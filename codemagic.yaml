@@ -14,8 +14,20 @@ workflows:
       - name: Install Pods
         script: |
           find . -name "Podfile" -execdir pod install \;
-      - name: Build IPA
+      - name: Build Unsigned IPA
         script: |
-          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+          # 1. Build the iOS app without code signing
+          flutter build ios --release --no-codesign
+
+          # 2. Create the Payload folder structure required for an IPA
+          cd build/ios/iphoneos
+          mkdir Payload
+          mv Runner.app Payload
+
+          # 3. Zip it into an .ipa file
+          zip -r Runner.ipa Payload
+
+          # 4. Move it to the root so Codemagic can find it
+          mv Runner.ipa $CM_BUILD_DIR/Runner.ipa
     artifacts:
-      - build/ios/ipa/*.ipa
+      - Runner.ipa
