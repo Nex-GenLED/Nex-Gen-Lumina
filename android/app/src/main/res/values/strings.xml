@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lumina</string>
+
+    <!-- App Shortcut Labels -->
+    <string name="shortcut_lights_off_short">Lights Off</string>
+    <string name="shortcut_lights_off_long">Turn All Lights Off</string>
+
+    <string name="shortcut_warm_white_short">Warm White</string>
+    <string name="shortcut_warm_white_long">Set Warm White Ambiance</string>
+
+    <string name="shortcut_bright_white_short">Bright White</string>
+    <string name="shortcut_bright_white_long">Set Bright White Mode</string>
+
+    <string name="shortcut_schedule_short">Run Schedule</string>
+    <string name="shortcut_schedule_long">Run Scheduled Lighting</string>
+</resources>

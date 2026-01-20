@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User profiles - private to each user
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId && request.resource.data.owner_id == userId;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.owner_id;
+    }
+    
+    // Sites - private to each user
+    match /sites/{siteId} {
+      allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.owner_id;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.owner_id;
+    }
+    
+    // Device configurations - private to each user
+    match /devices/{deviceId} {
+      allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.owner_id;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.owner_id;
+    }
+  }
+}

@@ -1,0 +1,246 @@
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/auth/auth_manager.dart';
+import 'package:nexgen_command/nav.dart';
+
+/// Lumina Login Screen (complete rewrite)
+/// - Gradient background (black -> midnight blue)
+/// - Blur layer to smooth gradient
+/// - Glass card with email/password inputs
+/// - Gradient CTA button using InkWell
+class LoginScreen extends ConsumerStatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends ConsumerState<LoginScreen> {
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSignIn() async {
+    if (!_formKey.currentState!.validate()) return;
+    final email = _emailCtrl.text.trim();
+    final pass = _passwordCtrl.text;
+    final AuthManager auth = ref.read(authManagerProvider);
+    setState(() => _loading = true);
+    try {
+      await auth.signInWithEmailAndPassword(email, pass);
+      if (!mounted) return;
+      context.go(AppRoutes.dashboard);
+    } catch (e) {
+      debugPrint('Login error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sign in failed: $e')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _enterDemo() {
+    // Restore original Demo Mode flow: toggle demo and go straight to dashboard
+    ref.read(demoModeProvider.notifier).state = true;
+    context.go(AppRoutes.dashboard);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final midnightBlue = const Color(0xFF0D1B2A);
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      body: Stack(children: [
+        // Layer 1: Background Gradient
+        Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black, midnightBlue],
+            ),
+          ),
+        ),
+        // Layer 2: Blur
+        Positioned.fill(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
+        // Layer 3: Content
+        SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Icon(Icons.hub, size: 60, color: Colors.cyanAccent),
+                  const SizedBox(height: 12),
+                  Text(
+                    'LUMINA',
+                    style: GoogleFonts.montserrat(
+                      fontSize: 40,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'POWERED BY NEX-GEN',
+                    style: GoogleFonts.montserrat(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.cyanAccent,
+                      letterSpacing: 2.0,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+
+                  // Glass Card
+                  Container(
+                    width: 640,
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Text('Welcome back', style: GoogleFonts.montserrat(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
+                        const SizedBox(height: 14),
+
+                        // Email
+                        TextFormField(
+                          controller: _emailCtrl,
+                          keyboardType: TextInputType.emailAddress,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Email',
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.06),
+                            prefixIcon: const Icon(Icons.mail_outline, color: Colors.cyanAccent),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.cyanAccent)),
+                            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.redAccent)),
+                          ),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Email is required';
+                            if (!v.contains('@') || !v.contains('.')) return 'Enter a valid email';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Password
+                        TextFormField(
+                          controller: _passwordCtrl,
+                          obscureText: true,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Password',
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.06),
+                            prefixIcon: const Icon(Icons.lock_outline, color: Colors.cyanAccent),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.cyanAccent)),
+                            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.redAccent)),
+                          ),
+                          validator: (v) => (v == null || v.isEmpty) ? 'Password is required' : null,
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        // CTA Button (Gradient)
+                        Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [Colors.cyanAccent, Colors.blueAccent]),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            splashColor: Colors.transparent,
+                            highlightColor: Colors.transparent,
+                            onTap: _loading ? null : _handleSignIn,
+                            child: Center(
+                              child: _loading
+                                  ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                                  : Text(
+                                      'ENTER LUMINA',
+                                      style: GoogleFonts.montserrat(fontWeight: FontWeight.w800, color: Colors.black, letterSpacing: 1.2),
+                                    ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        // Create Account link row
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              "Don't have an account? ",
+                              style: GoogleFonts.montserrat(color: Colors.white70, fontWeight: FontWeight.w500),
+                            ),
+                            TextButton(
+                              onPressed: _loading ? null : () => context.push(AppRoutes.signUp),
+                              child: Text(
+                                'Create One',
+                                style: GoogleFonts.montserrat(color: Colors.cyanAccent, fontWeight: FontWeight.w700),
+                              ),
+                            )
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Demo Mode entry: mirrors previous flow
+                        Center(
+                          child: TextButton(
+                            onPressed: _loading ? null : _enterDemo,
+                            child: Text(
+                              'Preview Experience (Demo Mode)',
+                              style: GoogleFonts.montserrat(color: Colors.cyanAccent, fontWeight: FontWeight.w600, fontSize: 12),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Adapter to keep existing routes (AppRouter) working without changes.
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key});
+  @override
+  Widget build(BuildContext context) => const LoginScreen();
+}

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Static shortcuts for common lighting actions -->
+
+    <shortcut
+        android:shortcutId="lights_off"
+        android:enabled="true"
+        android:icon="@drawable/ic_power_off"
+        android:shortcutShortLabel="@string/shortcut_lights_off_short"
+        android:shortcutLongLabel="@string/shortcut_lights_off_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="lumina://power/off" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="warm_white"
+        android:enabled="true"
+        android:icon="@drawable/ic_warm_light"
+        android:shortcutShortLabel="@string/shortcut_warm_white_short"
+        android:shortcutLongLabel="@string/shortcut_warm_white_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="lumina://scene/apply?name=Warm%20White" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="bright_white"
+        android:enabled="true"
+        android:icon="@drawable/ic_bright_light"
+        android:shortcutShortLabel="@string/shortcut_bright_white_short"
+        android:shortcutLongLabel="@string/shortcut_bright_white_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="lumina://scene/apply?name=Bright%20White" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="run_schedule"
+        android:enabled="true"
+        android:icon="@drawable/ic_schedule"
+        android:shortcutShortLabel="@string/shortcut_schedule_short"
+        android:shortcutLongLabel="@string/shortcut_schedule_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="lumina://schedule/run" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+</shortcuts>
