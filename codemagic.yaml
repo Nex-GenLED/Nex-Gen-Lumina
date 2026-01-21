@@ -10,24 +10,46 @@ workflows:
     scripts:
       - name: Get Flutter packages
         script: |
-          flutter packages pub get
-      - name: Install Pods
-        script: |
-          find . -name "Podfile" -execdir pod install \;
+          flutter pub get
       - name: Build Unsigned IPA
         script: |
-          # 1. Build the iOS app without code signing
+          # 1. Build the iOS app
           flutter build ios --release --no-codesign
 
-          # 2. Create the Payload folder structure required for an IPA
-          cd build/ios/iphoneos
-          mkdir Payload
-          mv Runner.app Payload
+          # 2. The .app is built to this specific location
+          APP_PATH="build/ios/iphoneos/Runner.app"
 
-          # 3. Zip it into an .ipa file
-          zip -r Runner.ipa Payload
+          # 3. Verify the app bundle exists and contains an executable
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found at $APP_PATH"
+            find build -name "*.app" -type d
+            exit 1
+          fi
 
-          # 4. Move it to the root so Codemagic can find it
+          if [ ! -f "$APP_PATH/Runner" ]; then
+            echo "ERROR: Runner executable not found inside app bundle"
+            ls -la "$APP_PATH"
+            exit 1
+          fi
+
+          echo "App bundle found with contents:"
+          ls -la "$APP_PATH"
+
+          # 4. Prepare the Payload folder structure
+          rm -rf Payload
+          mkdir -p Payload
+
+          # 5. Copy the app bundle (preserve symlinks with -R)
+          cp -R "$APP_PATH" Payload/
+
+          # 6. Create the IPA (zip with symlinks preserved)
+          zip -r -y Runner.ipa Payload
+
+          # 7. Verify IPA structure
+          echo "IPA contents:"
+          unzip -l Runner.ipa | head -20
+
+          # 8. Move to artifacts location
           mv Runner.ipa $CM_BUILD_DIR/Runner.ipa
     artifacts:
       - Runner.ipa
