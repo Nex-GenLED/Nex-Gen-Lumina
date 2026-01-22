@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 
 /// Annual seasonal color window model
 class SeasonalColorWindow {
@@ -124,6 +125,9 @@ class UserModel {
   /// Whether to receive weekly schedule preview notifications (Sunday evenings)
   final bool weeklySchedulePreviewEnabled;
 
+  /// User's saved schedules for automation
+  final List<ScheduleItem> schedules;
+
   UserModel({
     required this.id,
     required this.email,
@@ -171,6 +175,7 @@ class UserModel {
     this.customHolidays = const [],
     this.sportsTeamPriority = const [],
     this.weeklySchedulePreviewEnabled = true,
+    this.schedules = const [],
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -237,6 +242,11 @@ class UserModel {
               .toList() ??
           const [],
       weeklySchedulePreviewEnabled: (json['weekly_schedule_preview_enabled'] as bool?) ?? true,
+      schedules: (json['schedules'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ScheduleItem.fromJson(e))
+              .toList() ??
+          const [],
     );
   }
 
@@ -289,6 +299,7 @@ class UserModel {
       'custom_holidays': customHolidays.map((e) => e.toJson()).toList(),
       'sports_team_priority': sportsTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
+      'schedules': schedules.map((e) => e.toJson()).toList(),
     };
   }
 
@@ -339,6 +350,7 @@ class UserModel {
     List<CustomHoliday>? customHolidays,
     List<String>? sportsTeamPriority,
     bool? weeklySchedulePreviewEnabled,
+    List<ScheduleItem>? schedules,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -387,6 +399,7 @@ class UserModel {
       customHolidays: customHolidays ?? this.customHolidays,
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,
+      schedules: schedules ?? this.schedules,
     );
   }
 }

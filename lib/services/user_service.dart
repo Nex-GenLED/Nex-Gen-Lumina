@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/models/user_model.dart';
 
 /// Service for managing user data in Firestore
@@ -165,5 +166,99 @@ class UserService {
       debugPrint('❌ clearRemoteAccessConfig failed: $e');
       rethrow;
     }
+  }
+
+  // ==================== Schedule Management ====================
+
+  /// Save all schedules for a user (replaces existing schedules).
+  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'schedules': schedules.map((e) => e.toJson()).toList(),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Schedules saved: ${schedules.length} items');
+    } catch (e) {
+      debugPrint('❌ saveSchedules failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Add a single schedule item.
+  Future<void> addSchedule(String userId, ScheduleItem schedule) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'schedules': FieldValue.arrayUnion([schedule.toJson()]),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Schedule added: ${schedule.id}');
+    } catch (e) {
+      debugPrint('❌ addSchedule failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Remove a schedule item by ID.
+  /// Note: arrayRemove requires exact match, so we fetch and resave.
+  Future<void> removeSchedule(String userId, String scheduleId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (!doc.exists) return;
+
+      final data = doc.data()!;
+      final schedules = (data['schedules'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ScheduleItem.fromJson(e))
+              .where((s) => s.id != scheduleId)
+              .toList() ??
+          [];
+
+      await _firestore.collection('users').doc(userId).update({
+        'schedules': schedules.map((e) => e.toJson()).toList(),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Schedule removed: $scheduleId');
+    } catch (e) {
+      debugPrint('❌ removeSchedule failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Update a single schedule item.
+  Future<void> updateSchedule(String userId, ScheduleItem schedule) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (!doc.exists) return;
+
+      final data = doc.data()!;
+      final schedules = (data['schedules'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ScheduleItem.fromJson(e))
+              .map((s) => s.id == schedule.id ? schedule : s)
+              .toList() ??
+          [];
+
+      await _firestore.collection('users').doc(userId).update({
+        'schedules': schedules.map((e) => e.toJson()).toList(),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Schedule updated: ${schedule.id}');
+    } catch (e) {
+      debugPrint('❌ updateSchedule failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Stream user's schedules.
+  Stream<List<ScheduleItem>> streamSchedules(String userId) {
+    return _firestore.collection('users').doc(userId).snapshots().map((doc) {
+      if (!doc.exists) return [];
+      final data = doc.data()!;
+      return (data['schedules'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ScheduleItem.fromJson(e))
+              .toList() ??
+          [];
+    });
   }
 }

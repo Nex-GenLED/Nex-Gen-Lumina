@@ -37,13 +37,15 @@ class MySchedulePage extends ConsumerWidget {
               final ok = await ref.read(scheduleSyncServiceProvider).syncAll(ref, schedules);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(ok ? 'Schedules synced to controller' : 'Saved locally (controller sync pending)'),
+                  content: Text(ok
+                      ? 'Schedules synced to controller'
+                      : 'Could not sync to controller (schedules saved to cloud)'),
                   backgroundColor: ok ? Colors.green.shade700 : Colors.orange.shade700,
                 ));
               }
             },
             icon: const Icon(Icons.cloud_upload_rounded, size: 18, color: Colors.white),
-            label: const Text('Save'),
+            label: const Text('Sync'),
           ),
         ],
       ),
@@ -51,12 +53,10 @@ class MySchedulePage extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         child: ListView(
           children: [
-            // Autopilot quick toggle card
+            // Lumina AI card with autopilot toggle and schedule prompt
             const _AutopilotQuickToggle(),
             const SizedBox(height: 16),
             _WeeklyAgendaLarge(sunAsync: sunAsync),
-            const SizedBox(height: 16),
-            const _LuminaSchedulePromptBox(),
           ],
         ),
       ),
@@ -72,13 +72,85 @@ class MySchedulePage extends ConsumerWidget {
   void _openEditor(BuildContext context, WidgetRef ref) => showScheduleEditor(context, ref);
 }
 
-/// Quick toggle card for Autopilot on the Schedule page.
-/// Shows autopilot status and provides access to setup/configuration.
-class _AutopilotQuickToggle extends ConsumerWidget {
+/// Unified Lumina AI card combining Autopilot controls and schedule prompt input.
+/// Allows users to toggle autopilot, set preferences, and ask Lumina for schedule help.
+class _AutopilotQuickToggle extends ConsumerStatefulWidget {
   const _AutopilotQuickToggle();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AutopilotQuickToggle> createState() => _AutopilotQuickToggleState();
+}
+
+class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
+  final TextEditingController _controller = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _askLumina(BuildContext context) async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final autopilotEnabled = ref.read(autopilotEnabledProvider);
+      final prompt = autopilotEnabled
+          ? 'You are assisting with a weekly lighting schedule. The user has Autopilot enabled. They may be asking about schedule changes, autopilot preferences, or pattern choices. Provide helpful, concise suggestions: $text'
+          : 'You are assisting with a weekly lighting schedule. Suggest days, time ranges, and pattern(s) for this request. Keep it concise: $text';
+      final reply = await LuminaBrain.chat(ref, prompt);
+      if (!mounted) return;
+      // Show a lightweight dialog with the suggestion and quick actions.
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF2A2A2A),
+          title: const Text('Lumina Suggestion', style: TextStyle(color: Colors.white)),
+          content: SingleChildScrollView(child: Text(reply, style: const TextStyle(color: Colors.white70))),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                if (mounted) {
+                  showScheduleEditor(context, ref);
+                }
+              },
+              child: const Text('Open Editor'),
+            ),
+          ],
+        ),
+      );
+      _controller.clear();
+    } catch (e) {
+      debugPrint('Lumina schedule prompt failed: $e');
+      if (mounted) setState(() => _error = 'Lumina error: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _applyQuick(String s) {
+    setState(() => _controller.text = s);
+  }
+
+  Future<bool?> _showAutopilotSetupDialog(BuildContext context, WidgetRef ref) {
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AutopilotSetupSheet(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final autopilotEnabled = ref.watch(autopilotEnabledProvider);
     final autonomyLevel = ref.watch(autonomyLevelProvider);
 
@@ -104,20 +176,21 @@ class _AutopilotQuickToggle extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Header row with icon, title, and toggle
               Row(
                 children: [
                   Container(
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: autopilotEnabled
-                          ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                          : NexGenPalette.matteBlack.withValues(alpha: 0.3),
+                      gradient: LinearGradient(
+                        colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                      ),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.smart_toy_rounded,
-                      color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: Colors.white,
                       size: 22,
                     ),
                   ),
@@ -127,7 +200,7 @@ class _AutopilotQuickToggle extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Lumina Autopilot',
+                          'Lumina AI',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: NexGenPalette.textHigh,
@@ -135,88 +208,210 @@ class _AutopilotQuickToggle extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          autopilotEnabled
-                              ? (autonomyLevel == 2 ? 'Active • Auto-applying patterns' : 'Active • Suggesting patterns')
-                              : 'Let AI manage your lighting schedule',
+                          'Schedule assistant & autopilot',
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                            color: NexGenPalette.textMedium,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  CupertinoSwitch(
-                    value: autopilotEnabled,
-                    activeColor: NexGenPalette.cyan,
-                    onChanged: (value) async {
-                      if (value) {
-                        // Show setup dialog before enabling
-                        final confirmed = await _showAutopilotSetupDialog(context, ref);
-                        if (confirmed == true) {
-                          ref.read(autopilotSettingsServiceProvider).setEnabled(true);
-                        }
-                      } else {
-                        ref.read(autopilotSettingsServiceProvider).setEnabled(false);
-                      }
-                    },
-                  ),
                 ],
               ),
-              if (!autopilotEnabled) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Autopilot automatically generates lighting schedules based on your preferences, favorite teams, holidays, and time of day. Set it and forget it!',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: NexGenPalette.textMedium,
+
+              const SizedBox(height: 16),
+
+              // Autopilot toggle section
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: autopilotEnabled
+                      ? NexGenPalette.cyan.withValues(alpha: 0.1)
+                      : NexGenPalette.matteBlack.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: autopilotEnabled ? NexGenPalette.cyan.withValues(alpha: 0.3) : NexGenPalette.line,
                   ),
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () => _showAutopilotSetupDialog(context, ref),
-                  icon: const Icon(Icons.settings_suggest_rounded, size: 18),
-                  label: const Text('Learn More & Setup'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: NexGenPalette.cyan,
-                    side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
-                  ),
-                ),
-              ],
-              if (autopilotEnabled) ...[
-                const SizedBox(height: 12),
-                Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _AutopilotModeChip(
-                      label: 'Suggest',
-                      selected: autonomyLevel == 1,
-                      onTap: () => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.smart_toy_rounded,
+                          color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Autopilot',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textHigh,
+                            ),
+                          ),
+                        ),
+                        CupertinoSwitch(
+                          value: autopilotEnabled,
+                          activeColor: NexGenPalette.cyan,
+                          onChanged: (value) async {
+                            if (value) {
+                              final confirmed = await _showAutopilotSetupDialog(context, ref);
+                              if (confirmed == true) {
+                                ref.read(autopilotSettingsServiceProvider).setEnabled(true);
+                              }
+                            } else {
+                              ref.read(autopilotSettingsServiceProvider).setEnabled(false);
+                            }
+                          },
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    _AutopilotModeChip(
-                      label: 'Proactive',
-                      selected: autonomyLevel == 2,
-                      onTap: () => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(2),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => _showAutopilotSetupDialog(context, ref),
-                      child: const Text('Settings'),
-                    ),
+                    if (!autopilotEnabled) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Auto-generate schedules based on your preferences, teams, and holidays.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                      ),
+                    ],
+                    if (autopilotEnabled) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          _AutopilotModeChip(
+                            label: 'Suggest',
+                            selected: autonomyLevel == 1,
+                            onTap: () async {
+                              await ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1);
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          _AutopilotModeChip(
+                            label: 'Proactive',
+                            selected: autonomyLevel == 2,
+                            onTap: () async {
+                              final service = ref.read(autopilotSettingsServiceProvider);
+                              await service.setAutonomyLevel(2);
+                              await service.generateAndPopulateSchedules();
+                            },
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => _showAutopilotSetupDialog(context, ref),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Text('Settings', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Quick presets
+              Text(
+                'Quick prompts',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: NexGenPalette.textMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemBuilder: (_, i) {
+                    final presets = autopilotEnabled
+                        ? <String>[
+                            'Prefer warm colors on weeknights',
+                            'No bright patterns after 10pm',
+                            'More festive on weekends',
+                          ]
+                        : <String>[
+                            'Weeknights 8-11 PM • Warm White',
+                            'Fri & Sat Dusk to Dawn • Festive',
+                            'Daily Sunrise • Turn Off',
+                          ];
+                    final label = presets[i];
+                    return ChoiceChip(
+                      label: Text(label, overflow: TextOverflow.ellipsis),
+                      selected: false,
+                      onSelected: (_) => _applyQuick(label),
+                      backgroundColor: NexGenPalette.matteBlack.withValues(alpha: 0.4),
+                      labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textHigh),
+                      shape: StadiumBorder(side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.25))),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    );
+                  },
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemCount: 3,
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Text input
+              Container(
+                decoration: BoxDecoration(
+                  color: NexGenPalette.matteBlack.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.35), width: 1.2),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.chat_bubble_outline_rounded, color: NexGenPalette.violet, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        minLines: 1,
+                        maxLines: 3,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: NexGenPalette.textHigh),
+                        decoration: InputDecoration(
+                          hintText: autopilotEnabled
+                              ? 'Tell Lumina your preferences...'
+                              : 'Describe schedule changes...',
+                          hintStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onSubmitted: (_) => _askLumina(context),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _loading
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan))
+                        : IconButton(
+                            onPressed: () => _askLumina(context),
+                            icon: const Icon(Icons.send_rounded),
+                            color: NexGenPalette.cyan,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          ),
+                  ],
+                ),
+              ),
+
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.redAccent)),
               ],
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Future<bool?> _showAutopilotSetupDialog(BuildContext context, WidgetRef ref) {
-    return showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _AutopilotSetupSheet(),
     );
   }
 }
@@ -1481,152 +1676,3 @@ class _AgendaDetailChip extends StatelessWidget {
 }
 
 // NightTrackBar now shared in widgets/night_track_bar.dart
-
-// ==============================
-// Lumina Schedule Prompt Box
-// ==============================
-class _LuminaSchedulePromptBox extends ConsumerStatefulWidget {
-  const _LuminaSchedulePromptBox();
-  @override
-  ConsumerState<_LuminaSchedulePromptBox> createState() => _LuminaSchedulePromptBoxState();
-}
-
-class _LuminaSchedulePromptBoxState extends ConsumerState<_LuminaSchedulePromptBox> {
-  final TextEditingController _controller = TextEditingController();
-  bool _loading = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _askLumina(BuildContext context) async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final prompt = 'You are assisting with a weekly lighting schedule. Suggest days, time ranges, and pattern(s) for this request. Keep it concise: $text';
-      final reply = await LuminaBrain.chat(ref, prompt);
-      if (!mounted) return;
-      // Show a lightweight dialog with the suggestion and quick actions.
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF2A2A2A),
-          title: const Text('Lumina Suggestion', style: TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(child: Text(reply, style: const TextStyle(color: Colors.white70))),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                if (mounted) {
-                  showScheduleEditor(context, ref);
-                }
-              },
-              child: const Text('Open Editor'),
-            ),
-          ],
-        ),
-      );
-      _controller.clear();
-    } catch (e) {
-      debugPrint('Lumina schedule prompt failed: $e');
-      if (mounted) setState(() => _error = 'Lumina error: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  void _applyQuick(String s) {
-    setState(() => _controller.text = s);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.line),
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(children: [
-              const Icon(Icons.auto_awesome_rounded, color: NexGenPalette.cyan),
-              const SizedBox(width: 8),
-              Text('Adjust with Lumina', style: Theme.of(context).textTheme.titleMedium),
-            ]),
-            const SizedBox(height: 6),
-            Text('Describe schedule changes and pattern choices. I\'ll help you set it up.', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: NexGenPalette.textMedium)),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemBuilder: (_, i) {
-                  final presets = <String>[
-                    'Weeknights 8–11 PM • Candy Cane',
-                    'Fri & Sat Dusk→Dawn • Neon Party',
-                    'Daily Sunrise • Turn Off',
-                  ];
-                  final label = presets[i];
-                  return ChoiceChip(
-                    label: Text(label, overflow: TextOverflow.ellipsis),
-                    selected: false,
-                    onSelected: (_) => _applyQuick(label),
-                    backgroundColor: const Color(0xFF1F1F1F),
-                    labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textHigh),
-                    shape: StadiumBorder(side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.25))),
-                  );
-                },
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemCount: 3,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              decoration: BoxDecoration(
-                color: NexGenPalette.matteBlack.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.35), width: 1.2),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(children: [
-                const Icon(Icons.chat_bubble_outline_rounded, color: NexGenPalette.violet),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 3,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: NexGenPalette.textHigh),
-                    decoration: const InputDecoration(hintText: 'e.g., "Weeknights 7–10pm, run Candy Cane"', border: InputBorder.none),
-                    onSubmitted: (_) => _askLumina(context),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _loading
-                    ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan))
-                    : IconButton(onPressed: () => _askLumina(context), icon: const Icon(Icons.send_rounded), color: NexGenPalette.cyan),
-              ]),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.redAccent)),
-            ]
-          ]),
-        ),
-      ),
-    );
-  }
-}

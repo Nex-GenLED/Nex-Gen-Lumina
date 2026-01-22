@@ -67,29 +67,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ] else ...[
             const SizedBox(height: 16),
           ],
-          // Mode selection
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Mode', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                _ModeToggle(
-                  value: mode,
-                  onChanged: (m) => ref.read(siteModeProvider.notifier).state = m,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  mode == SiteMode.residential
-                      ? 'Single-controller experience optimized for homes.'
-                      : 'Group multiple controllers into Zones for large sites. Add members, set a primary, and enable DDP Sync.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                )
-              ]),
-            ),
-          ),
           // Unified System & Device Management entry
-          const SizedBox(height: 16),
           const _SystemManagementButton(),
           const SizedBox(height: 16),
           const _MyPropertiesCard(),

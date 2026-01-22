@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -159,6 +158,31 @@ class CurrentDesignNotifier extends StateNotifier<CustomDesign?> {
     final channels = state!.channels.map((ch) {
       if (ch.channelId == channelId) {
         return ch.copyWith(reverse: !ch.reverse);
+      }
+      return ch;
+    }).toList();
+    state = state!.copyWith(channels: channels);
+  }
+
+  /// Update the LED count for a specific channel
+  void setChannelLedCount(int channelId, int ledCount) {
+    if (state == null) return;
+    final channels = state!.channels.map((ch) {
+      if (ch.channelId == channelId) {
+        // Also update the color groups to fit the new LED count
+        final updatedGroups = ch.colorGroups.map((group) {
+          // Clamp color groups to fit within the new LED count
+          final newEndLed = group.endLed.clamp(0, ledCount - 1);
+          final newStartLed = group.startLed.clamp(0, newEndLed);
+          return group.copyWith(startLed: newStartLed, endLed: newEndLed);
+        }).where((g) => g.startLed <= g.endLed).toList();
+
+        // If no valid groups remain, create a default one
+        final finalGroups = updatedGroups.isEmpty
+            ? [LedColorGroup(startLed: 0, endLed: ledCount - 1, color: [255, 255, 255, 0])]
+            : updatedGroups;
+
+        return ch.copyWith(ledCount: ledCount, colorGroups: finalGroups);
       }
       return ch;
     }).toList();

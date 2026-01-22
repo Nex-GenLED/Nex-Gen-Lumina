@@ -19,7 +19,7 @@ class SystemManagementScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 3,
+      length: 5,
       child: Scaffold(
         appBar: GlassAppBar(
           title: const Text('System Management'),
@@ -29,15 +29,19 @@ class SystemManagementScreen extends ConsumerWidget {
             indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
               Tab(icon: Icon(Icons.router_outlined, color: NexGenPalette.cyan), text: 'Controllers'),
+              Tab(icon: Icon(Icons.layers_outlined, color: NexGenPalette.cyan), text: 'Zones & Channels'),
               Tab(icon: Icon(Icons.build_circle_outlined, color: NexGenPalette.cyan), text: 'Hardware'),
               Tab(icon: Icon(Icons.cloud_outlined, color: NexGenPalette.cyan), text: 'Remote Access'),
+              Tab(icon: Icon(Icons.tune_outlined, color: NexGenPalette.cyan), text: 'Mode'),
             ],
           ),
         ),
         body: const TabBarView(children: [
           _MyControllersTab(),
+          _ZonesChannelsTab(),
           _HardwareTab(),
           _RemoteAccessTab(),
+          _ModeTab(),
         ]),
       ),
     );
@@ -259,6 +263,131 @@ class _MyControllersTab extends ConsumerWidget {
 
   String _formatDate(DateTime dt) {
     return '${dt.month}/${dt.day}/${dt.year}';
+  }
+}
+
+/// Centralized Zones & Channels management tab
+class _ZonesChannelsTab extends ConsumerWidget {
+  const _ZonesChannelsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ListView(children: [
+        // Zone Control Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.layers, color: NexGenPalette.cyan),
+                const SizedBox(width: 8),
+                Text('Zone Control', style: Theme.of(context).textTheme.titleLarge),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Select and manage your lighting channels. Rename channels, select multiple for batch control, and organize your lighting zones.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.wledZones),
+                icon: const Icon(Icons.tune, color: Colors.black),
+                label: const Text('Manage Channels'),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Roofline Configuration Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.roofing, color: NexGenPalette.violet),
+                const SizedBox(width: 8),
+                Text('Roofline Setup', style: Theme.of(context).textTheme.titleLarge),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Configure your roofline layout including peaks, valleys, and segment boundaries for precise lighting control.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => context.push(AppRoutes.rooflineSetupWizard),
+                    icon: const Icon(Icons.auto_fix_high, color: Colors.black),
+                    label: const Text('Setup Wizard'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push(AppRoutes.rooflineEditor),
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Edit Layout'),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Segment Setup Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.straighten, color: NexGenPalette.cyan),
+                const SizedBox(width: 8),
+                Text('Segment Configuration', style: Theme.of(context).textTheme.titleLarge),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Define pixel ranges for each segment of your lighting installation. Map physical LED positions to logical zones.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.segmentSetup),
+                icon: const Icon(Icons.view_column, color: Colors.black),
+                label: const Text('Configure Segments'),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Info Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.info_outline, color: NexGenPalette.textMedium),
+                const SizedBox(width: 8),
+                Text('Understanding Zones & Channels', style: Theme.of(context).textTheme.titleMedium),
+              ]),
+              const SizedBox(height: 12),
+              Text(
+                '• Channels: Physical LED ports on your controller (up to 8 on Dig-Octa)\n'
+                '• Segments: Logical groups of pixels within channels\n'
+                '• Zones: Named areas combining multiple segments (e.g., "Front Peak", "Garage")\n'
+                '• Roofline: The overall layout defining how your house is outlined',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
   }
 }
 
@@ -691,6 +820,177 @@ class _ConfigItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Mode selection tab - Residential vs Commercial
+class _ModeTab extends ConsumerWidget {
+  const _ModeTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(siteModeProvider);
+    final isRes = mode == SiteMode.residential;
+    final isCom = mode == SiteMode.commercial;
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ListView(children: [
+        // Mode Selection Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.tune, color: NexGenPalette.cyan),
+                const SizedBox(width: 8),
+                Text('Installation Mode', style: Theme.of(context).textTheme.titleLarge),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Choose the mode that best fits your lighting installation.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+
+              // Mode Toggle Buttons
+              Row(children: [
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => ref.read(siteModeProvider.notifier).state = SiteMode.residential,
+                    child: Container(
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: isRes ? NexGenPalette.cyan : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isRes ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.home_outlined, color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Residential',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => ref.read(siteModeProvider.notifier).state = SiteMode.commercial,
+                    child: Container(
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: isCom ? NexGenPalette.cyan : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isCom ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.apartment_outlined, color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Commercial',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Residential Info Card
+        Card(
+          color: isRes ? NexGenPalette.cyan.withValues(alpha: 0.1) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.home, color: isRes ? NexGenPalette.cyan : Colors.grey),
+                const SizedBox(width: 8),
+                Text('Residential Mode', style: Theme.of(context).textTheme.titleMedium),
+                if (isRes) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: NexGenPalette.cyan,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Active',
+                      style: TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ]),
+              const SizedBox(height: 12),
+              Text(
+                '• Optimized for single homes\n'
+                '• One primary controller with optional linked controllers\n'
+                '• All controllers act as a unified system\n'
+                '• Simplified interface focused on ease of use',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Commercial Info Card
+        Card(
+          color: isCom ? NexGenPalette.cyan.withValues(alpha: 0.1) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.apartment, color: isCom ? NexGenPalette.cyan : Colors.grey),
+                const SizedBox(width: 8),
+                Text('Commercial Mode', style: Theme.of(context).textTheme.titleMedium),
+                if (isCom) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: NexGenPalette.cyan,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Active',
+                      style: TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ]),
+              const SizedBox(height: 12),
+              Text(
+                '• Designed for large installations & businesses\n'
+                '• Group multiple controllers into named Zones\n'
+                '• Set primary controllers with secondary members\n'
+                '• Enable DDP Sync for multi-controller coordination\n'
+                '• Advanced zone-based scheduling & control',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ]),
+          ),
+        ),
+      ]),
     );
   }
 }

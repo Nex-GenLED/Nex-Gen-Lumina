@@ -169,7 +169,7 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
       child: Row(
         children: [
           const Text(
-            'Mode:',
+            'Design Style:',
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(width: 12),
@@ -177,13 +177,13 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
             segments: const [
               ButtonSegment(
                 value: DesignMode.channel,
-                label: Text('Channel'),
-                icon: Icon(Icons.layers, size: 16),
+                label: Text('Simple'),
+                icon: Icon(Icons.palette, size: 16),
               ),
               ButtonSegment(
                 value: DesignMode.segment,
-                label: Text('Segment'),
-                icon: Icon(Icons.roofing, size: 16),
+                label: Text('Advanced'),
+                icon: Icon(Icons.auto_awesome, size: 16),
               ),
             ],
             selected: {currentMode},
@@ -198,8 +198,8 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
           if (currentMode == DesignMode.segment)
             TextButton.icon(
               onPressed: () => context.push(AppRoutes.segmentSetup),
-              icon: const Icon(Icons.settings, size: 16),
-              label: const Text('Configure'),
+              icon: const Icon(Icons.tune, size: 16),
+              label: const Text('Setup'),
               style: TextButton.styleFrom(
                 foregroundColor: NexGenPalette.cyan,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -211,11 +211,22 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
   }
 
   Widget _buildSegmentModeBody(BuildContext context, CustomDesign design) {
+    final hasRooflineConfig = ref.watch(hasRooflineConfigProvider);
+
+    // If no roofline config, show setup prompt
+    if (!hasRooflineConfig) {
+      return _buildNoRooflineConfigPrompt();
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Roofline info bar with quick actions
+          _buildRooflineInfoBar(),
+          const SizedBox(height: 16),
+
           // Segment LED canvas with generated pattern
           SegmentLedCanvas(
             colorGroups: _generatedPattern,
@@ -283,6 +294,121 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
           const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+
+  /// Prompt shown when no roofline configuration exists.
+  Widget _buildNoRooflineConfigPrompt() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.roofing,
+                size: 40,
+                color: NexGenPalette.cyan,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Set Up Your Roofline',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Configure your LED segments to enable smart pattern generation, spacing algorithms, and roofline-aware recommendations.',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              onPressed: () => context.push(AppRoutes.rooflineSetupWizard),
+              icon: const Icon(Icons.auto_fix_high),
+              label: const Text('Start Setup Wizard'),
+              style: FilledButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => context.push(AppRoutes.segmentSetup),
+              child: const Text('Manual Segment Setup'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Info bar showing roofline configuration summary.
+  Widget _buildRooflineInfoBar() {
+    final config = ref.watch(currentRooflineConfigProvider);
+
+    return config.maybeWhen(
+      data: (rooflineConfig) {
+        if (rooflineConfig == null) return const SizedBox.shrink();
+
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.roofing, color: NexGenPalette.cyan, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      rooflineConfig.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '${rooflineConfig.totalPixelCount} LEDs • ${rooflineConfig.segmentCount} segments',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit, size: 18),
+                color: Colors.white54,
+                tooltip: 'Edit Roofline',
+                onPressed: () => context.push(AppRoutes.rooflineSetupWizard),
+              ),
+            ],
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
     );
   }
 
@@ -513,37 +639,53 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
           const ChannelQuickActions(),
           const SizedBox(height: 24),
 
-          // Action buttons
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _isApplying ? null : _applyToDevice,
-                  icon: _isApplying
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.play_arrow),
-                  label: Text(_isApplying ? 'Applying...' : 'Preview'),
+          // Action buttons - large and easy to tap
+          SizedBox(
+            height: 56,
+            child: FilledButton.icon(
+              onPressed: _isApplying ? null : _applyToDevice,
+              icon: _isApplying
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.visibility, size: 24),
+              label: Text(
+                _isApplying ? 'Sending to lights...' : 'See It On My Lights',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _isSaving ? null : _saveDesign,
-                  icon: _isSaving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save),
-                  label: Text(_isSaving ? 'Saving...' : 'Save Design'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: _isSaving ? null : _saveDesign,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.bookmark_add_outlined),
+              label: Text(
+                _isSaving ? 'Saving...' : 'Save for Later',
+                style: const TextStyle(fontSize: 14),
+              ),
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -554,24 +696,43 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
   Widget _buildChannelSelector(CustomDesign design) {
     final selectedId = ref.watch(selectedChannelIdProvider);
 
+    // If only one channel, simplify the UI
+    if (design.channels.length == 1) {
+      return const SizedBox.shrink(); // Hide channel selector for single zone
+    }
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Channels',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              const Icon(Icons.lightbulb_outline, color: Colors.white54, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Lighting Zones',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Tap to select',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.4),
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -595,39 +756,81 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
   }
 
   Widget _buildBrightnessSlider(CustomDesign design) {
+    // Convert 0-255 to percentage for user-friendly display
+    final percentage = ((design.brightness / 255) * 100).round();
+
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.brightness_6, color: Colors.white54, size: 20),
-          const SizedBox(width: 12),
-          const Text(
-            'Brightness',
-            style: TextStyle(color: Colors.white70),
+          Row(
+            children: [
+              Icon(
+                percentage > 70 ? Icons.light_mode : (percentage > 30 ? Icons.brightness_6 : Icons.brightness_low),
+                color: NexGenPalette.cyan,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'How Bright?',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$percentage%',
+                  style: const TextStyle(
+                    color: NexGenPalette.cyan,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ],
           ),
-          Expanded(
+          const SizedBox(height: 12),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 8,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+            ),
             child: Slider(
               value: design.brightness.toDouble(),
               min: 0,
               max: 255,
               activeColor: NexGenPalette.cyan,
-              inactiveColor: Colors.white.withOpacity(0.1),
+              inactiveColor: Colors.white.withValues(alpha: 0.1),
               onChanged: (value) {
                 ref.read(currentDesignProvider.notifier).setBrightness(value.round());
               },
             ),
           ),
-          SizedBox(
-            width: 36,
-            child: Text(
-              '${design.brightness}',
-              textAlign: TextAlign.right,
-              style: const TextStyle(color: Colors.white70),
+          // Friendly labels
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Dim', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
+                Text('Medium', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
+                Text('Bright', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
+              ],
             ),
           ),
         ],
@@ -641,9 +844,9 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Row(
         children: [
@@ -659,7 +862,7 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
               min: 0,
               max: 255,
               activeColor: Colors.white,
-              inactiveColor: Colors.white.withOpacity(0.1),
+              inactiveColor: Colors.white.withValues(alpha: 0.1),
               onChanged: (value) {
                 ref.read(selectedWhiteProvider.notifier).state = value.round();
               },
@@ -771,14 +974,14 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
       if (_activePattern != null) {
         patternConfig = {
           'anchor_color': [
-            _activePattern!.anchorColor.red,
-            _activePattern!.anchorColor.green,
-            _activePattern!.anchorColor.blue,
+            (_activePattern!.anchorColor.r * 255).round().clamp(0, 255),
+            (_activePattern!.anchorColor.g * 255).round().clamp(0, 255),
+            (_activePattern!.anchorColor.b * 255).round().clamp(0, 255),
           ],
           'spaced_color': [
-            _activePattern!.spacedColor.red,
-            _activePattern!.spacedColor.green,
-            _activePattern!.spacedColor.blue,
+            (_activePattern!.spacedColor.r * 255).round().clamp(0, 255),
+            (_activePattern!.spacedColor.g * 255).round().clamp(0, 255),
+            (_activePattern!.spacedColor.b * 255).round().clamp(0, 255),
           ],
           'spacing_count': _activePattern!.spacingCount,
           'anchor_always_on': _activePattern!.anchorAlwaysOn,
@@ -830,7 +1033,7 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
   }
 }
 
-class _ChannelChip extends StatelessWidget {
+class _ChannelChip extends ConsumerWidget {
   final ChannelDesign channel;
   final bool isSelected;
   final VoidCallback onTap;
@@ -844,87 +1047,214 @@ class _ChannelChip extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: () => _showLedCountDialog(context, ref),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected
-              ? NexGenPalette.cyan.withOpacity(0.2)
+              ? NexGenPalette.cyan.withValues(alpha: 0.25)
               : channel.included
-                  ? Colors.white.withOpacity(0.05)
-                  : Colors.white.withOpacity(0.02),
-          borderRadius: BorderRadius.circular(8),
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected
                 ? NexGenPalette.cyan
                 : channel.included
-                    ? Colors.white.withOpacity(0.2)
-                    : Colors.white.withOpacity(0.1),
+                    ? Colors.white.withValues(alpha: 0.25)
+                    : Colors.white.withValues(alpha: 0.1),
             width: isSelected ? 2 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Include checkbox
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: channel.included,
-                onChanged: (v) => onIncludeChanged(v ?? false),
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Channel name
-            Text(
-              channel.channelName,
-              style: TextStyle(
-                color: channel.included ? Colors.white : Colors.white54,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-            // LED count badge
-            if (channel.ledCount > 0) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '${channel.ledCount}',
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            ],
-            // Color preview
-            const SizedBox(width: 8),
+            // Color preview - larger and more prominent
             Container(
-              width: 16,
-              height: 16,
+              width: 24,
+              height: 24,
               decoration: BoxDecoration(
                 color: channel.primaryColor,
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(6),
                 boxShadow: [
                   BoxShadow(
-                    color: channel.primaryColor.withOpacity(0.4),
-                    blurRadius: 4,
+                    color: channel.primaryColor.withValues(alpha: 0.5),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: channel.included
+                  ? null
+                  : const Icon(Icons.visibility_off, size: 14, color: Colors.white54),
+            ),
+            const SizedBox(width: 10),
+            // Zone name - friendly display
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  channel.channelName,
+                  style: TextStyle(
+                    color: channel.included ? Colors.white : Colors.white54,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                if (isSelected)
+                  Text(
+                    channel.included ? 'Selected' : 'Tap to include',
+                    style: TextStyle(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.8),
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            // Include toggle - simplified
+            if (!isSelected)
+              Icon(
+                channel.included ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: channel.included ? NexGenPalette.cyan : Colors.white38,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showLedCountDialog(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController(
+      text: channel.ledCount > 0 ? channel.ledCount.toString() : '',
+    );
+
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: Row(
+          children: [
+            const Icon(Icons.tune, color: NexGenPalette.cyan, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Advanced Settings',
+                style: const TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Zone: ${channel.channelName}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Number of lights in this zone:',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white, fontSize: 18),
+              decoration: InputDecoration(
+                hintText: 'e.g., 130',
+                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: NexGenPalette.cyan, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.blue, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'This was set up during installation. Only change if advised by support.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text.trim());
+              if (value != null && value > 0 && value <= 2000) {
+                Navigator.pop(ctx, value);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a number between 1 and 2000'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
+
+    if (result != null) {
+      ref.read(currentDesignProvider.notifier).setChannelLedCount(
+        channel.channelId,
+        result,
+      );
+    }
   }
 }

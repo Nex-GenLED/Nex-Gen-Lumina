@@ -14,6 +14,214 @@ enum SegmentType {
   connector,
 }
 
+/// Direction of LED flow within a segment.
+/// Used for chase animations and gradient calculations.
+enum SegmentDirection {
+  /// Left to right (horizontal)
+  leftToRight,
+  /// Right to left (horizontal)
+  rightToLeft,
+  /// Upward (vertical or ascending)
+  upward,
+  /// Downward (vertical or descending)
+  downward,
+  /// Toward the street (away from house)
+  towardStreet,
+  /// Away from street (toward house)
+  awayFromStreet,
+  /// Clockwise around a feature
+  clockwise,
+  /// Counter-clockwise around a feature
+  counterClockwise,
+}
+
+/// Type of anchor point for accent lighting.
+enum AnchorType {
+  /// Corner where roofline changes direction
+  corner,
+  /// Peak/apex of a gable or roof
+  peak,
+  /// Boundary between segments
+  boundary,
+  /// User-defined custom anchor point
+  custom,
+  /// Center point of a segment
+  center,
+}
+
+/// Represents a specific anchor point with metadata.
+class AnchorPoint {
+  /// Local LED index within the segment
+  final int ledIndex;
+
+  /// Type of anchor
+  final AnchorType type;
+
+  /// Optional user-friendly label
+  final String? label;
+
+  /// Number of LEDs in this anchor zone (default: 2)
+  final int zoneSize;
+
+  const AnchorPoint({
+    required this.ledIndex,
+    required this.type,
+    this.label,
+    this.zoneSize = 2,
+  });
+
+  AnchorPoint copyWith({
+    int? ledIndex,
+    AnchorType? type,
+    String? label,
+    int? zoneSize,
+  }) {
+    return AnchorPoint(
+      ledIndex: ledIndex ?? this.ledIndex,
+      type: type ?? this.type,
+      label: label ?? this.label,
+      zoneSize: zoneSize ?? this.zoneSize,
+    );
+  }
+
+  factory AnchorPoint.fromJson(Map<String, dynamic> json) {
+    return AnchorPoint(
+      ledIndex: json['led_index'] as int? ?? 0,
+      type: AnchorTypeExtension.fromString(json['type'] as String? ?? 'custom'),
+      label: json['label'] as String?,
+      zoneSize: json['zone_size'] as int? ?? 2,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'led_index': ledIndex,
+      'type': type.name,
+      if (label != null) 'label': label,
+      'zone_size': zoneSize,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is AnchorPoint &&
+        other.ledIndex == ledIndex &&
+        other.type == type &&
+        other.label == label &&
+        other.zoneSize == zoneSize;
+  }
+
+  @override
+  int get hashCode => Object.hash(ledIndex, type, label, zoneSize);
+}
+
+/// Extension for AnchorType serialization
+extension AnchorTypeExtension on AnchorType {
+  String get displayName {
+    switch (this) {
+      case AnchorType.corner:
+        return 'Corner';
+      case AnchorType.peak:
+        return 'Peak';
+      case AnchorType.boundary:
+        return 'Boundary';
+      case AnchorType.custom:
+        return 'Custom';
+      case AnchorType.center:
+        return 'Center';
+    }
+  }
+
+  static AnchorType fromString(String value) {
+    switch (value.toLowerCase()) {
+      case 'corner':
+        return AnchorType.corner;
+      case 'peak':
+        return AnchorType.peak;
+      case 'boundary':
+        return AnchorType.boundary;
+      case 'center':
+        return AnchorType.center;
+      default:
+        return AnchorType.custom;
+    }
+  }
+}
+
+/// Extension for SegmentDirection serialization
+extension SegmentDirectionExtension on SegmentDirection {
+  String get displayName {
+    switch (this) {
+      case SegmentDirection.leftToRight:
+        return 'Left to Right';
+      case SegmentDirection.rightToLeft:
+        return 'Right to Left';
+      case SegmentDirection.upward:
+        return 'Upward';
+      case SegmentDirection.downward:
+        return 'Downward';
+      case SegmentDirection.towardStreet:
+        return 'Toward Street';
+      case SegmentDirection.awayFromStreet:
+        return 'Away from Street';
+      case SegmentDirection.clockwise:
+        return 'Clockwise';
+      case SegmentDirection.counterClockwise:
+        return 'Counter-Clockwise';
+    }
+  }
+
+  String get shortName {
+    switch (this) {
+      case SegmentDirection.leftToRight:
+        return 'L→R';
+      case SegmentDirection.rightToLeft:
+        return 'R→L';
+      case SegmentDirection.upward:
+        return '↑';
+      case SegmentDirection.downward:
+        return '↓';
+      case SegmentDirection.towardStreet:
+        return '→St';
+      case SegmentDirection.awayFromStreet:
+        return '←St';
+      case SegmentDirection.clockwise:
+        return '↻';
+      case SegmentDirection.counterClockwise:
+        return '↺';
+    }
+  }
+
+  static SegmentDirection fromString(String value) {
+    switch (value.toLowerCase()) {
+      case 'lefttoright':
+      case 'left_to_right':
+        return SegmentDirection.leftToRight;
+      case 'righttoleft':
+      case 'right_to_left':
+        return SegmentDirection.rightToLeft;
+      case 'upward':
+        return SegmentDirection.upward;
+      case 'downward':
+        return SegmentDirection.downward;
+      case 'towardstreet':
+      case 'toward_street':
+        return SegmentDirection.towardStreet;
+      case 'awayfromstreet':
+      case 'away_from_street':
+        return SegmentDirection.awayFromStreet;
+      case 'clockwise':
+        return SegmentDirection.clockwise;
+      case 'counterclockwise':
+      case 'counter_clockwise':
+        return SegmentDirection.counterClockwise;
+      default:
+        return SegmentDirection.leftToRight;
+    }
+  }
+}
+
 /// Extension to convert SegmentType to/from string for serialization.
 extension SegmentTypeExtension on SegmentType {
   String get name {
@@ -88,6 +296,8 @@ extension SegmentTypeExtension on SegmentType {
 /// - Segment type for pattern generation logic
 /// - Anchor pixels (local indices within segment that are anchor points)
 /// - Anchor LED count (how many LEDs form each anchor zone, typically 2)
+/// - Direction of LED flow
+/// - Optional description and physical location info
 class RooflineSegment {
   /// Unique identifier for this segment
   final String id;
@@ -115,6 +325,21 @@ class RooflineSegment {
   /// Sort order for display and calculation purposes
   final int sortOrder;
 
+  /// Direction of LED flow within this segment
+  final SegmentDirection direction;
+
+  /// Enhanced anchor points with type information
+  final List<AnchorPoint> anchorPoints;
+
+  /// Optional description of this segment's physical location
+  final String? description;
+
+  /// Whether this segment is part of the primary roofline (vs secondary features)
+  final bool isPrimary;
+
+  /// Segment this one connects to (for symmetry calculations)
+  final String? symmetryPairId;
+
   const RooflineSegment({
     required this.id,
     required this.name,
@@ -124,6 +349,11 @@ class RooflineSegment {
     this.anchorPixels = const [],
     this.anchorLedCount = 2,
     this.sortOrder = 0,
+    this.direction = SegmentDirection.leftToRight,
+    this.anchorPoints = const [],
+    this.description,
+    this.isPrimary = true,
+    this.symmetryPairId,
   });
 
   /// Global pixel index of the last LED in this segment (inclusive)
@@ -179,6 +409,32 @@ class RooflineSegment {
     }
   }
 
+  /// Get all anchor points including both legacy anchorPixels and new anchorPoints
+  List<AnchorPoint> get effectiveAnchorPoints {
+    if (anchorPoints.isNotEmpty) return anchorPoints;
+    // Convert legacy anchorPixels to AnchorPoints
+    return anchorPixels.map((idx) => AnchorPoint(
+      ledIndex: idx,
+      type: _inferAnchorType(idx),
+      zoneSize: anchorLedCount,
+    )).toList();
+  }
+
+  /// Infer anchor type based on position in segment
+  AnchorType _inferAnchorType(int localIndex) {
+    if (type == SegmentType.peak) {
+      final middle = pixelCount ~/ 2;
+      if ((localIndex - middle).abs() <= 2) return AnchorType.peak;
+    }
+    if (type == SegmentType.corner) {
+      return AnchorType.corner;
+    }
+    if (localIndex == 0 || localIndex >= pixelCount - anchorLedCount) {
+      return AnchorType.boundary;
+    }
+    return AnchorType.custom;
+  }
+
   RooflineSegment copyWith({
     String? id,
     String? name,
@@ -188,6 +444,11 @@ class RooflineSegment {
     List<int>? anchorPixels,
     int? anchorLedCount,
     int? sortOrder,
+    SegmentDirection? direction,
+    List<AnchorPoint>? anchorPoints,
+    String? description,
+    bool? isPrimary,
+    String? symmetryPairId,
   }) {
     return RooflineSegment(
       id: id ?? this.id,
@@ -198,6 +459,11 @@ class RooflineSegment {
       anchorPixels: anchorPixels ?? this.anchorPixels,
       anchorLedCount: anchorLedCount ?? this.anchorLedCount,
       sortOrder: sortOrder ?? this.sortOrder,
+      direction: direction ?? this.direction,
+      anchorPoints: anchorPoints ?? this.anchorPoints,
+      description: description ?? this.description,
+      isPrimary: isPrimary ?? this.isPrimary,
+      symmetryPairId: symmetryPairId ?? this.symmetryPairId,
     );
   }
 
@@ -212,6 +478,16 @@ class RooflineSegment {
       anchorPixels: (json['anchor_pixels'] as List<dynamic>?)?.cast<int>() ?? [],
       anchorLedCount: json['anchor_led_count'] as int? ?? 2,
       sortOrder: json['sort_order'] as int? ?? 0,
+      direction: SegmentDirectionExtension.fromString(
+        json['direction'] as String? ?? 'left_to_right',
+      ),
+      anchorPoints: (json['anchor_points'] as List<dynamic>?)
+              ?.map((e) => AnchorPoint.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      description: json['description'] as String?,
+      isPrimary: json['is_primary'] as bool? ?? true,
+      symmetryPairId: json['symmetry_pair_id'] as String?,
     );
   }
 
@@ -226,13 +502,18 @@ class RooflineSegment {
       'anchor_pixels': anchorPixels,
       'anchor_led_count': anchorLedCount,
       'sort_order': sortOrder,
+      'direction': direction.name,
+      'anchor_points': anchorPoints.map((e) => e.toJson()).toList(),
+      if (description != null) 'description': description,
+      'is_primary': isPrimary,
+      if (symmetryPairId != null) 'symmetry_pair_id': symmetryPairId,
     };
   }
 
   @override
   String toString() {
     return 'RooflineSegment(id: $id, name: $name, pixelCount: $pixelCount, '
-        'startPixel: $startPixel, type: ${type.name}, '
+        'startPixel: $startPixel, type: ${type.name}, direction: ${direction.name}, '
         'anchors: $anchorPixels, anchorLedCount: $anchorLedCount)';
   }
 
@@ -247,7 +528,9 @@ class RooflineSegment {
         other.type == type &&
         _listEquals(other.anchorPixels, anchorPixels) &&
         other.anchorLedCount == anchorLedCount &&
-        other.sortOrder == sortOrder;
+        other.sortOrder == sortOrder &&
+        other.direction == direction &&
+        other.isPrimary == isPrimary;
   }
 
   @override
@@ -261,6 +544,8 @@ class RooflineSegment {
       Object.hashAll(anchorPixels),
       anchorLedCount,
       sortOrder,
+      direction,
+      isPrimary,
     );
   }
 }

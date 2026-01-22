@@ -35,6 +35,12 @@ class AutopilotGenerationService {
     final end = start.add(const Duration(days: 7));
     final suggestions = <AutopilotScheduleItem>[];
 
+    // Always add a daily warm white sunset-to-sunrise schedule as the baseline
+    final dailyWarmWhite = await _generateDailyWarmWhiteSchedule(profile);
+    if (dailyWarmWhite != null) {
+      suggestions.add(dailyWarmWhite);
+    }
+
     // Get calendar events for the week
     final calendarService = _ref.read(calendarEventServiceProvider);
     final events = await calendarService.getEventsForDateRange(start, end, profile);
@@ -165,6 +171,53 @@ class AutopilotGenerationService {
       );
     } catch (e) {
       debugPrint('AutopilotGeneration: Failed to generate suggestion: $e');
+      return null;
+    }
+  }
+
+  /// Generate a recurring daily warm white sunset-to-sunrise schedule.
+  /// This serves as the baseline lighting for all days.
+  Future<AutopilotScheduleItem?> _generateDailyWarmWhiteSchedule(UserModel profile) async {
+    try {
+      // This is a repeating schedule that runs every day
+      final now = DateTime.now();
+
+      // Calculate sunset time for today
+      DateTime scheduledTime = DateTime(now.year, now.month, now.day, 18, 0);
+      if (profile.latitude != null && profile.longitude != null) {
+        final sunset = SunUtils.sunsetLocal(
+          profile.latitude!,
+          profile.longitude!,
+          now,
+        );
+        if (sunset != null) scheduledTime = sunset;
+      }
+
+      // Create a warm white payload
+      final wledPayload = {
+        'on': true,
+        'bri': 180,
+        'seg': [
+          {
+            'col': [[255, 250, 244, 0]], // Warm white
+            'fx': 0, // Solid
+          }
+        ],
+      };
+
+      return AutopilotScheduleItem(
+        id: _uuid.v4(),
+        scheduledTime: scheduledTime,
+        repeatDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], // Every day
+        patternName: 'Warm White',
+        reason: 'Daily evening lighting',
+        trigger: AutopilotTrigger.sunset,
+        confidenceScore: 1.0,
+        wledPayload: wledPayload,
+        createdAt: DateTime.now(),
+      );
+    } catch (e) {
+      debugPrint('AutopilotGeneration: Failed to generate daily warm white: $e');
       return null;
     }
   }

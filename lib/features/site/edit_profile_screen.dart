@@ -1036,8 +1036,8 @@ class _AutopilotCard extends StatelessWidget {
                   child: Slider(
                     value: changeToleranceLevel.toDouble(),
                     min: 0,
-                    max: 5,
-                    divisions: 5,
+                    max: 4,
+                    divisions: 4,
                     label: tolerance.label,
                     onChanged: (v) => onToleranceChanged(v.round()),
                   ),

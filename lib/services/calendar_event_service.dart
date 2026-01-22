@@ -293,21 +293,12 @@ class CalendarEventService {
 
   /// Get team colors from the sports teams data.
   List<Color>? _getTeamColors(String teamName) {
-    // Search through all leagues for the team
-    final allTeams = [
-      ...nflTeams,
-      ...nbaTeams,
-      ...mlbTeams,
-      ...nhlTeams,
-      ...mlsTeams,
-      ...wnbaTeams,
-      ...nwslTeams,
-      ...ncaaFootballTeams,
-      ...ncaaBasketballTeams,
-    ];
-
-    for (final team in allTeams) {
-      if (team.name == teamName || team.name.contains(teamName) || teamName.contains(team.name)) {
+    // Search through all teams in the database
+    for (final team in SportsTeamsDatabase.allTeams) {
+      if (team.name == teamName ||
+          team.displayName == teamName ||
+          team.name.contains(teamName) ||
+          teamName.contains(team.name)) {
         return team.colors;
       }
     }

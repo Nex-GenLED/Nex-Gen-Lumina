@@ -1,8 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
+import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/services/autopilot_generation_service.dart';
 
 /// Provider for the user's autopilot enabled state.
 /// Derived from the user profile.
@@ -192,11 +197,105 @@ class AutopilotSettingsService {
   AutopilotSettingsService(this._ref);
 
   /// Enable or disable autopilot.
+  /// When enabling, generates and populates schedules based on user profile.
   Future<void> setEnabled(bool enabled) async {
     await _updateProfile((p) => p.copyWith(
           autopilotEnabled: enabled,
           updatedAt: DateTime.now(),
         ));
+
+    if (enabled) {
+      // Generate and populate schedules when autopilot is enabled
+      await generateAndPopulateSchedules();
+    }
+  }
+
+  /// Generate autopilot schedules and add them to the user's schedule list.
+  Future<void> generateAndPopulateSchedules() async {
+    final profileAsync = _ref.read(currentUserProfileProvider);
+    final profile = profileAsync.maybeWhen(
+      data: (p) => p,
+      orElse: () => null,
+    );
+    if (profile == null) {
+      debugPrint('AutopilotSettingsService: No profile found, cannot generate schedules');
+      return;
+    }
+
+    debugPrint('AutopilotSettingsService: Generating autopilot schedules...');
+
+    try {
+      // Generate autopilot schedule items
+      final generationService = _ref.read(autopilotGenerationServiceProvider);
+      final autopilotItems = await generationService.generateWeeklySchedule(
+        profile: profile,
+      );
+
+      debugPrint('AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
+
+      // Convert to regular ScheduleItem format
+      final scheduleItems = autopilotItems.map((item) => _convertToScheduleItem(item)).toList();
+
+      // Add to user's schedules (merge with existing)
+      final schedulesNotifier = _ref.read(schedulesProvider.notifier);
+      await schedulesNotifier.addAll(scheduleItems);
+
+      // Mark schedule as generated
+      await markScheduleGenerated();
+
+      debugPrint('AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
+    } catch (e) {
+      debugPrint('AutopilotSettingsService: Failed to generate schedules: $e');
+    }
+  }
+
+  /// Convert an AutopilotScheduleItem to a regular ScheduleItem.
+  ScheduleItem _convertToScheduleItem(AutopilotScheduleItem item) {
+    // Format time label
+    String timeLabel = _formatTime(item.scheduledTime);
+
+    // Add trigger context to time label for special triggers
+    if (item.trigger == AutopilotTrigger.sunset) {
+      timeLabel = 'Sunset';
+    } else if (item.trigger == AutopilotTrigger.sunrise) {
+      timeLabel = 'Sunrise';
+    }
+
+    // Format repeat days
+    List<String> repeatDays = item.repeatDays;
+    if (repeatDays.isEmpty) {
+      // One-time event - use the date as the "repeat" indicator
+      repeatDays = [_formatDate(item.scheduledTime)];
+    }
+
+    // Build action label
+    String actionLabel = 'Pattern: ${item.patternName}';
+    if (item.reason.isNotEmpty) {
+      actionLabel = '${item.patternName} (${item.reason})';
+    }
+
+    return ScheduleItem(
+      id: 'autopilot-${item.id}',
+      timeLabel: timeLabel,
+      repeatDays: repeatDays,
+      actionLabel: actionLabel,
+      enabled: true,
+    );
+  }
+
+  /// Format time as "h:mm AM/PM"
+  String _formatTime(DateTime dt) {
+    final hour = dt.hour;
+    final minute = dt.minute;
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+  }
+
+  /// Format date as "Jan 21" style
+  String _formatDate(DateTime dt) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[dt.month - 1]} ${dt.day}';
   }
 
   /// Set the change tolerance level (0-5).

@@ -7,6 +7,9 @@ import 'package:nexgen_command/features/voice/android_shortcut_service.dart';
 import 'package:nexgen_command/features/scenes/scene_models.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/app_providers.dart';
 
 /// Provider for the Siri Shortcuts service (iOS only)
 final siriShortcutServiceProvider = Provider<SiriShortcutService?>((ref) {
@@ -209,9 +212,69 @@ void _setBrightness(ProviderRef ref, int level) {
   notifier.setBrightness(level.clamp(0, 255));
 }
 
-/// Run the current schedule
-void _runSchedule(ProviderRef ref) {
+/// Run the current schedule - applies whatever pattern/action should be active now
+Future<void> _runSchedule(ProviderRef ref) async {
   debugPrint('Voice: Running schedule');
-  // This would trigger the schedule sync or apply current scheduled pattern
-  // Implementation depends on schedule system
+
+  // Find the current scheduled action based on time and day
+  final currentSchedule = ref.read(currentScheduledActionProvider);
+
+  if (currentSchedule == null) {
+    debugPrint('Voice: No schedule is active right now');
+    return;
+  }
+
+  final repo = ref.read(wledRepositoryProvider);
+  if (repo == null) {
+    debugPrint('Voice: No controller connected');
+    return;
+  }
+
+  debugPrint('Voice: Applying "${currentSchedule.actionLabel}" from schedule "${currentSchedule.timeLabel}"');
+
+  try {
+    final action = currentSchedule.actionLabel.trim();
+    final actionLower = action.toLowerCase();
+
+    if (actionLower.contains('turn off') || actionLower == 'off') {
+      await repo.applyJson({'on': false});
+      ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
+    } else if (actionLower.startsWith('brightness')) {
+      final match = RegExp(r'(\d{1,3})%').firstMatch(action);
+      final brightness = int.tryParse(match?.group(1) ?? '') ?? 100;
+      final bri = (brightness * 255 / 100).round().clamp(0, 255);
+      await repo.applyJson({'on': true, 'bri': bri});
+      ref.read(activePresetLabelProvider.notifier).state = 'Brightness $brightness%';
+    } else if (actionLower.startsWith('pattern')) {
+      final idx = action.indexOf(':');
+      final patternName = (idx != -1 && idx + 1 < action.length)
+          ? action.substring(idx + 1).trim()
+          : action.replaceFirst(RegExp(r'^(?i)pattern'), '').trim();
+
+      final library = ref.read(publicPatternLibraryProvider);
+      final pattern = library.all.where(
+        (p) => p.name.toLowerCase() == patternName.toLowerCase()
+      ).firstOrNull;
+
+      if (pattern != null) {
+        await repo.applyJson(pattern.toWledPayload());
+        ref.read(activePresetLabelProvider.notifier).state = patternName;
+      } else {
+        debugPrint('Voice: Pattern "$patternName" not found, applying generic');
+        await repo.applyJson({'on': true, 'bri': 200, 'seg': [{'id': 0, 'fx': 0}]});
+        ref.read(activePresetLabelProvider.notifier).state = patternName;
+      }
+    } else if (actionLower.contains('turn on') || actionLower == 'on') {
+      await repo.applyJson({'on': true, 'bri': 200});
+      ref.read(activePresetLabelProvider.notifier).state = 'On (Scheduled)';
+    } else {
+      debugPrint('Voice: Unknown schedule action: $action');
+      await repo.applyJson({'on': true});
+      ref.read(activePresetLabelProvider.notifier).state = action;
+    }
+
+    debugPrint('Voice: Successfully applied schedule');
+  } catch (e) {
+    debugPrint('Voice: Run Schedule failed: $e');
+  }
 }

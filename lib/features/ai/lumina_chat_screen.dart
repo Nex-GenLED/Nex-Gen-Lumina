@@ -51,6 +51,10 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   late final AnimationController _previewBarAnim;
   
   Future<void> _handleThumbsUp(_Msg msg) async {
+    // Update UI immediately to show feedback was received
+    setState(() {
+      msg.feedbackGiven = true;
+    });
     try {
       final user = ref.read(authStateProvider).maybeWhen(data: (u) => u, orElse: () => null);
       if (user == null) return;
@@ -141,6 +145,10 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
         );
       });
       if (choice == null) return;
+      // Update UI immediately to show feedback was received
+      setState(() {
+        msg.feedbackGiven = false;
+      });
       final user = ref.read(authStateProvider).maybeWhen(data: (u) => u, orElse: () => null);
       if (user == null) return;
       final svc = ref.read(userServiceProvider);
@@ -717,8 +725,11 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
         bottom: true,
         child: Stack(children: [
           // Top hero: user's house image with optional AI preview overlay
-          Positioned(
-            top: 0,
+          // Animates up and out of view when keyboard is open
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+            top: isKeyboard ? -clampedHeroHeight : 0,
             left: 0,
             right: 0,
             child: _HouseHero(
@@ -735,7 +746,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
               messages: _messages,
               isThinking: _isThinking,
               bottomReserve: overlayReserve,
-              topReserve: clampedHeroHeight + 12,
+              topReserve: isKeyboard ? 12 : clampedHeroHeight + 12,
               onThumbsUp: _handleThumbsUp,
               onThumbsDown: _handleThumbsDown,
               onRefinement: _sendRefinement,
@@ -746,7 +757,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
           Positioned(
             left: 0,
             right: 0,
-            bottom: isKeyboard ? keyboard + 12 : 80, // 80 = space for bottom nav bar
+            bottom: isKeyboard ? keyboard + 12 : 95, // 95 = space for bottom nav bar with extra clearance
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: Padding(
@@ -856,6 +867,7 @@ class _MessageList extends StatelessWidget {
                 _Role.assistant => _AssistantBubble(
                   text: m.text,
                   preview: m.preview,
+                  feedbackGiven: m.feedbackGiven,
                   onThumbsUp: () => onThumbsUp(m),
                   onThumbsDown: () => onThumbsDown(m),
                   onRefinement: isLastAssistantWithPreview ? onRefinement : null,
@@ -877,7 +889,9 @@ class _Msg {
   final String text;
   final _PatternPreview? preview;
   final Map<String, dynamic>? wledPayload;
-  _Msg(this.role, this.text, {this.preview, this.wledPayload});
+  // Track if user gave feedback (null = no feedback, true = thumbs up, false = thumbs down)
+  bool? feedbackGiven;
+  _Msg(this.role, this.text, {this.preview, this.wledPayload, this.feedbackGiven});
   factory _Msg.user(String t) => _Msg(_Role.user, t);
   factory _Msg.assistant(String t, { _PatternPreview? preview, Map<String, dynamic>? wledPayload }) => _Msg(_Role.assistant, t, preview: preview, wledPayload: wledPayload);
   factory _Msg.thinking() => _Msg(_Role.thinking, '');
@@ -913,10 +927,11 @@ class _UserBubble extends StatelessWidget {
 class _AssistantBubble extends StatelessWidget {
   final String text;
   final _PatternPreview? preview;
+  final bool? feedbackGiven; // null = no feedback, true = thumbs up, false = thumbs down
   final VoidCallback onThumbsUp;
   final VoidCallback onThumbsDown;
   final void Function(String)? onRefinement;
-  const _AssistantBubble({required this.text, this.preview, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
+  const _AssistantBubble({required this.text, this.preview, this.feedbackGiven, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
 
   @override
   Widget build(BuildContext context) {
@@ -953,8 +968,24 @@ class _AssistantBubble extends StatelessWidget {
             ],
             const SizedBox(height: 8),
             Row(mainAxisSize: MainAxisSize.min, children: [
-              Tooltip(message: 'Thumbs up', child: IconButton(onPressed: onThumbsUp, icon: const Icon(Icons.thumb_up_alt_outlined), color: NexGenPalette.textMedium, iconSize: 18)),
-              Tooltip(message: 'Thumbs down', child: IconButton(onPressed: onThumbsDown, icon: const Icon(Icons.thumb_down_alt_outlined), color: NexGenPalette.textMedium, iconSize: 18)),
+              Tooltip(
+                message: 'Thumbs up',
+                child: IconButton(
+                  onPressed: feedbackGiven == null ? onThumbsUp : null,
+                  icon: Icon(feedbackGiven == true ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined),
+                  color: feedbackGiven == true ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                  iconSize: 18,
+                ),
+              ),
+              Tooltip(
+                message: 'Thumbs down',
+                child: IconButton(
+                  onPressed: feedbackGiven == null ? onThumbsDown : null,
+                  icon: Icon(feedbackGiven == false ? Icons.thumb_down_alt : Icons.thumb_down_alt_outlined),
+                  color: feedbackGiven == false ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                  iconSize: 18,
+                ),
+              ),
             ])
           ]),
         ),

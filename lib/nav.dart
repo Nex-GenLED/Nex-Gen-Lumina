@@ -35,6 +35,7 @@ import 'package:nexgen_command/features/ble/wled_manual_setup.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_library_pages.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
+import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
@@ -65,6 +66,7 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
+import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
 
 /// GoRouter configuration for app navigation
 ///
@@ -291,6 +293,11 @@ class AppRouter {
         name: 'segment-setup',
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SegmentSetupScreen()),
       ),
+      GoRoute(
+        path: AppRoutes.rooflineSetupWizard,
+        name: 'roofline-setup-wizard',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
+      ),
     ],
   );
 }
@@ -329,6 +336,7 @@ class AppRoutes {
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
   static const String segmentSetup = '/segment-setup';
+  static const String rooflineSetupWizard = '/roofline-setup-wizard';
 }
 
 // ========================== Pages ============================
@@ -528,12 +536,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     }
   }
 
-  void _updateHeroImage(String? url) {
+  void _updateHeroImage(String? url, {String? rooflineMaskVersion}) {
     try {
       final provider = (url != null && url.isNotEmpty)
           ? NetworkImage(url)
           : const AssetImage('assets/images/Demohomephoto.jpg') as ImageProvider;
-      final id = (url != null && url.isNotEmpty) ? url : 'asset:Demohomephoto';
+      // Include roofline mask version in the ID to force reload when mask changes
+      final id = (url != null && url.isNotEmpty)
+          ? '$url#${rooflineMaskVersion ?? ""}'
+          : 'asset:Demohomephoto';
       if (_heroImageId == id && _heroImageProvider != null) return;
       _heroImageId = id;
       _heroImageProvider = provider;
@@ -579,10 +590,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     // Only update hero image once profile has actually loaded to avoid flashing stock image
     final profileLoaded = profileAsync.hasValue;
     final houseImageUrl = profileAsync.maybeWhen(data: (u) => u?.housePhotoUrl, orElse: () => null);
+    // Get roofline mask version to detect when mask is updated
+    final rooflineMaskVersion = profileAsync.maybeWhen(
+      data: (u) => u?.rooflineMask?.toString(),
+      orElse: () => null,
+    );
     // Ensure hero uses the latest image and compute aspect ratio once resolved
     // Pass null while loading to prevent stock image flash
     if (profileLoaded) {
-      _updateHeroImage(houseImageUrl);
+      _updateHeroImage(houseImageUrl, rooflineMaskVersion: rooflineMaskVersion);
     }
 
     return Scaffold(
@@ -1027,10 +1043,98 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 Text('Quick Control'.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium, letterSpacing: 1.1)),
                 const SizedBox(height: 10),
                 _QuickPresetButtons(onRunSchedule: () async {
-              final schedules = ref.read(schedulesProvider);
-              final ok = await ref.read(scheduleSyncServiceProvider).syncAll(ref, schedules);
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Schedules synced to controller' : 'Failed to sync schedules')));
+              // Find the current scheduled action based on time and day
+              final currentSchedule = ref.read(currentScheduledActionProvider);
+
+              if (currentSchedule == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('No schedule is active right now')),
+                );
+                return;
+              }
+
+              final repo = ref.read(wledRepositoryProvider);
+              if (repo == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('No controller connected')),
+                );
+                return;
+              }
+
+              debugPrint('📅 Run Schedule: Applying "${currentSchedule.actionLabel}" from schedule "${currentSchedule.timeLabel}"');
+
+              try {
+                final action = currentSchedule.actionLabel.trim();
+                final actionLower = action.toLowerCase();
+
+                if (actionLower.contains('turn off') || actionLower == 'off') {
+                  // Turn off the lights
+                  await repo.applyJson({'on': false});
+                  ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
+                } else if (actionLower.startsWith('brightness')) {
+                  // Set brightness - parse percentage from "Brightness: 70%"
+                  final match = RegExp(r'(\d{1,3})%').firstMatch(action);
+                  final brightness = int.tryParse(match?.group(1) ?? '') ?? 100;
+                  final bri = (brightness * 255 / 100).round().clamp(0, 255);
+                  await repo.applyJson({'on': true, 'bri': bri});
+                  ref.read(activePresetLabelProvider.notifier).state = 'Brightness $brightness%';
+                } else if (actionLower.startsWith('pattern')) {
+                  // Apply pattern - extract pattern name from "Pattern: Warm White Glow"
+                  final idx = action.indexOf(':');
+                  final patternName = (idx != -1 && idx + 1 < action.length)
+                      ? action.substring(idx + 1).trim()
+                      : action.replaceFirst(RegExp(r'^(?i)pattern'), '').trim();
+
+                  // Look up pattern in the library
+                  final library = ref.read(publicPatternLibraryProvider);
+                  final pattern = library.all.where(
+                    (p) => p.name.toLowerCase() == patternName.toLowerCase()
+                  ).firstOrNull;
+
+                  if (pattern != null) {
+                    // Apply the pattern's WLED payload
+                    await repo.applyJson(pattern.toWledPayload());
+                    ref.read(activePresetLabelProvider.notifier).state = patternName;
+                  } else {
+                    // Pattern not found in library - try a generic solid color approach
+                    debugPrint('⚠️ Pattern "$patternName" not found in library, applying generic');
+                    await repo.applyJson({
+                      'on': true,
+                      'bri': 200,
+                      'seg': [{'id': 0, 'fx': 0}] // Solid effect
+                    });
+                    ref.read(activePresetLabelProvider.notifier).state = patternName;
+                  }
+                } else if (actionLower.contains('turn on') || actionLower == 'on') {
+                  // Turn on with default brightness
+                  await repo.applyJson({'on': true, 'bri': 200});
+                  ref.read(activePresetLabelProvider.notifier).state = 'On (Scheduled)';
+                } else {
+                  // Unknown action type - just turn on
+                  debugPrint('⚠️ Unknown schedule action: $action');
+                  await repo.applyJson({'on': true});
+                  ref.read(activePresetLabelProvider.notifier).state = action;
+                }
+
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Applied: ${currentSchedule.actionLabel}'),
+                    backgroundColor: Colors.green.shade700,
+                  ),
+                );
+              } catch (e) {
+                debugPrint('❌ Run Schedule failed: $e');
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to apply schedule: $e'),
+                    backgroundColor: Colors.red.shade700,
+                  ),
+                );
+              }
             }, onWarmWhite: () async {
               debugPrint('🌡️ Warm White button pressed');
               final repo = ref.read(wledRepositoryProvider);
@@ -1075,53 +1179,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               } catch (e) {
                 debugPrint('Bright White quick action failed: $e');
               }
-            }, onRunHoliday: () async {
-              debugPrint('🎄 Run Holiday button pressed');
-              final repo = ref.read(wledRepositoryProvider);
-              if (repo == null) {
-                debugPrint('❌ Run Holiday: repo is null');
-                return;
-              }
-              // Apply a default holiday payload (Candy Cane Chase)
-              final holidayPayload = {
-                'on': true,
-                'bri': 255,
-                'seg': [
-                  {'id': 0, 'fx': 12, 'pal': 3, 'sx': 180, 'ix': 200}
-                ]
-              };
-              try {
-                debugPrint('🎄 Run Holiday: sending payload');
-                final ok = await repo.applyJson(holidayPayload);
-                debugPrint('🎄 Run Holiday result: $ok');
-                ref.read(activePresetLabelProvider.notifier).state = 'Holiday';
-              } catch (e) {
-                debugPrint('Run Holiday quick action failed: $e');
-              }
-                }),
+            }),
               ]),
             ),
             const SizedBox(height: 12),
-            // Section B: Compact control row (glass buttons) now sits BELOW the image
+            // Section B: Design Studio button
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                Expanded(
-                  child: _GlassActionButton(
-                    icon: Icons.palette,
-                    label: 'Design Studio',
-                    onTap: () => context.push(AppRoutes.designStudio),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _GlassActionButton(
-                    icon: Icons.layers,
-                    label: 'Zone Control',
-                    onTap: () => context.push(AppRoutes.wledZones),
-                  ),
-                ),
-              ]),
+              child: _GlassActionButton(
+                icon: Icons.palette,
+                label: 'Design Studio',
+                onTap: () => context.push(AppRoutes.designStudio),
+              ),
             ),
             const SizedBox(height: 16),
             // Section D: Vertical Agenda (Today + next 6 days)
@@ -1417,8 +1486,7 @@ class _QuickPresetButtons extends StatelessWidget {
   final VoidCallback onRunSchedule;
   final VoidCallback onWarmWhite;
   final VoidCallback onBrightWhite;
-  final VoidCallback onRunHoliday;
-  const _QuickPresetButtons({required this.onRunSchedule, required this.onWarmWhite, required this.onBrightWhite, required this.onRunHoliday});
+  const _QuickPresetButtons({required this.onRunSchedule, required this.onWarmWhite, required this.onBrightWhite});
 
   @override
   Widget build(BuildContext context) {
@@ -1426,7 +1494,6 @@ class _QuickPresetButtons extends StatelessWidget {
       _QuickPresetButton(icon: Icons.schedule_rounded, label: 'Run Schedule', onTap: onRunSchedule),
       _QuickPresetButton(icon: Icons.wb_twilight, label: 'Warm White', onTap: onWarmWhite),
       _QuickPresetButton(icon: Icons.wb_sunny_rounded, label: 'Bright White', onTap: onBrightWhite),
-      _QuickPresetButton(icon: Icons.celebration_rounded, label: 'Run Holiday', onTap: onRunHoliday),
     ];
     return LayoutBuilder(builder: (context, constraints) {
       final isNarrow = constraints.maxWidth < 360;
@@ -1439,8 +1506,6 @@ class _QuickPresetButtons extends StatelessWidget {
         Expanded(child: items[1]),
         const SizedBox(width: 10),
         Expanded(child: items[2]),
-        const SizedBox(width: 10),
-        Expanded(child: items[3]),
       ]);
     });
   }

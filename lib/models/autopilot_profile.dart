@@ -4,18 +4,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 ///
 /// Controls how frequently Lumina changes the lighting patterns.
 enum ChangeToleranceLevel {
-  /// 1-2 changes per week (events only)
-  minimal(0, 'Minimal', '1-2 changes/week'),
-  /// 3-4 changes per week
-  low(1, 'Low', '3-4 changes/week'),
-  /// Daily changes
-  moderate(2, 'Moderate', 'Daily changes'),
+  /// No weekly changes (events only)
+  minimal(0, 'No Weekly Changes', 'Events only'),
+  /// 1-2 changes per week
+  low(1, 'Low', '1-2 changes per week'),
+  /// 2-4 changes per week
+  moderate(2, 'Moderate', '2-4 changes per week'),
+  /// 4-7 changes per week
+  active(3, 'Active', '4-7 changes per week'),
   /// 1-2 changes per day
-  active(3, 'Active', '1-2 changes/day'),
-  /// Multiple changes per day
-  dynamic(4, 'Dynamic', 'Multiple/day'),
-  /// Frequent changes, always fresh
-  maximum(5, 'Maximum', 'Frequent changes');
+  dynamic(4, 'Dynamic', '1-2 changes per day');
 
   const ChangeToleranceLevel(this.value, this.label, this.description);
 
@@ -36,15 +34,13 @@ enum ChangeToleranceLevel {
       case ChangeToleranceLevel.minimal:
         return 0; // Only on event days
       case ChangeToleranceLevel.low:
-        return 0; // Only on event days, but more events
+        return 0; // 1-2 changes per week (not daily)
       case ChangeToleranceLevel.moderate:
-        return 1;
+        return 1; // 2-4 changes per week
       case ChangeToleranceLevel.active:
-        return 2;
+        return 1; // 4-7 changes per week (daily)
       case ChangeToleranceLevel.dynamic:
-        return 4;
-      case ChangeToleranceLevel.maximum:
-        return 8;
+        return 2; // 1-2 changes per day
     }
   }
 
@@ -52,15 +48,15 @@ enum ChangeToleranceLevel {
   int get minDaysBetweenChanges {
     switch (this) {
       case ChangeToleranceLevel.minimal:
-        return 3;
+        return 7; // No weekly changes (only events)
       case ChangeToleranceLevel.low:
-        return 2;
+        return 3; // 1-2 changes per week
       case ChangeToleranceLevel.moderate:
-        return 1;
+        return 2; // 2-4 changes per week
       case ChangeToleranceLevel.active:
+        return 1; // 4-7 changes per week (daily)
       case ChangeToleranceLevel.dynamic:
-      case ChangeToleranceLevel.maximum:
-        return 0;
+        return 0; // 1-2 changes per day
     }
   }
 }

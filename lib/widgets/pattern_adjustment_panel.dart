@@ -6,24 +6,89 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/theme.dart';
 
-/// Common WLED effects for the effect selector dropdown.
-/// These are curated effects that work well and preserve custom color palettes.
+/// All WLED effects that respect user color selection (uses or blends colors).
+/// Excludes effects that generate their own colors, use palettes, require 2D matrix, or require audio.
+/// Organized by category for easier browsing.
 const List<_EffectOption> _commonEffects = [
+  // Basic effects
   _EffectOption(0, 'Solid', Icons.square_rounded),
-  _EffectOption(2, 'Breathe', Icons.air),
   _EffectOption(1, 'Blink', Icons.flash_on),
+  _EffectOption(2, 'Breathe', Icons.air),
+  _EffectOption(12, 'Fade', Icons.gradient),
+  _EffectOption(18, 'Dissolve', Icons.blur_on),
+  _EffectOption(46, 'Gradient', Icons.linear_scale),
+  _EffectOption(47, 'Loading', Icons.hourglass_empty),
+  _EffectOption(56, 'Tri Fade', Icons.change_history),
+  _EffectOption(62, 'Oscillate', Icons.swap_horiz),
+  _EffectOption(83, 'Solid Pattern', Icons.grid_view),
+  _EffectOption(84, 'Solid Pattern Tri', Icons.change_history_outlined),
+  _EffectOption(85, 'Spots', Icons.blur_circular),
+  _EffectOption(86, 'Spots Fade', Icons.blur_circular_outlined),
+  _EffectOption(98, 'Percent', Icons.percent),
+  _EffectOption(100, 'Heartbeat', Icons.favorite),
+  _EffectOption(113, 'Washing Machine', Icons.local_laundry_service),
+
+  // Wipe effects
   _EffectOption(3, 'Wipe', Icons.arrow_forward),
-  _EffectOption(12, 'Theater Chase', Icons.theater_comedy),
-  _EffectOption(41, 'Running', Icons.directions_run),
-  _EffectOption(43, 'Twinkle', Icons.auto_awesome),
-  _EffectOption(52, 'Fireworks', Icons.celebration),
-  _EffectOption(65, 'Chase', Icons.double_arrow),
-  _EffectOption(70, 'Twinkle Fox', Icons.pets),
-  _EffectOption(72, 'Sparkle', Icons.star),
-  _EffectOption(77, 'Meteor', Icons.rocket_launch),
-  _EffectOption(95, 'Ripple', Icons.waves),
-  _EffectOption(110, 'Flow', Icons.water),
-  _EffectOption(37, 'Candle', Icons.local_fire_department),
+  _EffectOption(6, 'Sweep', Icons.compare_arrows),
+  _EffectOption(55, 'Tri Wipe', Icons.arrow_right_alt),
+
+  // Chase effects
+  _EffectOption(13, 'Theater', Icons.theater_comedy),
+  _EffectOption(15, 'Running', Icons.directions_run),
+  _EffectOption(16, 'Saw', Icons.show_chart),
+  _EffectOption(27, 'Android', Icons.android),
+  _EffectOption(28, 'Chase', Icons.double_arrow),
+  _EffectOption(31, 'Chase Flash', Icons.flash_on_outlined),
+  _EffectOption(37, 'Chase 2', Icons.fast_forward),
+  _EffectOption(50, 'Two Dots', Icons.more_horiz),
+  _EffectOption(52, 'Running Dual', Icons.sync_alt),
+  _EffectOption(54, 'Chase 3', Icons.fast_forward_outlined),
+  _EffectOption(78, 'Railway', Icons.train),
+  _EffectOption(111, 'Chunchun', Icons.auto_awesome),
+
+  // Scanner effects
+  _EffectOption(10, 'Scan', Icons.sensors),
+  _EffectOption(11, 'Scan Dual', Icons.sensors_outlined),
+  _EffectOption(40, 'Scanner', Icons.document_scanner),
+  _EffectOption(41, 'Lighthouse', Icons.highlight),
+  _EffectOption(58, 'ICU', Icons.visibility),
+  _EffectOption(60, 'Scanner Dual', Icons.document_scanner_outlined),
+
+  // Sparkle effects
+  _EffectOption(17, 'Twinkle', Icons.auto_awesome),
+  _EffectOption(20, 'Sparkle', Icons.star),
+  _EffectOption(21, 'Sparkle Dark', Icons.star_border),
+  _EffectOption(22, 'Sparkle+', Icons.star_half),
+  _EffectOption(49, 'Fairy', Icons.auto_fix_high),
+  _EffectOption(51, 'Fairytwinkle', Icons.auto_fix_normal),
+  _EffectOption(87, 'Glitter', Icons.diamond),
+  _EffectOption(103, 'Solid Glitter', Icons.diamond_outlined),
+
+  // Meteor effects
+  _EffectOption(59, 'Multi Comet', Icons.rocket),
+  _EffectOption(76, 'Meteor', Icons.rocket_launch),
+  _EffectOption(77, 'Meteor Smooth', Icons.rocket_launch_outlined),
+
+  // Fire effects (that use selected colors)
+  _EffectOption(102, 'Candle Multi', Icons.local_fire_department),
+
+  // Strobe effects
+  _EffectOption(23, 'Strobe', Icons.flash_on),
+  _EffectOption(25, 'Strobe Mega', Icons.flash_auto),
+  _EffectOption(57, 'Lightning', Icons.bolt),
+
+  // Ambient effects (that use selected colors)
+  _EffectOption(96, 'Drip', Icons.water_drop),
+  _EffectOption(112, 'Dancing Shadows', Icons.nightlight),
+
+  // Game effects
+  _EffectOption(44, 'Tetrix', Icons.view_module),
+  _EffectOption(91, 'Bouncing Balls', Icons.sports_basketball),
+  _EffectOption(95, 'Popcorn', Icons.local_dining),
+
+  // Holiday effects
+  _EffectOption(82, 'Halloween Eyes', Icons.visibility_outlined),
 ];
 
 class _EffectOption {
