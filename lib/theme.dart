@@ -162,19 +162,26 @@ class NexGenPalette {
   static const gunmetal50 = Color(0x801A1A1A); // 50% opacity for charts/bg
   // Brand background deep tone
   static const midnightBlue = Color(0xFF0D1B2A);
+  static const deepNavy = Color(0xFF0D1B2A); // Alias for midnightBlue
   // Tracks / gauges
   static const trackDark = Color(0xFF222222);
   // Accents
   static const cyan = Color(0xFF00F0FF); // Nex‑Gen Cyan
   static const blue = Color(0xFF007BFF); // Accent Blue for gradients
   static const violet = Color(0xFF7000FF); // Electric Violet
+  static const primary = cyan; // Alias for cyan
+  static const secondary = violet; // Alias for violet
     // Special accents
     static const gold = Color(0xFFFFD54F); // Subtle gold for featured borders
   // Text
   static const textHigh = Color(0xFFFFFFFF);
   static const textMedium = Color(0xFFB0B0B0);
+  static const textPrimary = textHigh; // Alias for textHigh
+  static const textSecondary = textMedium; // Alias for textMedium
   // Lines
   static const line = Color(0xFF2A2A2A);
+  // Card backgrounds
+  static const cardBackground = gunmetal90; // Alias for gunmetal90
 }
 
 /// Reusable gradients and tokens for brand moments (e.g., Login)

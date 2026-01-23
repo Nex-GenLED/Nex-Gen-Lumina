@@ -100,40 +100,115 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       _error = null;
     });
     try {
-      final autopilotEnabled = ref.read(autopilotEnabledProvider);
-      final prompt = autopilotEnabled
-          ? 'You are assisting with a weekly lighting schedule. The user has Autopilot enabled. They may be asking about schedule changes, autopilot preferences, or pattern choices. Provide helpful, concise suggestions: $text'
-          : 'You are assisting with a weekly lighting schedule. Suggest days, time ranges, and pattern(s) for this request. Keep it concise: $text';
-      final reply = await LuminaBrain.chat(ref, prompt);
-      if (!mounted) return;
-      // Show a lightweight dialog with the suggestion and quick actions.
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF2A2A2A),
-          title: const Text('Lumina Suggestion', style: TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(child: Text(reply, style: const TextStyle(color: Colors.white70))),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                if (mounted) {
-                  showScheduleEditor(context, ref);
-                }
-              },
-              child: const Text('Open Editor'),
-            ),
-          ],
-        ),
-      );
-      _controller.clear();
+      // Parse the user's natural language request to extract schedule parameters
+      final scheduleData = await _parseScheduleRequest(text);
+
+      if (scheduleData != null) {
+        // Create the schedule item
+        final newSchedule = ScheduleItem(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          timeLabel: scheduleData['timeLabel']!,
+          repeatDays: scheduleData['repeatDays'] as List<String>,
+          actionLabel: scheduleData['actionLabel']!,
+          enabled: true,
+        );
+
+        // Add to schedules
+        await ref.read(schedulesProvider.notifier).add(newSchedule);
+
+        if (!mounted) return;
+
+        // Show friendly confirmation
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(scheduleData['confirmation']!),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
+        _controller.clear();
+      } else {
+        // Fallback: couldn't parse the request automatically
+        if (!mounted) return;
+        setState(() => _error = 'I couldn\'t understand that request. Try something like "warm white every night at sunset"');
+      }
     } catch (e) {
-      debugPrint('Lumina schedule prompt failed: $e');
+      debugPrint('Lumina schedule creation failed: $e');
       if (mounted) setState(() => _error = 'Lumina error: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Parses natural language schedule requests into structured data
+  Future<Map<String, dynamic>?> _parseScheduleRequest(String text) async {
+    final lowerText = text.toLowerCase();
+
+    // Determine time
+    String timeLabel;
+    if (lowerText.contains('sunset') || lowerText.contains('evening')) {
+      timeLabel = 'Sunset';
+    } else if (lowerText.contains('sunrise') || lowerText.contains('morning')) {
+      timeLabel = 'Sunrise';
+    } else if (lowerText.contains('midnight') || lowerText.contains('12:00 am')) {
+      timeLabel = '12:00 AM';
+    } else {
+      // Default to sunset for evening requests
+      timeLabel = 'Sunset';
+    }
+
+    // Determine repeat days
+    List<String> repeatDays;
+    if (lowerText.contains('every night') || lowerText.contains('nightly') ||
+        lowerText.contains('every evening') || lowerText.contains('daily')) {
+      repeatDays = ['Daily'];
+    } else if (lowerText.contains('weeknight')) {
+      repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    } else if (lowerText.contains('weekend')) {
+      repeatDays = ['Sat', 'Sun'];
+    } else {
+      // Default to daily
+      repeatDays = ['Daily'];
+    }
+
+    // Determine action/pattern
+    String actionLabel;
+    String patternDescription;
+    if (lowerText.contains('warm white') || lowerText.contains('warm')) {
+      actionLabel = 'Pattern: Warm White';
+      patternDescription = 'warm white';
+    } else if (lowerText.contains('bright white') || lowerText.contains('bright')) {
+      actionLabel = 'Pattern: Bright White';
+      patternDescription = 'bright white';
+    } else if (lowerText.contains('off') || lowerText.contains('turn off')) {
+      actionLabel = 'Turn Off';
+      patternDescription = 'off';
+    } else if (lowerText.contains('on') || lowerText.contains('turn on')) {
+      actionLabel = 'Turn On';
+      patternDescription = 'on';
+    } else {
+      // Default to warm white for lighting requests
+      actionLabel = 'Pattern: Warm White';
+      patternDescription = 'warm white';
+    }
+
+    // Generate friendly confirmation message
+    final timeName = timeLabel.toLowerCase();
+    final daysDescription = repeatDays.contains('Daily')
+        ? 'every evening'
+        : repeatDays.length == 5
+            ? 'on weeknights'
+            : 'on ${repeatDays.join(", ")}';
+
+    final confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription at $timeName.';
+
+    return {
+      'timeLabel': timeLabel,
+      'repeatDays': repeatDays,
+      'actionLabel': actionLabel,
+      'confirmation': confirmation,
+    };
   }
 
   void _applyQuick(String s) {

@@ -1,0 +1,108 @@
+// Firestore Security Rules for Learning System
+// Add these rules to your existing firestore.rules file
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated and owns the document
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Pattern Usage Tracking
+    match /users/{userId}/pattern_usage/{usageId} {
+      // Users can read their own usage data
+      allow read: if isOwner(userId);
+
+      // Users can create usage events
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['created_at', 'source']) &&
+        request.resource.data.created_at is timestamp &&
+        request.resource.data.source is string;
+
+      // No updates or deletes (usage is append-only)
+      allow update, delete: if false;
+    }
+
+    // Favorites Collection
+    match /users/{userId}/favorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isOwner(userId);
+
+      // Users can create favorites
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['pattern_name', 'added_at']) &&
+        request.resource.data.pattern_name is string &&
+        request.resource.data.added_at is timestamp;
+
+      // Users can update their favorites (usage count, last_used)
+      allow update: if isOwner(userId) &&
+        request.resource.data.pattern_name == resource.data.pattern_name &&
+        request.resource.data.added_at == resource.data.added_at;
+
+      // Users can delete their favorites
+      allow delete: if isOwner(userId);
+    }
+
+    // Smart Suggestions Collection
+    match /users/{userId}/suggestions/{suggestionId} {
+      // Users can read their own suggestions
+      allow read: if isOwner(userId);
+
+      // Only server/functions can create suggestions
+      // (Users shouldn't create their own suggestions)
+      allow create: if false;
+
+      // Users can update to dismiss suggestions
+      allow update: if isOwner(userId) &&
+        request.resource.data.dismissed == true &&
+        request.resource.data.keys().hasAll(resource.data.keys());
+
+      // Users can delete old suggestions
+      allow delete: if isOwner(userId);
+    }
+
+    // Detected Habits Collection
+    match /users/{userId}/detected_habits/{habitId} {
+      // Users can read their detected habits
+      allow read: if isOwner(userId);
+
+      // Only server/functions can create habits
+      // (Habits are detected by backend analysis)
+      allow create: if false;
+
+      // No updates (habits are immutable once detected)
+      allow update: if false;
+
+      // Users can delete habits if they want
+      allow delete: if isOwner(userId);
+    }
+  }
+}
+
+// NOTE: For development/testing, you can temporarily use:
+// allow read, write: if isOwner(userId);
+// But for production, use the granular rules above for better security.
+
+// Firestore Indexes Required:
+// These composite indexes are needed for efficient queries:
+//
+// Collection: users/{userId}/pattern_usage
+// Fields: created_at (Descending), __name__ (Descending)
+//
+// Collection: users/{userId}/favorites
+// Fields: added_at (Descending), __name__ (Descending)
+//
+// Collection: users/{userId}/suggestions
+// Fields: dismissed (Ascending), priority (Descending), created_at (Descending)
+//
+// Collection: users/{userId}/detected_habits
+// Fields: detected_at (Descending), __name__ (Descending)
+//
+// Firebase will automatically prompt you to create these indexes
+// when you first run the queries. Click the provided link to create them.

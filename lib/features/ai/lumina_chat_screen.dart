@@ -14,6 +14,9 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/services/architectural_parser_service.dart';
+import 'package:nexgen_command/services/segment_pattern_generator.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class LuminaChatScreen extends ConsumerStatefulWidget {
@@ -28,7 +31,8 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   final ScrollController _scroll = ScrollController();
   final FocusNode _focus = FocusNode();
 
-  final List<_Msg> _messages = [];
+  // Static list to persist messages across tab navigation
+  static final List<_Msg> _messages = [];
   bool _isThinking = false;
   bool _listening = false;
   late final stt.SpeechToText _speech;
@@ -37,16 +41,17 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   // === Active Pattern Context ===
   // Stores the currently displayed pattern for refinement operations.
   // When user taps "make it slower", we modify this instead of doing a new search.
-  Map<String, dynamic>? _activePatternContext;
-  _PatternPreview? _activePreview;
+  // Static to persist across tab navigation
+  static Map<String, dynamic>? _activePatternContext;
+  static _PatternPreview? _activePreview;
 
   // === Preview preparation ===
   // Cached background image for real-time previews (user's house or placeholder)
   ImageProvider<Object>? _houseImageProvider;
-  // Controls visibility of the upcoming preview bar
-  bool showPreviewBar = false;
-  // Colors currently previewed (updated when a new pattern is proposed)
-  List<Color> currentPreviewColors = [];
+  // Controls visibility of the upcoming preview bar (static to persist)
+  static bool showPreviewBar = false;
+  // Colors currently previewed (updated when a new pattern is proposed, static to persist)
+  static List<Color> currentPreviewColors = [];
   // Slide up/down animation controller for the preview bar
   late final AnimationController _previewBarAnim;
   
@@ -193,6 +198,35 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     return 'Pink';
   }
 
+  Color _colorNameToColorObject(String colorName) {
+    switch (colorName.toLowerCase()) {
+      case 'red':
+        return const Color(0xFFFF0000);
+      case 'green':
+        return const Color(0xFF00FF00);
+      case 'blue':
+        return const Color(0xFF0000FF);
+      case 'white':
+        return const Color(0xFFFFFFFF);
+      case 'warm white':
+        return const Color(0xFFFFFAF4);
+      case 'cool white':
+        return const Color(0xFFC8DCFF);
+      case 'yellow':
+        return const Color(0xFFFFFF00);
+      case 'orange':
+        return const Color(0xFFFFA500);
+      case 'purple':
+        return const Color(0xFF800080);
+      case 'pink':
+        return const Color(0xFFFFC0CB);
+      case 'cyan':
+        return const Color(0xFF00FFFF);
+      default:
+        return const Color(0xFFFFFFFF);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -280,6 +314,88 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       final repo = ref.read(wledRepositoryProvider);
       // We proceed even if repo is null, to at least show the verbal response.
 
+      // === PHASE 2: Architectural Parser ===
+      // Try to parse the command with architectural understanding
+      final rooflineConfig = ref.read(currentRooflineConfigProvider).maybeWhen(
+            data: (config) => config,
+            orElse: () => null,
+          );
+
+      if (rooflineConfig != null && rooflineConfig.segments.isNotEmpty) {
+        final parser = ArchitecturalParserService();
+        final architecturalCommand = parser.parseCommand(prompt, rooflineConfig);
+
+        // If we successfully parsed an architectural command, handle it directly
+        if (architecturalCommand != null) {
+          final targetDescription = parser.describeTargets(architecturalCommand.targetSegments);
+          final effectDesc = architecturalCommand.effect;
+          final colorDesc = architecturalCommand.colors.isNotEmpty
+              ? architecturalCommand.colors.join(', ')
+              : 'current colors';
+
+          // === PHASE 3: Intelligent Pattern Generation ===
+          // Generate a segment-aware pattern using the advanced generator
+          final generatedPattern = parser.generateIntelligentPattern(
+            config: rooflineConfig,
+            command: architecturalCommand,
+          );
+
+          // Build friendly response
+          final verbal = 'Perfect! I\'ve created "${generatedPattern.name}" - ${generatedPattern.description}';
+
+          // Get WLED payload from generated pattern
+          final patternGenerator = SegmentPatternGenerator();
+          final wled = patternGenerator.patternToWledPayload(generatedPattern);
+
+          // Create preview from generated pattern
+          final preview = _PatternPreview(
+            colors: generatedPattern.colors,
+            effectId: generatedPattern.primaryEffectId,
+            patternName: generatedPattern.name.toUpperCase(),
+          );
+
+          // Show confirmation and apply
+          if (repo != null) {
+            try {
+              final shouldApply = await _showRunSetupSheet(
+                context,
+                wled: wled,
+                preview: preview,
+                fallbackText: verbal,
+              );
+
+              if (shouldApply == true) {
+                final ok = await repo.applyJson(wled);
+                if (!ok) debugPrint('WLED rejected architectural payload');
+                if (mounted) {
+                  ref.read(activePresetLabelProvider.notifier).state = preview.patternName ?? 'Architectural Pattern';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Applied to $targetDescription!')),
+                  );
+                  _clearChatHistory();
+                }
+              }
+            } catch (e) {
+              debugPrint('Architectural command application failed: $e');
+            }
+          }
+
+          setState(() {
+            _messages.add(_Msg.assistant(verbal, preview: preview, wledPayload: wled));
+            _activePatternContext = {'wled': wled};
+            _activePreview = preview;
+            currentPreviewColors = preview.colors;
+            showPreviewBar = true;
+            _previewBarAnim.forward();
+          });
+
+          if (mounted) setState(() => _isThinking = false);
+          _scrollToEndSoon();
+          return; // Exit early - architectural command handled
+        }
+      }
+
+      // === FALLBACK: Standard Lumina AI ===
       // Ask Lumina with the new system instruction. The reply may include a
       // hidden JSON object to apply immediately.
       final content = await LuminaBrain.chat(ref, prompt);
@@ -477,9 +593,14 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     }
   }
 
-  void _scrollToEndSoon() => Future.delayed(const Duration(milliseconds: 50), () {
+  void _scrollToEndSoon() => Future.delayed(const Duration(milliseconds: 100), () {
         if (!_scroll.hasClients) return;
-        _scroll.animateTo(_scroll.position.maxScrollExtent + 120, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        // Scroll to the very end with extra padding to ensure visibility above keyboard
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent + 200,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
       });
 
   Future<void> _toggleVoice() async {
@@ -697,20 +818,15 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       _setHouseImageFromUrl(url);
     });
 
-    // Listen for tab changes - clear chat history when navigating away from Lumina (tab index 2)
-    ref.listen(selectedTabIndexProvider, (previous, next) {
-      // If we were on Lumina (tab 2) and now we're not, clear the chat
-      if (previous == 2 && next != 2 && _messages.isNotEmpty) {
-        _clearChatHistory();
-        if (mounted) setState(() {});
-      }
-    });
+    // Note: Chat history now persists across tab navigation until app exit
+    // Chat is only cleared when pattern is applied or user fully exits the app
 
     final media = MediaQuery.of(context);
     final keyboard = media.viewInsets.bottom;
     final isKeyboard = keyboard > 0.0;
     // Reserve space at the bottom of the list so messages aren't obscured by the floating console
-    const double overlayReserve = 160; // compact input area needs less space
+    // When keyboard is open, add much more space to ensure messages are visible above keyboard + input
+    final double overlayReserve = isKeyboard ? keyboard + 100 : 160;
     // Reserve space at the top for the house hero so the list scrolls beneath it
     // Use a more compact hero height - roughly 1/3 of screen or aspect-based, whichever is smaller
     final double _aspectBased = media.size.width * 9 / 16;
@@ -743,6 +859,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
           // Main chat stream
           Positioned.fill(
             child: _MessageList(
+              scrollController: _scroll,
               messages: _messages,
               isThinking: _isThinking,
               bottomReserve: overlayReserve,
@@ -803,6 +920,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
 }
 
 class _MessageList extends StatelessWidget {
+  final ScrollController scrollController;
   final List<_Msg> messages;
   final bool isThinking;
   final double bottomReserve;
@@ -810,7 +928,7 @@ class _MessageList extends StatelessWidget {
   final void Function(_Msg) onThumbsUp;
   final void Function(_Msg) onThumbsDown;
   final void Function(String)? onRefinement;
-  const _MessageList({required this.messages, required this.isThinking, this.bottomReserve = 12, this.topReserve = 0, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
+  const _MessageList({required this.scrollController, required this.messages, required this.isThinking, this.bottomReserve = 12, this.topReserve = 0, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
 
   @override
   Widget build(BuildContext context) {
@@ -852,6 +970,7 @@ class _MessageList extends StatelessWidget {
           ),
         ),
         child: ListView.builder(
+          controller: scrollController,
           padding: EdgeInsets.fromLTRB(16, 16, 16, bottomReserve),
           itemCount: items.length,
           itemBuilder: (context, index) {

@@ -32,7 +32,7 @@ class RooflineLightPainter extends CustomPainter {
     this.mask,
     this.isOn = true,
     this.brightness = 255,
-    this.ledCount = 60,
+    this.ledCount = 120,
   });
 
   @override
@@ -230,7 +230,8 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint chase effect along path
   void _paintChasePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    final chaseLength = ledCount ~/ 4;
+    // Longer chase segment for smoother visual flow
+    final chaseLength = ledCount ~/ 3;
     final chaseStart = (animationPhase * ledCount).floor();
 
     for (int i = 0; i < positions.length; i++) {
@@ -267,7 +268,8 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint twinkle effect along path
   void _paintTwinklePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    final random = math.Random((animationPhase * 1000).floor());
+    // Slower sparkle change rate for smoother, less chaotic animation
+    final random = math.Random((animationPhase * 500).floor());
 
     // Base glow
     for (final pos in positions) {
@@ -278,8 +280,8 @@ class RooflineLightPainter extends CustomPainter {
       canvas.drawCircle(pos, 4, basePaint);
     }
 
-    // Random sparkles on LED positions
-    final sparkleCount = (intensity / 30).ceil().clamp(3, 15);
+    // Reduced sparkle count for more elegant effect
+    final sparkleCount = (intensity / 50).ceil().clamp(2, 8);
     for (int i = 0; i < sparkleCount; i++) {
       final posIndex = random.nextInt(positions.length);
       final pos = positions[posIndex];
@@ -298,7 +300,8 @@ class RooflineLightPainter extends CustomPainter {
   /// Paint wave effect along path
   void _paintWavePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
     for (int i = 0; i < positions.length; i++) {
-      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 4);
+      // Reduced wave frequency for smoother, more elegant motion
+      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 2.5);
       final ledBrightness = 0.3 + (waveValue + 1) / 2 * 0.7;
       final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
       final color = colors[colorIndex];
@@ -373,7 +376,8 @@ class RooflineLightPainter extends CustomPainter {
   /// Paint chase/running light effect
   void _paintChase(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
     final ledWidth = rect.width / ledCount;
-    final chaseLength = ledCount ~/ 4; // Chase segment is 1/4 of total length
+    // Longer chase segment for smoother visual flow
+    final chaseLength = ledCount ~/ 3; // Chase segment is 1/3 of total length
 
     // Calculate chase position
     final chaseStart = (animationPhase * ledCount).floor();
@@ -440,8 +444,9 @@ class RooflineLightPainter extends CustomPainter {
     canvas.drawRect(rect, basePaint);
 
     // Random sparkle points based on animation phase
-    final random = math.Random((animationPhase * 1000).floor());
-    final sparkleCount = (intensity / 25).ceil(); // More sparkles with higher intensity
+    // Slower sparkle change rate for smoother, less chaotic animation
+    final random = math.Random((animationPhase * 500).floor());
+    final sparkleCount = (intensity / 40).ceil().clamp(3, 10); // Reduced max sparkles
 
     for (int i = 0; i < sparkleCount; i++) {
       final x = rect.left + random.nextDouble() * rect.width;
@@ -467,7 +472,8 @@ class RooflineLightPainter extends CustomPainter {
 
     for (int i = 0; i < ledCount; i++) {
       // Calculate wave position
-      final waveValue = math.sin((i / ledCount + animationPhase) * math.pi * 4);
+      // Reduced wave frequency for smoother, more elegant motion
+      final waveValue = math.sin((i / ledCount + animationPhase) * math.pi * 2.5);
       final ledBrightness = 0.3 + (waveValue + 1) / 2 * 0.7;
 
       // Cycle through colors

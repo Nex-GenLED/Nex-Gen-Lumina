@@ -1,11 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper function to check ownership
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // SECURITY: Prevent tampering with critical fields
+    function cannotModifyCriticalFields() {
+      return request.resource.data.owner_id == resource.data.owner_id &&
+             request.resource.data.id == resource.data.id &&
+             request.resource.data.email == resource.data.email;
+    }
+
+    // SECURITY: Validate dealer email is from authorized domain
+    function isValidDealerEmail(email) {
+      // Only allow emails from verified dealer domains
+      // Update this list with your authorized dealer domains
+      return email == null ||
+             email.matches('.*@nexgenled.com') ||
+             email.matches('.*@authorized-dealer.com');
+    }
+
     // User profiles - private to each user
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId && request.resource.data.owner_id == userId;
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.owner_id;
+      allow read: if isOwner(userId);
+
+      // SECURITY: On create, enforce owner_id matches auth uid
+      allow create: if isOwner(userId) &&
+                      request.resource.data.owner_id == userId &&
+                      request.resource.data.id == userId &&
+                      isValidDealerEmail(request.resource.data.get('dealer_email', null));
+
+      // SECURITY: On update, prevent tampering with critical fields
+      allow update: if isOwner(userId) &&
+                      cannotModifyCriticalFields() &&
+                      isValidDealerEmail(request.resource.data.get('dealer_email', null));
+
+      allow delete: if isOwner(userId);
+
+      // SECURITY: AI usage tracking subcollection
+      match /ai_usage/{usageId} {
+        // Users can read their own usage data
+        allow read: if isOwner(userId);
+
+        // Users can create usage events (logged by client)
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['timestamp', 'status']);
+
+        // No updates or deletes (usage is append-only for auditing)
+        allow update, delete: if false;
+      }
     }
     
     // Sites - private to each user
@@ -18,6 +63,98 @@ service cloud.firestore {
     match /devices/{deviceId} {
       allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.owner_id;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.owner_id;
+    }
+
+    // ==================== Learning System Collections ====================
+
+    // Helper function to check ownership
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Pattern Usage Tracking - append-only logs with retention
+    match /users/{userId}/pattern_usage/{usageId} {
+      // Users can read their own usage data
+      allow read: if isOwner(userId);
+
+      // Users can create usage events
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['created_at', 'source']) &&
+        request.resource.data.created_at is timestamp &&
+        request.resource.data.source is string;
+
+      // SECURITY: Allow deletion only for old records (90+ days for retention policy)
+      // This allows cleanup functions to work
+      allow delete: if isOwner(userId) &&
+        resource.data.created_at < request.time - duration.value(90, 'd');
+
+      // No updates (usage is append-only for auditing)
+      allow update: if false;
+    }
+
+    // Favorites Collection
+    match /users/{userId}/favorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isOwner(userId);
+
+      // Users can create favorites
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['pattern_name', 'added_at']) &&
+        request.resource.data.pattern_name is string &&
+        request.resource.data.added_at is timestamp;
+
+      // Users can update their favorites (usage count, last_used)
+      allow update: if isOwner(userId) &&
+        request.resource.data.pattern_name == resource.data.pattern_name &&
+        request.resource.data.added_at == resource.data.added_at;
+
+      // Users can delete their favorites
+      allow delete: if isOwner(userId);
+    }
+
+    // Smart Suggestions Collection
+    match /users/{userId}/suggestions/{suggestionId} {
+      // Users can read their own suggestions
+      allow read: if isOwner(userId);
+
+      // Users can create suggestions (from client-side learning)
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['created_at', 'type', 'title']) &&
+        request.resource.data.created_at is timestamp;
+
+      // Users can update to dismiss suggestions
+      allow update: if isOwner(userId) &&
+        request.resource.data.dismissed == true;
+
+      // Users can delete old suggestions
+      allow delete: if isOwner(userId);
+    }
+
+    // Detected Habits Collection
+    match /users/{userId}/detected_habits/{habitId} {
+      // Users can read their detected habits
+      allow read: if isOwner(userId);
+
+      // Users can create habits (from client-side analysis)
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['detected_at', 'type', 'description']) &&
+        request.resource.data.detected_at is timestamp;
+
+      // No updates (habits are immutable once detected)
+      allow update: if false;
+
+      // SECURITY: Allow deletion for old habits (90+ days for retention policy)
+      allow delete: if isOwner(userId) &&
+        resource.data.detected_at < request.time - duration.value(90, 'd');
+    }
+
+    // SECURITY: OAuth codes and refresh tokens collections (server-side only)
+    match /oauth_codes/{codeId} {
+      allow read, write: if false; // Only Cloud Functions can access
+    }
+
+    match /oauth_refresh_tokens/{tokenId} {
+      allow read, write: if false; // Only Cloud Functions can access
     }
   }
 }

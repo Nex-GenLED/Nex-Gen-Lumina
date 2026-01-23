@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_effect_metadata.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -281,6 +282,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     final state = ref.watch(wledStateProvider);
     final isConnected = state.connected;
 
+    // Get effect metadata for context-aware labeling
+    final effectMetadata = getEffectMetadata(_effectId ?? state.effectId);
+
     return IgnorePointer(
       ignoring: !isConnected,
       child: Opacity(
@@ -289,36 +293,40 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Speed slider
-            _SliderRow(
-              icon: Icons.speed,
-              label: 'Speed',
-              value: _speed.toDouble(),
-              min: 0,
-              max: 255,
-              onChanged: (v) {
-                setState(() => _speed = v.round().clamp(0, 255));
-                _notifyChanged();
-                _scheduleDebouncedApply();
-              },
-              displayValue: '$_speed',
-            ),
-            const SizedBox(height: 8),
-            // Intensity slider
-            _SliderRow(
-              icon: Icons.local_fire_department,
-              label: 'Intensity',
-              value: _intensity.toDouble(),
-              min: 0,
-              max: 255,
-              onChanged: (v) {
-                setState(() => _intensity = v.round().clamp(0, 255));
-                _notifyChanged();
-                _scheduleDebouncedApply();
-              },
-              displayValue: '$_intensity',
-            ),
-            const SizedBox(height: 10),
+            // Speed slider (hide if effect doesn't use speed)
+            if (effectMetadata.usesSpeed) ...[
+              _SliderRow(
+                icon: Icons.speed,
+                label: 'Speed',
+                value: _speed.toDouble(),
+                min: 0,
+                max: 255,
+                onChanged: (v) {
+                  setState(() => _speed = v.round().clamp(0, 255));
+                  _notifyChanged();
+                  _scheduleDebouncedApply();
+                },
+                displayValue: '$_speed',
+              ),
+              const SizedBox(height: 8),
+            ],
+            // Intensity slider (hide if effect doesn't use intensity or label is null)
+            if (effectMetadata.usesIntensity && effectMetadata.intensityLabel != null) ...[
+              _SliderRow(
+                icon: Icons.tune,
+                label: effectMetadata.intensityLabel!,
+                value: _intensity.toDouble(),
+                min: 0,
+                max: 255,
+                onChanged: (v) {
+                  setState(() => _intensity = v.round().clamp(0, 255));
+                  _notifyChanged();
+                  _scheduleDebouncedApply();
+                },
+                displayValue: '$_intensity',
+              ),
+              const SizedBox(height: 10),
+            ],
             // Direction toggle
             Row(
               children: [

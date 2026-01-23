@@ -38,6 +38,7 @@ import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
+import 'package:nexgen_command/features/wled/current_colors_editor_screen.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
 import 'package:nexgen_command/features/site/manage_controllers_page.dart';
 import 'package:nexgen_command/features/site/system_management_screen.dart';
@@ -67,6 +68,19 @@ import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
+import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
+import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
+import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
+import 'package:nexgen_command/features/voice/dashboard_voice_control.dart';
+import 'package:nexgen_command/features/voice/widgets/voice_control_fab.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:nexgen_command/features/simple/simple_providers.dart';
+import 'package:nexgen_command/features/simple/simple_dashboard.dart';
+import 'package:nexgen_command/features/simple/simple_settings.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
+import 'package:nexgen_command/widgets/favorites_grid.dart';
+import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
+import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 
 /// GoRouter configuration for app navigation
 ///
@@ -298,6 +312,33 @@ class AppRouter {
         name: 'roofline-setup-wizard',
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
       ),
+      GoRoute(
+        path: AppRoutes.currentColors,
+        name: 'current-colors',
+        pageBuilder: (context, state) => const NoTransitionPage(child: CurrentColorsEditorScreen()),
+      ),
+      // Installer mode routes
+      GoRoute(
+        path: AppRoutes.installerPin,
+        name: 'installer-pin',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.installerWizard,
+        name: 'installer-wizard',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
+      ),
+      // Admin management routes
+      GoRoute(
+        path: AppRoutes.adminPin,
+        name: 'admin-pin',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminPinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.adminDashboard,
+        name: 'admin-dashboard',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
+      ),
     ],
   );
 }
@@ -337,6 +378,13 @@ class AppRoutes {
   static const String rooflineEditor = '/settings/roofline-editor';
   static const String segmentSetup = '/segment-setup';
   static const String rooflineSetupWizard = '/roofline-setup-wizard';
+  static const String currentColors = '/settings/current-colors';
+  // Installer mode routes
+  static const String installerPin = '/installer/pin';
+  static const String installerWizard = '/installer/wizard';
+  // Admin management routes
+  static const String adminPin = '/admin/pin';
+  static const String adminDashboard = '/admin/dashboard';
 }
 
 // ========================== Pages ============================
@@ -505,11 +553,23 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   // Pattern adjustment panel expanded state
   bool _adjustmentPanelExpanded = false;
 
+  // Voice control state
+  bool _voiceListening = false;
+  late final stt.SpeechToText _speech;
+  String? _voiceFeedbackMessage;
+
   @override
   void initState() {
     super.initState();
+    _speech = stt.SpeechToText();
     // Defer the check to after first frame to ensure context/router are ready
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
+  }
+
+  @override
+  void dispose() {
+    _speech.stop();
+    super.dispose();
   }
 
   Future<void> _checkControllersAndMaybeLaunchWizard() async {
@@ -575,6 +635,89 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     }
   }
 
+  /// Toggle voice listening and process the command when speech is recognized
+  Future<void> _toggleVoice() async {
+    if (_voiceListening) {
+      await _speech.stop();
+      setState(() => _voiceListening = false);
+      return;
+    }
+
+    try {
+      final available = await _speech.initialize(
+        onStatus: (status) {
+          debugPrint('Voice status: $status');
+        },
+        onError: (error) {
+          debugPrint('Voice error: ${error.errorMsg}');
+          if (mounted) {
+            setState(() {
+              _voiceListening = false;
+              _voiceFeedbackMessage = 'Voice recognition error';
+            });
+          }
+        },
+      );
+
+      if (!available) {
+        if (mounted) {
+          setState(() {
+            _voiceFeedbackMessage = 'Voice recognition not available';
+          });
+        }
+        return;
+      }
+
+      setState(() => _voiceListening = true);
+
+      await _speech.listen(
+        onResult: (result) async {
+          if (!mounted) return;
+
+          final recognizedWords = result.recognizedWords;
+          debugPrint('Voice recognized: $recognizedWords (final: ${result.finalResult})');
+
+          // Only process final results
+          if (result.finalResult && recognizedWords.isNotEmpty) {
+            setState(() => _voiceListening = false);
+            await _speech.stop();
+
+            // Process the voice command
+            final handler = ref.read(voiceCommandHandlerProvider);
+            final feedback = await handler.processCommand(recognizedWords);
+
+            if (mounted) {
+              setState(() {
+                _voiceFeedbackMessage = feedback;
+              });
+
+              // Clear feedback after 2.5 seconds
+              Future.delayed(const Duration(milliseconds: 2500), () {
+                if (mounted) {
+                  setState(() {
+                    _voiceFeedbackMessage = null;
+                  });
+                }
+              });
+            }
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.confirmation,
+          partialResults: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Voice initialization failed: $e');
+      if (mounted) {
+        setState(() {
+          _voiceListening = false;
+          _voiceFeedbackMessage = 'Failed to start voice recognition';
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(wledStateProvider);
@@ -603,7 +746,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     return Scaffold(
       appBar: GlassAppBar(
-        title: const Text('Lumina'),
+        title: Text('Hello, $userName'),
         actions: [
           // Enhanced connection status indicator
           const Padding(
@@ -742,7 +885,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: SizedBox(
-                  height: 325,
+                  height: 275,
                   child: Stack(fit: StackFit.expand, children: [
                     Container(color: NexGenPalette.matteBlack),
                     // Show image only when we have a provider (either user's image or stock after profile loads)
@@ -776,81 +919,65 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                         ),
                       ),
                     ),
-                    // Top overlay: Identity and Power
+                    // Top overlay: Power button (greeting moved to AppBar)
                     Positioned(
                       top: 16,
-                      left: 16,
                       right: 16,
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            // Removed the small brand label above the greeting per request
-                            Text(
-                              'Hello, '+userName,
-                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700, shadows: [
-                                Shadow(color: Colors.black.withValues(alpha: 0.6), blurRadius: 6, offset: const Offset(0, 2)),
-                              ]),
-                            ),
-                          ]),
-                        ),
-                        const SizedBox(width: 12),
-                        // Power button glass capsule
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                            child: Container(
-                              decoration: BoxDecoration(color: NexGenPalette.gunmetal90, borderRadius: BorderRadius.circular(20), border: Border.all(color: NexGenPalette.line)),
-                              child: Consumer(builder: (context, ref, _) {
-                                // Use wledStateProvider directly for immediate UI feedback
-                                final wledState = ref.watch(wledStateProvider);
-                                final ips = ref.watch(activeAreaControllerIpsProvider);
-                                // Use the local state directly - it updates immediately on toggle
-                                final bool isOn = wledState.isOn;
-                                return IconButton(
-                                  icon: Icon(isOn ? Icons.power_settings_new : Icons.power_settings_new_outlined, color: isOn ? NexGenPalette.cyan : Colors.white),
-                                  onPressed: wledState.connected
-                                      ? () async {
-                                          try {
-                                            final currentState = ref.read(wledStateProvider);
-                                            final newValue = !currentState.isOn;
-                                            debugPrint('🔌 Power toggle: currentOn=${currentState.isOn}, newValue=$newValue');
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                          child: Container(
+                            decoration: BoxDecoration(color: NexGenPalette.gunmetal90, borderRadius: BorderRadius.circular(20), border: Border.all(color: NexGenPalette.line)),
+                            child: Consumer(builder: (context, ref, _) {
+                              // Use wledStateProvider directly for immediate UI feedback
+                              final wledState = ref.watch(wledStateProvider);
+                              final ips = ref.watch(activeAreaControllerIpsProvider);
+                              // Use the local state directly - it updates immediately on toggle
+                              final bool isOn = wledState.isOn;
+                              return IconButton(
+                                icon: Icon(isOn ? Icons.power_settings_new : Icons.power_settings_new_outlined, color: isOn ? NexGenPalette.cyan : Colors.white),
+                                onPressed: wledState.connected
+                                    ? () async {
+                                        try {
+                                          final currentState = ref.read(wledStateProvider);
+                                          final newValue = !currentState.isOn;
+                                          debugPrint('🔌 Power toggle: currentOn=${currentState.isOn}, newValue=$newValue');
 
-                                            // Always use the notifier - it updates local state immediately
-                                            await ref.read(wledStateProvider.notifier).togglePower(newValue);
+                                          // Always use the notifier - it updates local state immediately
+                                          await ref.read(wledStateProvider.notifier).togglePower(newValue);
 
-                                            // If there are multiple IPs, also send to those
-                                            final currentIps = ref.read(activeAreaControllerIpsProvider);
-                                            if (currentIps.isNotEmpty) {
-                                              await Future.wait(currentIps.map((ip) async {
-                                                try {
-                                                  final svc = WledService('http://'+ip);
-                                                  return await svc.setState(on: newValue);
-                                                } catch (e) {
-                                                  debugPrint('Area toggle failed for '+ip+': '+e.toString());
-                                                  return false;
-                                                }
-                                              }));
-                                            }
-                                          } catch (e) {
-                                            debugPrint('Area toggle error: $e');
+                                          // If there are multiple IPs, also send to those
+                                          final currentIps = ref.read(activeAreaControllerIpsProvider);
+                                          if (currentIps.isNotEmpty) {
+                                            await Future.wait(currentIps.map((ip) async {
+                                              try {
+                                                final svc = WledService('http://'+ip);
+                                                return await svc.setState(on: newValue);
+                                              } catch (e) {
+                                                debugPrint('Area toggle failed for '+ip+': '+e.toString());
+                                                return false;
+                                              }
+                                            }));
                                           }
+                                        } catch (e) {
+                                          debugPrint('Area toggle error: $e');
                                         }
-                                      : null,
-                                );
-                              }),
-                            ),
+                                      }
+                                    : null,
+                              );
+                            }),
                           ),
                         ),
-                      ]),
+                      ),
                     ),
                     // Add Photo button (shown when no custom house image)
                     Consumer(builder: (context, ref, _) {
                       final hasCustomImage = ref.watch(hasCustomHouseImageProvider);
                       if (hasCustomImage) return const SizedBox.shrink();
                       return Positioned(
-                        top: 60,
-                        right: 16,
+                        top: 16,
+                        left: 16,
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
@@ -1022,7 +1149,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                             }
                             return PatternAdjustmentPanel(
                               initialSpeed: state.speed,
-                              initialIntensity: 128, // Default intensity
+                              initialIntensity: state.intensity, // Use actual device intensity
                               initialReverse: false,
                               initialEffectId: state.effectId, // Pre-populate with current effect from device
                               initialColors: colors,
@@ -1073,6 +1200,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   // Turn off the lights
                   await repo.applyJson({'on': false});
                   ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
+
+                  // Track usage
+                  ref.trackPowerToggle(isOn: false, source: 'schedule');
                 } else if (actionLower.startsWith('brightness')) {
                   // Set brightness - parse percentage from "Brightness: 70%"
                   final match = RegExp(r'(\d{1,3})%').firstMatch(action);
@@ -1097,6 +1227,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     // Apply the pattern's WLED payload
                     await repo.applyJson(pattern.toWledPayload());
                     ref.read(activePresetLabelProvider.notifier).state = patternName;
+
+                    // Track usage
+                    ref.trackPatternUsage(pattern: pattern, source: 'schedule');
                   } else {
                     // Pattern not found in library - try a generic solid color approach
                     debugPrint('⚠️ Pattern "$patternName" not found in library, applying generic');
@@ -1154,6 +1287,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 };
                 await repo.applyJson(payload);
                 ref.read(activePresetLabelProvider.notifier).state = 'Warm White';
+
+                // Track usage
+                ref.trackWledPayload(
+                  payload: payload,
+                  patternName: 'Warm White',
+                  source: 'quick_action',
+                );
               } catch (e) {
                 debugPrint('Warm White quick action failed: $e');
               }
@@ -1176,6 +1316,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 final ok = await repo.applyJson(payload);
                 debugPrint('💡 Bright White result: $ok');
                 ref.read(activePresetLabelProvider.notifier).state = 'Bright White';
+
+                // Track usage
+                ref.trackWledPayload(
+                  payload: payload,
+                  patternName: 'Bright White',
+                  source: 'quick_action',
+                );
               } catch (e) {
                 debugPrint('Bright White quick action failed: $e');
               }
@@ -1193,6 +1340,94 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               ),
             ),
             const SizedBox(height: 16),
+            // Smart Suggestions Section
+            SmartSuggestionsList(
+              maxSuggestions: 3,
+              onSuggestionAction: (suggestion) async {
+                // Handle suggestion actions based on type
+                final repo = ref.read(wledRepositoryProvider);
+                if (repo == null) return;
+
+                try {
+                  switch (suggestion.type.name) {
+                    case 'applyPattern':
+                      final patternName = suggestion.actionData['pattern_name'] as String?;
+                      if (patternName != null) {
+                        final library = ref.read(publicPatternLibraryProvider);
+                        final pattern = library.all.firstWhere(
+                          (p) => p.name.toLowerCase() == patternName.toLowerCase(),
+                          orElse: () => library.all.first,
+                        );
+                        await repo.applyJson(pattern.toWledPayload());
+                        ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Applied: $patternName')),
+                          );
+                        }
+                      }
+                      break;
+                    case 'createSchedule':
+                      // Navigate to schedule tab (tab index 1 in bottom nav)
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Create your schedule on the Schedule tab')),
+                        );
+                      }
+                      break;
+                    default:
+                      break;
+                  }
+                } catch (e) {
+                  debugPrint('Suggestion action failed: $e');
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            // Favorites Section
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('My Favorites'.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium, letterSpacing: 1.1)),
+                const SizedBox(height: 10),
+              ]),
+            ),
+            FavoritesGrid(
+              onPatternTap: (favorite) async {
+                final repo = ref.read(wledRepositoryProvider);
+                if (repo == null) return;
+
+                try {
+                  final payload = favorite.patternData;
+                  await repo.applyJson(payload);
+
+                  // Record favorite usage
+                  await ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id);
+
+                  // Track overall usage
+                  ref.trackWledPayload(
+                    payload: payload,
+                    patternName: favorite.patternName,
+                    source: 'favorite',
+                  );
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Applied: ${favorite.patternName}')),
+                    );
+                  }
+                } catch (e) {
+                  debugPrint('Apply favorite failed: $e');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to apply: $e')),
+                    );
+                  }
+                }
+              },
+            ),
+            const SizedBox(height: 16),
             // Section D: Vertical Agenda (Today + next 6 days)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1205,6 +1440,32 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           ]),
         ),
         const Align(alignment: Alignment.bottomCenter, child: LuminaChatBar()),
+        // Voice control FAB - giant microphone button with glow animation
+        Positioned(
+          right: 20,
+          bottom: 120, // Position above the bottom nav bar
+          child: VoiceControlFab(
+            onTap: _toggleVoice,
+            isListening: _voiceListening,
+          ),
+        ),
+        // Voice feedback overlay - shows confirmation messages
+        if (_voiceFeedbackMessage != null)
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 220, // Position above the voice FAB
+            child: Center(
+              child: VoiceCommandFeedback(
+                message: _voiceFeedbackMessage!,
+                onDismiss: () {
+                  setState(() {
+                    _voiceFeedbackMessage = null;
+                  });
+                },
+              ),
+            ),
+          ),
       ]),
     );
   }
@@ -1247,6 +1508,11 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     SettingsPage(),
   ];
 
+  final _simplePages = const [
+    SimpleDashboard(),
+    SimpleSettings(),
+  ];
+
   void _onTap(int i) {
     ref.read(selectedTabIndexProvider.notifier).state = i;
   }
@@ -1260,8 +1526,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       await notifier.ensurePermissionsWithDialog(context);
       await notifier.start();
 
-      // Check if we should show the feature tour
-      if (!_tourChecked) {
+      // Check if we should show the feature tour (only in full mode)
+      final isSimpleMode = ref.read(simpleModeProvider);
+      if (!_tourChecked && !isSimpleMode) {
         _tourChecked = true;
         final tourCompleted = await isFeatureTourCompleted();
         if (!tourCompleted && mounted) {
@@ -1280,8 +1547,18 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     // Auto-connect to saved controller on app load
     ref.watch(autoConnectControllerProvider);
 
+    // Watch Simple Mode state
+    final isSimpleMode = ref.watch(simpleModeProvider);
+
     // Watch the global tab index provider
     final tabIndex = ref.watch(selectedTabIndexProvider);
+
+    // Reset tab index to 0 when switching modes
+    ref.listen(simpleModeProvider, (previous, next) {
+      if (previous != next) {
+        ref.read(selectedTabIndexProvider.notifier).state = 0;
+      }
+    });
 
     // Use an overlayed dock to guarantee bottom pinning across platforms
     // and avoid any layout quirks with Scaffold.bottomNavigationBar.
@@ -1290,8 +1567,20 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         extendBody: true,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Stack(children: [
-          Positioned.fill(child: IndexedStack(index: tabIndex, children: _pages)),
-          Positioned(left: 0, right: 0, bottom: 0, child: _GlassDockNavBar(index: tabIndex, onTap: _onTap)),
+          Positioned.fill(
+            child: IndexedStack(
+              index: tabIndex,
+              children: isSimpleMode ? _simplePages : _pages,
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: isSimpleMode
+                ? _SimpleNavBar(index: tabIndex, onTap: _onTap)
+                : _GlassDockNavBar(index: tabIndex, onTap: _onTap),
+          ),
         ]),
       ),
     );
@@ -1319,7 +1608,6 @@ class _GlassDockNavBar extends StatelessWidget {
             decoration: BoxDecoration(
               color: NexGenPalette.gunmetal90,
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: NexGenPalette.line),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1364,6 +1652,109 @@ class _GlassDockNavBar extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Simplified 2-tab navigation bar for Simple Mode
+class _SimpleNavBar extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onTap;
+  const _SimpleNavBar({required this.index, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = NexGenPalette.cyan;
+    const unselected = Color(0xFF808080);
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: NexGenPalette.gunmetal90,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _SimpleNavItem(
+                  label: 'Home',
+                  icon: Icons.home_filled,
+                  active: index == 0,
+                  selected: selected,
+                  unselected: unselected,
+                  onTap: () => onTap(0),
+                ),
+                _SimpleNavItem(
+                  label: 'Settings',
+                  icon: Icons.settings_rounded,
+                  active: index == 1,
+                  selected: selected,
+                  unselected: unselected,
+                  onTap: () => onTap(1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Larger nav item for Simple Mode (easier to tap)
+class _SimpleNavItem extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool active;
+  final Color selected;
+  final Color unselected;
+  final VoidCallback onTap;
+
+  const _SimpleNavItem({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.selected,
+    required this.unselected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: BoxDecoration(
+          color: active ? selected.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: active ? selected : unselected,
+              size: 32,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                color: active ? selected : unselected,
+              ),
+            ),
+          ],
         ),
       ),
     );

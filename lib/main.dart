@@ -6,6 +6,8 @@ import 'package:nexgen_command/firebase_options.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
+import 'package:nexgen_command/services/encryption_service.dart';
+import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
 
 /// Main entry point for the application
 ///
@@ -27,13 +29,63 @@ Future<void> main() async {
     debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
+  // SECURITY: Initialize encryption service for sensitive data
+  await EncryptionService.initialize();
+
   // Initialize local notifications (no prompts on web)
   await NotificationsService.init();
+
+  // Initialize background learning service and run startup check
+  final learningService = BackgroundLearningService();
+  learningService.onAppStartup().catchError((e) {
+    debugPrint('Background learning startup failed: $e');
+  });
+
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      // App came to foreground
+      final learningService = BackgroundLearningService();
+
+      // Check if we should run daily maintenance
+      if (learningService.shouldRunDaily()) {
+        debugPrint('🔄 App resumed - running daily maintenance');
+        learningService.runDailyMaintenance().catchError((e) {
+          debugPrint('Daily maintenance failed: $e');
+        });
+      } else {
+        // Just check for contextual suggestions
+        learningService.onAppStartup().catchError((e) {
+          debugPrint('Contextual check failed: $e');
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,0 +1,27 @@
+{
+  "name": "lumina-alexa-skill",
+  "version": "1.0.0",
+  "description": "Alexa Smart Home Skill for Nex-Gen Lumina LED control",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js",
+    "deploy": "zip -r lambda.zip . && aws lambda update-function-code --function-name LuminaAlexaSkill --zip-file fileb://lambda.zip"
+  },
+  "dependencies": {
+    "ask-sdk-core": "^2.14.0",
+    "ask-sdk-model": "^1.86.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "alexa",
+    "smart-home",
+    "lumina",
+    "wled",
+    "led-lighting"
+  ],
+  "author": "Nex-Gen Lighting Systems",
+  "license": "MIT"
+}

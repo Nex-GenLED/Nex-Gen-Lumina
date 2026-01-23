@@ -203,7 +203,9 @@ EffectCategory categorizeEffect(int effectId) {
 
 /// Convert WLED speed (0-255) to animation duration
 Duration speedToDuration(int wledSpeed) {
-  // WLED sx 0-255 maps to 4s (slowest) to 0.3s (fastest)
-  final seconds = 4.0 - (wledSpeed / 255.0) * 3.7;
+  // Dampen the speed mapping for smoother preview animations
+  // Map 0-255 to 6s (slowest) to 1.5s (fastest) instead of 0.3s
+  // This eliminates sub-1-second animations that cause chaotic flashing
+  final seconds = 6.0 - (wledSpeed / 255.0) * 4.5;
   return Duration(milliseconds: (seconds * 1000).round());
 }

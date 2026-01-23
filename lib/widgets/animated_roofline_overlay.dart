@@ -83,21 +83,25 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
       // Widget-level preview override
       effectiveColors = widget.previewColors!;
       effectiveEffectId = widget.previewEffectId ?? 0;
-      effectiveSpeed = widget.previewSpeed ?? 128;
+      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
+      final rawSpeed = widget.previewSpeed ?? 128;
+      effectiveSpeed = (rawSpeed * 0.7).round().clamp(0, 200);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = widget.forceOn ?? true;
     } else if (arPreview.isActive) {
       // AR preview mode (from Lumina AI)
       effectiveColors = arPreview.colors;
       effectiveEffectId = arPreview.effectId;
-      effectiveSpeed = arPreview.speed;
+      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
+      effectiveSpeed = (arPreview.speed * 0.7).round().clamp(0, 200);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = true;
     } else {
       // Live WLED state
       effectiveColors = [wledState.color];
       effectiveEffectId = wledState.effectId;
-      effectiveSpeed = wledState.speed;
+      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
+      effectiveSpeed = (wledState.speed * 0.7).round().clamp(0, 200);
       effectiveBrightness = widget.brightness ?? wledState.brightness;
       isOn = widget.forceOn ?? wledState.isOn;
     }

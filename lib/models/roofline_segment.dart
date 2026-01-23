@@ -1,3 +1,29 @@
+/// Architectural role of a segment for natural language control.
+///
+/// Allows users to say "light up the peaks" or "chase the eaves"
+/// - [peak]: Roof peak/gable apex point
+/// - [eave]: Horizontal edge where roof meets wall
+/// - [valley]: Inside corner where two roof slopes meet
+/// - [ridge]: Top horizontal edge of roof
+/// - [corner]: Outside corner where walls meet
+/// - [fascia]: Vertical board along roof edge
+/// - [soffit]: Underside of roof overhang
+/// - [gutter]: Rain gutter along roof edge
+/// - [column]: Vertical post/pillar
+/// - [archway]: Architectural arch
+enum ArchitecturalRole {
+  peak,
+  eave,
+  valley,
+  ridge,
+  corner,
+  fascia,
+  soffit,
+  gutter,
+  column,
+  archway,
+}
+
 /// Defines the type of segment for pattern generation logic.
 ///
 /// Different segment types may have different default behaviors:
@@ -114,6 +140,136 @@ class AnchorPoint {
 
   @override
   int get hashCode => Object.hash(ledIndex, type, label, zoneSize);
+}
+
+/// Extension for ArchitecturalRole serialization and display
+extension ArchitecturalRoleExtension on ArchitecturalRole {
+  String get name {
+    switch (this) {
+      case ArchitecturalRole.peak:
+        return 'peak';
+      case ArchitecturalRole.eave:
+        return 'eave';
+      case ArchitecturalRole.valley:
+        return 'valley';
+      case ArchitecturalRole.ridge:
+        return 'ridge';
+      case ArchitecturalRole.corner:
+        return 'corner';
+      case ArchitecturalRole.fascia:
+        return 'fascia';
+      case ArchitecturalRole.soffit:
+        return 'soffit';
+      case ArchitecturalRole.gutter:
+        return 'gutter';
+      case ArchitecturalRole.column:
+        return 'column';
+      case ArchitecturalRole.archway:
+        return 'archway';
+    }
+  }
+
+  String get displayName {
+    switch (this) {
+      case ArchitecturalRole.peak:
+        return 'Peak';
+      case ArchitecturalRole.eave:
+        return 'Eave';
+      case ArchitecturalRole.valley:
+        return 'Valley';
+      case ArchitecturalRole.ridge:
+        return 'Ridge';
+      case ArchitecturalRole.corner:
+        return 'Corner';
+      case ArchitecturalRole.fascia:
+        return 'Fascia';
+      case ArchitecturalRole.soffit:
+        return 'Soffit';
+      case ArchitecturalRole.gutter:
+        return 'Gutter';
+      case ArchitecturalRole.column:
+        return 'Column';
+      case ArchitecturalRole.archway:
+        return 'Archway';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case ArchitecturalRole.peak:
+        return 'Roof peak or gable apex point';
+      case ArchitecturalRole.eave:
+        return 'Horizontal edge where roof meets wall';
+      case ArchitecturalRole.valley:
+        return 'Inside corner where two roof slopes meet';
+      case ArchitecturalRole.ridge:
+        return 'Top horizontal edge of roof';
+      case ArchitecturalRole.corner:
+        return 'Outside corner where walls meet';
+      case ArchitecturalRole.fascia:
+        return 'Vertical board along roof edge';
+      case ArchitecturalRole.soffit:
+        return 'Underside of roof overhang';
+      case ArchitecturalRole.gutter:
+        return 'Rain gutter along roof edge';
+      case ArchitecturalRole.column:
+        return 'Vertical post or pillar';
+      case ArchitecturalRole.archway:
+        return 'Architectural arch';
+    }
+  }
+
+  String get pluralName {
+    switch (this) {
+      case ArchitecturalRole.peak:
+        return 'peaks';
+      case ArchitecturalRole.eave:
+        return 'eaves';
+      case ArchitecturalRole.valley:
+        return 'valleys';
+      case ArchitecturalRole.ridge:
+        return 'ridges';
+      case ArchitecturalRole.corner:
+        return 'corners';
+      case ArchitecturalRole.fascia:
+        return 'fascias';
+      case ArchitecturalRole.soffit:
+        return 'soffits';
+      case ArchitecturalRole.gutter:
+        return 'gutters';
+      case ArchitecturalRole.column:
+        return 'columns';
+      case ArchitecturalRole.archway:
+        return 'archways';
+    }
+  }
+
+  static ArchitecturalRole fromString(String value) {
+    switch (value.toLowerCase()) {
+      case 'peak':
+        return ArchitecturalRole.peak;
+      case 'eave':
+        return ArchitecturalRole.eave;
+      case 'valley':
+        return ArchitecturalRole.valley;
+      case 'ridge':
+        return ArchitecturalRole.ridge;
+      case 'corner':
+        return ArchitecturalRole.corner;
+      case 'fascia':
+        return ArchitecturalRole.fascia;
+      case 'soffit':
+        return ArchitecturalRole.soffit;
+      case 'gutter':
+        return ArchitecturalRole.gutter;
+      case 'column':
+        return ArchitecturalRole.column;
+      case 'archway':
+        return ArchitecturalRole.archway;
+      default:
+        return ArchitecturalRole.eave; // Default to eave
+    }
+  }
 }
 
 /// Extension for AnchorType serialization
@@ -340,6 +496,18 @@ class RooflineSegment {
   /// Segment this one connects to (for symmetry calculations)
   final String? symmetryPairId;
 
+  /// Architectural role for natural language understanding (e.g., "light the peaks")
+  final ArchitecturalRole? architecturalRole;
+
+  /// Physical location relative to the house (front, back, left, right)
+  final String? location;
+
+  /// IDs of adjacent segments for intelligent pattern flow
+  final List<String> adjacentSegmentIds;
+
+  /// Whether this segment is visually prominent (for AI suggestions)
+  final bool isProminent;
+
   const RooflineSegment({
     required this.id,
     required this.name,
@@ -354,6 +522,10 @@ class RooflineSegment {
     this.description,
     this.isPrimary = true,
     this.symmetryPairId,
+    this.architecturalRole,
+    this.location,
+    this.adjacentSegmentIds = const [],
+    this.isProminent = false,
   });
 
   /// Global pixel index of the last LED in this segment (inclusive)
@@ -449,6 +621,10 @@ class RooflineSegment {
     String? description,
     bool? isPrimary,
     String? symmetryPairId,
+    ArchitecturalRole? architecturalRole,
+    String? location,
+    List<String>? adjacentSegmentIds,
+    bool? isProminent,
   }) {
     return RooflineSegment(
       id: id ?? this.id,
@@ -464,6 +640,10 @@ class RooflineSegment {
       description: description ?? this.description,
       isPrimary: isPrimary ?? this.isPrimary,
       symmetryPairId: symmetryPairId ?? this.symmetryPairId,
+      architecturalRole: architecturalRole ?? this.architecturalRole,
+      location: location ?? this.location,
+      adjacentSegmentIds: adjacentSegmentIds ?? this.adjacentSegmentIds,
+      isProminent: isProminent ?? this.isProminent,
     );
   }
 
@@ -488,6 +668,12 @@ class RooflineSegment {
       description: json['description'] as String?,
       isPrimary: json['is_primary'] as bool? ?? true,
       symmetryPairId: json['symmetry_pair_id'] as String?,
+      architecturalRole: json['architectural_role'] != null
+          ? ArchitecturalRoleExtension.fromString(json['architectural_role'] as String)
+          : null,
+      location: json['location'] as String?,
+      adjacentSegmentIds: (json['adjacent_segment_ids'] as List<dynamic>?)?.cast<String>() ?? [],
+      isProminent: json['is_prominent'] as bool? ?? false,
     );
   }
 
@@ -507,6 +693,10 @@ class RooflineSegment {
       if (description != null) 'description': description,
       'is_primary': isPrimary,
       if (symmetryPairId != null) 'symmetry_pair_id': symmetryPairId,
+      if (architecturalRole != null) 'architectural_role': architecturalRole!.name,
+      if (location != null) 'location': location,
+      if (adjacentSegmentIds.isNotEmpty) 'adjacent_segment_ids': adjacentSegmentIds,
+      'is_prominent': isProminent,
     };
   }
 
@@ -514,7 +704,8 @@ class RooflineSegment {
   String toString() {
     return 'RooflineSegment(id: $id, name: $name, pixelCount: $pixelCount, '
         'startPixel: $startPixel, type: ${type.name}, direction: ${direction.name}, '
-        'anchors: $anchorPixels, anchorLedCount: $anchorLedCount)';
+        'anchors: $anchorPixels, anchorLedCount: $anchorLedCount, '
+        'architecturalRole: ${architecturalRole?.name}, location: $location)';
   }
 
   @override

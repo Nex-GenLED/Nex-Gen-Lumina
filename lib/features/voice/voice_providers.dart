@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 
 /// Provider for the Siri Shortcuts service (iOS only)
 final siriShortcutServiceProvider = Provider<SiriShortcutService?>((ref) {
@@ -32,8 +33,8 @@ final siriShortcutServiceProvider = Provider<SiriShortcutService?>((ref) {
 /// Provider for the Android Shortcuts service
 final androidShortcutServiceProvider = Provider<AndroidShortcutService?>((ref) {
   if (!Platform.isAndroid) return null;
-  // Use stub for now - full implementation requires Kotlin native code
-  return AndroidShortcutServiceStub();
+  // Use full implementation with native Kotlin ShortcutManagerPlugin
+  return AndroidShortcutService();
 });
 
 /// Provider for the Deep Link service
@@ -93,6 +94,48 @@ final isSiriAvailableProvider = Provider<bool>((ref) {
 /// Check if Android Shortcuts are available
 final isAndroidShortcutsAvailableProvider = Provider<bool>((ref) {
   return Platform.isAndroid;
+});
+
+/// Auto-donate a scene to voice assistants after save.
+/// Call this from scene save providers to register with Siri/Android shortcuts.
+final autoRegisterVoiceShortcutProvider = Provider<Future<void> Function(Scene)>((ref) {
+  return (scene) async {
+    // Donate to Siri on iOS
+    if (Platform.isIOS) {
+      final donateToSiri = ref.read(donateSceneToSiriProvider);
+      await donateToSiri(scene);
+      debugPrint('Voice: Auto-donated scene "${scene.name}" to Siri');
+    }
+
+    // Update dynamic shortcuts on Android
+    if (Platform.isAndroid) {
+      final androidService = ref.read(androidShortcutServiceProvider);
+      if (androidService != null) {
+        // Get all user scenes and update shortcuts
+        final allScenesAsync = ref.read(allScenesProvider);
+        allScenesAsync.whenData((scenes) {
+          final userScenes = scenes.where((s) => s.type != SceneType.system).toList();
+          androidService.updateShortcuts(userScenes);
+        });
+        debugPrint('Voice: Updated Android shortcuts after scene save');
+      }
+    }
+  };
+});
+
+/// Donate system shortcuts (power on/off) on app startup
+final donateSystemShortcutsProvider = Provider<Future<void> Function()>((ref) {
+  return () async {
+    if (!Platform.isIOS) return;
+
+    final siriService = ref.read(siriShortcutServiceProvider);
+    if (siriService == null) return;
+
+    // Donate power shortcuts
+    await siriService.donatePowerShortcut(on: true);
+    await siriService.donatePowerShortcut(on: false);
+    debugPrint('Voice: Donated system shortcuts to Siri');
+  };
 });
 
 // ============== Private Handlers ==============
@@ -259,6 +302,9 @@ Future<void> _runSchedule(ProviderRef ref) async {
       if (pattern != null) {
         await repo.applyJson(pattern.toWledPayload());
         ref.read(activePresetLabelProvider.notifier).state = patternName;
+
+        // Track usage
+        ref.trackPatternUsage(pattern: pattern, source: 'voice');
       } else {
         debugPrint('Voice: Pattern "$patternName" not found, applying generic');
         await repo.applyJson({'on': true, 'bri': 200, 'seg': [{'id': 0, 'fx': 0}]});

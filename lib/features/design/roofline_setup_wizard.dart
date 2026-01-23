@@ -91,6 +91,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           anchorPixels: draft.anchorIndices,
           anchorLedCount: 2,
           sortOrder: i,
+          architecturalRole: draft.architecturalRole,
+          location: draft.location,
+          isProminent: draft.isProminent,
         ));
         currentStart += draft.ledCount;
       }
@@ -1235,6 +1238,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     final ledCountController = TextEditingController(text: '20');
     var selectedType = SegmentType.run;
     var selectedDirection = SegmentDirection.leftToRight;
+    ArchitecturalRole? selectedRole;
+    String? selectedLocation;
+    bool isProminent = false;
 
     showModalBottomSheet(
       context: context,
@@ -1360,6 +1366,115 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                       );
                     }).toList(),
                   ),
+                  const SizedBox(height: 16),
+
+                  // Architectural Role (optional)
+                  Text(
+                    'Architectural Role (Optional)',
+                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('None'),
+                        selected: selectedRole == null,
+                        selectedColor: NexGenPalette.cyan,
+                        backgroundColor: NexGenPalette.matteBlack,
+                        labelStyle: TextStyle(
+                          color: selectedRole == null ? Colors.black : NexGenPalette.textMedium,
+                        ),
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => selectedRole = null);
+                          }
+                        },
+                      ),
+                      ...ArchitecturalRole.values.map((role) {
+                        final isSelected = selectedRole == role;
+                        return ChoiceChip(
+                          label: Text(role.displayName),
+                          selected: isSelected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedRole = role);
+                            }
+                          },
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Location (optional)
+                  Text(
+                    'Location (Optional)',
+                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('None'),
+                        selected: selectedLocation == null,
+                        selectedColor: NexGenPalette.cyan,
+                        backgroundColor: NexGenPalette.matteBlack,
+                        labelStyle: TextStyle(
+                          color: selectedLocation == null ? Colors.black : NexGenPalette.textMedium,
+                        ),
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => selectedLocation = null);
+                          }
+                        },
+                      ),
+                      ...['Front', 'Back', 'Left', 'Right'].map((location) {
+                        final isSelected = selectedLocation == location.toLowerCase();
+                        return ChoiceChip(
+                          label: Text(location),
+                          selected: isSelected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedLocation = location.toLowerCase());
+                            }
+                          },
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Prominent checkbox
+                  CheckboxListTile(
+                    value: isProminent,
+                    onChanged: (value) {
+                      setDialogState(() => isProminent = value ?? false);
+                    },
+                    title: Text(
+                      'Mark as Prominent Feature',
+                      style: TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'AI will prioritize this segment in designs',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    ),
+                    activeColor: NexGenPalette.cyan,
+                    checkColor: Colors.black,
+                  ),
                   const SizedBox(height: 24),
 
                   // Buttons
@@ -1403,6 +1518,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                                 ledCount: ledCount,
                                 type: selectedType,
                                 direction: selectedDirection,
+                                architecturalRole: selectedRole,
+                                location: selectedLocation,
+                                isProminent: isProminent,
                               ));
                             });
                             Navigator.pop(context);
@@ -1775,6 +1893,9 @@ class _SegmentDraft {
   SegmentType type;
   SegmentDirection direction;
   List<int> anchorIndices;
+  ArchitecturalRole? architecturalRole;
+  String? location;
+  bool isProminent;
 
   _SegmentDraft({
     required this.id,
@@ -1783,5 +1904,8 @@ class _SegmentDraft {
     this.type = SegmentType.run,
     this.direction = SegmentDirection.leftToRight,
     List<int>? anchorIndices,
+    this.architecturalRole,
+    this.location,
+    this.isProminent = false,
   }) : anchorIndices = anchorIndices ?? [];
 }

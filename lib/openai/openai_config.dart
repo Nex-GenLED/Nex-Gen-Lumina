@@ -159,7 +159,7 @@ class LuminaAI {
 
     final body = {
       'model': 'gpt-4o',
-      'temperature': 0.5,
+      'temperature': 0.2, // Lower temperature for more consistent, deterministic responses
       'messages': [
         {
           'role': 'system',

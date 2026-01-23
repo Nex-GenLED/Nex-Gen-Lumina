@@ -5,14 +5,174 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/openai/openai_config.dart';
+import 'package:nexgen_command/features/wled/event_theme_library.dart';
+import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
+import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
 /// every OpenAI request for improved grounding and personalization.
 class LuminaBrain {
   /// Sends a conversational request enriched with context.
+  /// Three-tier matching system for maximum consistency and scalability:
+  /// 1. Check pre-defined theme library (fastest, for common themes)
+  /// 2. Check semantic cache (for previously seen queries)
+  /// 3. Fall back to AI with caching (for new queries)
   static Future<String> chat(WidgetRef ref, String userPrompt) async {
+    // TIER 1: Try to match against deterministic event theme library first
+    final themeMatch = EventThemeLibrary.matchQuery(userPrompt);
+
+    if (themeMatch != null) {
+      debugPrint('🎯 TIER 1: Matched pre-defined theme: ${themeMatch.theme.name} with context: ${themeMatch.context}');
+      final pattern = themeMatch.pattern;
+      final wledPayload = pattern.toWledPayload();
+      final response = _buildDeterministicResponse(pattern, wledPayload);
+      return response;
+    }
+
+    // TIER 2: Check semantic cache for previously processed queries
+    final cachedPattern = SemanticPatternMatcher.getCachedPattern(userPrompt);
+    if (cachedPattern != null) {
+      debugPrint('💾 TIER 2: Using cached pattern (hash: ${SemanticPatternMatcher.createQueryHash(userPrompt)})');
+      final theme = SemanticPatternMatcher.extractTheme(userPrompt);
+      final context = SemanticPatternMatcher.extractContext(userPrompt);
+      debugPrint('   Theme: $theme, Context: $context');
+
+      // Build response from cached data
+      return _buildResponseFromCachedData(cachedPattern);
+    }
+
+    // TIER 3: Fall back to AI for new queries, then cache the result
+    debugPrint('🤖 TIER 3: No match found, using AI (will cache result)');
+    final theme = SemanticPatternMatcher.extractTheme(userPrompt);
+    final context = SemanticPatternMatcher.extractContext(userPrompt);
+    debugPrint('   Detected theme: $theme, context: $context');
+
     final contextBlock = _buildContextBlock(ref);
-    return LuminaAI.chat(userPrompt, contextBlock: contextBlock);
+    final aiResponse = await LuminaAI.chat(userPrompt, contextBlock: contextBlock);
+
+    // Extract and cache the pattern from AI response for future identical queries
+    final parsed = _extractJsonFromContent(aiResponse);
+    if (parsed != null) {
+      SemanticPatternMatcher.cachePattern(userPrompt, parsed.object);
+      debugPrint('   ✅ Cached AI response for future use (cache size: ${SemanticPatternMatcher.cacheSize})');
+    }
+
+    return aiResponse;
+  }
+
+  /// Builds a response from cached pattern data
+  static String _buildResponseFromCachedData(Map<String, dynamic> cachedData) {
+    // Extract fields from cached data
+    final patternName = cachedData['patternName'] as String? ?? 'Pattern';
+    final thought = cachedData['thought'] as String? ?? '';
+    final wled = cachedData['wled'] as Map<String, dynamic>?;
+
+    // Build a friendly verbal response
+    final verbal = thought.isNotEmpty
+        ? '$thought - here we go!'
+        : 'Perfect! Applying $patternName now.';
+
+    // Return formatted response with embedded JSON
+    return '$verbal ${jsonEncode(cachedData)}';
+  }
+
+  /// Helper to extract JSON from AI content (moved from chat screen logic)
+  static _JsonExtraction? _extractJsonFromContent(String content) {
+    try {
+      final start = content.indexOf('{');
+      if (start < 0) return null;
+      int depth = 0;
+      for (int i = start; i < content.length; i++) {
+        final ch = content[i];
+        if (ch == '{') depth++;
+        if (ch == '}') {
+          depth--;
+          if (depth == 0) {
+            final sub = content.substring(start, i + 1);
+            final obj = jsonDecode(sub);
+            if (obj is Map<String, dynamic>) {
+              return _JsonExtraction(object: obj, substring: sub);
+            }
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('extractJsonFromContent failed: $e');
+    }
+    return null;
+  }
+
+  /// Builds a deterministic response in the same format as AI responses.
+  /// This ensures consistent parsing in the chat screen.
+  static String _buildDeterministicResponse(
+    dynamic pattern, // GradientPattern
+    Map<String, dynamic> wledPayload,
+  ) {
+    // Extract pattern properties safely
+    final name = pattern.name as String? ?? 'Custom Pattern';
+    final subtitle = pattern.subtitle as String? ?? '';
+    final colors = pattern.colors as List<dynamic>? ?? [];
+    final effectId = pattern.effectId as int? ?? 0;
+    final effectName = pattern.effectName as String? ?? 'Solid';
+    final direction = pattern.direction as String? ?? 'none';
+    final isStatic = pattern.isStatic as bool? ?? true;
+    final speed = pattern.speed as int? ?? 128;
+    final intensity = pattern.intensity as int? ?? 128;
+
+    // Build colors array
+    final colorsArray = colors.map((c) {
+      final color = c as dynamic; // Color object
+      return {
+        'name': _colorToName(color),
+        'rgb': [color.red, color.green, color.blue, 0], // Force W=0 for saturated colors
+      };
+    }).toList();
+
+    // Build JSON object
+    final jsonObject = {
+      'patternName': name,
+      'thought': subtitle.isNotEmpty ? subtitle : 'Perfect choice for this occasion!',
+      'colors': colorsArray,
+      'effect': {
+        'name': effectName,
+        'id': effectId,
+        'direction': direction,
+        'isStatic': isStatic,
+      },
+      'speed': speed,
+      'intensity': intensity,
+      'wled': wledPayload,
+    };
+
+    // Format as a friendly message with embedded JSON
+    final verbal = subtitle.isNotEmpty
+        ? '$subtitle - here we go!'
+        : 'Perfect! Applying $name now.';
+
+    return '$verbal ${jsonEncode(jsonObject)}';
+  }
+
+  /// Simple color name heuristic
+  static String _colorToName(dynamic color) {
+    final r = color.red as int;
+    final g = color.green as int;
+    final b = color.blue as int;
+
+    // Simple heuristic for common colors
+    if (r > 200 && g < 100 && b < 100) return 'Red';
+    if (g > 200 && r < 100 && b < 100) return 'Green';
+    if (b > 200 && r < 100 && g < 100) return 'Blue';
+    if (r > 200 && g > 200 && b < 100) return 'Yellow';
+    if (r > 200 && g > 150 && b > 200) return 'Pink';
+    if (r > 200 && g > 100 && b < 100) return 'Orange';
+    if (r < 100 && g > 150 && b > 200) return 'Cyan';
+    if (r > 150 && g < 100 && b > 150) return 'Purple';
+    if (r > 200 && g > 200 && b > 200) return 'White';
+    if (r > 200 && g > 160 && b < 150) return 'Gold';
+    if (r > 200 && g > 180 && b > 150) return 'Champagne';
+
+    return 'Color';
   }
 
   /// Requests a strict WLED JSON payload with context aware instructions.
@@ -216,32 +376,69 @@ class LuminaBrain {
       buffer.writeln('- Segment Types: $typeDescriptions');
     }
 
+    // Count architectural roles
+    final roleCounts = <ArchitecturalRole, int>{};
+    for (final segment in config.segments) {
+      if (segment.architecturalRole != null) {
+        final role = segment.architecturalRole!;
+        roleCounts[role] = (roleCounts[role] ?? 0) + 1;
+      }
+    }
+
+    if (roleCounts.isNotEmpty) {
+      final roleDescriptions = roleCounts.entries
+          .map((e) => '${e.value} ${e.key.pluralName}')
+          .join(', ');
+      buffer.writeln('- Architectural Features: $roleDescriptions');
+    }
+
     // Total anchor points
     final totalAnchors = config.segments.fold(0, (sum, s) => sum + s.anchorPixels.length);
     if (totalAnchors > 0) {
       buffer.writeln('- Accent Points (corners/peaks): $totalAnchors');
     }
 
-    // Describe segments
+    // Describe segments with architectural roles
     buffer.writeln('\nSegments (in order from LED #0):');
     for (final segment in config.segments) {
-      buffer.write('  ${segment.name} (${_segmentTypeName(segment.type)}): ');
-      buffer.write('LEDs ${segment.startPixel}-${segment.endPixel}');
+      buffer.write('  ${segment.name}');
+
+      // Add architectural role if present
+      if (segment.architecturalRole != null) {
+        buffer.write(' [${segment.architecturalRole!.displayName}]');
+      } else {
+        buffer.write(' (${_segmentTypeName(segment.type)})');
+      }
+
+      // Add location if present
+      if (segment.location != null && segment.location!.isNotEmpty) {
+        buffer.write(' - ${segment.location}');
+      }
+
+      buffer.write(': LEDs ${segment.startPixel}-${segment.endPixel}');
       buffer.write(' (${segment.pixelCount} pixels)');
+
       if (segment.anchorPixels.isNotEmpty) {
         buffer.write(' [${segment.anchorPixels.length} anchors]');
       }
+
+      if (segment.isProminent) {
+        buffer.write(' *PROMINENT*');
+      }
+
       buffer.writeln();
     }
 
     // Add guidance for AI
     buffer.writeln();
     buffer.writeln('ROOFLINE-AWARE PATTERN GUIDANCE:');
+    buffer.writeln('- User can request patterns by architectural feature (e.g., "light the peaks")');
     buffer.writeln('- For downlighting effects, ensure corners and peaks are always lit');
     buffer.writeln('- Chase effects should flow naturally along the roofline direction');
     buffer.writeln('- Use anchor points as accent areas for special colors');
     buffer.writeln('- Peak segments are great focal points for holiday themes');
     buffer.writeln('- Symmetry suggestions: mirror patterns across the main peak when possible');
+    buffer.writeln('- Prominent segments should be prioritized in design suggestions');
 
     return buffer.toString();
   }
@@ -286,4 +483,11 @@ class LuminaBrain {
     final ampm = dt.hour >= 12 ? 'PM' : 'AM';
     return '$weekday, $month $day, $year, $hour12:$minute $ampm';
   }
+}
+
+/// Helper class for JSON extraction
+class _JsonExtraction {
+  final Map<String, dynamic> object;
+  final String substring;
+  const _JsonExtraction({required this.object, required this.substring});
 }

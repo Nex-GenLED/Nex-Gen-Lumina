@@ -4,6 +4,7 @@ class WledStateModel {
   final bool isOn;
   final int brightness; // 0-255
   final int speed; // 0-255
+  final int intensity; // 0-255 (WLED 'ix' parameter)
   final Color color;
   final bool connected;
   final int warmWhite; // 0-255
@@ -15,6 +16,7 @@ class WledStateModel {
     required this.isOn,
     required this.brightness,
     required this.speed,
+    required this.intensity,
     required this.color,
     required this.connected,
     required this.warmWhite,
@@ -27,6 +29,7 @@ class WledStateModel {
     bool? isOn,
     int? brightness,
     int? speed,
+    int? intensity,
     Color? color,
     bool? connected,
     int? warmWhite,
@@ -38,6 +41,7 @@ class WledStateModel {
         isOn: isOn ?? this.isOn,
         brightness: brightness ?? this.brightness,
         speed: speed ?? this.speed,
+        intensity: intensity ?? this.intensity,
         color: color ?? this.color,
         connected: connected ?? this.connected,
         warmWhite: warmWhite ?? this.warmWhite,
@@ -53,6 +57,7 @@ class WledStateModel {
         isOn: false,
         brightness: 128,
         speed: 128,
+        intensity: 128,
         color: Colors.white,
         connected: false,
         warmWhite: 0,

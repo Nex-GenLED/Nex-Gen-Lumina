@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/features/wled/event_theme_library.dart';
 
 /// Repository provider for the Pattern Library.
 /// For now we use an in-memory mock; can be swapped to Firestore later.
@@ -317,6 +318,16 @@ class PredefinedPatterns {
         ...sportsTeams,
       ];
 }
+
+/// Provider for event theme library (deterministic pattern matching)
+final eventThemeLibraryProvider = Provider<List<EventTheme>>((ref) {
+  return EventThemeLibrary.allThemes;
+});
+
+/// Provider to search/match event themes by query
+final eventThemeMatchProvider = Provider.family<EventThemeMatch?, String>((ref, query) {
+  return EventThemeLibrary.matchQuery(query);
+});
 
 /// Provider exposing the public pattern library lists.
 final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {

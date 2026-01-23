@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/scenes/scene_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:nexgen_command/models/smart_pattern.dart';
 
 /// Service for scene CRUD operations
@@ -180,7 +181,16 @@ final savePatternAsSceneProvider = Provider<Future<String?> Function(dynamic pat
       if (pattern is SmartPattern) {
         final scene = Scene.fromPattern(pattern, user.uid);
         final service = ref.read(sceneServiceProvider);
-        return await service.saveScene(user.uid, scene);
+        final sceneId = await service.saveScene(user.uid, scene);
+
+        // Auto-register with voice assistants (Siri/Android shortcuts)
+        if (sceneId.isNotEmpty) {
+          final savedScene = scene.copyWith(id: sceneId);
+          final autoRegister = ref.read(autoRegisterVoiceShortcutProvider);
+          await autoRegister(savedScene);
+        }
+
+        return sceneId;
       }
 
       debugPrint('Unsupported pattern type: ${pattern.runtimeType}');
@@ -244,7 +254,16 @@ final captureSnapshotProvider = Provider<Future<String?> Function(String name)>(
       );
 
       final service = ref.read(sceneServiceProvider);
-      return await service.saveScene(user.uid, scene);
+      final sceneId = await service.saveScene(user.uid, scene);
+
+      // Auto-register with voice assistants (Siri/Android shortcuts)
+      if (sceneId.isNotEmpty) {
+        final savedScene = scene.copyWith(id: sceneId);
+        final autoRegister = ref.read(autoRegisterVoiceShortcutProvider);
+        await autoRegister(savedScene);
+      }
+
+      return sceneId;
     } catch (e) {
       debugPrint('Error capturing snapshot: $e');
       return null;

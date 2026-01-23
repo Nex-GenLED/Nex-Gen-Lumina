@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:nexgen_command/services/encryption_service.dart';
 
 /// Service for detecting network connectivity and determining if user
 /// is on their home (local) network vs. remote.
@@ -52,13 +53,15 @@ class ConnectivityService {
 
   /// Check if the device is currently on the home network.
   ///
-  /// [homeSsid] is the stored SSID of the user's home network.
-  /// Returns true if current SSID matches home SSID.
-  /// Returns true (assumes local) if homeSsid is null/empty (not configured).
-  Future<bool> isOnHomeNetwork(String? homeSsid) async {
+  /// [homeSsidHash] is the stored hash of the user's home network SSID.
+  /// Returns true if current SSID hash matches home SSID hash.
+  /// Returns true (assumes local) if homeSsidHash is null/empty (not configured).
+  ///
+  /// SECURITY: Uses hashed SSID comparison to avoid storing network name in plain text
+  Future<bool> isOnHomeNetwork(String? homeSsidHash) async {
     // If no home SSID configured, assume local (backwards compatibility)
-    if (homeSsid == null || homeSsid.isEmpty) {
-      debugPrint('ConnectivityService: No home SSID configured, assuming local');
+    if (homeSsidHash == null || homeSsidHash.isEmpty) {
+      debugPrint('ConnectivityService: No home SSID hash configured, assuming local');
       return true;
     }
 
@@ -71,8 +74,9 @@ class ConnectivityService {
       return true;
     }
 
-    final isHome = currentSsid.toLowerCase() == homeSsid.toLowerCase();
-    debugPrint('ConnectivityService: Current SSID="$currentSsid", Home SSID="$homeSsid", isHome=$isHome');
+    // SECURITY: Compare using hashed SSID
+    final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
+    debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
     return isHome;
   }
 

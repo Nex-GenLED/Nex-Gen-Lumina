@@ -15,6 +15,9 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
+import 'package:nexgen_command/features/simple/simple_providers.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -55,6 +58,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
         children: [
+          // Simple Mode Toggle (Top Priority)
+          const _SimpleModeToggleCard(),
+          const SizedBox(height: 16),
           _UserProfileEntry(),
           // Keep spacing after profile entry
           const SizedBox(height: 16),
@@ -69,6 +75,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ],
           // Unified System & Device Management entry
           const _SystemManagementButton(),
+          const SizedBox(height: 16),
+          const _CurrentColorsCard(),
           const SizedBox(height: 16),
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
@@ -663,6 +671,12 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                     await _simulateUpload(context);
                   },
                 ),
+                const Divider(height: 1),
+                // Hidden Installer Mode entry - revealed by rapid taps
+                const _InstallerModeEntry(),
+                const Divider(height: 1),
+                // Hidden Admin Mode entry - revealed by rapid taps on copyright
+                const _AdminModeEntry(),
               ]),
             ),
             crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
@@ -670,6 +684,201 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Hidden installer mode entry - requires long press to reveal
+class _InstallerModeEntry extends ConsumerStatefulWidget {
+  const _InstallerModeEntry();
+
+  @override
+  ConsumerState<_InstallerModeEntry> createState() => _InstallerModeEntryState();
+}
+
+class _InstallerModeEntryState extends ConsumerState<_InstallerModeEntry> {
+  bool _revealed = false;
+  int _tapCount = 0;
+  DateTime? _lastTap;
+
+  void _onTap() {
+    final now = DateTime.now();
+    // Reset tap count if more than 2 seconds since last tap
+    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
+      _tapCount = 0;
+    }
+    _lastTap = now;
+    _tapCount++;
+
+    // Reveal after 5 rapid taps
+    if (_tapCount >= 5) {
+      setState(() => _revealed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isInstallerMode = ref.watch(installerModeActiveProvider);
+
+    // If already in installer mode, show exit option
+    if (isInstallerMode) {
+      return ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Icon(Icons.engineering, color: Colors.orange, size: 18),
+        ),
+        title: const Text('Installer Mode Active'),
+        subtitle: const Text('Tap to exit installer mode'),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
+          ),
+          child: Text(
+            'Active',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.orange),
+          ),
+        ),
+        onTap: () {
+          ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Installer mode deactivated')),
+          );
+        },
+      );
+    }
+
+    // Hidden entry - show version info that reveals on rapid taps
+    if (!_revealed) {
+      return GestureDetector(
+        onTap: _onTap,
+        child: ListTile(
+          leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+          title: Text('Version 1.6.0', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
+          subtitle: Text('Build 2026.01', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5))),
+        ),
+      );
+    }
+
+    // Revealed installer mode entry
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [NexGenPalette.violet, NexGenPalette.cyan],
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(Icons.engineering, color: Colors.white, size: 18),
+      ),
+      title: const Text('Installer Mode'),
+      subtitle: const Text('Access professional setup tools'),
+      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      onTap: () => context.push('/installer/pin'),
+    );
+  }
+}
+
+/// Hidden admin mode entry - requires long press on installer mode entry to reveal
+class _AdminModeEntry extends ConsumerStatefulWidget {
+  const _AdminModeEntry();
+
+  @override
+  ConsumerState<_AdminModeEntry> createState() => _AdminModeEntryState();
+}
+
+class _AdminModeEntryState extends ConsumerState<_AdminModeEntry> {
+  bool _revealed = false;
+  int _tapCount = 0;
+  DateTime? _lastTap;
+
+  void _onTap() {
+    final now = DateTime.now();
+    // Reset tap count if more than 2 seconds since last tap
+    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
+      _tapCount = 0;
+    }
+    _lastTap = now;
+    _tapCount++;
+
+    // Reveal after 7 rapid taps (different from installer mode's 5)
+    if (_tapCount >= 7) {
+      setState(() => _revealed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAdminMode = ref.watch(adminAuthenticatedProvider);
+
+    // If admin mode is active, show indicator
+    if (isAdminMode) {
+      return ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Icon(Icons.admin_panel_settings, color: Colors.amber, size: 18),
+        ),
+        title: const Text('Admin Dashboard'),
+        subtitle: const Text('Manage dealers and installers'),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
+          ),
+          child: Text(
+            'Active',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.amber),
+          ),
+        ),
+        onTap: () => context.push(AppRoutes.adminDashboard),
+      );
+    }
+
+    // Hidden entry - show copyright that reveals on rapid taps
+    if (!_revealed) {
+      return GestureDetector(
+        onTap: _onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Text(
+            '© 2026 Nex-Gen Lighting Systems',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+              fontSize: 12,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    // Revealed admin entry
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.amber.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(Icons.admin_panel_settings, color: Colors.amber, size: 18),
+      ),
+      title: const Text('Admin Access'),
+      subtitle: const Text('Manage dealers and installers'),
+      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      onTap: () => context.push(AppRoutes.adminPin),
     );
   }
 }
@@ -832,6 +1041,32 @@ class _VoiceAssistantsCard extends StatelessWidget {
   }
 }
 
+class _CurrentColorsCard extends StatelessWidget {
+  const _CurrentColorsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [NexGenPalette.cyan, NexGenPalette.violet],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(Icons.palette, color: Colors.white, size: 20),
+        ),
+        title: const Text('Current Colors'),
+        subtitle: const Text('View and edit the colors currently active on your system'),
+        trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        onTap: () => context.push(AppRoutes.currentColors),
+      ),
+    );
+  }
+}
+
 class _GrowthCard extends StatelessWidget {
   const _GrowthCard();
 
@@ -865,6 +1100,154 @@ class _GrowthCard extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+class _SimpleModeToggleCard extends ConsumerWidget {
+  const _SimpleModeToggleCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isSimpleMode = ref.watch(simpleModeProvider);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Simple Mode',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isSimpleMode ? 'Enabled' : 'Disabled',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: isSimpleMode ? NexGenPalette.cyan : Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: isSimpleMode,
+                  onChanged: (value) => _handleToggle(context, ref, value),
+                  activeColor: NexGenPalette.cyan,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'A simplified interface with large buttons and essential features only. Perfect for easier, more straightforward control.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            if (!isSimpleMode) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _confirmEnableSimpleMode(context, ref),
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Try Simple Mode'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _handleToggle(BuildContext context, WidgetRef ref, bool enable) {
+    if (enable) {
+      _confirmEnableSimpleMode(context, ref);
+    } else {
+      _confirmDisableSimpleMode(context, ref);
+    }
+  }
+
+  Future<void> _confirmEnableSimpleMode(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enable Simple Mode?'),
+        content: const Text(
+          'Simple Mode provides:\n\n'
+          '• Large, easy-to-tap buttons\n'
+          '• Only essential features (Home & Settings)\n'
+          '• Your favorite lighting patterns\n'
+          '• Simple brightness control\n'
+          '• Voice assistant setup\n\n'
+          'Perfect for quick, straightforward control. You can always switch back from Settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Enable Simple Mode'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      ref.read(simpleModeProvider.notifier).enable();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Simple Mode enabled! Navigation simplified to Home and Settings.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDisableSimpleMode(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Disable Simple Mode?'),
+        content: const Text(
+          'This will show all app features and navigation tabs (Home, Schedule, Lumina, Explore, Settings).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Show All Features'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      ref.read(simpleModeProvider.notifier).disable();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Simple Mode disabled. All features now available.')),
+      );
+    }
   }
 }
 

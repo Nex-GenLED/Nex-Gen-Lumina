@@ -1040,9 +1040,12 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               Text('${_current.speed}', style: Theme.of(context).textTheme.labelLarge),
             ]),
             const SizedBox(height: 6),
-            // Intensity slider
+            // Effect Strength slider (formerly Intensity)
             Row(children: [
-              const Icon(Icons.local_fire_department, color: NexGenPalette.cyan),
+              Tooltip(
+                message: 'Effect Strength',
+                child: const Icon(Icons.tune, color: NexGenPalette.cyan),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Slider(

@@ -197,6 +197,7 @@ class WledNotifier extends Notifier<WledStateModel> {
         final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
         final bri = (data['bri'] as int?) ?? state.brightness;
         int speed = state.speed;
+        int intensity = state.intensity;
 
         // WLED 'seg' in /json/state can be either a List or a single Map depending on build.
         final dynamic segAny = data['seg'];
@@ -214,6 +215,10 @@ class WledNotifier extends Notifier<WledStateModel> {
         if (firstSeg != null) {
           final sx = firstSeg['sx'];
           if (sx is int) speed = sx;
+
+          // Parse intensity (ix)
+          final ix = firstSeg['ix'];
+          if (ix is int) intensity = ix;
 
           // Parse effect ID (fx)
           final fx = firstSeg['fx'];
@@ -239,7 +244,7 @@ class WledNotifier extends Notifier<WledStateModel> {
           }
         }
 
-        state = state.copyWith(isOn: isOn, brightness: bri, speed: speed, effectId: effectId, paletteId: paletteId, connected: true);
+        state = state.copyWith(isOn: isOn, brightness: bri, speed: speed, intensity: intensity, effectId: effectId, paletteId: paletteId, connected: true);
       } catch (e) {
         debugPrint('WLED parse state error: $e');
       }

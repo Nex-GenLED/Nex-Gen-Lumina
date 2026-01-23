@@ -56,6 +56,10 @@
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts"/>
+            <!-- Google Assistant App Actions -->
+            <meta-data
+                android:name="android.app.actions"
+                android:resource="@xml/actions"/>
         </activity>
         <!-- Foreground service type for background location updates (Android 10+) -->
         <service
