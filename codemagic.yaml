@@ -16,28 +16,34 @@ workflows:
           cd ios && pod install
       - name: Build Unsigned IPA
         script: |
-          # 1. Run Flutter build to generate iOS files (without full build)
-          flutter build ios --release --no-codesign --config-only || true
+          # 1. Generate Flutter iOS build files
+          flutter build ios --release --no-codesign || true
 
-          # 2. Build using xcodebuild with signing completely disabled
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            -allowProvisioningUpdates \
-            ONLY_ACTIVE_ARCH=NO \
-            BUILD_DIR="../build/ios"
-          cd ..
+          # 2. If Flutter build failed to create .app, use xcodebuild directly
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Flutter build incomplete, using xcodebuild..."
+            cd ios
+            xcodebuild -workspace Runner.xcworkspace \
+              -scheme Runner \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM="" \
+              PROVISIONING_PROFILE_SPECIFIER="" \
+              ONLY_ACTIVE_ARCH=NO \
+              BUILD_DIR="../build/ios"
+            cd ..
+            APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          fi
 
-          # 3. The .app is built to this location
-          APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          # 3. Check both possible locations for the .app
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          fi
 
           # 4. Verify the app bundle exists and contains an executable
           if [ ! -d "$APP_PATH" ]; then
