@@ -11,17 +11,38 @@ workflows:
       - name: Get Flutter packages
         script: |
           flutter pub get
+      - name: Install CocoaPods
+        script: |
+          cd ios && pod install
       - name: Build Unsigned IPA
         script: |
-          # 1. Build the iOS app
-          flutter build ios --release --no-codesign
+          # 1. Run Flutter build to generate iOS files (without full build)
+          flutter build ios --release --no-codesign --config-only || true
 
-          # 2. The .app is built to this specific location
-          APP_PATH="build/ios/iphoneos/Runner.app"
+          # 2. Build using xcodebuild with signing completely disabled
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -allowProvisioningUpdates \
+            ONLY_ACTIVE_ARCH=NO \
+            BUILD_DIR="../build/ios"
+          cd ..
 
-          # 3. Verify the app bundle exists and contains an executable
+          # 3. The .app is built to this location
+          APP_PATH="build/ios/Release-iphoneos/Runner.app"
+
+          # 4. Verify the app bundle exists and contains an executable
           if [ ! -d "$APP_PATH" ]; then
             echo "ERROR: Runner.app not found at $APP_PATH"
+            echo "Searching for .app bundles:"
             find build -name "*.app" -type d
             exit 1
           fi
@@ -35,7 +56,7 @@ workflows:
           echo "App bundle found with contents:"
           ls -la "$APP_PATH"
 
-          # 4. Fake-sign all binaries for AltStore compatibility
+          # 5. Fake-sign all binaries for AltStore compatibility
           echo "Fake-signing app bundle for AltStore..."
 
           # Sign the main executable
@@ -49,21 +70,21 @@ workflows:
 
           echo "Fake-signing complete"
 
-          # 5. Prepare the Payload folder structure
+          # 6. Prepare the Payload folder structure
           rm -rf Payload
           mkdir -p Payload
 
-          # 6. Copy the app bundle (preserve symlinks with -R)
+          # 7. Copy the app bundle (preserve symlinks with -R)
           cp -R "$APP_PATH" Payload/
 
-          # 7. Create the IPA (zip with symlinks preserved)
+          # 8. Create the IPA (zip with symlinks preserved)
           zip -r -y Runner.ipa Payload
 
-          # 8. Verify IPA structure
+          # 9. Verify IPA structure
           echo "IPA contents:"
           unzip -l Runner.ipa | head -20
 
-          # 9. Move to artifacts location
+          # 10. Move to artifacts location
           mv Runner.ipa $CM_BUILD_DIR/Runner.ipa
     artifacts:
       - Runner.ipa
