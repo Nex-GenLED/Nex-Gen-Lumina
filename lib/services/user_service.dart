@@ -50,6 +50,17 @@ class UserService {
     }
   }
 
+  /// Update specific fields in user profile by ID
+  Future<void> updateUserProfile(String userId, Map<String, dynamic> fields) async {
+    try {
+      fields['updated_at'] = FieldValue.serverTimestamp();
+      await _firestore.collection('users').doc(userId).update(fields);
+    } catch (e) {
+      debugPrint('Error updating user profile: $e');
+      rethrow;
+    }
+  }
+
   /// Delete user profile
   Future<void> deleteUser(String userId) async {
     try {
