@@ -83,7 +83,10 @@ class UserModel {
   // Privacy & Intelligence controls
   /// Opt-in for recommending user's custom designs to community matches (builder/floor plan).
   final bool communityPatternSharing;
-  
+
+  /// Opt-in for contributing anonymized usage data to global analytics
+  final bool analyticsEnabled;
+
   /// Preferred dealer contact for sales requests and quotes
   final String? dealerEmail;
 
@@ -159,6 +162,7 @@ class UserModel {
     int? buildYear,
     this.seasonalColorWindows = const [],
     this.communityPatternSharing = false,
+    this.analyticsEnabled = true,
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
@@ -243,6 +247,7 @@ class UserModel {
               .toList() ??
           const [],
       communityPatternSharing: (json['community_pattern_sharing'] as bool?) ?? false,
+      analyticsEnabled: (json['analytics_enabled'] as bool?) ?? true,
       dealerEmail: json['dealer_email'] as String?,
       webhookUrl: json['webhook_url'] as String?,
       homeSsid: json['home_ssid'] as String?,
@@ -311,6 +316,7 @@ class UserModel {
       'build_year': buildYear,
       'seasonal_color_windows': seasonalColorWindows.map((e) => e.toJson()).toList(),
       'community_pattern_sharing': communityPatternSharing,
+      'analytics_enabled': analyticsEnabled,
       'dealer_email': dealerEmail,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
@@ -363,6 +369,7 @@ class UserModel {
     int? buildYear,
     List<SeasonalColorWindow>? seasonalColorWindows,
     bool? communityPatternSharing,
+    bool? analyticsEnabled,
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
@@ -412,6 +419,7 @@ class UserModel {
       buildYear: buildYear ?? this.buildYear,
       seasonalColorWindows: seasonalColorWindows ?? this.seasonalColorWindows,
       communityPatternSharing: communityPatternSharing ?? this.communityPatternSharing,
+      analyticsEnabled: analyticsEnabled ?? this.analyticsEnabled,
       dealerEmail: dealerEmail ?? this.dealerEmail,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       homeSsid: homeSsid ?? this.homeSsid,

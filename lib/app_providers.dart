@@ -17,6 +17,15 @@ const bool kSimulationMode = false;
 /// and bypasses network requirements to let users try the UI instantly.
 final demoModeProvider = StateProvider<bool>((ref) => false);
 
+/// Guided Mode toggle. When enabled (default), the app provides:
+/// - Improved visual hierarchy with larger controls
+/// - Contextual help and tooltips
+/// - Auto-populated favorites from usage patterns
+/// - Simplified navigation labels
+/// - Quick action shortcuts
+/// This mode doesn't restrict features - it makes them easier to discover and use.
+final guidedModeProvider = StateProvider<bool>((ref) => true);
+
 /// Storage key for persisting the active preset label
 const String _activePresetKey = 'active_preset_label';
 

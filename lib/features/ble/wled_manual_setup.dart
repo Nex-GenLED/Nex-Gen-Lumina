@@ -389,7 +389,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
               hintText: '192.168.1.100',
               prefixIcon: Icon(Icons.router),
             ),
-            keyboardType: TextInputType.number,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
           ),
 
           if (_errorMessage != null) ...[

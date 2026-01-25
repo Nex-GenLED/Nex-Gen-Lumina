@@ -51,6 +51,36 @@ service cloud.firestore {
         // No updates or deletes (usage is append-only for auditing)
         allow update, delete: if false;
       }
+
+      // Controllers subcollection - WLED devices registered to user
+      match /controllers/{controllerId} {
+        // Users can read their own controllers
+        allow read: if isOwner(userId);
+
+        // Users can create controllers (from device discovery/setup)
+        allow create: if isOwner(userId);
+
+        // Users can update their controllers (rename, IP changes, etc.)
+        allow update: if isOwner(userId);
+
+        // Users can delete their controllers
+        allow delete: if isOwner(userId);
+      }
+
+      // Schedules subcollection - automation schedules for lighting
+      match /schedules/{scheduleId} {
+        // Users can read their own schedules
+        allow read: if isOwner(userId);
+
+        // Users can create schedules
+        allow create: if isOwner(userId);
+
+        // Users can update their schedules
+        allow update: if isOwner(userId);
+
+        // Users can delete their schedules
+        allow delete: if isOwner(userId);
+      }
     }
     
     // Sites - private to each user
@@ -66,11 +96,6 @@ service cloud.firestore {
     }
 
     // ==================== Learning System Collections ====================
-
-    // Helper function to check ownership
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
-    }
 
     // Pattern Usage Tracking - append-only logs with retention
     match /users/{userId}/pattern_usage/{usageId} {
@@ -146,6 +171,122 @@ service cloud.firestore {
       // SECURITY: Allow deletion for old habits (90+ days for retention policy)
       allow delete: if isOwner(userId) &&
         resource.data.detected_at < request.time - duration.value(90, 'd');
+    }
+
+    // Pattern Feedback subcollection (user's own feedback)
+    match /users/{userId}/pattern_feedback/{feedbackId} {
+      // Users can read their own feedback
+      allow read: if isOwner(userId);
+
+      // Users can create feedback
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasAll(['pattern_name', 'rating', 'created_at']) &&
+        request.resource.data.rating is int &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5;
+
+      // No updates or deletes (feedback is append-only for consistency)
+      allow update, delete: if false;
+    }
+
+    // ==================== Global Analytics Collections ====================
+    // These collections aggregate anonymized data across all users
+
+    // Global Pattern Statistics
+    match /analytics/global_pattern_stats/patterns/{patternId} {
+      // Anyone can read trending patterns (public data)
+      allow read: if request.auth != null;
+
+      // Authenticated users can contribute stats (increment counters)
+      allow create, update: if request.auth != null &&
+        request.resource.data.keys().hasAll(['pattern_name', 'total_applications']);
+
+      // No deletes (only Cloud Functions can clean up)
+      allow delete: if false;
+
+      // User tracking subcollection (hashed IDs for uniqueness)
+      match /users/{hashedUserId} {
+        allow read: if false; // Private tracking data
+        allow write: if request.auth != null; // Any auth user can update
+        allow delete: if false;
+      }
+    }
+
+    // Pattern Feedback Aggregation
+    match /analytics/pattern_feedback/patterns/{patternId} {
+      // Anyone can read feedback stats
+      allow read: if request.auth != null;
+
+      // Authenticated users can contribute feedback
+      allow create, update: if request.auth != null &&
+        request.resource.data.keys().hasAll(['pattern_name', 'total_ratings']);
+
+      allow delete: if false;
+
+      // Anonymous rater tracking
+      match /raters/{hashedUserId} {
+        allow read: if false;
+        allow write: if request.auth != null;
+        allow delete: if false;
+      }
+    }
+
+    // Pattern Requests
+    match /analytics/pattern_requests/requests/{requestId} {
+      // Anyone can read pattern requests
+      allow read: if request.auth != null;
+
+      // Authenticated users can create requests
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasAll(['requested_theme', 'created_at', 'vote_count', 'fulfilled']) &&
+        request.resource.data.vote_count == 1 &&
+        request.resource.data.fulfilled == false;
+
+      // Users can vote (increment vote_count)
+      allow update: if request.auth != null &&
+        request.resource.data.vote_count == resource.data.vote_count + 1;
+
+      // No deletes (only admins via Cloud Functions)
+      allow delete: if false;
+
+      // Voter tracking
+      match /voters/{hashedUserId} {
+        allow read: if false;
+        allow write: if request.auth != null;
+        allow delete: if false;
+      }
+    }
+
+    // Color Trends
+    match /analytics/color_trends/weekly/{weekId} {
+      // Anyone can read color trends
+      allow read: if request.auth != null;
+
+      // Authenticated users can contribute color usage
+      allow create, update: if request.auth != null;
+
+      allow delete: if false;
+    }
+
+    // Effect Popularity
+    match /analytics/effect_popularity/effects/{effectId} {
+      // Anyone can read effect popularity
+      allow read: if request.auth != null;
+
+      // Authenticated users can contribute effect usage
+      allow create, update: if request.auth != null &&
+        request.resource.data.keys().hasAll(['effect_id', 'usage_count']);
+
+      allow delete: if false;
+    }
+
+    // Trending Reports (generated by Cloud Functions)
+    match /analytics/trending_reports/{reportId} {
+      // Anyone can read reports
+      allow read: if request.auth != null;
+
+      // Only Cloud Functions can create reports
+      allow write: if false;
     }
 
     // SECURITY: OAuth codes and refresh tokens collections (server-side only)

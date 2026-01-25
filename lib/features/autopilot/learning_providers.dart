@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/autopilot/habit_learner.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/analytics/analytics_providers.dart';
 
 /// Provider for the HabitLearner service
 final habitLearnerProvider = Provider.family<HabitLearner?, String>((ref, userId) {
@@ -305,6 +306,30 @@ class UsageLoggerNotifier extends AutoDisposeAsyncNotifier<void> {
       intensity: intensity,
       wled: wledPayload,
     );
+
+    // Contribute to global analytics if user has opted in
+    final aggregator = ref.read(currentUserAnalyticsProvider);
+    if (aggregator != null) {
+      final event = PatternUsageEvent(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        createdAt: DateTime.now(),
+        source: source,
+        colorNames: colorNames,
+        effectId: effectId,
+        effectName: effectName,
+        paletteId: paletteId,
+        brightness: brightness,
+        speed: speed,
+        intensity: intensity,
+        wledPayload: wledPayload,
+        patternName: patternName,
+      );
+
+      // Fire and forget - don't block on analytics
+      aggregator.contributePatternUsage(event).catchError((e) {
+        // Silently fail - analytics should never block user experience
+      });
+    }
   }
 }
 

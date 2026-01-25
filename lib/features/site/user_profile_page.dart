@@ -8,6 +8,7 @@ import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/analytics/analytics_providers.dart';
 
 class UserProfilePage extends ConsumerStatefulWidget {
   const UserProfilePage({super.key});
@@ -23,6 +24,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   final Set<String> _selectedCategoryIds = <String>{};
   final List<String> _interestTags = <String>[];
   bool _allowSuggestions = true;
+  bool _analyticsEnabled = true;
 
   User? _firebaseUser;
 
@@ -57,6 +59,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       ..clear()
       ..addAll(model.interestTags);
     _allowSuggestions = model.allowSuggestions;
+    _analyticsEnabled = model.analyticsEnabled;
   }
 
   Future<void> _onSave(User? firebaseUser, UserModel? existing) async {
@@ -77,6 +80,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       preferredCategoryIds: _selectedCategoryIds.toList(),
       interestTags: _interestTags,
       allowSuggestions: _allowSuggestions,
+      analyticsEnabled: _analyticsEnabled,
       updatedAt: now,
     );
     try {
@@ -113,7 +117,9 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             data: (model) {
               // hydrate local state on first read
               if (model != null && _displayNameCtrl.text.isEmpty && _locationCtrl.text.isEmpty && _selectedCategoryIds.isEmpty && _interestTags.isEmpty) {
-                _hydrateFromModel(model);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _hydrateFromModel(model);
+                });
               }
 
               return ListView(
@@ -136,6 +142,62 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                           const SizedBox(width: 8),
                           Expanded(child: Text('Allow seasonal & event-based suggestions', style: Theme.of(context).textTheme.bodyMedium)),
                         ]),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Icon(Icons.analytics_outlined, color: NexGenPalette.cyan),
+                          const SizedBox(width: 8),
+                          Text('Privacy & Analytics', style: Theme.of(context).textTheme.titleMedium),
+                        ]),
+                        const SizedBox(height: 12),
+                        Row(children: [
+                          Switch(
+                            value: _analyticsEnabled,
+                            onChanged: (v) => setState(() => _analyticsEnabled = v),
+                            activeColor: NexGenPalette.cyan
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Contribute to Pattern Trends', style: Theme.of(context).textTheme.bodyMedium),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Help improve Lumina by sharing anonymized usage data to identify trending patterns and areas for improvement',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white60),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.security, size: 16, color: NexGenPalette.cyan),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Your identity remains private. All data is anonymized and used only to improve pattern recommendations.',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ]),
                     ),
                   ),
