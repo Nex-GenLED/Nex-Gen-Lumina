@@ -287,6 +287,38 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
+  /// Force refresh connection state - call when app resumes from background
+  Future<void> refreshConnection() async {
+    debugPrint('🔄 WledNotifier: Refreshing connection...');
+    final service = ref.read(wledRepositoryProvider);
+    if (service == null) {
+      debugPrint('🔄 WledNotifier: No repository available');
+      return;
+    }
+
+    try {
+      final data = await service.getState();
+      if (data != null) {
+        debugPrint('🔄 WledNotifier: Connection restored');
+        _cancelReconnectTimer();
+        // Parse and update state immediately
+        final isOn = (data['on'] as bool?) ?? state.isOn;
+        final bri = (data['bri'] as int?) ?? state.brightness;
+        state = state.copyWith(isOn: isOn, brightness: bri, connected: true);
+        // Restart polling to ensure fresh data
+        _startPolling();
+      } else {
+        debugPrint('🔄 WledNotifier: Connection failed, starting reconnect timer');
+        state = state.copyWith(connected: false);
+        _ensureReconnectTimer();
+      }
+    } catch (e) {
+      debugPrint('🔄 WledNotifier: Refresh failed: $e');
+      state = state.copyWith(connected: false);
+      _ensureReconnectTimer();
+    }
+  }
+
   Future<void> togglePower(bool value) async {
     debugPrint('🔌 togglePower called: $value');
     state = state.copyWith(isOn: value);

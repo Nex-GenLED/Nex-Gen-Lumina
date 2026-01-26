@@ -8,6 +8,7 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 
 /// Main entry point for the application
 ///
@@ -44,14 +45,14 @@ Future<void> main() async {
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -69,7 +70,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed) {
-      // App came to foreground
+      debugPrint('🔄 App resumed from background');
+
+      // Refresh WLED connection immediately
+      try {
+        ref.read(wledStateProvider.notifier).refreshConnection();
+      } catch (e) {
+        debugPrint('WLED refresh on resume failed: $e');
+      }
+
+      // App came to foreground - run learning service tasks
       final learningService = BackgroundLearningService();
 
       // Check if we should run daily maintenance
