@@ -81,6 +81,21 @@ service cloud.firestore {
         // Users can delete their schedules
         allow delete: if isOwner(userId);
       }
+
+      // Commands subcollection - Cloud Relay commands for remote WLED control
+      match /commands/{commandId} {
+        // Users can read their own commands
+        allow read: if isOwner(userId);
+
+        // Users can create commands (sent from app when remote)
+        allow create: if isOwner(userId);
+
+        // Users can update commands (status updates from relay)
+        allow update: if isOwner(userId);
+
+        // Users can delete commands (cleanup)
+        allow delete: if isOwner(userId);
+      }
     }
     
     // Sites - private to each user
