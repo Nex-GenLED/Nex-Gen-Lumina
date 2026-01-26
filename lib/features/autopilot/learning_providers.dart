@@ -149,6 +149,9 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
 
   /// Update favorite usage (called when user applies a favorite)
   Future<void> recordFavoriteUsage(String favoriteId) async {
+    // Skip system defaults - they're not stored in Firestore
+    if (favoriteId.startsWith('system_')) return;
+
     final user = ref.read(authStateProvider).value;
     if (user == null) return;
 
