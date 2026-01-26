@@ -22,57 +22,40 @@ class ScheduleSyncService {
   /// - start/end: for time ranges (optional)
   ///
   /// WLED supports up to 8 timers in the "ins" array.
+  ///
+  /// Each schedule with an on/off time generates TWO timers:
+  /// 1. ON timer - triggers the pattern/action
+  /// 2. OFF timer - turns lights off (if offTimeLabel is set)
   Map<String, dynamic> buildCfgPayload(List<ScheduleItem> schedules) {
     final enabled = schedules.where((s) => s.enabled).toList(growable: false);
     final List<Map<String, dynamic>> timers = [];
 
-    // Separate regular schedules from solar event schedules
-    final regularSchedules = <ScheduleItem>[];
-    final solarSchedules = <ScheduleItem>[];
-
     for (final s in enabled) {
-      final tl = s.timeLabel.trim().toLowerCase();
-      if (tl == 'sunrise' || tl == 'sunset') {
-        solarSchedules.add(s);
-      } else {
-        regularSchedules.add(s);
-      }
-    }
-
-    // Build timer entries - WLED expects exactly the fields it knows about
-    // Regular timers first
-    for (int i = 0; i < regularSchedules.length && timers.length < 8; i++) {
-      final s = regularSchedules[i];
-      final parsed = _parseTimeLabel(s.timeLabel);
-      final dow = _computeDowMask(s.repeatDays);
-      final macro = _presetForAction(s.actionLabel);
-
-      timers.add({
-        'en': true,
-        'hour': parsed.hour,
-        'min': parsed.minute,
-        'macro': macro,
-        'dow': dow,
-      });
-    }
-
-    // Sunrise/sunset timers
-    // WLED uses hour=24 for sunrise, hour=25 for sunset
-    // min is the offset in minutes (-59 to +59)
-    for (final s in solarSchedules) {
       if (timers.length >= 8) break;
-      final tl = s.timeLabel.trim().toLowerCase();
-      final dow = _computeDowMask(s.repeatDays);
-      final macro = _presetForAction(s.actionLabel);
 
-      final isSunrise = tl == 'sunrise';
-      timers.add({
-        'en': true,
-        'hour': isSunrise ? 24 : 25, // 24=sunrise, 25=sunset
-        'min': 0, // offset from sunrise/sunset
-        'macro': macro,
-        'dow': dow,
-      });
+      final dow = _computeDowMask(s.repeatDays);
+
+      // ON timer
+      final onTimer = _buildTimerEntry(
+        timeLabel: s.timeLabel,
+        dow: dow,
+        macro: _presetForAction(s.actionLabel),
+      );
+      if (onTimer != null) {
+        timers.add(onTimer);
+      }
+
+      // OFF timer (if schedule has an off time)
+      if (s.hasOffTime && s.offTimeLabel != null && timers.length < 8) {
+        final offTimer = _buildTimerEntry(
+          timeLabel: s.offTimeLabel!,
+          dow: dow,
+          macro: 2, // Preset 2 = off state (convention)
+        );
+        if (offTimer != null) {
+          timers.add(offTimer);
+        }
+      }
     }
 
     debugPrint('ScheduleSync: Built ${timers.length} timer entries');
@@ -85,6 +68,38 @@ class ScheduleSyncService {
       'timers': {
         'ins': timers,
       },
+    };
+  }
+
+  /// Builds a single timer entry from a time label.
+  /// Returns null if the time label cannot be parsed.
+  Map<String, dynamic>? _buildTimerEntry({
+    required String timeLabel,
+    required int dow,
+    required int macro,
+  }) {
+    final tl = timeLabel.trim().toLowerCase();
+
+    // Handle solar events (sunrise/sunset)
+    if (tl == 'sunrise' || tl == 'sunset') {
+      final isSunrise = tl == 'sunrise';
+      return {
+        'en': true,
+        'hour': isSunrise ? 24 : 25, // 24=sunrise, 25=sunset
+        'min': 0, // offset from sunrise/sunset
+        'macro': macro,
+        'dow': dow,
+      };
+    }
+
+    // Handle specific time
+    final parsed = _parseTimeLabel(timeLabel);
+    return {
+      'en': true,
+      'hour': parsed.hour,
+      'min': parsed.minute,
+      'macro': macro,
+      'dow': dow,
     };
   }
 

@@ -108,6 +108,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
         final newSchedule = ScheduleItem(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           timeLabel: scheduleData['timeLabel']!,
+          offTimeLabel: scheduleData['offTimeLabel'] as String?,
           repeatDays: scheduleData['repeatDays'] as List<String>,
           actionLabel: scheduleData['actionLabel']!,
           enabled: true,
@@ -145,17 +146,62 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
   Future<Map<String, dynamic>?> _parseScheduleRequest(String text) async {
     final lowerText = text.toLowerCase();
 
-    // Determine time
+    // Determine ON time
     String timeLabel;
-    if (lowerText.contains('sunset') || lowerText.contains('evening')) {
+    if (lowerText.contains('sunset') || lowerText.contains('dusk') || lowerText.contains('evening')) {
       timeLabel = 'Sunset';
-    } else if (lowerText.contains('sunrise') || lowerText.contains('morning')) {
+    } else if (lowerText.contains('sunrise') || lowerText.contains('dawn') || lowerText.contains('morning')) {
       timeLabel = 'Sunrise';
     } else if (lowerText.contains('midnight') || lowerText.contains('12:00 am')) {
       timeLabel = '12:00 AM';
     } else {
-      // Default to sunset for evening requests
-      timeLabel = 'Sunset';
+      // Try to parse specific time like "8 pm" or "8:00 pm"
+      final timeMatch = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', caseSensitive: false).firstMatch(lowerText);
+      if (timeMatch != null) {
+        final hour = timeMatch.group(1)!;
+        final minute = timeMatch.group(2) ?? '00';
+        final ampm = timeMatch.group(3)!.toUpperCase();
+        timeLabel = '$hour:$minute $ampm';
+      } else {
+        // Default to sunset for evening requests
+        timeLabel = 'Sunset';
+      }
+    }
+
+    // Determine OFF time (look for "to", "until", "through", "-")
+    String? offTimeLabel;
+    final offTimePatterns = [
+      RegExp(r'(?:to|until|through|->|→|-)\s*(sunrise|dawn)', caseSensitive: false),
+      RegExp(r'(?:to|until|through|->|→|-)\s*(sunset|dusk)', caseSensitive: false),
+      RegExp(r'(?:to|until|through|->|→|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)', caseSensitive: false),
+    ];
+
+    for (final pattern in offTimePatterns) {
+      final match = pattern.firstMatch(lowerText);
+      if (match != null) {
+        final captured = match.group(1)!.toLowerCase();
+        if (captured == 'sunrise' || captured == 'dawn') {
+          offTimeLabel = 'Sunrise';
+        } else if (captured == 'sunset' || captured == 'dusk') {
+          offTimeLabel = 'Sunset';
+        } else {
+          // Specific time
+          final hour = match.group(1)!;
+          final minute = match.group(2) ?? '00';
+          final ampm = match.group(3)!.toUpperCase();
+          offTimeLabel = '$hour:$minute $ampm';
+        }
+        break;
+      }
+    }
+
+    // If no explicit off time but text mentions "dusk to dawn" or similar patterns
+    if (offTimeLabel == null) {
+      if (lowerText.contains('dusk to dawn') || lowerText.contains('sunset to sunrise')) {
+        offTimeLabel = 'Sunrise';
+      } else if (lowerText.contains('dawn to dusk') || lowerText.contains('sunrise to sunset')) {
+        offTimeLabel = 'Sunset';
+      }
     }
 
     // Determine repeat days
@@ -181,6 +227,9 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     } else if (lowerText.contains('bright white') || lowerText.contains('bright')) {
       actionLabel = 'Pattern: Bright White';
       patternDescription = 'bright white';
+    } else if (lowerText.contains('festive')) {
+      actionLabel = 'Pattern: Festive';
+      patternDescription = 'festive';
     } else if (lowerText.contains('off') || lowerText.contains('turn off')) {
       actionLabel = 'Turn Off';
       patternDescription = 'off';
@@ -195,16 +244,23 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
 
     // Generate friendly confirmation message
     final timeName = timeLabel.toLowerCase();
+    final offTimeName = offTimeLabel?.toLowerCase();
     final daysDescription = repeatDays.contains('Daily')
         ? 'every evening'
         : repeatDays.length == 5
             ? 'on weeknights'
             : 'on ${repeatDays.join(", ")}';
 
-    final confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription at $timeName.';
+    String confirmation;
+    if (offTimeName != null) {
+      confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription from $timeName to $offTimeName.';
+    } else {
+      confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription at $timeName.';
+    }
 
     return {
       'timeLabel': timeLabel,
+      'offTimeLabel': offTimeLabel,
       'repeatDays': repeatDays,
       'actionLabel': actionLabel,
       'confirmation': confirmation,
@@ -955,6 +1011,11 @@ class _ScheduleCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(schedulesProvider.notifier);
+    // Build time display string
+    final timeDisplay = item.hasOffTime
+        ? '${item.timeLabel} → ${item.offTimeLabel}'
+        : item.timeLabel;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: BackdropFilter(
@@ -969,9 +1030,9 @@ class _ScheduleCard extends ConsumerWidget {
           child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             // Left: Time + Days
             SizedBox(
-              width: 110,
+              width: 130,
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(item.timeLabel, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: NexGenPalette.textHigh)),
+                Text(timeDisplay, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh)),
                 const SizedBox(height: 4),
                 Text(item.repeatDays.join(', '), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium)),
               ]),
@@ -1032,9 +1093,16 @@ enum _TriggerType { specificTime, solarEvent }
 enum _ActionType { powerOff, runPattern, brightness }
 
 class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
-  _TriggerType _trigger = _TriggerType.specificTime;
-  TimeOfDay _time = const TimeOfDay(hour: 19, minute: 0);
-  String _solar = 'Sunset'; // 'Sunrise' or 'Sunset'
+  // ON time settings
+  _TriggerType _onTrigger = _TriggerType.specificTime;
+  TimeOfDay _onTime = const TimeOfDay(hour: 19, minute: 0);
+  String _onSolar = 'Sunset'; // 'Sunrise' or 'Sunset'
+
+  // OFF time settings
+  bool _hasOffTime = true; // Default to having an off time
+  _TriggerType _offTrigger = _TriggerType.solarEvent;
+  TimeOfDay _offTime = const TimeOfDay(hour: 23, minute: 0);
+  String _offSolar = 'Sunrise'; // 'Sunrise' or 'Sunset'
 
   _ActionType _action = _ActionType.runPattern;
   double _brightness = 70; // percentage 0..100
@@ -1070,13 +1138,13 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
           _selectedDays = {1, 3, 5};
         }
       }
-      // Trigger
+      // ON Trigger
       final tl = editing.timeLabel.trim().toLowerCase();
       if (tl == 'sunset' || tl == 'sunrise') {
-        _trigger = _TriggerType.solarEvent;
-        _solar = tl == 'sunrise' ? 'Sunrise' : 'Sunset';
+        _onTrigger = _TriggerType.solarEvent;
+        _onSolar = tl == 'sunrise' ? 'Sunrise' : 'Sunset';
       } else {
-        _trigger = _TriggerType.specificTime;
+        _onTrigger = _TriggerType.specificTime;
         final reg = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
         final m = reg.firstMatch(editing.timeLabel.trim());
         if (m != null) {
@@ -1085,7 +1153,28 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
           final ap = m.group(3)!.toLowerCase();
           if (ap == 'pm' && hh != 12) hh += 12;
           if (ap == 'am' && hh == 12) hh = 0;
-          _time = TimeOfDay(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
+          _onTime = TimeOfDay(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
+        }
+      }
+      // OFF Trigger
+      _hasOffTime = editing.hasOffTime;
+      if (editing.offTimeLabel != null) {
+        final otl = editing.offTimeLabel!.trim().toLowerCase();
+        if (otl == 'sunset' || otl == 'sunrise') {
+          _offTrigger = _TriggerType.solarEvent;
+          _offSolar = otl == 'sunrise' ? 'Sunrise' : 'Sunset';
+        } else {
+          _offTrigger = _TriggerType.specificTime;
+          final reg = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
+          final m = reg.firstMatch(editing.offTimeLabel!.trim());
+          if (m != null) {
+            var hh = int.tryParse(m.group(1)!) ?? 23;
+            final mm = int.tryParse(m.group(2)!) ?? 0;
+            final ap = m.group(3)!.toLowerCase();
+            if (ap == 'pm' && hh != 12) hh += 12;
+            if (ap == 'am' && hh == 12) hh = 0;
+            _offTime = TimeOfDay(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
+          }
         }
       }
       // Action
@@ -1094,7 +1183,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       if (lower.startsWith('pattern')) {
         _action = _ActionType.runPattern;
         final idx = a.indexOf(':');
-        final name = (idx != -1 && idx + 1 < a.length) ? a.substring(idx + 1).trim() : a.replaceFirst(RegExp(r'^(?i)pattern'), '').trim();
+        final name = (idx != -1 && idx + 1 < a.length) ? a.substring(idx + 1).trim() : a.replaceFirst(RegExp(r'^pattern', caseSensitive: false), '').trim();
         _selectedPattern = PatternSelection(id: 'existing', name: name, imageUrl: '');
       } else if (lower.startsWith('brightness')) {
         _action = _ActionType.brightness;
@@ -1136,28 +1225,109 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   CupertinoSwitch(value: _enabled, activeColor: NexGenPalette.cyan, onChanged: (v) => setState(() => _enabled = v)),
                 ]),
                 const SizedBox(height: 16),
-                // Trigger type segmented
-                SegmentedButton<_TriggerType>(
-                  segments: const [
-                    ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded), label: Text('Specific Time')),
-                    ButtonSegment(value: _TriggerType.solarEvent, icon: Icon(Icons.wb_sunny_rounded), label: Text('Solar Event')),
-                  ],
-                  selected: {_trigger},
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: MaterialStateProperty.resolveWith((states) => states.contains(MaterialState.selected) ? NexGenPalette.cyan.withValues(alpha: 0.16) : Colors.transparent),
-                    foregroundColor: MaterialStateProperty.resolveWith((states) => states.contains(MaterialState.selected) ? NexGenPalette.cyan : NexGenPalette.textHigh),
-                    side: MaterialStatePropertyAll(BorderSide(color: NexGenPalette.line)),
+
+                // ON TIME Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
                   ),
-                  onSelectionChanged: (s) => setState(() => _trigger = s.first),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.power_settings_new_rounded, color: NexGenPalette.cyan, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Turn On', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.cyan, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<_TriggerType>(
+                        segments: const [
+                          ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
+                          ButtonSegment(value: _TriggerType.solarEvent, icon: Icon(Icons.wb_sunny_rounded, size: 18), label: Text('Solar')),
+                        ],
+                        selected: {_onTrigger},
+                        style: ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? NexGenPalette.cyan.withValues(alpha: 0.16) : Colors.transparent),
+                          foregroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? NexGenPalette.cyan : NexGenPalette.textHigh),
+                          side: WidgetStatePropertyAll(BorderSide(color: NexGenPalette.line)),
+                        ),
+                        onSelectionChanged: (s) => setState(() => _onTrigger = s.first),
+                      ),
+                      const SizedBox(height: 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: _onTrigger == _TriggerType.specificTime
+                            ? _TimeWheel(key: const ValueKey('on_time'), initial: _onTime, onChanged: (t) => setState(() => _onTime = t))
+                            : _SolarEventPicker(key: const ValueKey('on_solar'), selected: _onSolar, onChanged: (s) => setState(() => _onSolar = s)),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: _trigger == _TriggerType.specificTime
-                      ? _TimeWheel(initial: _time, onChanged: (t) => setState(() => _time = t))
-                      : _SolarEventPicker(selected: _solar, onChanged: (s) => setState(() => _solar = s)),
+
+                const SizedBox(height: 16),
+
+                // OFF TIME Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _hasOffTime ? NexGenPalette.violet.withValues(alpha: 0.08) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _hasOffTime ? NexGenPalette.violet.withValues(alpha: 0.3) : NexGenPalette.line),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.power_off_rounded, color: _hasOffTime ? NexGenPalette.violet : NexGenPalette.textMedium, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text('Turn Off', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: _hasOffTime ? NexGenPalette.violet : NexGenPalette.textMedium,
+                              fontWeight: FontWeight.w600,
+                            )),
+                          ),
+                          CupertinoSwitch(
+                            value: _hasOffTime,
+                            activeColor: NexGenPalette.violet,
+                            onChanged: (v) => setState(() => _hasOffTime = v),
+                          ),
+                        ],
+                      ),
+                      if (_hasOffTime) ...[
+                        const SizedBox(height: 12),
+                        SegmentedButton<_TriggerType>(
+                          segments: const [
+                            ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
+                            ButtonSegment(value: _TriggerType.solarEvent, icon: Icon(Icons.wb_sunny_rounded, size: 18), label: Text('Solar')),
+                          ],
+                          selected: {_offTrigger},
+                          style: ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? NexGenPalette.violet.withValues(alpha: 0.16) : Colors.transparent),
+                            foregroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? NexGenPalette.violet : NexGenPalette.textHigh),
+                            side: WidgetStatePropertyAll(BorderSide(color: NexGenPalette.line)),
+                          ),
+                          onSelectionChanged: (s) => setState(() => _offTrigger = s.first),
+                        ),
+                        const SizedBox(height: 12),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: _offTrigger == _TriggerType.specificTime
+                              ? _TimeWheel(key: const ValueKey('off_time'), initial: _offTime, onChanged: (t) => setState(() => _offTime = t))
+                              : _SolarEventPicker(key: const ValueKey('off_solar'), selected: _offSolar, onChanged: (s) => setState(() => _offSolar = s)),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
+
                 const SizedBox(height: 16),
                 Text('Repeat Days', style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(height: 8),
@@ -1244,7 +1414,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
 
                     // Use the original ID when editing, or generate a new one
                     final id = widget.editing?.id ?? 'sch-${DateTime.now().millisecondsSinceEpoch}';
-                    final timeLabel = _trigger == _TriggerType.specificTime ? _formatTime(_time) : _solar;
+                    final timeLabel = _onTrigger == _TriggerType.specificTime ? _formatTime(_onTime) : _onSolar;
+                    final offTimeLabel = _hasOffTime
+                        ? (_offTrigger == _TriggerType.specificTime ? _formatTime(_offTime) : _offSolar)
+                        : null;
                     final days = _selectedDays.map((i) => _dayAbbr[i]).toList(growable: false);
                     String actionLabel;
                     switch (_action) {
@@ -1262,6 +1435,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     final item = ScheduleItem(
                       id: id, // Use ID as-is to match existing schedule
                       timeLabel: timeLabel,
+                      offTimeLabel: offTimeLabel,
                       repeatDays: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
@@ -1355,7 +1529,7 @@ class _DayCircleChip extends StatelessWidget {
 class _TimeWheel extends StatelessWidget {
   final TimeOfDay initial;
   final ValueChanged<TimeOfDay> onChanged;
-  const _TimeWheel({required this.initial, required this.onChanged});
+  const _TimeWheel({super.key, required this.initial, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -1374,7 +1548,7 @@ class _TimeWheel extends StatelessWidget {
 class _SolarEventPicker extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onChanged;
-  const _SolarEventPicker({required this.selected, required this.onChanged});
+  const _SolarEventPicker({super.key, required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -1691,14 +1865,22 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
                     for (final it in dayItems)
                       _AgendaDetailChip(
                         label: '${(() {
-                          final tl = it.timeLabel.trim();
-                          final lower = tl.toLowerCase();
-                          if (lower != 'sunset' && lower != 'sunrise') return tl;
-                          return sunAsync.when(
-                            data: (s) => lower == 'sunset' ? (s?.sunsetLabel ?? 'Sunset (—)') : (s?.sunriseLabel ?? 'Sunrise (—)'),
-                            loading: () => lower == 'sunset' ? 'Sunset (…)': 'Sunrise (…) ',
-                            error: (e, st) => lower == 'sunset' ? 'Sunset (—)' : 'Sunrise (—)',
-                          );
+                          // Format ON time
+                          String formatTime(String tl) {
+                            final lower = tl.trim().toLowerCase();
+                            if (lower != 'sunset' && lower != 'sunrise') return tl;
+                            return sunAsync.when(
+                              data: (s) => lower == 'sunset' ? (s?.sunsetLabel ?? 'Sunset (—)') : (s?.sunriseLabel ?? 'Sunrise (—)'),
+                              loading: () => lower == 'sunset' ? 'Sunset (…)': 'Sunrise (…)',
+                              error: (e, st) => lower == 'sunset' ? 'Sunset (—)' : 'Sunrise (—)',
+                            );
+                          }
+                          final onTime = formatTime(it.timeLabel.trim());
+                          if (it.hasOffTime && it.offTimeLabel != null) {
+                            final offTime = formatTime(it.offTimeLabel!.trim());
+                            return '$onTime → $offTime';
+                          }
+                          return onTime;
                         }())} • ${it.actionLabel}',
                         onTap: () => showScheduleEditor(context, ref, editing: it),
                         onDelete: () async {

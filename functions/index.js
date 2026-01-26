@@ -576,11 +576,11 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   </div>
 
   <script>
-    // Firebase config - replace with your project's config
+    // Firebase config for Nex-Gen Lumina
     const firebaseConfig = {
-      apiKey: "YOUR_FIREBASE_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT",
+      apiKey: "AIzaSyB2VhrbVD1lBbs_b_JuCkjLa1Yh_AsbWJs",
+      authDomain: "icrt6menwsv2d8all8oijs021b06s5.firebaseapp.com",
+      projectId: "icrt6menwsv2d8all8oijs021b06s5",
     };
 
     firebase.initializeApp(firebaseConfig);

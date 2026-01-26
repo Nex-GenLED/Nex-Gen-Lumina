@@ -208,13 +208,14 @@ final schedulesProvider = StateNotifierProvider<SchedulesNotifier, List<Schedule
 /// Helper class to find what schedule should be running at a given time.
 /// Handles parsing of schedule times including sunrise/sunset triggers.
 class ScheduleFinder {
-  /// Finds the most recent schedule that should have started by [now] for [today].
-  /// Returns null if no schedule applies.
+  /// Finds the schedule that should currently be active based on on/off times.
+  /// Returns null if no schedule is currently active.
   ///
   /// Logic:
   /// 1. Filter schedules that apply to today's day of week
-  /// 2. Parse their trigger times (specific time or solar event)
-  /// 3. Find the most recent one that has passed
+  /// 2. For each schedule, check if we're within its on/off window
+  /// 3. If a schedule has no off time, it stays active until another schedule starts
+  /// 4. Return the most recently started schedule that is still active
   static ScheduleItem? findCurrentSchedule(
     List<ScheduleItem> schedules,
     DateTime now, {
@@ -226,63 +227,112 @@ class ScheduleFinder {
     // Get today's day abbreviation (Sun, Mon, Tue, Wed, Thu, Fri, Sat)
     final dayAbbrs = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     final todayAbbr = dayAbbrs[now.weekday % 7].toLowerCase();
+    final yesterdayAbbr = dayAbbrs[(now.weekday - 1 + 7) % 7].toLowerCase();
 
-    // Filter to enabled schedules that apply to today
-    final todaySchedules = schedules.where((s) {
-      if (!s.enabled) return false;
+    // Helper to check if schedule applies to a day
+    bool appliesToDay(ScheduleItem s, String dayAbbr) {
       final daysLower = s.repeatDays.map((d) => d.toLowerCase()).toList();
       if (daysLower.contains('daily')) return true;
-      return daysLower.any((d) => d.startsWith(todayAbbr));
+      return daysLower.any((d) => d.startsWith(dayAbbr));
+    }
+
+    // Filter to enabled schedules that apply to today or yesterday (for overnight schedules)
+    final candidateSchedules = schedules.where((s) {
+      if (!s.enabled) return false;
+      return appliesToDay(s, todayAbbr) || appliesToDay(s, yesterdayAbbr);
     }).toList();
 
-    if (todaySchedules.isEmpty) return null;
+    if (candidateSchedules.isEmpty) return null;
 
-    // Parse schedule times and find the most recent one that has passed
-    ScheduleItem? mostRecent;
-    DateTime? mostRecentTime;
+    ScheduleItem? activeSchedule;
+    DateTime? activeOnTime;
 
-    for (final schedule in todaySchedules) {
-      final triggerTime = _parseScheduleTime(schedule, now, latitude, longitude);
-      if (triggerTime == null) continue;
+    for (final schedule in candidateSchedules) {
+      // Check if this schedule started today
+      if (appliesToDay(schedule, todayAbbr)) {
+        final onTime = _parseTimeLabel(schedule.timeLabel, now, latitude, longitude);
+        if (onTime == null) continue;
 
-      // Only consider schedules whose trigger time has passed
-      if (triggerTime.isAfter(now)) continue;
+        // Has the on time passed?
+        if (onTime.isAfter(now)) continue;
 
-      // Find the most recent (closest to now but in the past)
-      if (mostRecentTime == null || triggerTime.isAfter(mostRecentTime)) {
-        mostRecentTime = triggerTime;
-        mostRecent = schedule;
+        // If there's an off time, check if we're still within the window
+        if (schedule.hasOffTime && schedule.offTimeLabel != null) {
+          final offTime = _parseTimeLabel(schedule.offTimeLabel!, now, latitude, longitude);
+          if (offTime != null) {
+            // Handle overnight schedules (off time is before on time = next day)
+            final isOvernight = offTime.isBefore(onTime) || offTime.isAtSameMomentAs(onTime);
+            if (isOvernight) {
+              // Off time is tomorrow, so we're still active if we've passed on time
+              // (We'll check yesterday's schedule separately)
+            } else {
+              // Same-day schedule: check if off time has passed
+              if (now.isAfter(offTime)) continue; // Already turned off
+            }
+          }
+        }
+
+        // This schedule is active - check if it's more recent than others
+        if (activeOnTime == null || onTime.isAfter(activeOnTime)) {
+          activeOnTime = onTime;
+          activeSchedule = schedule;
+        }
+      }
+
+      // Check if this is an overnight schedule that started yesterday
+      if (appliesToDay(schedule, yesterdayAbbr) && schedule.hasOffTime) {
+        final yesterday = now.subtract(const Duration(days: 1));
+        final onTime = _parseTimeLabel(schedule.timeLabel, yesterday, latitude, longitude);
+        final offTime = _parseTimeLabel(schedule.offTimeLabel!, now, latitude, longitude);
+
+        if (onTime == null || offTime == null) continue;
+
+        // Check if this is an overnight schedule (off time would be "today")
+        final isOvernight = offTime.hour < onTime.hour ||
+            (offTime.hour == onTime.hour && offTime.minute <= onTime.minute);
+
+        if (isOvernight) {
+          // The off time is today - check if it hasn't passed yet
+          if (now.isBefore(offTime)) {
+            // This overnight schedule is still active
+            // Use yesterday's on time for comparison
+            if (activeOnTime == null || onTime.isAfter(activeOnTime)) {
+              activeOnTime = onTime;
+              activeSchedule = schedule;
+            }
+          }
+        }
       }
     }
 
-    return mostRecent;
+    return activeSchedule;
   }
 
-  /// Parses the timeLabel from a schedule into an actual DateTime for today.
+  /// Parses a time label into an actual DateTime for a given day.
   /// Handles:
   /// - "Sunset" / "Sunrise" (requires lat/lon)
   /// - "7:00 PM", "10:30 AM" etc.
-  static DateTime? _parseScheduleTime(
-    ScheduleItem schedule,
-    DateTime now,
+  static DateTime? _parseTimeLabel(
+    String label,
+    DateTime day,
     double? latitude,
     double? longitude,
   ) {
-    final label = schedule.timeLabel.trim().toLowerCase();
+    final trimmed = label.trim().toLowerCase();
 
     // Handle solar events
-    if (label == 'sunset') {
+    if (trimmed == 'sunset') {
       if (latitude == null || longitude == null) return null;
-      return SunUtils.sunsetLocal(latitude, longitude, now);
+      return SunUtils.sunsetLocal(latitude, longitude, day);
     }
-    if (label == 'sunrise') {
+    if (trimmed == 'sunrise') {
       if (latitude == null || longitude == null) return null;
-      return SunUtils.sunriseLocal(latitude, longitude, now);
+      return SunUtils.sunriseLocal(latitude, longitude, day);
     }
 
     // Parse time format like "7:00 PM", "10:30 AM"
     final timeRegex = RegExp(r'^(\d{1,2}):(\d{2})\s*(am|pm)$', caseSensitive: false);
-    final match = timeRegex.firstMatch(schedule.timeLabel.trim());
+    final match = timeRegex.firstMatch(label.trim());
     if (match == null) return null;
 
     var hour = int.tryParse(match.group(1)!) ?? 0;
@@ -293,7 +343,17 @@ class ScheduleFinder {
     if (ampm == 'pm' && hour != 12) hour += 12;
     if (ampm == 'am' && hour == 12) hour = 0;
 
-    return DateTime(now.year, now.month, now.day, hour, minute);
+    return DateTime(day.year, day.month, day.day, hour, minute);
+  }
+
+  /// Legacy method - kept for compatibility
+  static DateTime? _parseScheduleTime(
+    ScheduleItem schedule,
+    DateTime now,
+    double? latitude,
+    double? longitude,
+  ) {
+    return _parseTimeLabel(schedule.timeLabel, now, latitude, longitude);
   }
 }
 
