@@ -162,6 +162,44 @@ final selectedControllerIdProvider = Provider<String?>((ref) {
   return null;
 });
 
+/// Provider that fetches the total LED count from the connected WLED device.
+/// Returns null if no device is connected or if the count cannot be fetched.
+final deviceTotalLedCountProvider = FutureProvider<int?>((ref) async {
+  final repo = ref.watch(wledRepositoryProvider);
+  if (repo == null) return null;
+
+  try {
+    return await repo.getTotalLedCount();
+  } catch (e) {
+    debugPrint('Error fetching device LED count: $e');
+    return null;
+  }
+});
+
+/// Provider for updating segment configuration on the WLED device.
+/// Returns a function that can be called to update a segment's boundaries.
+final updateSegmentConfigProvider = Provider<Future<bool> Function({
+  required int segmentId,
+  int? start,
+  int? stop,
+})>((ref) {
+  return ({required int segmentId, int? start, int? stop}) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) return false;
+
+    try {
+      return await repo.updateSegmentConfig(
+        segmentId: segmentId,
+        start: start,
+        stop: stop,
+      );
+    } catch (e) {
+      debugPrint('Error updating segment config: $e');
+      return false;
+    }
+  };
+});
+
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
   Timer? _reconnectTimer;

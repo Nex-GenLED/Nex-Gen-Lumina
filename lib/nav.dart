@@ -1162,6 +1162,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   initialColors: colors,
                                   showColors: true, // Show color sequence for editing
                                   showPixelLayout: false,
+                                  onCustomized: () {
+                                    // When colors are customized, change pattern name to "Custom"
+                                    ref.read(activePresetLabelProvider.notifier).state = 'Custom';
+                                  },
                                 ),
                                 const SizedBox(height: 16),
                                 // Save As button

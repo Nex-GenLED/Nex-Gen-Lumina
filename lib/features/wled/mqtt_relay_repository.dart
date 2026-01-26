@@ -226,6 +226,30 @@ class MqttRelayRepository implements WledRepository {
   @override
   List<WledPreset> getPresets() => const [];
 
+  @override
+  Future<bool> updateSegmentConfig({
+    required int segmentId,
+    int? start,
+    int? stop,
+  }) async {
+    final Map<String, dynamic> segUpdate = {'id': segmentId};
+    if (start != null) segUpdate['start'] = start;
+    if (stop != null) segUpdate['stop'] = stop;
+
+    if (segUpdate.length <= 1) return true;
+
+    return applyJson({'seg': [segUpdate]});
+  }
+
+  @override
+  Future<int?> getTotalLedCount() async {
+    // For MQTT relay, we rely on cached state or need to query
+    // Since we don't have a direct info endpoint, return null for now
+    // The backend would need to support a getInfo command
+    debugPrint('🌐 MqttRelay: getTotalLedCount() - not yet supported via MQTT');
+    return null;
+  }
+
   /// Update the local cache with sent state.
   void _updateCache(Map<String, dynamic> sentPayload) {
     _cachedState ??= {};

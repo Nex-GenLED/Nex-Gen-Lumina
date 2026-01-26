@@ -223,6 +223,9 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Pixel count mismatch warning
+          _buildPixelCountWarning(),
+
           // Roofline info bar with quick actions
           _buildRooflineInfoBar(),
           const SizedBox(height: 16),
@@ -358,6 +361,156 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
     );
   }
 
+  /// Warning banner for Simple mode when pixel counts don't match.
+  Widget _buildSimpleModePixelWarning(CustomDesign design) {
+    final deviceLedCountAsync = ref.watch(deviceTotalLedCountProvider);
+
+    return deviceLedCountAsync.maybeWhen(
+      data: (deviceCount) {
+        if (deviceCount == null) return const SizedBox.shrink();
+
+        // Calculate total LEDs across all channels in the design
+        final appCount = design.channels.fold<int>(0, (sum, ch) => sum + ch.ledCount);
+
+        if (appCount == 0 || deviceCount == appCount) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber, color: Colors.orange, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Design: $appCount LEDs • Device: $deviceCount LEDs — Motion may flicker',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
+  /// Warning banner when pixel counts don't match between app and device.
+  Widget _buildPixelCountWarning() {
+    final deviceLedCountAsync = ref.watch(deviceTotalLedCountProvider);
+    final rooflineConfigAsync = ref.watch(currentRooflineConfigProvider);
+
+    return deviceLedCountAsync.maybeWhen(
+      data: (deviceCount) {
+        if (deviceCount == null) return const SizedBox.shrink();
+
+        return rooflineConfigAsync.maybeWhen(
+          data: (rooflineConfig) {
+            if (rooflineConfig == null) return const SizedBox.shrink();
+
+            final appCount = rooflineConfig.totalPixelCount;
+            final mismatch = deviceCount != appCount;
+
+            if (!mismatch) return const SizedBox.shrink();
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Pixel Count Mismatch',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'App: $appCount LEDs • Device: $deviceCount LEDs\n'
+                          'Motion patterns may flicker. Update roofline config to match.',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.orange, size: 20),
+                    tooltip: 'Sync pixel count',
+                    onPressed: () async {
+                      // Offer to sync app config to device count
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: NexGenPalette.gunmetal90,
+                          title: const Text(
+                            'Sync Pixel Count?',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          content: Text(
+                            'Would you like to update your roofline configuration to match the device ($deviceCount LEDs)?',
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: NexGenPalette.cyan,
+                              ),
+                              child: const Text('Update'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirmed == true) {
+                        // Navigate to roofline setup wizard
+                        if (context.mounted) {
+                          context.push(AppRoutes.rooflineSetupWizard);
+                        }
+                      }
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+          orElse: () => const SizedBox.shrink(),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
   /// Info bar showing roofline configuration summary.
   Widget _buildRooflineInfoBar() {
     final config = ref.watch(currentRooflineConfigProvider);
@@ -484,15 +637,80 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
   Future<void> _applySegmentPattern() async {
     if (_generatedPattern == null || _generatedPattern!.isEmpty) return;
 
+    // Validate pixel count before applying
+    final deviceLedCount = await ref.read(deviceTotalLedCountProvider.future);
+    final rooflineConfig = await ref.read(currentRooflineConfigProvider.future);
+
+    if (deviceLedCount != null && rooflineConfig != null) {
+      final appCount = rooflineConfig.totalPixelCount;
+      if (deviceLedCount != appCount) {
+        // Show warning dialog
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            title: Row(
+              children: [
+                const Icon(Icons.warning_amber, color: Colors.orange),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Pixel Count Mismatch',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your roofline configuration has $appCount LEDs, but your device is configured for $deviceLedCount LEDs.',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'This may cause flickering or unexpected behavior in motion patterns. For best results, ensure both values match.',
+                  style: TextStyle(
+                    color: Colors.orange.withValues(alpha: 0.9),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                child: const Text('Apply Anyway'),
+              ),
+            ],
+          ),
+        );
+
+        if (proceed != true) return;
+      }
+    }
+
     setState(() => _isApplying = true);
     try {
       final design = ref.read(currentDesignProvider);
       final generator = ref.read(segmentPatternGeneratorProvider);
 
-      // Build WLED payload for individual LED control
+      // Get total pixel count for proper segment boundaries
+      // This ensures motion effects wrap correctly at the last pixel
+      final totalPixels = rooflineConfig?.totalPixelCount ?? deviceLedCount ?? 200;
+
+      // Build WLED payload for individual LED control with explicit boundaries
       final payload = generator.toWledIndividualPayload(
         groups: _generatedPattern!,
         brightness: design?.brightness ?? 200,
+        totalPixelCount: totalPixels,
       );
 
       // Apply via WLED repository
@@ -604,6 +822,9 @@ class _DesignStudioScreenState extends ConsumerState<DesignStudioScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Pixel count mismatch warning (Simple mode)
+          _buildSimpleModePixelWarning(design),
+
           // Lumina AI Assistant
           const LuminaDesignAssistant(),
           const SizedBox(height: 16),
@@ -1134,127 +1355,214 @@ class _ChannelChip extends ConsumerWidget {
       text: channel.ledCount > 0 ? channel.ledCount.toString() : '',
     );
 
-    final result = await showDialog<int>(
+    // Get current device LED count for validation
+    final deviceLedCount = await ref.read(deviceTotalLedCountProvider.future);
+    final syncToDevice = ValueNotifier<bool>(true);
+
+    final result = await showDialog<({int count, bool sync})>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        title: Row(
-          children: [
-            const Icon(Icons.tune, color: NexGenPalette.cyan, size: 24),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Advanced Settings',
-                style: const TextStyle(color: Colors.white, fontSize: 18),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Zone: ${channel.channelName}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Number of lights in this zone:',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white, fontSize: 18),
-              decoration: InputDecoration(
-                hintText: 'e.g., 130',
-                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: NexGenPalette.gunmetal90,
+          title: Row(
+            children: [
+              const Icon(Icons.tune, color: NexGenPalette.cyan, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Advanced Settings',
+                  style: const TextStyle(color: Colors.white, fontSize: 18),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: NexGenPalette.cyan, width: 2),
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: Colors.blue, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'This was set up during installation. Only change if advised by support.',
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Zone: ${channel.channelName}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Show current device LED count if available
+                if (deviceLedCount != null)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.memory, color: NexGenPalette.cyan, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Device configured for $deviceLedCount LEDs',
+                            style: TextStyle(
+                              color: NexGenPalette.cyan,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Text(
+                  'Number of lights in this zone:',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white, fontSize: 18),
+                  decoration: InputDecoration(
+                    hintText: 'e.g., 130',
+                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: NexGenPalette.cyan, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Sync to device checkbox
+                ValueListenableBuilder<bool>(
+                  valueListenable: syncToDevice,
+                  builder: (ctx, sync, _) => CheckboxListTile(
+                    value: sync,
+                    onChanged: (val) => syncToDevice.value = val ?? true,
+                    title: const Text(
+                      'Sync to controller',
+                      style: TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Update WLED device with new pixel count',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
+                        color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 12,
                       ),
                     ),
+                    activeColor: NexGenPalette.cyan,
+                    checkColor: Colors.black,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
                   ),
-                ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Motion patterns may flicker if the pixel count doesn\'t match your physical installation.',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = int.tryParse(controller.text.trim());
+                if (value != null && value > 0 && value <= 2000) {
+                  Navigator.pop(ctx, (count: value, sync: syncToDevice.value));
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a number between 1 and 2000'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              },
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              child: const Text('Save'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            ),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = int.tryParse(controller.text.trim());
-              if (value != null && value > 0 && value <= 2000) {
-                Navigator.pop(ctx, value);
-              } else {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter a number between 1 and 2000'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-              }
-            },
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
 
     if (result != null) {
+      // Update local design state
       ref.read(currentDesignProvider.notifier).setChannelLedCount(
         channel.channelId,
-        result,
+        result.count,
       );
+
+      // Sync to WLED device if requested
+      if (result.sync) {
+        final success = await ref.read(updateSegmentConfigProvider)(
+          segmentId: channel.channelId,
+          start: 0,
+          stop: result.count,
+        );
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                success
+                    ? 'Pixel count updated on device (${result.count} LEDs)'
+                    : 'Failed to sync to device - changes saved locally only',
+              ),
+              backgroundColor: success ? Colors.green : Colors.orange,
+            ),
+          );
+        }
+
+        // Invalidate the device LED count provider to refresh
+        if (success) {
+          ref.invalidate(deviceTotalLedCountProvider);
+        }
+      }
     }
   }
 }

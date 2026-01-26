@@ -12,6 +12,14 @@ class MockWledRepository implements WledRepository {
   String? _lastLedMap;
   final List<String> _segNames = ['Segment 0', 'Segment 1', 'Segment 2'];
 
+  // Simulated segment configuration (start, stop for each segment)
+  final List<({int start, int stop})> _segConfig = [
+    (start: 0, stop: 100),
+    (start: 100, stop: 150),
+    (start: 150, stop: 200),
+  ];
+  int _totalLedCount = 200;
+
   final List<WledPreset> _presets = const [
     WledPreset(name: 'Warm White Architectural', json: {
       'on': true,
@@ -179,7 +187,15 @@ class MockWledRepository implements WledRepository {
   Future<bool> supportsRgbw() async => true;
 
   @override
-  Future<List<WledSegment>> fetchSegments() async => List.generate(_segNames.length, (i) => WledSegment(id: i, name: _segNames[i]));
+  Future<List<WledSegment>> fetchSegments() async => List.generate(
+        _segNames.length,
+        (i) => WledSegment(
+          id: i,
+          name: _segNames[i],
+          start: i < _segConfig.length ? _segConfig[i].start : 0,
+          stop: i < _segConfig.length ? _segConfig[i].stop : 0,
+        ),
+      );
 
   @override
   Future<bool> renameSegment({required int id, required String name}) async {
@@ -195,5 +211,31 @@ class MockWledRepository implements WledRepository {
     if (speed != null) _speed = speed.clamp(0, 255);
     // ignore fx/intensity in mock
     return true;
+  }
+
+  @override
+  Future<bool> updateSegmentConfig({
+    required int segmentId,
+    int? start,
+    int? stop,
+  }) async {
+    if (segmentId < 0 || segmentId >= _segConfig.length) return false;
+
+    final current = _segConfig[segmentId];
+    _segConfig[segmentId] = (
+      start: start ?? current.start,
+      stop: stop ?? current.stop,
+    );
+
+    // Update total LED count based on highest stop value
+    _totalLedCount = _segConfig.fold(0, (max, seg) => seg.stop > max ? seg.stop : max);
+
+    debugPrint('MockWLED updateSegmentConfig: seg=$segmentId start=$start stop=$stop, totalLeds=$_totalLedCount');
+    return true;
+  }
+
+  @override
+  Future<int?> getTotalLedCount() async {
+    return _totalLedCount;
   }
 }

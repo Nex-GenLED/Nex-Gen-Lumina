@@ -281,4 +281,34 @@ class CloudRelayRepository implements WledRepository {
 
   @override
   List<WledPreset> getPresets() => const [];
+
+  @override
+  Future<bool> updateSegmentConfig({
+    required int segmentId,
+    int? start,
+    int? stop,
+  }) async {
+    final Map<String, dynamic> segUpdate = {'id': segmentId};
+    if (start != null) segUpdate['start'] = start;
+    if (stop != null) segUpdate['stop'] = stop;
+
+    if (segUpdate.length <= 1) return true;
+
+    return _executeBool('updateSegmentConfig', {'seg': [segUpdate]});
+  }
+
+  @override
+  Future<int?> getTotalLedCount() async {
+    // For cloud relay, we need to query the device info
+    final result = await _executeCommand('getInfo', {});
+    if (result != null) {
+      final leds = result['leds'];
+      if (leds is Map) {
+        final count = leds['count'];
+        if (count is int) return count;
+        if (count is num) return count.toInt();
+      }
+    }
+    return null;
+  }
 }

@@ -312,21 +312,63 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
   /// Generate a WLED JSON payload for individual LED control.
   ///
   /// Uses WLED's "i" array for per-LED color assignment.
+  ///
+  /// [totalPixelCount] - Optional total pixel count to set segment boundaries.
+  /// This ensures motion effects wrap correctly at the last pixel.
   Map<String, dynamic> toWledIndividualPayload({
     required List<LedColorGroup> groups,
     required int brightness,
     int segmentId = 0,
+    int? totalPixelCount,
   }) {
     // Build the individual LED array
     // Format: [LED_INDEX, R, G, B, LED_INDEX, R, G, B, ...]
     final ledArray = <int>[];
 
+    // Track max LED index for segment boundary
+    int maxLed = 0;
+
     for (final group in groups) {
       for (int led = group.startLed; led <= group.endLed; led++) {
         ledArray.add(led);
         ledArray.addAll(group.color.take(3)); // R, G, B only
+        if (led > maxLed) maxLed = led;
       }
     }
+
+    // Determine stop position: use provided totalPixelCount or calculate from groups
+    final stopPosition = totalPixelCount ?? (maxLed + 1);
+
+    // Build segment configuration with explicit boundaries
+    // This is CRITICAL for motion effects to wrap correctly at pixel boundaries
+    final segmentConfig = <String, dynamic>{
+      'id': segmentId,
+      'start': 0,           // Segment starts at pixel 0
+      'stop': stopPosition, // Segment ends at last pixel (exclusive)
+      'i': ledArray,
+    };
+
+    return {
+      'on': true,
+      'bri': brightness,
+      'seg': [segmentConfig],
+    };
+  }
+
+  /// Generate a WLED JSON payload for motion effects (chase, rainbow, etc).
+  ///
+  /// This payload explicitly sets segment boundaries to ensure proper wrapping.
+  /// When a motion effect reaches the last pixel, it will wrap back to pixel 0.
+  Map<String, dynamic> toWledMotionPayload({
+    required int brightness,
+    required int effectId,
+    required int totalPixelCount,
+    List<List<int>>? colors,
+    int speed = 128,
+    int intensity = 128,
+    int segmentId = 0,
+  }) {
+    final effectColors = colors ?? [[255, 255, 255]];
 
     return {
       'on': true,
@@ -334,7 +376,12 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
       'seg': [
         {
           'id': segmentId,
-          'i': ledArray,
+          'start': 0,                // Start at pixel 0
+          'stop': totalPixelCount,   // End at last pixel (exclusive, so wraps correctly)
+          'col': effectColors,
+          'fx': effectId,
+          'sx': speed,
+          'ix': intensity,
         }
       ],
     };
@@ -343,6 +390,7 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
   /// Generate a standard WLED payload with segment-based colors.
   ///
   /// Uses the first few colors from the groups for the segment's color slots.
+  /// [totalPixelCount] - Optional total pixel count for segment boundaries.
   Map<String, dynamic> toWledSegmentPayload({
     required List<LedColorGroup> groups,
     required int brightness,
@@ -350,20 +398,27 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
     int speed = 128,
     int intensity = 128,
     int segmentId = 0,
+    int? totalPixelCount,
   }) {
     // Get unique colors (up to 3 for WLED)
     final colors = <List<int>>[];
+    int maxLed = 0;
+
     for (final group in groups) {
       final color = group.color.take(3).toList();
       if (!colors.any((c) => _colorsEqual(c, color))) {
         colors.add(color);
         if (colors.length >= 3) break;
       }
+      if (group.endLed > maxLed) maxLed = group.endLed;
     }
 
     if (colors.isEmpty) {
       colors.add([255, 255, 255]); // Default white
     }
+
+    // Determine stop position
+    final stopPosition = totalPixelCount ?? (maxLed + 1);
 
     return {
       'on': true,
@@ -371,6 +426,8 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
       'seg': [
         {
           'id': segmentId,
+          'start': 0,           // Explicit start boundary
+          'stop': stopPosition, // Explicit stop boundary for proper wrapping
           'col': colors,
           'fx': effectId,
           'sx': speed,
@@ -386,5 +443,31 @@ extension WledPayloadGeneration on SegmentPatternGenerator {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+}
+
+/// Validates pixel count configuration between app and device.
+class PixelCountValidator {
+  /// Check if app pixel count matches device pixel count.
+  static bool isValid({
+    required int appPixelCount,
+    required int devicePixelCount,
+  }) {
+    return appPixelCount == devicePixelCount;
+  }
+
+  /// Get a user-friendly message describing the mismatch.
+  static String getMismatchMessage({
+    required int appPixelCount,
+    required int devicePixelCount,
+  }) {
+    final difference = (appPixelCount - devicePixelCount).abs();
+    if (appPixelCount > devicePixelCount) {
+      return 'App configured for $appPixelCount LEDs, but device only has $devicePixelCount. '
+          '$difference LEDs will not be addressable.';
+    } else {
+      return 'Device has $devicePixelCount LEDs, but app configured for $appPixelCount. '
+          '$difference LEDs at the end will not be controlled.';
+    }
   }
 }

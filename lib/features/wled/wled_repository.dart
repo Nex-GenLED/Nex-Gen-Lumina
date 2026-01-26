@@ -24,6 +24,19 @@ abstract class WledRepository {
   /// Applies one payload (color/effect/speed) to multiple segments simultaneously.
   Future<bool> applyToSegments({required List<int> ids, Color? color, int? white, int? fx, int? speed, int? intensity}) async => false;
 
+  /// Updates segment configuration (start, stop position and/or length).
+  /// This is used to sync pixel counts from the app to the WLED device.
+  /// Returns true on success.
+  Future<bool> updateSegmentConfig({
+    required int segmentId,
+    int? start,
+    int? stop,
+  }) async => false;
+
+  /// Gets the total LED count configured on the device.
+  /// Returns null if unable to fetch.
+  Future<int?> getTotalLedCount() async => null;
+
   /// Optional: presets for demo mode. Real implementations may return empty.
   List<WledPreset> getPresets() => const [];
 }

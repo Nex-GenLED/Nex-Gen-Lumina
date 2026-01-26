@@ -399,4 +399,65 @@ class WledService implements WledRepository {
     }
     return _postJson({'seg': segs});
   }
+
+  @override
+  Future<bool> updateSegmentConfig({
+    required int segmentId,
+    int? start,
+    int? stop,
+  }) async {
+    if (_simulate) {
+      debugPrint('📤 WLED updateSegmentConfig (simulated): seg=$segmentId start=$start stop=$stop');
+      return true;
+    }
+
+    // Build segment update payload
+    // WLED uses 'start' and 'stop' for segment boundaries
+    final Map<String, dynamic> segUpdate = {'id': segmentId};
+    if (start != null) segUpdate['start'] = start;
+    if (stop != null) segUpdate['stop'] = stop;
+
+    if (segUpdate.length <= 1) {
+      // Nothing to update
+      return true;
+    }
+
+    final payload = {
+      'seg': [segUpdate]
+    };
+
+    debugPrint('📤 WLED updateSegmentConfig: $payload');
+    return _postJson(payload);
+  }
+
+  @override
+  Future<int?> getTotalLedCount() async {
+    if (_simulate) {
+      // Return a simulated count
+      return 200;
+    }
+
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.getUrl(_uri('/json/info'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final info = jsonDecode(body) as Map<String, dynamic>;
+        final leds = info['leds'];
+        if (leds is Map) {
+          // WLED returns total LED count in leds.count
+          final count = leds['count'];
+          if (count is int) return count;
+          if (count is num) return count.toInt();
+        }
+      }
+    } catch (e) {
+      debugPrint('WLED getTotalLedCount error: $e');
+    }
+    return null;
+  }
 }

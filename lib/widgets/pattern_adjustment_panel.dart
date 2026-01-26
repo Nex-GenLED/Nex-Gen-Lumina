@@ -122,6 +122,8 @@ class PatternAdjustmentPanel extends ConsumerStatefulWidget {
   final bool showEffectSelector;
   /// Callback when any value changes (for external state tracking)
   final void Function(PatternAdjustmentValues values)? onChanged;
+  /// Callback when colors are customized (pattern should be marked as "Custom")
+  final VoidCallback? onCustomized;
 
   const PatternAdjustmentPanel({
     super.key,
@@ -134,6 +136,7 @@ class PatternAdjustmentPanel extends ConsumerStatefulWidget {
     this.showPixelLayout = false,
     this.showEffectSelector = true,
     this.onChanged,
+    this.onCustomized,
   });
 
   @override
@@ -497,6 +500,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                       debugPrint('Apply custom palette failed: $e');
                     }
                   },
+                  onCustomized: widget.onCustomized,
                 );
               }),
             ],
