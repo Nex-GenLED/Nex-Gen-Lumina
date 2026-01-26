@@ -1450,6 +1450,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           'fx': state.effectId,
           'sx': state.speed,
           'ix': state.intensity,
+          'pal': 0,  // Use direct colors, no palette
           'col': [[
             (c.r * 255.0).round().clamp(0, 255),
             (c.g * 255.0).round().clamp(0, 255),

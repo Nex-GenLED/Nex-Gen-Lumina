@@ -30,6 +30,7 @@ final currentUserHabitLearnerProvider = Provider<HabitLearner?>((ref) {
 // ==================== Favorites ====================
 
 /// System default favorites that are always available
+/// Payload structure matches pattern_models.dart toWledPayload() for consistency
 final _systemDefaultFavorites = [
   FavoritePattern(
     id: 'system_warm_white',
@@ -39,7 +40,15 @@ final _systemDefaultFavorites = [
     patternData: {
       'on': true,
       'bri': 220,
-      'seg': [{'id': 0, 'fx': 0, 'col': [[255, 180, 100, 255]]}]
+      'seg': [
+        {
+          'fx': 0,       // Solid effect
+          'sx': 128,     // Speed (not used for solid)
+          'ix': 128,     // Intensity (not used for solid)
+          'pal': 0,      // No palette - use direct colors
+          'col': [[255, 180, 100, 255]],  // Warm amber + white channel
+        }
+      ]
     },
     autoAdded: false,
   ),
@@ -51,7 +60,15 @@ final _systemDefaultFavorites = [
     patternData: {
       'on': true,
       'bri': 255,
-      'seg': [{'id': 0, 'fx': 0, 'col': [[255, 255, 255, 255]]}]
+      'seg': [
+        {
+          'fx': 0,       // Solid effect
+          'sx': 128,     // Speed (not used for solid)
+          'ix': 128,     // Intensity (not used for solid)
+          'pal': 0,      // No palette - use direct colors
+          'col': [[255, 255, 255, 255]],  // Full white RGB + white channel
+        }
+      ]
     },
     autoAdded: false,
   ),

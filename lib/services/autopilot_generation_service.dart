@@ -199,8 +199,11 @@ class AutopilotGenerationService {
         'bri': 180,
         'seg': [
           {
-            'col': [[255, 250, 244, 0]], // Warm white
             'fx': 0, // Solid
+            'sx': 128,
+            'ix': 128,
+            'pal': 0, // Use direct colors
+            'col': [[255, 250, 244, 0]], // Warm white
           }
         ],
       };
@@ -382,8 +385,11 @@ class AutopilotGenerationService {
           'bri': 180,
           'seg': [
             {
-              'col': [[255, 250, 244, 200]], // Warm white with W channel
               'fx': 0, // Solid
+              'sx': 128,
+              'ix': 128,
+              'pal': 0,
+              'col': [[255, 250, 244, 200]], // Warm white with W channel
             }
           ],
         },
@@ -405,8 +411,11 @@ class AutopilotGenerationService {
           'bri': 200,
           'seg': [
             {
-              'col': colors,
               'fx': 0, // Solid
+              'sx': 128,
+              'ix': 128,
+              'pal': 0,
+              'col': colors,
             }
           ],
         },
@@ -421,8 +430,11 @@ class AutopilotGenerationService {
         'bri': 180,
         'seg': [
           {
-            'col': [[255, 180, 100, 200]], // Warm amber with W channel
             'fx': 0,
+            'sx': 128,
+            'ix': 128,
+            'pal': 0,
+            'col': [[255, 180, 100, 200]], // Warm amber with W channel
           }
         ],
       },
@@ -443,8 +455,11 @@ class AutopilotGenerationService {
           'bri': isWeekend ? 200 : 150,
           'seg': [
             {
-              'col': [[255, 250, 244, 200]], // RGBW format
               'fx': 0,
+              'sx': 128,
+              'ix': 128,
+              'pal': 0,
+              'col': [[255, 250, 244, 200]], // RGBW format
             }
           ],
         },
@@ -459,8 +474,11 @@ class AutopilotGenerationService {
           'bri': 220,
           'seg': [
             {
-              'col': [[255, 200, 150, 150], [255, 180, 120, 120]], // RGBW format
               'fx': 0,
+              'sx': 128,
+              'ix': 128,
+              'pal': 0,
+              'col': [[255, 200, 150, 150], [255, 180, 120, 120]], // RGBW format
             }
           ],
         },
@@ -474,8 +492,11 @@ class AutopilotGenerationService {
         'bri': 150,
         'seg': [
           {
-            'col': [[255, 220, 180, 180]], // RGBW format
             'fx': 0,
+            'sx': 128,
+            'ix': 128,
+            'pal': 0,
+            'col': [[255, 220, 180, 180]], // RGBW format
           }
         ],
       },
