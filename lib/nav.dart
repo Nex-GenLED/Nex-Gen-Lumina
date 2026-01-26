@@ -1253,32 +1253,66 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             FavoritesGrid(
               onPatternTap: (favorite) async {
                 final repo = ref.read(wledRepositoryProvider);
-                if (repo == null) return;
-
-                try {
-                  final payload = favorite.patternData;
-                  await repo.applyJson(payload);
-
-                  // Record favorite usage
-                  await ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id);
-
-                  // Track overall usage
-                  ref.trackWledPayload(
-                    payload: payload,
-                    patternName: favorite.patternName,
-                    source: 'favorite',
-                  );
-
+                if (repo == null) {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Applied: ${favorite.patternName}')),
+                      const SnackBar(content: Text('No controller connected')),
                     );
+                  }
+                  return;
+                }
+
+                try {
+                  debugPrint('Applying favorite: ${favorite.patternName}');
+                  debugPrint('Pattern data: ${favorite.patternData}');
+
+                  final payload = favorite.patternData;
+                  final success = await repo.applyJson(payload);
+
+                  if (success) {
+                    // Update the active pattern label immediately for UI feedback
+                    ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
+
+                    // Record favorite usage (don't await - fire and forget)
+                    try {
+                      ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id);
+                    } catch (_) {}
+
+                    // Track overall usage
+                    try {
+                      ref.trackWledPayload(
+                        payload: payload,
+                        patternName: favorite.patternName,
+                        source: 'favorite',
+                      );
+                    } catch (_) {}
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Applied: ${favorite.patternName}'),
+                          backgroundColor: Colors.green.shade700,
+                        ),
+                      );
+                    }
+                  } else {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Failed to apply pattern'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
                   }
                 } catch (e) {
                   debugPrint('Apply favorite failed: $e');
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to apply: $e')),
+                      SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: Colors.red,
+                      ),
                     );
                   }
                 }

@@ -85,10 +85,10 @@ class WledService implements WledRepository {
       };
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final req = await client.getUrl(_uri('/json/state'));
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 5));
+      final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -176,7 +176,7 @@ class WledService implements WledRepository {
         _uri('/json/state'),
         headers: {'Content-Type': 'application/json'},
         body: body,
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 15));
 
       debugPrint('📥 WLED Response: ${response.statusCode}');
       debugPrint('   Body: ${response.body}');
@@ -241,7 +241,7 @@ class WledService implements WledRepository {
     }
     try {
       final boundary = '----dart-ar-ledmap-${DateTime.now().millisecondsSinceEpoch}';
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final req = await client.postUrl(_uri('/edit'));
       req.headers.set(HttpHeaders.contentTypeHeader, 'multipart/form-data; boundary=$boundary');
 
@@ -267,7 +267,7 @@ class WledService implements WledRepository {
       write('--$boundary--\r\n');
 
       req.add(builder.takeBytes());
-      final res = await req.close().timeout(const Duration(seconds: 5));
+      final res = await req.close().timeout(const Duration(seconds: 15));
       client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) return true;
       final body = await res.transform(utf8.decoder).join();
@@ -326,10 +326,10 @@ class WledService implements WledRepository {
       return true;
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final req = await client.getUrl(_uri('/json/info'));
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 5));
+      final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
