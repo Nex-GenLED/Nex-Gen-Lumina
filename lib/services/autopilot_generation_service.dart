@@ -382,7 +382,7 @@ class AutopilotGenerationService {
           'bri': 180,
           'seg': [
             {
-              'col': [[255, 250, 244]], // Warm white
+              'col': [[255, 250, 244, 200]], // Warm white with W channel
               'fx': 0, // Solid
             }
           ],
@@ -392,9 +392,10 @@ class AutopilotGenerationService {
 
     // Use event colors if available
     if (event.suggestedColors != null && event.suggestedColors!.isNotEmpty) {
+      // Convert to RGBW format (W=0 for saturated colors)
       final colors = event.suggestedColors!
           .take(3)
-          .map((c) => [c.red, c.green, c.blue])
+          .map((c) => [c.red, c.green, c.blue, 0])
           .toList();
 
       return {
@@ -420,7 +421,7 @@ class AutopilotGenerationService {
         'bri': 180,
         'seg': [
           {
-            'col': [[255, 180, 100]], // Warm amber
+            'col': [[255, 180, 100, 200]], // Warm amber with W channel
             'fx': 0,
           }
         ],
@@ -442,7 +443,7 @@ class AutopilotGenerationService {
           'bri': isWeekend ? 200 : 150,
           'seg': [
             {
-              'col': [[255, 250, 244]],
+              'col': [[255, 250, 244, 200]], // RGBW format
               'fx': 0,
             }
           ],
@@ -458,7 +459,7 @@ class AutopilotGenerationService {
           'bri': 220,
           'seg': [
             {
-              'col': [[255, 200, 150], [255, 180, 120]],
+              'col': [[255, 200, 150, 150], [255, 180, 120, 120]], // RGBW format
               'fx': 0,
             }
           ],
@@ -473,7 +474,7 @@ class AutopilotGenerationService {
         'bri': 150,
         'seg': [
           {
-            'col': [[255, 220, 180]],
+            'col': [[255, 220, 180, 180]], // RGBW format
             'fx': 0,
           }
         ],

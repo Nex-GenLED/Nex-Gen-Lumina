@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -28,22 +29,51 @@ final currentUserHabitLearnerProvider = Provider<HabitLearner?>((ref) {
 
 // ==================== Favorites ====================
 
-/// Stream of user's favorite patterns
+/// System default favorites that are always available
+final _systemDefaultFavorites = [
+  FavoritePattern(
+    id: 'system_warm_white',
+    patternName: 'Warm White',
+    addedAt: DateTime(2024, 1, 1),
+    usageCount: 0,
+    patternData: {
+      'on': true,
+      'bri': 220,
+      'seg': [{'id': 0, 'fx': 0, 'col': [[255, 180, 100, 255]]}]
+    },
+    autoAdded: false,
+  ),
+  FavoritePattern(
+    id: 'system_bright_white',
+    patternName: 'Bright White',
+    addedAt: DateTime(2024, 1, 1),
+    usageCount: 0,
+    patternData: {
+      'on': true,
+      'bri': 255,
+      'seg': [{'id': 0, 'fx': 0, 'col': [[255, 255, 255, 255]]}]
+    },
+    autoAdded: false,
+  ),
+];
+
+/// Stream of user's favorite patterns (includes system defaults)
 final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern>>((ref) async* {
   final user = ref.watch(authStateProvider).value;
   if (user == null) {
-    yield [];
+    // Return only system defaults when not logged in
+    yield _systemDefaultFavorites;
     return;
   }
 
   final userService = ref.watch(userServiceProvider);
   await for (final favoritesData in userService.streamFavorites(user.uid)) {
-    final favorites = favoritesData
+    final userFavorites = favoritesData
         .map((data) => FavoritePattern.fromJson(data))
         .toList();
 
-    // Sort by usage and recency
-    favorites.sort((a, b) {
+    // Sort user favorites by usage and recency
+    userFavorites.sort((a, b) {
       // Manual favorites first
       if (a.autoAdded != b.autoAdded) {
         return a.autoAdded ? 1 : -1;
@@ -56,7 +86,14 @@ final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern
       return b.usageCount.compareTo(a.usageCount);
     });
 
-    yield favorites;
+    // Combine system defaults with user favorites
+    // System defaults appear first, then user patterns
+    final combined = <FavoritePattern>[
+      ..._systemDefaultFavorites,
+      ...userFavorites,
+    ];
+
+    yield combined;
   }
 });
 
@@ -289,31 +326,15 @@ class UsageLoggerNotifier extends AutoDisposeAsyncNotifier<void> {
     int? intensity,
     Map<String, dynamic>? wledPayload,
   }) async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
+    try {
+      final user = ref.read(authStateProvider).value;
+      if (user == null) return;
 
-    final userService = ref.read(userServiceProvider);
-    await userService.logPatternUsage(
-      userId: user.uid,
-      source: source,
-      patternName: patternName,
-      colorNames: colorNames,
-      effectId: effectId,
-      effectName: effectName,
-      paletteId: paletteId,
-      brightness: brightness,
-      speed: speed,
-      intensity: intensity,
-      wled: wledPayload,
-    );
-
-    // Contribute to global analytics if user has opted in
-    final aggregator = ref.read(currentUserAnalyticsProvider);
-    if (aggregator != null) {
-      final event = PatternUsageEvent(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        createdAt: DateTime.now(),
+      final userService = ref.read(userServiceProvider);
+      await userService.logPatternUsage(
+        userId: user.uid,
         source: source,
+        patternName: patternName,
         colorNames: colorNames,
         effectId: effectId,
         effectName: effectName,
@@ -321,14 +342,35 @@ class UsageLoggerNotifier extends AutoDisposeAsyncNotifier<void> {
         brightness: brightness,
         speed: speed,
         intensity: intensity,
-        wledPayload: wledPayload,
-        patternName: patternName,
+        wled: wledPayload,
       );
 
-      // Fire and forget - don't block on analytics
-      aggregator.contributePatternUsage(event).catchError((e) {
-        // Silently fail - analytics should never block user experience
-      });
+      // Contribute to global analytics if user has opted in
+      final aggregator = ref.read(currentUserAnalyticsProvider);
+      if (aggregator != null) {
+        final event = PatternUsageEvent(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          createdAt: DateTime.now(),
+          source: source,
+          colorNames: colorNames,
+          effectId: effectId,
+          effectName: effectName,
+          paletteId: paletteId,
+          brightness: brightness,
+          speed: speed,
+          intensity: intensity,
+          wledPayload: wledPayload,
+          patternName: patternName,
+        );
+
+        // Fire and forget - don't block on analytics
+        aggregator.contributePatternUsage(event).catchError((e) {
+          // Silently fail - analytics should never block user experience
+        });
+      }
+    } catch (e) {
+      // Silently fail - usage logging should never crash the app
+      debugPrint('❌ UsageLoggerNotifier.logUsage failed: $e');
     }
   }
 }

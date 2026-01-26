@@ -26,6 +26,7 @@ import 'package:nexgen_command/features/auth/forgot_password_page.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/ble/device_setup_page.dart';
 import 'package:nexgen_command/features/ble/controller_setup_wizard.dart';
 import 'package:nexgen_command/features/ble/wifi_connect_page_hybrid.dart';
@@ -1140,194 +1141,50 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           const SizedBox(height: 12),
                           Consumer(builder: (context, ref, _) {
                             final state = ref.watch(wledStateProvider);
-                            // Extract current colors from device state if available
+                            // Extract current color from device state
                             List<List<int>>? colors;
                             if (state.connected) {
-                              // Use the primary color from state as a starting point
                               final c = state.color;
-                              colors = [[(c.r * 255.0).round().clamp(0, 255), (c.g * 255.0).round().clamp(0, 255), (c.b * 255.0).round().clamp(0, 255)]];
+                              colors = [[
+                                (c.r * 255.0).round().clamp(0, 255),
+                                (c.g * 255.0).round().clamp(0, 255),
+                                (c.b * 255.0).round().clamp(0, 255),
+                              ]];
                             }
-                            return PatternAdjustmentPanel(
-                              initialSpeed: state.speed,
-                              initialIntensity: state.intensity, // Use actual device intensity
-                              initialReverse: false,
-                              initialEffectId: state.effectId, // Pre-populate with current effect from device
-                              initialColors: colors,
-                              showColors: false, // Hide color sequence on home screen for simplicity
-                              showPixelLayout: false,
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                PatternAdjustmentPanel(
+                                  initialSpeed: state.speed,
+                                  initialIntensity: state.intensity,
+                                  initialReverse: false,
+                                  initialEffectId: state.effectId,
+                                  initialColors: colors,
+                                  showColors: true, // Show color sequence for editing
+                                  showPixelLayout: false,
+                                ),
+                                const SizedBox(height: 16),
+                                // Save As button
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => _showSavePatternDialog(context, ref, state),
+                                    icon: const Icon(Icons.save_alt_rounded),
+                                    label: const Text('Save As Custom Pattern'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: NexGenPalette.cyan,
+                                      side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             );
                           }),
                         ],
                       ),
                     )
                   : const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 12),
-            // Quick preset buttons should remain BETWEEN the image and Zones & Segments row
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Quick Control'.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium, letterSpacing: 1.1)),
-                const SizedBox(height: 10),
-                _QuickPresetButtons(onRunSchedule: () async {
-              // Find the current scheduled action based on time and day
-              final currentSchedule = ref.read(currentScheduledActionProvider);
-
-              if (currentSchedule == null) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No schedule is active right now')),
-                );
-                return;
-              }
-
-              final repo = ref.read(wledRepositoryProvider);
-              if (repo == null) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No controller connected')),
-                );
-                return;
-              }
-
-              debugPrint('📅 Run Schedule: Applying "${currentSchedule.actionLabel}" from schedule "${currentSchedule.timeLabel}"');
-
-              try {
-                final action = currentSchedule.actionLabel.trim();
-                final actionLower = action.toLowerCase();
-
-                if (actionLower.contains('turn off') || actionLower == 'off') {
-                  // Turn off the lights
-                  await repo.applyJson({'on': false});
-                  ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
-
-                  // Track usage
-                  ref.trackPowerToggle(isOn: false, source: 'schedule');
-                } else if (actionLower.startsWith('brightness')) {
-                  // Set brightness - parse percentage from "Brightness: 70%"
-                  final match = RegExp(r'(\d{1,3})%').firstMatch(action);
-                  final brightness = int.tryParse(match?.group(1) ?? '') ?? 100;
-                  final bri = (brightness * 255 / 100).round().clamp(0, 255);
-                  await repo.applyJson({'on': true, 'bri': bri});
-                  ref.read(activePresetLabelProvider.notifier).state = 'Brightness $brightness%';
-                } else if (actionLower.startsWith('pattern')) {
-                  // Apply pattern - extract pattern name from "Pattern: Warm White Glow"
-                  final idx = action.indexOf(':');
-                  final patternName = (idx != -1 && idx + 1 < action.length)
-                      ? action.substring(idx + 1).trim()
-                      : action.replaceFirst(RegExp(r'^(?i)pattern'), '').trim();
-
-                  // Look up pattern in the library
-                  final library = ref.read(publicPatternLibraryProvider);
-                  final pattern = library.all.where(
-                    (p) => p.name.toLowerCase() == patternName.toLowerCase()
-                  ).firstOrNull;
-
-                  if (pattern != null) {
-                    // Apply the pattern's WLED payload
-                    await repo.applyJson(pattern.toWledPayload());
-                    ref.read(activePresetLabelProvider.notifier).state = patternName;
-
-                    // Track usage
-                    ref.trackPatternUsage(pattern: pattern, source: 'schedule');
-                  } else {
-                    // Pattern not found in library - try a generic solid color approach
-                    debugPrint('⚠️ Pattern "$patternName" not found in library, applying generic');
-                    await repo.applyJson({
-                      'on': true,
-                      'bri': 200,
-                      'seg': [{'id': 0, 'fx': 0}] // Solid effect
-                    });
-                    ref.read(activePresetLabelProvider.notifier).state = patternName;
-                  }
-                } else if (actionLower.contains('turn on') || actionLower == 'on') {
-                  // Turn on with default brightness
-                  await repo.applyJson({'on': true, 'bri': 200});
-                  ref.read(activePresetLabelProvider.notifier).state = 'On (Scheduled)';
-                } else {
-                  // Unknown action type - just turn on
-                  debugPrint('⚠️ Unknown schedule action: $action');
-                  await repo.applyJson({'on': true});
-                  ref.read(activePresetLabelProvider.notifier).state = action;
-                }
-
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Applied: ${currentSchedule.actionLabel}'),
-                    backgroundColor: Colors.green.shade700,
-                  ),
-                );
-              } catch (e) {
-                debugPrint('❌ Run Schedule failed: $e');
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Failed to apply schedule: $e'),
-                    backgroundColor: Colors.red.shade700,
-                  ),
-                );
-              }
-            }, onWarmWhite: () async {
-              debugPrint('🌡️ Warm White button pressed');
-              final repo = ref.read(wledRepositoryProvider);
-              if (repo == null) {
-                debugPrint('❌ Warm White: repo is null (no device selected)');
-                return;
-              }
-              // Set static effect (fx: 0) with warm white color
-              try {
-                // Use applyJson to set effect to Solid (0) and warm white color
-                final payload = {
-                  'on': true,
-                  'bri': 220,
-                  'seg': [
-                    {'id': 0, 'fx': 0, 'col': [[255, 180, 100, 255]]}  // Warm white: amber RGB + full W
-                  ]
-                };
-                await repo.applyJson(payload);
-                ref.read(activePresetLabelProvider.notifier).state = 'Warm White';
-
-                // Track usage
-                ref.trackWledPayload(
-                  payload: payload,
-                  patternName: 'Warm White',
-                  source: 'quick_action',
-                );
-              } catch (e) {
-                debugPrint('Warm White quick action failed: $e');
-              }
-            }, onBrightWhite: () async {
-              debugPrint('💡 Bright White button pressed');
-              final repo = ref.read(wledRepositoryProvider);
-              if (repo == null) {
-                debugPrint('❌ Bright White: repo is null');
-                return;
-              }
-              try {
-                // Set static effect (fx: 0) with full white on all channels
-                final payload = {
-                  'on': true,
-                  'bri': 255,
-                  'seg': [
-                    {'id': 0, 'fx': 0, 'col': [[255, 255, 255, 255]]}  // Full RGB + full W
-                  ]
-                };
-                final ok = await repo.applyJson(payload);
-                debugPrint('💡 Bright White result: $ok');
-                ref.read(activePresetLabelProvider.notifier).state = 'Bright White';
-
-                // Track usage
-                ref.trackWledPayload(
-                  payload: payload,
-                  patternName: 'Bright White',
-                  source: 'quick_action',
-                );
-              } catch (e) {
-                debugPrint('Bright White quick action failed: $e');
-              }
-            }),
-              ]),
             ),
             const SizedBox(height: 12),
             // Section B: Design Studio button
@@ -1439,7 +1296,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
           ]),
         ),
-        const Align(alignment: Alignment.bottomCenter, child: LuminaChatBar()),
         // Voice control FAB - giant microphone button with glow animation
         Positioned(
           right: 20,
@@ -1486,6 +1342,119 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         ),
       ),
     );
+  }
+
+  /// Show dialog to save current pattern configuration as a custom pattern
+  Future<void> _showSavePatternDialog(BuildContext context, WidgetRef ref, WledStateModel state) async {
+    final nameController = TextEditingController();
+
+    final patternName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Save Custom Pattern'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Save the current settings as a new custom pattern that you can apply anytime.',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Pattern Name',
+                hintText: 'e.g., My Evening Glow',
+                filled: true,
+                fillColor: Colors.black26,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: NexGenPalette.line),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: NexGenPalette.cyan),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.pop(ctx, name);
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (patternName == null || patternName.isEmpty) return;
+
+    // Build the WLED payload from current state
+    final c = state.color;
+    final payload = {
+      'on': true,
+      'bri': state.brightness,
+      'seg': [
+        {
+          'fx': state.effectId,
+          'sx': state.speed,
+          'ix': state.intensity,
+          'col': [[
+            (c.r * 255.0).round().clamp(0, 255),
+            (c.g * 255.0).round().clamp(0, 255),
+            (c.b * 255.0).round().clamp(0, 255),
+            state.warmWhite,
+          ]],
+        }
+      ],
+    };
+
+    // Save to favorites
+    try {
+      await ref.read(favoritesNotifierProvider.notifier).addFavorite(
+        patternName: patternName,
+        patternData: payload,
+        autoAdded: false,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Pattern "$patternName" saved to favorites'),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+        // Close the adjustment panel
+        setState(() => _adjustmentPanelExpanded = false);
+      }
+    } catch (e) {
+      debugPrint('Failed to save pattern: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save pattern: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
   }
 }
 
@@ -1864,70 +1833,6 @@ class _GlassActionButton extends StatelessWidget {
             child: Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.max, children: [
               Icon(icon, color: NexGenPalette.cyan, size: 20),
               const SizedBox(width: 8),
-              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelLarge)),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickPresetButtons extends StatelessWidget {
-  final VoidCallback onRunSchedule;
-  final VoidCallback onWarmWhite;
-  final VoidCallback onBrightWhite;
-  const _QuickPresetButtons({required this.onRunSchedule, required this.onWarmWhite, required this.onBrightWhite});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = [
-      _QuickPresetButton(icon: Icons.schedule_rounded, label: 'Run Schedule', onTap: onRunSchedule),
-      _QuickPresetButton(icon: Icons.wb_twilight, label: 'Warm White', onTap: onWarmWhite),
-      _QuickPresetButton(icon: Icons.wb_sunny_rounded, label: 'Bright White', onTap: onBrightWhite),
-    ];
-    return LayoutBuilder(builder: (context, constraints) {
-      final isNarrow = constraints.maxWidth < 360;
-      if (isNarrow) {
-        return Wrap(spacing: 10, runSpacing: 10, children: items.map((w) => SizedBox(width: (constraints.maxWidth - 10) / 2, child: w)).toList());
-      }
-      return Row(children: [
-        Expanded(child: items[0]),
-        const SizedBox(width: 10),
-        Expanded(child: items[1]),
-        const SizedBox(width: 10),
-        Expanded(child: items[2]),
-      ]);
-    });
-  }
-}
-
-class _QuickPresetButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _QuickPresetButton({required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: NexGenPalette.line),
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(icon, color: NexGenPalette.cyan, size: 18),
-              const SizedBox(width: 6),
               Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelLarge)),
             ]),
           ),

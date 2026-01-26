@@ -1,3 +1,5 @@
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+
 /// SmartPattern represents a WLED-ready lighting pattern configuration.
 ///
 /// Fields align with common WLED API parameters and app needs.
@@ -58,7 +60,7 @@ class SmartPattern {
   /// {
   ///   'seg': [
   ///     {
-  ///       'col': colors,
+  ///       'col': [[r, g, b, w], ...],  // RGBW format required by WLED
   ///       'fx': effectId,
   ///       'sx': speed,
   ///       'ix': intensity,
@@ -68,8 +70,17 @@ class SmartPattern {
   ///   ]
   /// }
   Map<String, dynamic> toJson() {
+    // Convert RGB colors to RGBW format for WLED
+    // Force W=0 for saturated colors to maintain color accuracy
+    final rgbwColors = colors.take(3).map((rgb) {
+      if (rgb.length >= 3) {
+        return rgbToRgbw(rgb[0], rgb[1], rgb[2], forceZeroWhite: true);
+      }
+      return [255, 255, 255, 0]; // Fallback white
+    }).toList();
+
     final seg = <String, dynamic>{
-      'col': colors,
+      'col': rgbwColors,
       'fx': effectId,
       'sx': speed,
       'ix': intensity,

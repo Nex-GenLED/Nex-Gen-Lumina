@@ -215,44 +215,67 @@ class _FavoritePatternCard extends ConsumerWidget {
                   ),
                 ),
               ),
-            // Remove button
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: IconButton(
-                icon: Icon(
-                  Icons.remove_circle_outline_rounded,
-                  size: 20,
-                  color: NexGenPalette.textSecondary.withOpacity(0.5),
-                ),
-                onPressed: () async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      backgroundColor: NexGenPalette.cardBackground,
-                      title: const Text('Remove Favorite'),
-                      content: Text('Remove "${favorite.patternName}" from favorites?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: const Text('Remove'),
-                        ),
-                      ],
-                    ),
-                  );
+            // Remove button (only for non-system favorites)
+            if (!favorite.id.startsWith('system_'))
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: IconButton(
+                  icon: Icon(
+                    Icons.remove_circle_outline_rounded,
+                    size: 20,
+                    color: NexGenPalette.textSecondary.withOpacity(0.5),
+                  ),
+                  onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: NexGenPalette.cardBackground,
+                        title: const Text('Remove Favorite'),
+                        content: Text('Remove "${favorite.patternName}" from favorites?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ),
+                    );
 
-                  if (confirmed == true) {
-                    await ref
-                        .read(favoritesNotifierProvider.notifier)
-                        .removeFavorite(favorite.id);
-                  }
-                },
+                    if (confirmed == true) {
+                      await ref
+                          .read(favoritesNotifierProvider.notifier)
+                          .removeFavorite(favorite.id);
+                    }
+                  },
+                ),
               ),
-            ),
+            // System default badge
+            if (favorite.id.startsWith('system_'))
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.cyan.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: NexGenPalette.cyan.withOpacity(0.4),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.star_rounded,
+                    size: 14,
+                    color: NexGenPalette.cyan,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

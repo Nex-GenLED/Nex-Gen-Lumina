@@ -1242,7 +1242,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       return;
                     }
 
-                    final id = widget.editing?.id ?? DateTime.now().millisecondsSinceEpoch.toString();
+                    // Use the original ID when editing, or generate a new one
+                    final id = widget.editing?.id ?? 'sch-${DateTime.now().millisecondsSinceEpoch}';
                     final timeLabel = _trigger == _TriggerType.specificTime ? _formatTime(_time) : _solar;
                     final days = _selectedDays.map((i) => _dayAbbr[i]).toList(growable: false);
                     String actionLabel;
@@ -1259,19 +1260,30 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     }
 
                     final item = ScheduleItem(
-                      id: id.startsWith('sch-') ? id : 'sch-$id',
+                      id: id, // Use ID as-is to match existing schedule
                       timeLabel: timeLabel,
                       repeatDays: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
                     );
 
-                    if (widget.editing == null) {
-                      ref.read(schedulesProvider.notifier).add(item);
-                    } else {
-                      ref.read(schedulesProvider.notifier).update(item);
+                    try {
+                      if (widget.editing == null) {
+                        await ref.read(schedulesProvider.notifier).add(item);
+                      } else {
+                        await ref.read(schedulesProvider.notifier).update(item);
+                      }
+                      if (context.mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    } catch (e) {
+                      debugPrint('Schedule save/update failed: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to save schedule: $e')),
+                        );
+                      }
                     }
-                    Navigator.of(context).pop();
                   },
                   child: Text(widget.editing == null ? 'Save Schedule' : 'Update Schedule'),
                 ),
@@ -1689,7 +1701,32 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
                           );
                         }())} • ${it.actionLabel}',
                         onTap: () => showScheduleEditor(context, ref, editing: it),
-                        onDelete: () => ref.read(schedulesProvider.notifier).remove(it.id),
+                        onDelete: () async {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              backgroundColor: NexGenPalette.gunmetal90,
+                              title: const Text('Delete Schedule?'),
+                              content: Text('Delete "${_labelFromAction(it.actionLabel)}" schedule?\n\nThis will remove it from all selected days.'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.of(ctx).pop(true),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red.shade700,
+                                  ),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmed == true) {
+                            ref.read(schedulesProvider.notifier).remove(it.id);
+                          }
+                        },
                       ),
                   ]),
               ]),

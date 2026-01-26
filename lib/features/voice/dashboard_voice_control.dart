@@ -183,7 +183,7 @@ class VoiceCommandHandler {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return 'No controller connected';
 
-      // Warm white: RGB(255, 244, 229) - soft warm glow
+      // Warm white: amber RGB + full W channel for proper RGBW
       final payload = {
         'on': true,
         'bri': 200,
@@ -192,7 +192,7 @@ class VoiceCommandHandler {
             'id': 0,
             'fx': 0, // Solid effect
             'col': [
-              [255, 244, 229], // Warm white
+              [255, 180, 100, 255], // Warm white: amber RGB + full W
             ],
           }
         ],
@@ -212,7 +212,7 @@ class VoiceCommandHandler {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return 'No controller connected';
 
-      // Bright white: RGB(255, 255, 255) - pure white
+      // Bright white: full RGB + full W channel for maximum brightness
       final payload = {
         'on': true,
         'bri': 255,
@@ -221,7 +221,7 @@ class VoiceCommandHandler {
             'id': 0,
             'fx': 0, // Solid effect
             'col': [
-              [255, 255, 255], // Bright white
+              [255, 255, 255, 255], // Full RGB + full W
             ],
           }
         ],
@@ -241,7 +241,7 @@ class VoiceCommandHandler {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return 'No controller connected';
 
-      // Festive: Red & Green chase effect
+      // Festive: Red & Green chase effect (W=0 for saturated colors)
       final payload = {
         'on': true,
         'bri': 255,
@@ -251,9 +251,9 @@ class VoiceCommandHandler {
             'fx': 28, // Chase effect
             'sx': 150, // Medium-fast speed
             'col': [
-              [255, 0, 0], // Red
-              [0, 255, 0], // Green
-              [0, 0, 0], // Black spacer
+              [255, 0, 0, 0], // Red
+              [0, 255, 0, 0], // Green
+              [0, 0, 0, 0], // Black spacer
             ],
           }
         ],
