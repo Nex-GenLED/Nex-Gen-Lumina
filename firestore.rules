@@ -96,6 +96,21 @@ service cloud.firestore {
         // Users can delete commands (cleanup)
         allow delete: if isOwner(userId);
       }
+
+      // Geofences subcollection - location-based automation triggers
+      match /geofences/{geofenceId} {
+        // Users can read their own geofences
+        allow read: if isOwner(userId);
+
+        // Users can create geofences
+        allow create: if isOwner(userId);
+
+        // Users can update their geofences
+        allow update: if isOwner(userId);
+
+        // Users can delete their geofences
+        allow delete: if isOwner(userId);
+      }
     }
     
     // Sites - private to each user

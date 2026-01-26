@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Status of a remote command in the queue.
@@ -44,32 +46,56 @@ class RemoteCommand {
   /// Create from Firestore document.
   factory RemoteCommand.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
+
+    // Parse payload from JSON string (to avoid nested array issues)
+    Map<String, dynamic> parsedPayload = {};
+    final payloadData = data['payload'];
+    if (payloadData is String) {
+      try {
+        parsedPayload = jsonDecode(payloadData) as Map<String, dynamic>;
+      } catch (_) {}
+    } else if (payloadData is Map<String, dynamic>) {
+      parsedPayload = payloadData;
+    }
+
+    // Parse result from JSON string
+    Map<String, dynamic>? parsedResult;
+    final resultData = data['result'];
+    if (resultData is String) {
+      try {
+        parsedResult = jsonDecode(resultData) as Map<String, dynamic>;
+      } catch (_) {}
+    } else if (resultData is Map<String, dynamic>) {
+      parsedResult = resultData;
+    }
+
     return RemoteCommand(
       id: doc.id,
       type: data['type'] as String? ?? 'unknown',
-      payload: (data['payload'] as Map<String, dynamic>?) ?? {},
+      payload: parsedPayload,
       controllerId: data['controllerId'] as String? ?? '',
       controllerIp: data['controllerIp'] as String? ?? '',
       webhookUrl: data['webhookUrl'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: _parseStatus(data['status'] as String?),
-      result: data['result'] as Map<String, dynamic>?,
+      result: parsedResult,
       completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
       error: data['error'] as String?,
     );
   }
 
   /// Convert to Firestore document data.
+  /// Payload and result are stored as JSON strings to avoid nested array issues.
   Map<String, dynamic> toFirestore() {
     return {
       'type': type,
-      'payload': payload,
+      'payload': jsonEncode(payload), // Serialize as JSON string
       'controllerId': controllerId,
       'controllerIp': controllerIp,
       'webhookUrl': webhookUrl,
       'createdAt': FieldValue.serverTimestamp(),
       'status': status.name,
-      if (result != null) 'result': result,
+      if (result != null) 'result': jsonEncode(result), // Serialize as JSON string
       if (completedAt != null) 'completedAt': Timestamp.fromDate(completedAt!),
       if (error != null) 'error': error,
     };
