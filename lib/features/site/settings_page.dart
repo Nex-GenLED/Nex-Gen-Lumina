@@ -76,8 +76,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           // Unified System & Device Management entry
           const _SystemManagementButton(),
           const SizedBox(height: 16),
-          const _CurrentColorsCard(),
-          const SizedBox(height: 16),
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
           const _VoiceAssistantsCard(),
@@ -1036,32 +1034,6 @@ class _VoiceAssistantsCard extends StatelessWidget {
           ],
         ),
         onTap: () => context.push(AppRoutes.voiceAssistants),
-      ),
-    );
-  }
-}
-
-class _CurrentColorsCard extends StatelessWidget {
-  const _CurrentColorsCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [NexGenPalette.cyan, NexGenPalette.violet],
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.palette, color: Colors.white, size: 20),
-        ),
-        title: const Text('Current Colors'),
-        subtitle: const Text('View and edit the colors currently active on your system'),
-        trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        onTap: () => context.push(AppRoutes.currentColors),
       ),
     );
   }
