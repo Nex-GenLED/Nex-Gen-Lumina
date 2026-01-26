@@ -282,8 +282,8 @@ final recommendedPatternsProvider = Provider<List<GradientPattern>>((ref) {
       name: 'Soft Golden Hour',
       subtitle: 'Gentle Amber Flow',
       colors: [Color(0xFFFFB347), Color(0xFFFF8C00)], // Warm amber, dark orange
-      effectId: 110,
-      effectName: 'Flow',
+      effectId: 41, // Running - uses segment colors (Flow is palette-based)
+      effectName: 'Running',
       direction: 'right',
       isStatic: false,
       speed: 80,
@@ -355,8 +355,8 @@ final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {
         name: 'Golden Elegance',
         subtitle: 'Soft Amber Flow',
         colors: [Color(0xFFFFB347), Color(0xFFFFD700), Color(0xFFFF8C00)], // Warm amber, gold, dark orange
-        effectId: 110,
-        effectName: 'Flow',
+        effectId: 41, // Running - uses segment colors (Flow is palette-based)
+        effectName: 'Running',
         direction: 'right',
         isStatic: false,
         speed: 60,
@@ -467,8 +467,8 @@ final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {
         name: 'Royals - Blue Wave',
         subtitle: 'Royal Blue Flow',
         colors: [Color(0xFF004687), Colors.white, Color(0xFF7AB2DD)],
-        effectId: 110,
-        effectName: 'Flow',
+        effectId: 41, // Running - uses segment colors (Flow is palette-based)
+        effectName: 'Running',
         direction: 'right',
         isStatic: false,
         speed: 70, // Gentle flow

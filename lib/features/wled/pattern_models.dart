@@ -96,6 +96,14 @@ class SubCategory {
 ///
 /// Used by the Pattern Library UI and recommendation engines.
 /// Includes effect details, motion type, direction, and WLED payload.
+///
+/// IMPORTANT: When choosing effectId, be aware that some WLED effects are
+/// "palette-based" and ignore the segment colors (col array). These include:
+/// - 110 (Flow), 9 (Colorful), 11 (Rainbow), 63 (Pride 2015), etc.
+///
+/// Effects that properly use segment colors include:
+/// - 0 (Solid), 1 (Blink), 2 (Breathe), 9 (Chase), 12 (Theater Chase),
+/// - 28 (Chase 2), 41 (Running), 42 (Saw), 65 (Comet), 66 (Fireworks), etc.
 class GradientPattern {
   final String name;
   final String? subtitle; // e.g., "Gold chasing Red" or "Static warm glow"

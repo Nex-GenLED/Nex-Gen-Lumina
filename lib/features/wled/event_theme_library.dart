@@ -599,8 +599,8 @@ class EventTheme {
           Color(0xFFFFD700), // Gold
           Color(0xFFFFFFFF), // White
         ],
-        effectId: 110,
-        effectName: 'Flow',
+        effectId: 41, // Running - uses segment colors (Flow is palette-based)
+        effectName: 'Running',
         direction: 'right',
         isStatic: false,
         speed: 100,
