@@ -50,7 +50,7 @@ class MySchedulePage extends ConsumerWidget {
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 100),
         child: ListView(
           children: [
             // Lumina AI card with autopilot toggle and schedule prompt
@@ -1389,6 +1389,47 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     ),
                   ]),
                 const SizedBox(height: 20),
+                // Delete button (only when editing existing schedule)
+                if (widget.editing != null) ...[
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: NexGenPalette.gunmetal90,
+                          title: const Text('Delete Schedule?'),
+                          content: const Text('This action cannot be undone.'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.red.shade700,
+                              ),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        ref.read(schedulesProvider.notifier).remove(widget.editing!.id);
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('Delete Schedule'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade400,
+                      side: BorderSide(color: Colors.red.shade400),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 FilledButton(
                   onPressed: () async {
                     // Limit enforcement

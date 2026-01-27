@@ -556,7 +556,7 @@ class _LuminaDesignAssistantState extends ConsumerState<LuminaDesignAssistant> {
     });
   }
 
-  void _applySuggestion(LuminaSuggestion suggestion) {
+  Future<void> _applySuggestion(LuminaSuggestion suggestion) async {
     final selectedChannelId = ref.read(selectedChannelIdProvider);
 
     switch (suggestion.type) {
@@ -574,19 +574,29 @@ class _LuminaDesignAssistantState extends ConsumerState<LuminaDesignAssistant> {
         break;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Applied: ${suggestion.title}'),
-        backgroundColor: NexGenPalette.violet,
-        action: SnackBarAction(
-          label: 'Undo',
-          textColor: Colors.white,
-          onPressed: () {
-            // TODO: Implement undo
-          },
+    // Apply the updated design to the WLED device
+    final success = await ref.read(applyDesignProvider)();
+
+    if (success) {
+      // Update home screen to show this pattern name
+      ref.read(activePresetLabelProvider.notifier).state = suggestion.title;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? 'Applied: ${suggestion.title}' : 'Failed to apply pattern'),
+          backgroundColor: success ? NexGenPalette.violet : Colors.red,
+          action: success ? SnackBarAction(
+            label: 'Undo',
+            textColor: Colors.white,
+            onPressed: () {
+              // TODO: Implement undo
+            },
+          ) : null,
         ),
-      ),
-    );
+      );
+    }
   }
 
   void _applyColorPalette(List colors, int? channelId) {

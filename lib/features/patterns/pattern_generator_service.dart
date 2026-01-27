@@ -56,114 +56,132 @@ class PatternGenerator {
     bool includeVariations = false,
     int limitEffects = 0,
   }) {
-    final q = query.trim().toLowerCase();
-    debugPrint('PatternGenerator: generatePatterns called with q="$q"');
+    try {
+      final q = query.trim().toLowerCase();
+      debugPrint('PatternGenerator: generatePatterns called with q="$q"');
 
-    // 1) Try to find a canonical theme first
-    final canonicalResult = CanonicalPalettes.getPalette(q, style: style);
-    debugPrint('PatternGenerator: canonicalResult=${canonicalResult?.theme.displayName ?? "null"}');
+      // 1) Try to find a canonical theme first
+      final canonicalResult = CanonicalPalettes.getPalette(q, style: style);
+      debugPrint('PatternGenerator: canonicalResult=${canonicalResult?.theme.displayName ?? "null"}');
+      debugPrint('PatternGenerator: wledEffects count=${wledEffects.length}');
 
-    String displayKey;
-    List<List<int>> resolvedPalette;
-    int defaultSpeed;
-    int defaultIntensity;
-    List<int> suggestedEffects;
+      String displayKey;
+      List<List<int>> resolvedPalette;
+      int defaultSpeed;
+      int defaultIntensity;
+      List<int> suggestedEffects;
 
-    if (canonicalResult != null) {
-      // Use canonical theme - consistent and deterministic
-      displayKey = canonicalResult.theme.displayName;
-      resolvedPalette = canonicalResult.colors;
-      defaultSpeed = canonicalResult.theme.defaultSpeed;
-      defaultIntensity = canonicalResult.theme.defaultIntensity;
-      suggestedEffects = canonicalResult.theme.suggestedEffects;
-    } else {
-      // Fallback to random palette for unknown queries
-      displayKey = q.isEmpty ? 'Custom' : _capitalizeFirst(q);
-      resolvedPalette = _randomPalette(3);
-      defaultSpeed = 128;
-      defaultIntensity = 128;
-      suggestedEffects = [];
-    }
+      if (canonicalResult != null) {
+        // Use canonical theme - consistent and deterministic
+        displayKey = canonicalResult.theme.displayName;
+        resolvedPalette = canonicalResult.colors;
+        defaultSpeed = canonicalResult.theme.defaultSpeed;
+        defaultIntensity = canonicalResult.theme.defaultIntensity;
+        suggestedEffects = canonicalResult.theme.suggestedEffects;
+      } else {
+        // Fallback to random palette for unknown queries
+        displayKey = q.isEmpty ? 'Custom' : _capitalizeFirst(q);
+        resolvedPalette = _randomPalette(3);
+        defaultSpeed = 128;
+        defaultIntensity = 128;
+        suggestedEffects = [];
+      }
 
-    // 2) Check if this is a rainbow-related query
-    final isRainbowQuery = rainbowKeywords.any((kw) => q.contains(kw));
+      // 2) Check if this is a rainbow-related query
+      final isRainbowQuery = rainbowKeywords.any((kw) => q.contains(kw));
 
-    // 3) Determine which effects to use
-    // Combine base effects with rainbow effects ONLY if user wants rainbow
-    final allAvailableEffects = isRainbowQuery
-        ? [...wledEffects, ...rainbowEffects]
-        : wledEffects;
+      // 3) Determine which effects to use
+      // Combine base effects with rainbow effects ONLY if user wants rainbow
+      final allAvailableEffects = isRainbowQuery
+          ? [...wledEffects, ...rainbowEffects]
+          : wledEffects;
 
-    List<Map<String, dynamic>> effectsToUse;
-    if (suggestedEffects.isNotEmpty) {
-      // Filter suggested effects to only include those from available effects
-      // (this prevents rainbow effects from being suggested for non-rainbow themes)
-      final availableIds = allAvailableEffects.map((e) => e['id'] as int).toSet();
-      final filteredSuggested = suggestedEffects.where((id) => availableIds.contains(id)).toList();
+      List<Map<String, dynamic>> effectsToUse;
+      if (suggestedEffects.isNotEmpty) {
+        // Filter suggested effects to only include those from available effects
+        // (this prevents rainbow effects from being suggested for non-rainbow themes)
+        final availableIds = allAvailableEffects.map((e) => e['id'] as int).toSet();
+        final filteredSuggested = suggestedEffects.where((id) => availableIds.contains(id)).toList();
 
-      // Put suggested effects first, then add others
-      final suggested = filteredSuggested
-          .map((id) => allAvailableEffects.firstWhere(
-                (e) => e['id'] == id,
-                orElse: () => {'id': id, 'name': 'Effect $id'},
-              ))
-          .toList();
-      final others = allAvailableEffects.where((e) => !filteredSuggested.contains(e['id'])).toList();
-      effectsToUse = [...suggested, ...others];
-    } else {
-      effectsToUse = allAvailableEffects.toList();
-    }
+        // Put suggested effects first, then add others
+        final suggested = filteredSuggested
+            .map((id) => allAvailableEffects.firstWhere(
+                  (e) => e['id'] == id,
+                  orElse: () => {'id': id, 'name': 'Effect $id'},
+                ))
+            .toList();
+        final others = allAvailableEffects.where((e) => !filteredSuggested.contains(e['id'])).toList();
+        effectsToUse = [...suggested, ...others];
+      } else {
+        effectsToUse = allAvailableEffects.toList();
+      }
 
-    // Apply limit if specified
-    if (limitEffects > 0 && effectsToUse.length > limitEffects) {
-      effectsToUse = effectsToUse.take(limitEffects).toList();
-    }
+      // Apply limit if specified
+      if (limitEffects > 0 && effectsToUse.length > limitEffects) {
+        effectsToUse = effectsToUse.take(limitEffects).toList();
+      }
 
-    // 3) Build SmartPattern list
-    final List<SmartPattern> out = [];
+      // Build SmartPattern list
+      final List<SmartPattern> out = [];
 
-    // Add patterns for the primary style
-    for (final e in effectsToUse) {
-      final id = e['id'] as int;
-      final name = e['name'] as String;
-      final isSuggested = suggestedEffects.contains(id);
-      // Apply effect-specific speed adjustment
-      final adjustedSpeed = getAdjustedSpeed(id, defaultSpeed);
+      // Add patterns for the primary style
+      for (final e in effectsToUse) {
+        final id = e['id'] as int;
+        final name = e['name'] as String;
+        final isSuggested = suggestedEffects.contains(id);
+        // Apply effect-specific speed adjustment
+        final adjustedSpeed = getAdjustedSpeed(id, defaultSpeed);
 
-      out.add(SmartPattern(
-        id: _uuidV4(),
-        name: '$displayKey $name${isSuggested ? ' ★' : ''}',
-        effectId: id,
-        colors: resolvedPalette,
-        speed: adjustedSpeed,
-        intensity: defaultIntensity,
-      ));
-    }
-
-    // 4) Optionally add variations for other styles
-    if (includeVariations && canonicalResult != null) {
-      for (final varStyle in ThemeStyle.values) {
-        if (varStyle == style) continue; // Skip the primary style
-
-        final varColors = canonicalResult.theme.getRgbForStyle(varStyle);
-        if (varColors == resolvedPalette) continue; // Skip if same as primary
-
-        // Add just the top suggested effect for each variation
-        final topEffect = effectsToUse.first;
-        final topEffectId = topEffect['id'] as int;
-        final adjustedSpeed = getAdjustedSpeed(topEffectId, defaultSpeed);
         out.add(SmartPattern(
           id: _uuidV4(),
-          name: '$displayKey ${topEffect['name']} (${varStyle.displayName})',
-          effectId: topEffectId,
-          colors: varColors,
+          name: '$displayKey $name${isSuggested ? ' ★' : ''}',
+          effectId: id,
+          colors: resolvedPalette,
           speed: adjustedSpeed,
           intensity: defaultIntensity,
         ));
       }
-    }
 
-    return out;
+      // 4) Optionally add variations for other styles
+      if (includeVariations && canonicalResult != null) {
+        for (final varStyle in ThemeStyle.values) {
+          if (varStyle == style) continue; // Skip the primary style
+
+          final varColors = canonicalResult.theme.getRgbForStyle(varStyle);
+          if (varColors == resolvedPalette) continue; // Skip if same as primary
+
+          // Add just the top suggested effect for each variation
+          final topEffect = effectsToUse.first;
+          final topEffectId = topEffect['id'] as int;
+          final adjustedSpeed = getAdjustedSpeed(topEffectId, defaultSpeed);
+          out.add(SmartPattern(
+            id: _uuidV4(),
+            name: '$displayKey ${topEffect['name']} (${varStyle.displayName})',
+            effectId: topEffectId,
+            colors: varColors,
+            speed: adjustedSpeed,
+            intensity: defaultIntensity,
+          ));
+        }
+      }
+
+      debugPrint('PatternGenerator: returning ${out.length} patterns');
+      return out;
+    } catch (e, stackTrace) {
+      debugPrint('PatternGenerator: ERROR in generatePatterns: $e');
+      debugPrint('PatternGenerator: Stack trace: $stackTrace');
+      // Return a fallback pattern so search always shows something
+      return [
+        SmartPattern(
+          id: _uuidV4(),
+          name: 'Custom: ${query.isEmpty ? "Default" : _capitalizeFirst(query.trim())}',
+          effectId: 0, // Solid
+          colors: _randomPalette(3),
+          speed: 128,
+          intensity: 128,
+        ),
+      ];
+    }
   }
 
   /// Generate a single "best match" pattern for quick application.

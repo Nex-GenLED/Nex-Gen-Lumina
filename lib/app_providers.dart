@@ -29,11 +29,20 @@ final guidedModeProvider = StateProvider<bool>((ref) => true);
 /// Storage key for persisting the active preset label
 const String _activePresetKey = 'active_preset_label';
 
+/// Static cache for the active preset label to avoid async race conditions.
+/// This ensures immediate reads return the correct value even during navigation.
+String? _activePresetLabelCache;
+
 /// Notifier that persists the active preset label to SharedPreferences.
 /// This ensures the pattern name survives app restarts.
+/// Uses a static cache to avoid race conditions during navigation.
 class ActivePresetLabelNotifier extends Notifier<String?> {
   @override
   String? build() {
+    // Return cached value immediately if available (handles navigation scenarios)
+    if (_activePresetLabelCache != null) {
+      return _activePresetLabelCache;
+    }
     // Load persisted value asynchronously on first access
     _loadPersistedValue();
     return null;
@@ -44,6 +53,7 @@ class ActivePresetLabelNotifier extends Notifier<String?> {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_activePresetKey);
       if (saved != null && saved.isNotEmpty) {
+        _activePresetLabelCache = saved;
         state = saved;
       }
     } catch (e) {
@@ -53,6 +63,8 @@ class ActivePresetLabelNotifier extends Notifier<String?> {
 
   @override
   set state(String? value) {
+    // Update cache synchronously before updating state
+    _activePresetLabelCache = value;
     super.state = value;
     _persistValue(value);
   }
