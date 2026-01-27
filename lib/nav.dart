@@ -1273,6 +1273,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   final payload = favorite.patternData;
                   final success = await repo.applyJson(payload);
 
+                  // Check mounted before accessing ref after await
+                  if (!mounted) return;
+
                   if (success) {
                     // Update the active pattern label immediately for UI feedback
                     ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
@@ -1282,13 +1285,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id);
                     } catch (_) {}
 
-                    // Track overall usage
+                    // Track overall usage (wrapped in mounted check)
                     try {
-                      ref.trackWledPayload(
-                        payload: payload,
-                        patternName: favorite.patternName,
-                        source: 'favorite',
-                      );
+                      if (mounted) {
+                        ref.trackWledPayload(
+                          payload: payload,
+                          patternName: favorite.patternName,
+                          source: 'favorite',
+                        );
+                      }
                     } catch (_) {}
 
                     if (mounted) {
