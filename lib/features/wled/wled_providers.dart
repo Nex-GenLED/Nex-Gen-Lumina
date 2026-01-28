@@ -268,16 +268,38 @@ class WledNotifier extends Notifier<WledStateModel> {
 
           final cols = firstSeg['col'];
           if (cols is List && cols.isNotEmpty && cols.first is List) {
-            final c = cols.first as List;
-            if (c.length >= 3) {
-              final rr = (c[0] as num).toInt();
-              final gg = (c[1] as num).toInt();
-              final bb = (c[2] as num).toInt();
-              int ww = state.warmWhite;
-              if (c.length >= 4) {
-                ww = (c[3] as num).toInt().clamp(0, 255);
+            // Extract the full color sequence (all colors in segment)
+            final List<Color> colorSequence = [];
+            Color? primaryColor;
+            int ww = state.warmWhite;
+
+            for (final c in cols) {
+              if (c is List && c.length >= 3) {
+                final rr = (c[0] as num).toInt().clamp(0, 255);
+                final gg = (c[1] as num).toInt().clamp(0, 255);
+                final bb = (c[2] as num).toInt().clamp(0, 255);
+
+                // Skip black/off colors in the sequence display
+                if (rr > 0 || gg > 0 || bb > 0) {
+                  colorSequence.add(Color.fromARGB(255, rr, gg, bb));
+                }
+
+                // First color becomes primary
+                if (primaryColor == null) {
+                  primaryColor = Color.fromARGB(255, rr, gg, bb);
+                  if (c.length >= 4) {
+                    ww = (c[3] as num).toInt().clamp(0, 255);
+                  }
+                }
               }
-              state = state.copyWith(color: Color.fromARGB(255, rr, gg, bb), warmWhite: ww);
+            }
+
+            if (primaryColor != null) {
+              state = state.copyWith(
+                color: primaryColor,
+                warmWhite: ww,
+                colorSequence: colorSequence,
+              );
             }
           }
         }
@@ -387,6 +409,32 @@ class WledNotifier extends Notifier<WledStateModel> {
     state = state.copyWith(warmWhite: clamped);
     // Send an update including current color and the updated white channel
     await _postUpdate(color: state.color, white: state.supportsRgbw ? clamped : null);
+  }
+
+  /// Sets Lumina pattern metadata (colors, effect name) when a pattern is applied.
+  /// This preserves the rich information from Lumina's AI response so it displays
+  /// correctly on the home screen even after device polling overwrites raw values.
+  void setLuminaPatternMetadata({
+    List<Color>? colorSequence,
+    List<String>? colorNames,
+    String? effectName,
+  }) {
+    state = state.copyWith(
+      colorSequence: colorSequence,
+      colorNames: colorNames,
+      customEffectName: effectName,
+    );
+    debugPrint('🎨 Set Lumina pattern metadata: ${colorSequence?.length ?? 0} colors, effect: $effectName');
+  }
+
+  /// Clears custom Lumina pattern metadata (e.g., when user manually adjusts pattern).
+  /// The next poll will restore device-reported values.
+  void clearLuminaPatternMetadata() {
+    state = state.copyWith(
+      colorNames: [],
+      clearCustomEffectName: true,
+    );
+    debugPrint('🗑️ Cleared Lumina pattern metadata');
   }
 
   Future<void> _postUpdate({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite}) async {

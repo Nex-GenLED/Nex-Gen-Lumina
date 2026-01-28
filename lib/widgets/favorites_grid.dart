@@ -4,7 +4,7 @@ import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/theme.dart';
 
-/// A grid widget displaying user's favorite patterns as slim, color-coded cards
+/// A grid widget displaying user's favorite patterns in a 2x2 compact layout
 class FavoritesGrid extends ConsumerWidget {
   final Function(FavoritePattern)? onPatternTap;
   final bool showAutoAddedBadge;
@@ -25,20 +25,61 @@ class FavoritesGrid extends ConsumerWidget {
           return _buildEmptyState(context, ref);
         }
 
-        // Use a column of slim horizontal cards
+        // Show first 4 favorites in a 2x2 grid layout
+        final displayFavorites = favorites.take(4).toList();
+
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Column(
-            children: favorites.map((favorite) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _FavoritePatternCard(
-                  favorite: favorite,
-                  onTap: onPatternTap != null ? () => onPatternTap!(favorite) : null,
-                  showAutoAddedBadge: showAutoAddedBadge,
-                ),
-              );
-            }).toList(),
+            children: [
+              // First row (2 cards)
+              Row(
+                children: [
+                  Expanded(
+                    child: _FavoritePatternCard(
+                      favorite: displayFavorites[0],
+                      onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[0]) : null,
+                      showAutoAddedBadge: showAutoAddedBadge,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: displayFavorites.length > 1
+                        ? _FavoritePatternCard(
+                            favorite: displayFavorites[1],
+                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[1]) : null,
+                            showAutoAddedBadge: showAutoAddedBadge,
+                          )
+                        : const _EmptySlot(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // Second row (2 cards)
+              Row(
+                children: [
+                  Expanded(
+                    child: displayFavorites.length > 2
+                        ? _FavoritePatternCard(
+                            favorite: displayFavorites[2],
+                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[2]) : null,
+                            showAutoAddedBadge: showAutoAddedBadge,
+                          )
+                        : const _EmptySlot(),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: displayFavorites.length > 3
+                        ? _FavoritePatternCard(
+                            favorite: displayFavorites[3],
+                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[3]) : null,
+                            showAutoAddedBadge: showAutoAddedBadge,
+                          )
+                        : const _EmptySlot(),
+                  ),
+                ],
+              ),
+            ],
           ),
         );
       },
@@ -92,6 +133,34 @@ class FavoritesGrid extends ConsumerWidget {
   }
 }
 
+/// Empty slot placeholder for the 2x2 grid
+class _EmptySlot extends StatelessWidget {
+  const _EmptySlot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+          strokeAlign: BorderSide.strokeAlignInside,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.add_rounded,
+          color: Colors.white.withOpacity(0.2),
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
 class _FavoritePatternCard extends ConsumerWidget {
   final FavoritePattern favorite;
   final VoidCallback? onTap;
@@ -104,6 +173,7 @@ class _FavoritePatternCard extends ConsumerWidget {
   });
 
   /// Extract colors from patternData to create a gradient background
+  /// Always returns at least one color (never empty list)
   List<Color> _extractPatternColors() {
     try {
       final seg = favorite.patternData['seg'];
@@ -129,8 +199,14 @@ class _FavoritePatternCard extends ConsumerWidget {
       }
     } catch (_) {}
 
-    // Fallback: use pattern name heuristics
-    return _colorsFromPatternName(favorite.patternName);
+    // Fallback: use pattern name heuristics (always returns non-empty)
+    try {
+      final fallback = _colorsFromPatternName(favorite.patternName);
+      if (fallback.isNotEmpty) return fallback;
+    } catch (_) {}
+
+    // Ultimate fallback - ensure we never return empty list
+    return [NexGenPalette.violet, NexGenPalette.cyan];
   }
 
   List<Color> _colorsFromPatternName(String name) {
@@ -207,90 +283,51 @@ class _FavoritePatternCard extends ConsumerWidget {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                       colors: [
-                        Colors.black.withOpacity(0.1),
+                        Colors.black.withOpacity(0.15),
                         Colors.transparent,
-                        Colors.black.withOpacity(0.1),
+                        Colors.black.withOpacity(0.15),
                       ],
                     ),
                   ),
                 ),
               ),
-              // Content row
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    // System default star icon
-                    if (isSystemDefault) ...[
-                      Icon(
-                        Icons.star_rounded,
-                        size: 18,
-                        color: textColor.withOpacity(0.9),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    // Pattern name
-                    Expanded(
-                      child: Text(
-                        favorite.patternName,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: textColor,
-                              fontWeight: FontWeight.w600,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black.withOpacity(0.3),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    // Remove button (only for non-system favorites)
-                    if (!isSystemDefault)
-                      IconButton(
-                        icon: Icon(
-                          Icons.close_rounded,
-                          size: 20,
-                          color: textColor.withOpacity(0.7),
+              // Content - centered text in compact view
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // System default star icon
+                      if (isSystemDefault) ...[
+                        Icon(
+                          Icons.star_rounded,
+                          size: 16,
+                          color: textColor.withOpacity(0.9),
                         ),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                        onPressed: () async {
-                          final confirmed = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              backgroundColor: NexGenPalette.cardBackground,
-                              title: const Text('Remove Favorite'),
-                              content: Text('Remove "${favorite.patternName}" from favorites?'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text('Cancel'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Remove'),
-                                ),
-                              ],
-                            ),
-                          );
-
-                          if (confirmed == true) {
-                            await ref
-                                .read(favoritesNotifierProvider.notifier)
-                                .removeFavorite(favorite.id);
-                          }
-                        },
+                        const SizedBox(width: 6),
+                      ],
+                      // Pattern name (truncated for compact view)
+                      Flexible(
+                        child: Text(
+                          favorite.patternName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: textColor,
+                                fontWeight: FontWeight.w600,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black.withOpacity(0.4),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                    // Play icon for tap action
-                    Icon(
-                      Icons.play_circle_outline_rounded,
-                      size: 24,
-                      color: textColor.withOpacity(0.8),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],

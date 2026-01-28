@@ -56,21 +56,31 @@ class MyPropertiesScreen extends ConsumerWidget {
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, stack) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading properties',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => ref.invalidate(userPropertiesProvider),
-                    child: const Text('Retry'),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error loading properties',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _getErrorMessage(error),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton.icon(
+                      onPressed: () => ref.invalidate(userPropertiesProvider),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -83,6 +93,21 @@ class MyPropertiesScreen extends ConsumerWidget {
         label: const Text('Add Property'),
       ),
     );
+  }
+
+  String _getErrorMessage(Object error) {
+    final errorStr = error.toString().toLowerCase();
+    if (errorStr.contains('permission') || errorStr.contains('denied')) {
+      return 'You don\'t have permission to access this data. Please sign in again.';
+    } else if (errorStr.contains('network') || errorStr.contains('unavailable') || errorStr.contains('connection')) {
+      return 'Network error. Please check your internet connection.';
+    } else if (errorStr.contains('not-found') || errorStr.contains('does not exist')) {
+      return 'Data not found. Try adding a new property.';
+    } else if (errorStr.contains('unauthenticated') || errorStr.contains('not authenticated')) {
+      return 'Please sign in to view your properties.';
+    } else {
+      return 'Something went wrong: ${error.toString().length > 100 ? '${error.toString().substring(0, 100)}...' : error}';
+    }
   }
 
   void _selectProperty(WidgetRef ref, Property property) {

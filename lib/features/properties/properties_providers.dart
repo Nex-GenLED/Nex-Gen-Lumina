@@ -10,7 +10,12 @@ final userPropertiesProvider = StreamProvider<List<Property>>((ref) {
 
   return authState.when(
     data: (user) {
-      if (user == null) return Stream.value([]);
+      if (user == null) {
+        debugPrint('Properties: No authenticated user');
+        return Stream.value([]);
+      }
+
+      debugPrint('Properties: Loading properties for user ${user.uid}');
 
       return FirebaseFirestore.instance
           .collection('users')
@@ -18,8 +23,16 @@ final userPropertiesProvider = StreamProvider<List<Property>>((ref) {
           .collection('properties')
           .snapshots()
           .map((snapshot) {
+            debugPrint('Properties: Received ${snapshot.docs.length} properties from Firestore');
             final properties = snapshot.docs
-                .map((doc) => Property.fromFirestore(doc))
+                .map((doc) {
+                  try {
+                    return Property.fromFirestore(doc);
+                  } catch (e) {
+                    debugPrint('Properties: Error parsing property ${doc.id}: $e');
+                    rethrow;
+                  }
+                })
                 .toList();
             // Sort client-side: primary properties first, then by name
             properties.sort((a, b) {
@@ -29,10 +42,21 @@ final userPropertiesProvider = StreamProvider<List<Property>>((ref) {
               return a.name.compareTo(b.name);
             });
             return properties;
+          })
+          .handleError((error, stack) {
+            debugPrint('Properties: Stream error: $error');
+            debugPrint('Properties: Stack trace: $stack');
+            throw error;
           });
     },
-    loading: () => Stream.value([]),
-    error: (_, __) => Stream.value([]),
+    loading: () {
+      debugPrint('Properties: Auth state loading...');
+      return Stream.value([]);
+    },
+    error: (error, stack) {
+      debugPrint('Properties: Auth state error: $error');
+      return Stream.error(error, stack);
+    },
   );
 });
 

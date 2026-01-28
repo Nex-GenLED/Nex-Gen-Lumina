@@ -142,13 +142,70 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     }
   }
 
-  /// Parses natural language schedule requests into structured data
+  /// Parses natural language schedule requests into structured data.
+  ///
+  /// Supports:
+  /// - Positive requests: "warm white at sunset", "turn on at 8pm"
+  /// - Negative constraints: "no bright lights after 10pm", "avoid bright after midnight"
+  /// - Brightness rules: "dim to 20% at 10pm", "reduce brightness after 11pm"
   Future<Map<String, dynamic>?> _parseScheduleRequest(String text) async {
     final lowerText = text.toLowerCase();
 
-    // Determine ON time
+    // =====================================================================
+    // STEP 1: Detect negative constraints (no, avoid, don't want, nothing, etc.)
+    // These indicate the user wants to PREVENT or REDUCE something
+    // =====================================================================
+    final negativeKeywords = [
+      'no ', 'not ', 'never ', 'avoid', "don't", 'dont', "doesn't", 'nothing',
+      'without', 'stop ', 'disable', 'prevent', 'less ', 'reduce', 'lower',
+      'dim ', 'dimmer', 'darker', 'quieter', 'softer', 'subtle',
+    ];
+    final isNegativeConstraint = negativeKeywords.any((kw) => lowerText.contains(kw));
+
+    // Detect if the user mentions bright/intense lighting in the negative context
+    final mentionsBright = lowerText.contains('bright') ||
+        lowerText.contains('intense') ||
+        lowerText.contains('harsh') ||
+        lowerText.contains('full') ||
+        lowerText.contains('maximum');
+
+    // =====================================================================
+    // STEP 2: Detect "after X" timing pattern
+    // "no bright lights after 10pm" means START the rule at 10pm
+    // =====================================================================
+    final afterTimeMatch = RegExp(
+      r'after\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)',
+      caseSensitive: false,
+    ).firstMatch(lowerText);
+
+    final afterSolarMatch = RegExp(
+      r'after\s+(sunset|sunrise|dusk|dawn|midnight)',
+      caseSensitive: false,
+    ).firstMatch(lowerText);
+
+    // =====================================================================
+    // STEP 3: Determine ON time
+    // =====================================================================
     String timeLabel;
-    if (lowerText.contains('sunset') || lowerText.contains('dusk') || lowerText.contains('evening')) {
+
+    // If "after X" pattern found, that's the START time
+    if (afterTimeMatch != null) {
+      final hour = afterTimeMatch.group(1)!;
+      final minute = afterTimeMatch.group(2) ?? '00';
+      final ampm = afterTimeMatch.group(3)!.toUpperCase();
+      timeLabel = '$hour:$minute $ampm';
+    } else if (afterSolarMatch != null) {
+      final event = afterSolarMatch.group(1)!.toLowerCase();
+      if (event == 'sunset' || event == 'dusk') {
+        timeLabel = 'Sunset';
+      } else if (event == 'sunrise' || event == 'dawn') {
+        timeLabel = 'Sunrise';
+      } else if (event == 'midnight') {
+        timeLabel = '12:00 AM';
+      } else {
+        timeLabel = 'Sunset';
+      }
+    } else if (lowerText.contains('sunset') || lowerText.contains('dusk') || lowerText.contains('evening')) {
       timeLabel = 'Sunset';
     } else if (lowerText.contains('sunrise') || lowerText.contains('dawn') || lowerText.contains('morning')) {
       timeLabel = 'Sunrise';
@@ -168,7 +225,10 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       }
     }
 
-    // Determine OFF time (look for "to", "until", "through", "-")
+    // =====================================================================
+    // STEP 4: Determine OFF time
+    // For negative constraints, default to sunrise (rule applies through night)
+    // =====================================================================
     String? offTimeLabel;
     final offTimePatterns = [
       RegExp(r'(?:to|until|through|->|→|-)\s*(sunrise|dawn)', caseSensitive: false),
@@ -204,7 +264,14 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       }
     }
 
-    // Determine repeat days
+    // For negative constraints without explicit end time, default to sunrise
+    if (offTimeLabel == null && isNegativeConstraint) {
+      offTimeLabel = 'Sunrise';
+    }
+
+    // =====================================================================
+    // STEP 5: Determine repeat days
+    // =====================================================================
     List<String> repeatDays;
     if (lowerText.contains('every night') || lowerText.contains('nightly') ||
         lowerText.contains('every evening') || lowerText.contains('daily')) {
@@ -218,10 +285,32 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       repeatDays = ['Daily'];
     }
 
-    // Determine action/pattern
+    // =====================================================================
+    // STEP 6: Determine action/pattern
+    // Handle negative constraints by inverting the intent
+    // =====================================================================
     String actionLabel;
     String patternDescription;
-    if (lowerText.contains('warm white') || lowerText.contains('warm')) {
+
+    // Check for explicit brightness percentage
+    final brightnessMatch = RegExp(r'(\d{1,3})\s*%', caseSensitive: false).firstMatch(lowerText);
+
+    if (isNegativeConstraint && mentionsBright) {
+      // User wants to avoid bright lights → dim or turn off
+      // Suggest dimming to 20% as a reasonable night mode
+      actionLabel = 'Brightness: 20%';
+      patternDescription = 'dim to 20%';
+    } else if (brightnessMatch != null) {
+      // Explicit brightness level requested
+      final brightness = int.tryParse(brightnessMatch.group(1)!) ?? 50;
+      final clampedBrightness = brightness.clamp(1, 100);
+      actionLabel = 'Brightness: $clampedBrightness%';
+      patternDescription = 'set brightness to $clampedBrightness%';
+    } else if (lowerText.contains('dim') || lowerText.contains('night mode') || lowerText.contains('subtle')) {
+      // User wants dimmer lighting
+      actionLabel = 'Brightness: 20%';
+      patternDescription = 'dim to 20%';
+    } else if (lowerText.contains('warm white') || lowerText.contains('warm')) {
       actionLabel = 'Pattern: Warm White';
       patternDescription = 'warm white';
     } else if (lowerText.contains('bright white') || lowerText.contains('bright')) {
@@ -236,23 +325,36 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     } else if (lowerText.contains('on') || lowerText.contains('turn on')) {
       actionLabel = 'Turn On';
       patternDescription = 'on';
+    } else if (isNegativeConstraint) {
+      // Generic negative constraint without specific pattern mentioned → dim
+      actionLabel = 'Brightness: 20%';
+      patternDescription = 'dim to 20%';
     } else {
       // Default to warm white for lighting requests
       actionLabel = 'Pattern: Warm White';
       patternDescription = 'warm white';
     }
 
-    // Generate friendly confirmation message
+    // =====================================================================
+    // STEP 7: Generate friendly confirmation message
+    // =====================================================================
     final timeName = timeLabel.toLowerCase();
     final offTimeName = offTimeLabel?.toLowerCase();
     final daysDescription = repeatDays.contains('Daily')
-        ? 'every evening'
+        ? 'every night'
         : repeatDays.length == 5
             ? 'on weeknights'
             : 'on ${repeatDays.join(", ")}';
 
     String confirmation;
-    if (offTimeName != null) {
+    if (isNegativeConstraint && mentionsBright) {
+      // Special message for negative constraints
+      if (offTimeName != null) {
+        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription from $timeName until $offTimeName. This helps avoid harsh lighting late at night.';
+      } else {
+        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription starting at $timeName. This helps avoid harsh lighting late at night.';
+      }
+    } else if (offTimeName != null) {
       confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription from $timeName to $offTimeName.';
     } else {
       confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription at $timeName.';

@@ -17,7 +17,11 @@ class LuminaAI {
   ///
   /// [contextBlock] can be used to inject dynamic user context into the
   /// system instruction (e.g., location, date, interests, time of day).
-  static Future<String> chat(String userPrompt, {String? contextBlock}) async {
+  ///
+  /// [temperature] controls response randomness (0.0-1.0). Lower values
+  /// produce more deterministic outputs. Default is 0.2 for consistency.
+  /// Use higher values (0.6-0.8) for creative/varied responses.
+  static Future<String> chat(String userPrompt, {String? contextBlock, double? temperature}) async {
 
     // System instruction per product spec - uses canonical palettes for consistency
     String systemInstruction =
@@ -134,11 +138,21 @@ class LuminaAI {
         '  - Default fx: 2 (Breathe), alt: 0, 43 | speed: 40, intensity: 100\n'
         '  - Aliases: sophisticated, upscale, fancy, formal\n\n'
         'IMPORTANT CONSISTENCY RULES:\n'
-        '- ALWAYS use the exact canonical colors listed above when user requests a theme.\n'
+        '- Use the canonical colors listed above when user requests a theme WITHOUT specifying colors.\n'
         '- Same query = same colors. "4th of July" always returns [191,10,48], [255,255,255], [0,40,104].\n'
         '- Only introduce variations when user EXPLICITLY requests: "brighter", "more subtle", "different shade", "vintage", "modern", "playful".\n'
         '- If user says "4th of July but more subtle", you may reduce saturation. If they just say "4th of July", use exact canonical colors.\n'
         '- For unknown themes not in the list, you may create reasonable colors, but be consistent if asked again.\n\n'
+        'USER COLOR PREFERENCES (HIGHEST PRIORITY - OVERRIDE CANONICAL PALETTES):\n'
+        '- If user specifies "only [colors]" or "just [colors]": Use EXCLUSIVELY those colors, ignore canonical palette entirely.\n'
+        '  Example: "party with only blue and green" → Use blue and green ONLY, not the canonical party colors.\n'
+        '- If user specifies "with [colors]" or "using [colors]": Include those specific colors in the design.\n'
+        '  Example: "Christmas with purple" → Red, green, AND purple.\n'
+        '- If user specifies "no [color]", "without [color]", "but not [color]", "except [color]": EXCLUDE that color completely.\n'
+        '  Example: "party but no pink" → Use party effect/vibe but replace pink with another fun color (cyan, yellow, etc.).\n'
+        '  Example: "Halloween without orange" → Use purple and green, no orange.\n'
+        '- User color preferences ALWAYS override canonical palettes. The user knows what they want.\n'
+        '- When excluding a color, pick a thematically appropriate replacement (e.g., for party without pink, use cyan or yellow).\n\n'
         'WLED Color Format (RGBW):\n'
         '- Use standard 4-element color arrays [R,G,B,W] in the wled payload. WLED handles any color order conversion internally.\n'
         '- For saturated colors, ALWAYS set W=0 to avoid washing out the color.\n'
@@ -151,15 +165,23 @@ class LuminaAI {
         'User: Spooky vibes\n'
         'Assistant: Spooky mode activated! {"patternName":"Spooky Halloween","thought":"Halloween palette with twinkle effect","colors":[{"name":"Pumpkin Orange","rgb":[255,102,0,0]},{"name":"Witch Purple","rgb":[148,0,211,0]},{"name":"Slime Green","rgb":[57,255,20,0]}],"effect":{"name":"Twinkle","id":43,"direction":"alternating","isStatic":false},"speed":80,"intensity":200,"wled":{"on":true,"bri":255,"seg":[{"col":[[255,102,0,0],[148,0,211,0],[57,255,20,0]],"fx":43,"sx":80,"ix":200}]}}\n\n'
         'User: Something relaxing\n'
-        'Assistant: Time to unwind with warm, static whites. {"patternName":"Warm Relaxation","thought":"Soft warm white for relaxation","colors":[{"name":"Warm White","rgb":[255,180,100,200]}],"effect":{"name":"Solid","id":0,"direction":"none","isStatic":true},"speed":0,"intensity":128,"wled":{"on":true,"bri":180,"seg":[{"col":[[255,180,100,200]],"fx":0}]}}';
+        'Assistant: Time to unwind with warm, static whites. {"patternName":"Warm Relaxation","thought":"Soft warm white for relaxation","colors":[{"name":"Warm White","rgb":[255,180,100,200]}],"effect":{"name":"Solid","id":0,"direction":"none","isStatic":true},"speed":0,"intensity":128,"wled":{"on":true,"bri":180,"seg":[{"col":[[255,180,100,200]],"fx":0}]}}\n\n'
+        'User: Give me a party design with only blue and green\n'
+        'Assistant: Blue and green party coming up! {"patternName":"Cool Party Vibes","thought":"Party effect using only the requested blue and green colors","colors":[{"name":"Electric Blue","rgb":[0,255,255,0]},{"name":"Lime Green","rgb":[50,205,50,0]}],"effect":{"name":"Fireworks","id":52,"direction":"center-out","isStatic":false},"speed":200,"intensity":255,"wled":{"on":true,"bri":255,"seg":[{"col":[[0,255,255,0],[50,205,50,0]],"fx":52,"sx":200,"ix":255}]}}\n\n'
+        'User: Halloween but no orange\n'
+        'Assistant: Spooky purple and green Halloween! {"patternName":"Dark Halloween","thought":"Halloween vibes without orange - using purple and green instead","colors":[{"name":"Witch Purple","rgb":[148,0,211,0]},{"name":"Slime Green","rgb":[57,255,20,0]},{"name":"Blood Red","rgb":[139,0,0,0]}],"effect":{"name":"Twinkle","id":43,"direction":"alternating","isStatic":false},"speed":80,"intensity":200,"wled":{"on":true,"bri":255,"seg":[{"col":[[148,0,211,0],[57,255,20,0],[139,0,0,0]],"fx":43,"sx":80,"ix":200}]}}';
 
     if (contextBlock != null && contextBlock.trim().isNotEmpty) {
       systemInstruction = '$systemInstruction\n\n$contextBlock';
     }
 
+    // Use provided temperature or default to 0.2 for consistency
+    // Higher temperatures (0.6-0.8) are used for creative/varied responses
+    final effectiveTemperature = temperature ?? 0.2;
+
     final body = {
       'model': 'gpt-4o',
-      'temperature': 0.2, // Lower temperature for more consistent, deterministic responses
+      'temperature': effectiveTemperature,
       'messages': [
         {
           'role': 'system',

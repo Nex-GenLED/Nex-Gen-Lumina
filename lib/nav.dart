@@ -1141,15 +1141,16 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           const SizedBox(height: 12),
                           Consumer(builder: (context, ref, _) {
                             final state = ref.watch(wledStateProvider);
-                            // Extract current color from device state
+                            // Extract full color sequence from device state
+                            // Uses displayColors which prefers Lumina's color sequence over single polled color
                             List<List<int>>? colors;
                             if (state.connected) {
-                              final c = state.color;
-                              colors = [[
+                              final displayColors = state.displayColors;
+                              colors = displayColors.map((c) => [
                                 (c.r * 255.0).round().clamp(0, 255),
                                 (c.g * 255.0).round().clamp(0, 255),
                                 (c.b * 255.0).round().clamp(0, 255),
-                              ]];
+                              ]).toList();
                             }
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1159,11 +1160,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   initialIntensity: state.intensity,
                                   initialReverse: false,
                                   initialEffectId: state.effectId,
+                                  effectName: state.effectName, // Use stored effect name from Lumina
                                   initialColors: colors,
                                   showColors: true, // Show color sequence for editing
                                   showPixelLayout: false,
                                   onCustomized: () {
-                                    // When colors are customized, change pattern name to "Custom"
+                                    // When colors are customized, clear Lumina metadata and change to "Custom"
+                                    ref.read(wledStateProvider.notifier).clearLuminaPatternMetadata();
                                     ref.read(activePresetLabelProvider.notifier).state = 'Custom';
                                   },
                                 ),
@@ -1256,17 +1259,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
             FavoritesGrid(
               onPatternTap: (favorite) async {
-                final repo = ref.read(wledRepositoryProvider);
-                if (repo == null) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('No controller connected')),
-                    );
-                  }
-                  return;
-                }
-
+                // Wrap entire callback in try-catch to prevent crashes
+                // from ref access issues or unexpected exceptions
                 try {
+                  // Check mounted first to avoid accessing disposed widget
+                  if (!mounted) return;
+
+                  final repo = ref.read(wledRepositoryProvider);
+                  if (repo == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No controller connected')),
+                      );
+                    }
+                    return;
+                  }
+
                   debugPrint('Applying favorite: ${favorite.patternName}');
                   debugPrint('Pattern data: ${favorite.patternData}');
 
@@ -1278,7 +1286,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
                   if (success) {
                     // Update the active pattern label immediately for UI feedback
-                    ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
+                    try {
+                      ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
+                    } catch (_) {}
 
                     // Record favorite usage (don't await - fire and forget)
                     try {
@@ -1319,7 +1329,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Error: $e'),
+                        content: Text('Error applying pattern'),
                         backgroundColor: Colors.red,
                       ),
                     );

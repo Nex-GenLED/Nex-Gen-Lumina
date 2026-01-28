@@ -197,7 +197,10 @@ class ScheduleSyncService {
   /// presets configured on their device:
   /// - Preset 1: "On" state (default brightness/color)
   /// - Preset 2: "Off" state
-  /// - Preset 3+: Custom patterns/effects
+  /// - Preset 3: "Dim" state (20% brightness) - for night mode / brightness rules
+  /// - Preset 4: "Low" state (40% brightness)
+  /// - Preset 5: "Medium" state (60% brightness)
+  /// - Preset 10+: Custom patterns/effects
   ///
   /// For now we use simple conventions. Future improvement: let users
   /// select which preset to trigger per schedule item.
@@ -209,12 +212,41 @@ class ScheduleSyncService {
     if (a.contains('turn off') || a.contains('off')) return 2;
     // "Turn On" triggers preset 1 (default on state)
     if (a.contains('turn on') || a.contains('on')) return 1;
-    // Brightness changes - would need preset with desired brightness
-    if (a.startsWith('brightness')) return 3;
+
+    // Brightness level presets (parse percentage from label)
+    // "Brightness: 20%" → preset 3 (dim)
+    // "Brightness: 40%" → preset 4 (low)
+    // "Brightness: 60%" → preset 5 (medium)
+    // Higher values → preset 1 (full on)
+    if (a.startsWith('brightness')) {
+      final percentMatch = RegExp(r'(\d+)%?').firstMatch(a);
+      if (percentMatch != null) {
+        final percent = int.tryParse(percentMatch.group(1)!) ?? 50;
+        if (percent <= 25) return 3;      // Dim preset (20%)
+        if (percent <= 45) return 4;      // Low preset (40%)
+        if (percent <= 70) return 5;      // Medium preset (60%)
+        return 1;                          // Full on for high brightness
+      }
+      return 3; // Default to dim preset if no percentage found
+    }
+
     // Pattern execution - maps to preset 10+ (user-configured)
     if (a.startsWith('pattern') || a.contains('pattern')) return 10;
     // Default: trigger preset 1 (on)
     return 1;
+  }
+
+  /// Extracts brightness percentage from an action label.
+  /// Returns null if the label doesn't contain a brightness percentage.
+  int? extractBrightnessPercent(String actionLabel) {
+    final a = actionLabel.toLowerCase();
+    if (!a.startsWith('brightness')) return null;
+
+    final percentMatch = RegExp(r'(\d+)%?').firstMatch(a);
+    if (percentMatch != null) {
+      return int.tryParse(percentMatch.group(1)!);
+    }
+    return null;
   }
 }
 

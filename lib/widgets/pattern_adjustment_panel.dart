@@ -112,6 +112,8 @@ class PatternAdjustmentPanel extends ConsumerStatefulWidget {
   final bool initialReverse;
   /// Initial effect ID (WLED fx value)
   final int? initialEffectId;
+  /// Effect name to display (from Lumina AI or lookup table)
+  final String? effectName;
   /// Initial colors for the color sequence builder (list of RGB arrays)
   final List<List<int>>? initialColors;
   /// Whether to show the color sequence builder
@@ -131,6 +133,7 @@ class PatternAdjustmentPanel extends ConsumerStatefulWidget {
     this.initialIntensity = 128,
     this.initialReverse = false,
     this.initialEffectId,
+    this.effectName,
     this.initialColors,
     this.showColors = true,
     this.showPixelLayout = false,
@@ -372,7 +375,12 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                         value: _effectId != null && _commonEffects.any((e) => e.id == _effectId)
                             ? _effectId
                             : null,
-                        hint: Text('Select effect', style: TextStyle(color: Colors.white.withValues(alpha: 0.7))),
+                        // Show effect name from Lumina if available, otherwise show hint
+                        hint: Text(
+                          widget.effectName ?? 'Select effect',
+                          style: TextStyle(color: widget.effectName != null ? Colors.white : Colors.white.withValues(alpha: 0.7)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         dropdownColor: const Color(0xFF1E1E2E),
                         icon: const Icon(Icons.arrow_drop_down, color: NexGenPalette.cyan),
                         isExpanded: true,

@@ -12,6 +12,18 @@ class WledStateModel {
   final int effectId; // WLED fx value (0-255)
   final int paletteId; // WLED palette value
 
+  /// Full color sequence from the pattern (all segment colors)
+  /// This preserves multi-color patterns like "Chiefs Red + Chiefs Gold"
+  final List<Color> colorSequence;
+
+  /// Color names from Lumina (e.g., ["Chiefs Red", "Chiefs Gold"])
+  /// Empty if colors were not named by AI
+  final List<String> colorNames;
+
+  /// Custom effect name set by Lumina (overrides lookup if non-null)
+  /// This preserves the exact effect name from AI responses
+  final String? customEffectName;
+
   const WledStateModel({
     required this.isOn,
     required this.brightness,
@@ -23,6 +35,9 @@ class WledStateModel {
     required this.supportsRgbw,
     this.effectId = 0,
     this.paletteId = 0,
+    this.colorSequence = const [],
+    this.colorNames = const [],
+    this.customEffectName,
   });
 
   WledStateModel copyWith({
@@ -36,6 +51,10 @@ class WledStateModel {
     bool? supportsRgbw,
     int? effectId,
     int? paletteId,
+    List<Color>? colorSequence,
+    List<String>? colorNames,
+    String? customEffectName,
+    bool clearCustomEffectName = false,
   }) =>
       WledStateModel(
         isOn: isOn ?? this.isOn,
@@ -48,10 +67,16 @@ class WledStateModel {
         supportsRgbw: supportsRgbw ?? this.supportsRgbw,
         effectId: effectId ?? this.effectId,
         paletteId: paletteId ?? this.paletteId,
+        colorSequence: colorSequence ?? this.colorSequence,
+        colorNames: colorNames ?? this.colorNames,
+        customEffectName: clearCustomEffectName ? null : (customEffectName ?? this.customEffectName),
       );
 
-  /// Get the effect name based on effectId
-  String get effectName => kEffectNames[effectId] ?? 'Effect #$effectId';
+  /// Get the effect name - prefers custom name from Lumina, falls back to lookup
+  String get effectName => customEffectName ?? kEffectNames[effectId] ?? 'Effect #$effectId';
+
+  /// Get display colors - prefers color sequence, falls back to single color
+  List<Color> get displayColors => colorSequence.isNotEmpty ? colorSequence : [color];
 
   static WledStateModel initial() => const WledStateModel(
         isOn: false,
@@ -64,6 +89,9 @@ class WledStateModel {
         supportsRgbw: false,
         effectId: 0,
         paletteId: 0,
+        colorSequence: [],
+        colorNames: [],
+        customEffectName: null,
       );
 }
 

@@ -7,6 +7,7 @@ import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
+import 'package:nexgen_command/features/ai/suggestion_history.dart';
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
@@ -15,13 +16,27 @@ class LuminaBrain {
   /// Sends a conversational request enriched with context.
   /// Three-tier matching system for maximum consistency and scalability:
   /// 1. Check pre-defined theme library (fastest, for common themes)
-  /// 2. Check semantic cache (for previously seen queries)
+  /// 2. Check semantic cache (for previously seen queries) - BYPASSED for open-ended queries
   /// 3. Fall back to AI with caching (for new queries)
+  ///
+  /// For open-ended queries ("surprise me", "give me a party", etc.), we:
+  /// - Skip the semantic cache to ensure variety
+  /// - Inject recent suggestion history so AI avoids repetition
+  /// - Use slightly higher temperature for creativity
   static Future<String> chat(WidgetRef ref, String userPrompt) async {
+    final historyService = SuggestionHistoryService.instance;
+    final isOpenEnded = SuggestionHistoryService.isOpenEndedQuery(userPrompt);
+
+    if (isOpenEnded) {
+      debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
+    }
+
     // TIER 1: Try to match against deterministic event theme library first
+    // Note: We still allow theme matches for open-ended queries since
+    // "give me a party" could match a party theme, which is expected behavior
     final themeMatch = EventThemeLibrary.matchQuery(userPrompt);
 
-    if (themeMatch != null) {
+    if (themeMatch != null && !isOpenEnded) {
       debugPrint('🎯 TIER 1: Matched pre-defined theme: ${themeMatch.theme.name} with context: ${themeMatch.context}');
       final pattern = themeMatch.pattern;
       final wledPayload = pattern.toWledPayload();
@@ -30,31 +45,62 @@ class LuminaBrain {
     }
 
     // TIER 2: Check semantic cache for previously processed queries
-    final cachedPattern = SemanticPatternMatcher.getCachedPattern(userPrompt);
-    if (cachedPattern != null) {
-      debugPrint('💾 TIER 2: Using cached pattern (hash: ${SemanticPatternMatcher.createQueryHash(userPrompt)})');
-      final theme = SemanticPatternMatcher.extractTheme(userPrompt);
-      final context = SemanticPatternMatcher.extractContext(userPrompt);
-      debugPrint('   Theme: $theme, Context: $context');
+    // SKIP for:
+    // - Open-ended queries (to ensure variety)
+    // - Generic queries without a specific theme (to avoid "party" matching "fun", "dance", etc.)
+    final detectedTheme = SemanticPatternMatcher.extractTheme(userPrompt);
+    final hasSpecificTheme = detectedTheme != null;
 
-      // Build response from cached data
-      return _buildResponseFromCachedData(cachedPattern);
+    if (!isOpenEnded && hasSpecificTheme) {
+      final cachedPattern = SemanticPatternMatcher.getCachedPattern(userPrompt);
+      if (cachedPattern != null) {
+        debugPrint('💾 TIER 2: Using cached pattern (hash: ${SemanticPatternMatcher.createQueryHash(userPrompt)})');
+        final context = SemanticPatternMatcher.extractContext(userPrompt);
+        debugPrint('   Theme: $detectedTheme, Context: $context');
+
+        // Build response from cached data
+        return _buildResponseFromCachedData(cachedPattern);
+      }
+    } else if (isOpenEnded) {
+      debugPrint('⏭️ Skipping semantic cache for open-ended query');
+    } else if (!hasSpecificTheme) {
+      debugPrint('⏭️ Skipping semantic cache for generic query (no specific theme detected)');
     }
 
-    // TIER 3: Fall back to AI for new queries, then cache the result
-    debugPrint('🤖 TIER 3: No match found, using AI (will cache result)');
+    // TIER 3: Fall back to AI for new queries
+    debugPrint('🤖 TIER 3: Using AI${isOpenEnded ? " (with variety context)" : " (will cache result)"}');
     final theme = SemanticPatternMatcher.extractTheme(userPrompt);
     final context = SemanticPatternMatcher.extractContext(userPrompt);
     debugPrint('   Detected theme: $theme, context: $context');
 
-    final contextBlock = _buildContextBlock(ref);
-    final aiResponse = await LuminaAI.chat(userPrompt, contextBlock: contextBlock);
+    // Build context block with optional avoidance context for open-ended queries
+    String contextBlock = _buildContextBlock(ref);
 
-    // Extract and cache the pattern from AI response for future identical queries
+    // For open-ended queries, inject recent suggestion history
+    if (isOpenEnded) {
+      final avoidanceContext = historyService.getAvoidanceContext(limit: 5);
+      if (avoidanceContext != null) {
+        contextBlock = '$contextBlock\n\n$avoidanceContext';
+        debugPrint('📋 Injected avoidance context (${historyService.historySize} suggestions in history)');
+      }
+    }
+
+    // Use higher temperature for open-ended queries to increase creativity
+    final aiResponse = await LuminaAI.chat(
+      userPrompt,
+      contextBlock: contextBlock,
+      temperature: isOpenEnded ? 0.7 : null, // Higher temp for variety
+    );
+
+    // Extract and cache the pattern from AI response
+    // Only cache queries that have a SPECIFIC theme (not generic queries)
+    // This prevents "party", "fun", "dance" from all returning the same cached result
     final parsed = _extractJsonFromContent(aiResponse);
-    if (parsed != null) {
+    if (parsed != null && !isOpenEnded && hasSpecificTheme) {
       SemanticPatternMatcher.cachePattern(userPrompt, parsed.object);
-      debugPrint('   ✅ Cached AI response for future use (cache size: ${SemanticPatternMatcher.cacheSize})');
+      debugPrint('   ✅ Cached AI response for theme "$detectedTheme" (cache size: ${SemanticPatternMatcher.cacheSize})');
+    } else if (parsed != null && !hasSpecificTheme) {
+      debugPrint('   ⏭️ Not caching generic query (would cause false matches)');
     }
 
     return aiResponse;

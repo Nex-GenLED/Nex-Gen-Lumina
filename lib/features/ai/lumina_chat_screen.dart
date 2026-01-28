@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/ai/suggestion_history.dart';
+import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -306,7 +308,12 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     setState(() {
       _messages.add(_Msg.user(prompt));
       _isThinking = true;
+      // Clear the preview bar when starting a new query
+      // This prevents stale patterns from visually persisting
+      showPreviewBar = false;
+      currentPreviewColors = [];
     });
+    _previewBarAnim.reverse();
     _input.clear();
     _scrollToEndSoon();
 
@@ -354,6 +361,14 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
             patternName: generatedPattern.name.toUpperCase(),
           );
 
+          // Record this suggestion in history for variety in open-ended queries
+          SuggestionHistoryService.instance.recordSuggestion(
+            patternName: generatedPattern.name,
+            colorNames: generatedPattern.colors.map(_colorName).toList(),
+            effectId: generatedPattern.primaryEffectId,
+            queryType: 'architectural',
+          );
+
           // Show confirmation and apply
           if (repo != null) {
             try {
@@ -367,7 +382,14 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
               if (shouldApply == true) {
                 final ok = await repo.applyJson(wled);
                 if (!ok) debugPrint('WLED rejected architectural payload');
-                if (mounted) {
+                if (mounted && ok) {
+                  // Store pattern metadata for home screen display
+                  ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+                    colorSequence: preview.colors,
+                    colorNames: preview.colors.map(_colorName).toList(),
+                    effectName: null, // Architectural patterns don't have a single effect name
+                  );
+
                   ref.read(activePresetLabelProvider.notifier).state = preview.patternName ?? 'Architectural Pattern';
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Applied to $targetDescription!')),
@@ -425,6 +447,20 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
         // Prepare preview info - pass full parsed object to get rich schema data
         preview = _extractPreview(parsed?.object ?? {'wled': wled});
 
+        // Record this suggestion in history to avoid repetition for open-ended queries
+        if (preview != null) {
+          final context = SemanticPatternMatcher.extractContext(prompt);
+          SuggestionHistoryService.instance.recordSuggestion(
+            patternName: preview.patternName ?? 'Pattern',
+            colorNames: preview.colorNames.isNotEmpty
+                ? preview.colorNames
+                : preview.colors.map(_colorName).toList(),
+            effectId: preview.effectId,
+            effectName: preview.effectName,
+            queryType: context,
+          );
+        }
+
         // Ask the user to confirm running the setup before applying to lights
         if (repo != null) {
           try {
@@ -432,7 +468,17 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
             if (shouldApply == true) {
               final ok = await repo.applyJson(wled);
               if (!ok) debugPrint('WLED rejected payload from Lumina');
-              if (mounted) {
+              if (mounted && ok) {
+                // Store Lumina pattern metadata for home screen display
+                // This preserves the full color sequence and effect name from AI
+                if (preview != null) {
+                  ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+                    colorSequence: preview.colors,
+                    colorNames: preview.colorNames,
+                    effectName: preview.effectName,
+                  );
+                }
+
                 // Extract pattern label: prefer patternName > thought > verbal
                 String patternLabel = 'Lumina Pattern';
                 if (parsed != null && parsed.object['patternName'] is String) {
@@ -501,7 +547,10 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     setState(() {
       _messages.add(_Msg.user(refinementPrompt));
       _isThinking = true;
+      // Clear the preview bar while processing refinement
+      showPreviewBar = false;
     });
+    _previewBarAnim.reverse();
     _scrollToEndSoon();
 
     try {
@@ -534,6 +583,19 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       if (wled != null) {
         preview = _extractPreview(parsed?.object ?? {'wled': wled});
 
+        // Record refined pattern in history
+        if (preview != null) {
+          SuggestionHistoryService.instance.recordSuggestion(
+            patternName: preview.patternName ?? 'Refined Pattern',
+            colorNames: preview.colorNames.isNotEmpty
+                ? preview.colorNames
+                : preview.colors.map(_colorName).toList(),
+            effectId: preview.effectId,
+            effectName: preview.effectName,
+            queryType: 'refinement',
+          );
+        }
+
         if (repo != null) {
           try {
             final shouldApply = await _showRunSetupSheet(
@@ -545,7 +607,16 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
             if (shouldApply == true) {
               final ok = await repo.applyJson(wled);
               if (!ok) debugPrint('WLED rejected refined payload from Lumina');
-              if (mounted) {
+              if (mounted && ok) {
+                // Store pattern metadata for home screen display
+                if (preview != null) {
+                  ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+                    colorSequence: preview.colors,
+                    colorNames: preview.colorNames,
+                    effectName: preview.effectName,
+                  );
+                }
+
                 String patternLabel = 'Lumina Pattern';
                 if (parsed != null && parsed.object['patternName'] is String) {
                   patternLabel = parsed.object['patternName'] as String;
@@ -828,11 +899,12 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     // When keyboard is open, add much more space to ensure messages are visible above keyboard + input
     final double overlayReserve = isKeyboard ? keyboard + 100 : 160;
     // Reserve space at the top for the house hero so the list scrolls beneath it
-    // Use a more compact hero height - roughly 1/3 of screen or aspect-based, whichever is smaller
+    // Use a compact hero height - roughly 1/4 of screen or aspect-based, whichever is smaller
+    // Reduced by 15% to give more space for chat messages on smaller screens
     final double _aspectBased = media.size.width * 9 / 16;
-    final double _screenThird = media.size.height * 0.28;
-    final double heroHeight = _aspectBased < _screenThird ? _aspectBased : _screenThird;
-    final double clampedHeroHeight = heroHeight.clamp(160.0, 280.0);
+    final double _screenFraction = media.size.height * 0.238;
+    final double heroHeight = _aspectBased < _screenFraction ? _aspectBased : _screenFraction;
+    final double clampedHeroHeight = heroHeight.clamp(140.0, 238.0);
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -957,16 +1029,16 @@ class _MessageList extends StatelessWidget {
       child: Container(
         margin: EdgeInsets.only(top: topReserve),
         decoration: BoxDecoration(
-          // Semi-transparent dark background so messages are readable
+          // High-opacity dark background for better text visibility over house image
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              NexGenPalette.matteBlack.withValues(alpha: 0.85),
-              NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              NexGenPalette.matteBlack.withValues(alpha: 0.92),
+              NexGenPalette.matteBlack.withValues(alpha: 0.97),
               NexGenPalette.matteBlack,
             ],
-            stops: const [0.0, 0.15, 0.3],
+            stops: const [0.0, 0.12, 0.25],
           ),
         ),
         child: ListView.builder(
@@ -1070,7 +1142,7 @@ class _AssistantBubble extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 560),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xCC2A2A2A),
+            color: const Color(0xE62A2A2A), // 90% opacity for better text visibility
             borderRadius: const BorderRadius.only(topRight: Radius.circular(16), bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
             border: Border.all(color: NexGenPalette.line),
           ),
