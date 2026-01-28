@@ -281,15 +281,15 @@ class ComprehensiveThemeLibrary {
     // Add more NFL teams as needed
   ];
 
-  static final _nbaTeams = [
+  static final List<EventTheme> _nbaTeams = [
     // Add NBA teams as needed
   ];
 
-  static final _mlbTeams = [
+  static final List<EventTheme> _mlbTeams = [
     // Add MLB teams as needed
   ];
 
-  static final _collegeTeams = [
+  static final List<EventTheme> _collegeTeams = [
     // Add college teams as needed
   ];
 
@@ -307,7 +307,7 @@ class ComprehensiveThemeLibrary {
     ThemeDefinitions.fire,
   ];
 
-  static final _cultural = [
+  static final List<EventTheme> _cultural = [
     // Add cultural celebrations as needed
   ];
 }

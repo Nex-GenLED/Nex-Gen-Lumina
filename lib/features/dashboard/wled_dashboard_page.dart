@@ -1037,7 +1037,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     // Save to favorites
     try {
+      // Generate a unique ID for this custom pattern
+      final patternId = 'custom_${DateTime.now().millisecondsSinceEpoch}';
       await ref.read(favoritesNotifierProvider.notifier).addFavorite(
+        patternId: patternId,
         patternName: patternName,
         patternData: payload,
         autoAdded: false,

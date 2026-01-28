@@ -158,6 +158,7 @@ class AppNeon {
 class NexGenPalette {
   // Base
   static const matteBlack = Color(0xFF050505);
+  static const gunmetal = Color(0xFF1A1A1A); // Solid gunmetal
   static const gunmetal90 = Color(0xE61A1A1A); // 90% opacity
   static const gunmetal50 = Color(0x801A1A1A); // 50% opacity for charts/bg
   // Brand background deep tone

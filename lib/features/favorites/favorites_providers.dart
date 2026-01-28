@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/features/wled/pattern_models.dart';
 
 /// Model representing a favorite pattern with usage metadata
 class FavoritePattern {
@@ -10,6 +10,7 @@ class FavoritePattern {
   final int usageCount;
   final DateTime lastUsed;
   final Map<String, dynamic> wledPayload;
+  final bool autoAdded;
 
   FavoritePattern({
     required this.patternId,
@@ -17,6 +18,7 @@ class FavoritePattern {
     required this.usageCount,
     required this.lastUsed,
     required this.wledPayload,
+    this.autoAdded = false,
   });
 
   factory FavoritePattern.fromFirestore(DocumentSnapshot doc) {
@@ -27,6 +29,7 @@ class FavoritePattern {
       usageCount: data['usageCount'] as int? ?? 0,
       lastUsed: (data['lastUsed'] as Timestamp?)?.toDate() ?? DateTime.now(),
       wledPayload: data['wledPayload'] as Map<String, dynamic>? ?? {},
+      autoAdded: data['autoAdded'] as bool? ?? false,
     );
   }
 
@@ -36,6 +39,7 @@ class FavoritePattern {
       'usageCount': usageCount,
       'lastUsed': Timestamp.fromDate(lastUsed),
       'wledPayload': wledPayload,
+      'autoAdded': autoAdded,
     };
   }
 }
@@ -50,7 +54,8 @@ final favoritesPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
       .orderBy('usageCount', descending: true)
       .limit(5)
       .snapshots()
-      .map((snap) => snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
+      .map((snap) =>
+          snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
 });
 
 /// Provider for recently used patterns (last 5)
@@ -63,7 +68,8 @@ final recentPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
       .orderBy('lastUsed', descending: true)
       .limit(5)
       .snapshots()
-      .map((snap) => snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
+      .map((snap) =>
+          snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
 });
 
 /// Notifier for managing favorites (add, remove, track usage)
@@ -71,11 +77,34 @@ class FavoritesNotifier extends Notifier<void> {
   @override
   void build() {}
 
-  /// Track pattern usage - auto-adds to favorites and increments usage count
-  Future<void> trackPatternUsage({
+  /// Records that a favorite was clicked/used.
+  /// Increments usage count and updates timestamp.
+  Future<void> recordFavoriteUsage(String patternId) async {
+    final user = ref.read(authStateProvider).value;
+    if (user == null) return;
+
+    try {
+      final docRef = FirebaseFirestore.instance
+          .doc('users/${user.uid}/favorites/$patternId');
+
+      // Update existing document
+      await docRef.update({
+        'usageCount': FieldValue.increment(1),
+        'lastUsed': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      // Silently fail or log
+      debugPrint('Failed to record favorite usage: $e');
+    }
+  }
+
+  /// Adds a new favorite to Firestore.
+  /// Updated to accept 'patternData' and 'autoAdded' to match WledDashboardPage
+  Future<void> addFavorite({
     required String patternId,
     required String patternName,
-    required Map<String, dynamic> wledPayload,
+    required Map<String, dynamic> patternData,
+    bool autoAdded = false, // FIXED: Added this parameter
   }) async {
     final user = ref.read(authStateProvider).value;
     if (user == null) return;
@@ -84,49 +113,15 @@ class FavoritesNotifier extends Notifier<void> {
       final docRef = FirebaseFirestore.instance
           .doc('users/${user.uid}/favorites/$patternId');
 
-      final docSnap = await docRef.get();
-
-      if (docSnap.exists) {
-        // Increment usage count and update timestamp
-        await docRef.update({
-          'usageCount': FieldValue.increment(1),
-          'lastUsed': FieldValue.serverTimestamp(),
-        });
-      } else {
-        // Create new favorite entry
-        await docRef.set({
-          'name': patternName,
-          'usageCount': 1,
-          'lastUsed': FieldValue.serverTimestamp(),
-          'wledPayload': wledPayload,
-        });
-      }
-    } catch (e) {
-      // Silently fail - favorites are a nice-to-have feature
-      print('Failed to track pattern usage: $e');
-    }
-  }
-
-  /// Manually add a pattern to favorites
-  Future<void> addToFavorites({
-    required String patternId,
-    required String patternName,
-    required Map<String, dynamic> wledPayload,
-  }) async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
-
-    try {
-      await FirebaseFirestore.instance
-          .doc('users/${user.uid}/favorites/$patternId')
-          .set({
+      await docRef.set({
         'name': patternName,
-        'usageCount': FieldValue.increment(1),
+        'usageCount': 1,
         'lastUsed': FieldValue.serverTimestamp(),
-        'wledPayload': wledPayload,
+        'wledPayload': patternData,
+        'autoAdded': autoAdded, // Store the flag in Firestore
       }, SetOptions(merge: true));
     } catch (e) {
-      print('Failed to add favorite: $e');
+      debugPrint('Failed to add favorite: $e');
       rethrow;
     }
   }
@@ -141,7 +136,7 @@ class FavoritesNotifier extends Notifier<void> {
           .doc('users/${user.uid}/favorites/$patternId')
           .delete();
     } catch (e) {
-      print('Failed to remove favorite: $e');
+      debugPrint('Failed to remove favorite: $e');
       rethrow;
     }
   }
@@ -159,6 +154,50 @@ class FavoritesNotifier extends Notifier<void> {
     } catch (e) {
       return false;
     }
+  }
+
+  /// Legacy wrapper if you still use trackPatternUsage elsewhere
+  Future<void> trackPatternUsage({
+    required String patternId,
+    required String patternName,
+    required Map<String, dynamic> wledPayload,
+  }) async {
+    final user = ref.read(authStateProvider).value;
+    if (user == null) return;
+
+    try {
+      final docRef = FirebaseFirestore.instance
+          .doc('users/${user.uid}/favorites/$patternId');
+
+      final docSnap = await docRef.get();
+
+      if (docSnap.exists) {
+        await recordFavoriteUsage(patternId);
+      } else {
+        await addFavorite(
+          patternId: patternId,
+          patternName: patternName,
+          patternData: wledPayload,
+          autoAdded: true, // Implicitly true for tracking usage of new patterns
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to track pattern usage: $e');
+    }
+  }
+
+  /// Legacy alias to support older calls to addToFavorites
+  Future<void> addToFavorites({
+    required String patternId,
+    required String patternName,
+    required Map<String, dynamic> wledPayload,
+  }) async {
+    return addFavorite(
+      patternId: patternId,
+      patternName: patternName,
+      patternData: wledPayload,
+      autoAdded: false, // Explicit adds are not auto-added
+    );
   }
 }
 

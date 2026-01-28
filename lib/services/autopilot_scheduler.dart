@@ -205,7 +205,7 @@ class AutopilotScheduler {
       }
 
       // Apply the WLED payload
-      final success = await repo.applyState(item.wledPayload);
+      final success = await repo.applyJson(item.wledPayload);
 
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');

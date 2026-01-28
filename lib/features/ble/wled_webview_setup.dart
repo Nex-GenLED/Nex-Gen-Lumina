@@ -1,37 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/nav.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-/// Simple WebView that loads WLED's WiFi configuration page
-/// This bypasses all API issues and lets the user configure WiFi directly through WLED's web interface
-class WledWebViewSetup extends StatefulWidget {
+/// Placeholder for WLED WebView WiFi setup.
+/// The webview_flutter package is not included, so this screen
+/// provides a fallback that launches the WLED config in the system browser.
+class WledWebViewSetup extends StatelessWidget {
   const WledWebViewSetup({super.key});
 
-  @override
-  State<WledWebViewSetup> createState() => _WledWebViewSetupState();
-}
-
-class _WledWebViewSetupState extends State<WledWebViewSetup> {
-  late final WebViewController _controller;
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (String url) {
-            setState(() => _isLoading = true);
-          },
-          onPageFinished: (String url) {
-            setState(() => _isLoading = false);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse('http://4.3.2.1/settings/wifi'));
+  Future<void> _launchWledConfig() async {
+    final uri = Uri.parse('http://4.3.2.1/settings/wifi');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   @override
@@ -43,42 +25,47 @@ class _WledWebViewSetupState extends State<WledWebViewSetup> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _controller.reload(),
-          ),
-        ],
       ),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _controller),
-          if (_isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(16),
-        color: Colors.black87,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            const Icon(
+              Icons.wifi_tethering,
+              size: 80,
+              color: Colors.cyan,
+            ),
+            const SizedBox(height: 24),
             const Text(
-              'Configure your WiFi network in the WLED interface above.',
-              style: TextStyle(color: Colors.white70),
+              'Configure WLED WiFi',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             const Text(
-              'After saving, the controller will reboot and connect to your network.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              'Connect to your WLED device\'s WiFi network (WLED-AP), then tap the button below to open the WiFi configuration page in your browser.',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => context.go(AppRoutes.systemManagement),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              onPressed: _launchWledConfig,
+              icon: const Icon(Icons.open_in_browser),
+              label: const Text('Open WLED WiFi Settings'),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'After saving your WiFi settings, the controller will reboot and connect to your network.',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            OutlinedButton(
+              onPressed: () => context.go(AppRoutes.controllersSettings),
               child: const Text('Done - Go to My Controllers'),
             ),
           ],

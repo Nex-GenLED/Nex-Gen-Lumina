@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 /// Dialog to obtain user consent for community pattern sharing
@@ -50,7 +51,7 @@ class _CommunitySharingConsentDialogState
             const SizedBox(height: 8),
             _buildInfoRow(Icons.palette, 'Your custom pattern designs'),
             _buildInfoRow(Icons.home, 'Your home builder (e.g., "Summit Homes")'),
-            _buildInfoRow(Icons.floor_plan, 'Your floor plan (e.g., "The Preston")'),
+            _buildInfoRow(Icons.grid_view, 'Your floor plan (e.g., "The Preston")'),
             const SizedBox(height: 16),
             const Text(
               'What we DON\'T share:',
@@ -148,7 +149,7 @@ class _CommunitySharingConsentDialogState
     });
 
     try {
-      final userProfile = ref.read(userProfileProvider).value;
+      final userProfile = ref.read(currentUserProfileProvider).value;
       if (userProfile == null) {
         throw Exception('User profile not found');
       }
