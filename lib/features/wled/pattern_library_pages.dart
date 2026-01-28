@@ -16,8 +16,12 @@ import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:nexgen_command/widgets/color_behavior_badge.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 
 /// Explore screen with Simulated AI search logic
 class ExplorePatternsScreen extends ConsumerStatefulWidget {
@@ -102,10 +106,12 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Watch personalized recommendations and user profile for greeting
-    final recs = ref.watch(recommendedPatternsProvider);
-    // Load public predefined pattern lists from provider
-    final library = ref.watch(publicPatternLibraryProvider);
+    // Watch smart personalized recommendations (async) and user profile for greeting
+    final recsAsync = ref.watch(smartRecommendedPatternsProvider);
+    final recs = recsAsync.maybeWhen(
+      data: (patterns) => patterns,
+      orElse: () => ref.read(recommendedPatternsProvider), // Fallback to sync provider while loading
+    );
     final profileAsync = ref.watch(currentUserProfileProvider);
     String _greetingTitle() {
       // Default title
@@ -197,25 +203,25 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: 120),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // Spotlight hero: show personalized recommendation when available; fallback to Chiefs banner
+                  // 1. My Saved Designs section (at top)
+                  _pagePadding(child: const _MySavedDesignsSection()),
+
+                  // 2. Recommended for You section
                   _pagePadding(
-                    child: recs.isNotEmpty
-                        ? _SpotlightRecommendedHero(title: _greetingTitle(), pattern: recs.first)
-                        : const _SpotlightBannerChiefs(),
+                    child: PatternCategoryRow(title: _greetingTitle(), patterns: recs, query: '', isFeatured: true),
                   ),
                   _gap(24),
-                  // Personalized recommendations row beneath the hero (same cards and dimensions)
-                  if (recs.isNotEmpty) ...[
-                    _pagePadding(
-                      child: PatternCategoryRow(title: _greetingTitle(), patterns: recs, query: '', isFeatured: true),
-                    ),
-                    _gap(24),
-                  ],
-                  _pagePadding(child: PatternCategoryRow(title: 'Architectural & Elegant', patterns: library.architecturalElegant, query: '')),
-                  _gap(24),
-                  _pagePadding(child: PatternCategoryRow(title: 'Holidays & Events', patterns: library.holidaysEvents, query: '')),
-                  _gap(24),
-                  _pagePadding(child: PatternCategoryRow(title: 'Sports Teams', patterns: library.sportsTeams, query: '')),
+
+                  // 3. Recent Patterns section
+                  _pagePadding(child: const _RecentPatternsSection()),
+
+                  // 4. Pinned Categories section (user-added folders, in order added)
+                  _pagePadding(child: const _PinnedCategoriesSection()),
+
+                  // 5. Browse Design Library section (at bottom)
+                  _pagePadding(
+                    child: _DesignLibraryBrowser(),
+                  ),
                   _gap(28),
                 ]),
               ),
@@ -345,177 +351,940 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
   }
 }
 
-/// Spotlight hero with bold CTA and Chiefs gradient
-class _SpotlightBannerChiefs extends ConsumerWidget {
-  const _SpotlightBannerChiefs();
+// GradientPattern moved to pattern_models.dart to enable reuse across providers
+
+/// Browse Design Library section with category cards
+class _DesignLibraryBrowser extends ConsumerWidget {
+  const _DesignLibraryBrowser();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return AspectRatio(
-      // Make the hero shorter to reduce vertical footprint
-      aspectRatio: 16 / 6,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(children: [
-          // Gradient background (Chiefs: deep red -> gold)
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.red,
-                    const Color(0xFFFFD54F),
+    final categoriesAsync = ref.watch(patternCategoriesProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section header
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Browse Design Library',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            Text(
+              'Explore all categories',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: NexGenPalette.textSecondary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        // Category grid
+        categoriesAsync.when(
+          data: (categories) => GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.6,
+            ),
+            itemCount: categories.length,
+            itemBuilder: (context, index) {
+              final category = categories[index];
+              return _DesignLibraryCategoryCard(category: category);
+            },
+          ),
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+          error: (_, __) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Unable to load categories',
+                style: TextStyle(color: NexGenPalette.textSecondary),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Individual category card for the Design Library browser
+class _DesignLibraryCategoryCard extends ConsumerWidget {
+  final PatternCategory category;
+
+  const _DesignLibraryCategoryCard({required this.category});
+
+  // Map category IDs to icons
+  IconData _iconForCategory(String categoryId) {
+    switch (categoryId) {
+      case 'cat_arch':
+        return Icons.home_outlined;
+      case 'cat_holiday':
+        return Icons.celebration_outlined;
+      case 'cat_sports':
+        return Icons.sports_football_outlined;
+      case 'cat_season':
+        return Icons.wb_sunny_outlined;
+      case 'cat_party':
+        return Icons.party_mode_outlined;
+      case 'cat_security':
+        return Icons.security_outlined;
+      default:
+        return Icons.palette_outlined;
+    }
+  }
+
+  // Map category IDs to gradient colors
+  List<Color> _gradientForCategory(String categoryId) {
+    switch (categoryId) {
+      case 'cat_arch':
+        return const [Color(0xFFFFB347), Color(0xFFFF8C00)]; // Warm amber
+      case 'cat_holiday':
+        return const [Color(0xFFFF0000), Color(0xFF00FF00)]; // Red & green
+      case 'cat_sports':
+        return const [Color(0xFFFF0000), Color(0xFFFFD700)]; // Red & gold
+      case 'cat_season':
+        return const [Color(0xFF00FFFF), Color(0xFFFF8C00)]; // Cyan & orange
+      case 'cat_party':
+        return const [Color(0xFFFF69B4), Color(0xFF800080)]; // Pink & purple
+      case 'cat_security':
+        return const [Color(0xFF87CEEB), Colors.white]; // Light blue & white
+      default:
+        return const [NexGenPalette.violet, NexGenPalette.cyan];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = _gradientForCategory(category.id);
+    final icon = _iconForCategory(category.id);
+    final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
+    final isPinned = pinnedIds.contains(category.id);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          // Navigate to category detail screen
+          context.push(
+            AppRoutes.patternCategory.replaceFirst(':categoryId', category.id),
+            extra: category,
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: colors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: colors.first.withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              // Dark overlay for text readability
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.1),
+                        Colors.black.withValues(alpha: 0.5),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Icon
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(icon, color: Colors.white, size: 20),
+                    ),
+                    // Category name
+                    Text(
+                      category.name,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
-            ),
-          ),
-          // Subtle overlay for readability
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black.withValues(alpha: 0.15), Colors.black.withValues(alpha: 0.35)],
+              // Arrow indicator
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.white.withValues(alpha: 0.7),
+                  size: 14,
                 ),
               ),
-            ),
-          ),
-          // Content
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 12,
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text('Trending Now', style: Theme.of(context).textTheme.labelLarge!.withColor(Colors.white70)),
-                  const SizedBox(height: 4),
-                  Text('Chiefs Kingdom', style: Theme.of(context).textTheme.titleLarge!.withColor(Colors.white)),
-                ]),
+              // Pin button
+              Positioned(
+                right: 4,
+                top: 4,
+                child: GestureDetector(
+                  onTap: () => _togglePin(context, ref, isPinned),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                      color: isPinned ? NexGenPalette.cyan : Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
               ),
-              FilledButton.icon(
-                onPressed: () async {
-                  final repo = ref.read(wledRepositoryProvider);
-                  if (repo == null) {
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-                    return;
-                  }
-                  try {
-                    // Chiefs colors: Red (255,0,0) and Gold (255,215,0)
-                    await repo.applyJson({
-                      'on': true,
-                      'bri': 210,
-                      'seg': [
-                        {
-                          'fx': 0,
-                          'sx': 160,
-                          'ix': 128,
-                          'pal': 0,
-                          'col': [
-                            rgbToRgbw(255, 0, 0, forceZeroWhite: true),     // Red
-                            rgbToRgbw(255, 215, 0, forceZeroWhite: true),   // Gold
-                          ]
-                        }
-                      ]
-                    });
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Playing: Chiefs Kingdom')));
-                  } catch (e) {
-                    debugPrint('Spotlight apply failed: $e');
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to play pattern')));
-                  }
-                },
-                icon: const Icon(Icons.play_arrow, color: Colors.black),
-                label: const Text('Play'),
-              ),
-            ]),
+            ],
           ),
-        ]),
+        ),
       ),
     );
   }
+
+  Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
+    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
+    final success = isPinned
+        ? await notifier.unpinCategory(category.id)
+        : await notifier.pinCategory(category.id);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? (isPinned ? 'Folder unpinned' : 'Folder pinned to Explore')
+                : 'Failed to update pin status',
+          ),
+        ),
+      );
+    }
+  }
 }
 
-/// Spotlight hero that uses the first personalized recommendation.
-class _SpotlightRecommendedHero extends ConsumerWidget {
-  final String title; // e.g., "Good Evening, Alex" or "Recommended for You"
-  final GradientPattern pattern;
-  const _SpotlightRecommendedHero({required this.title, required this.pattern});
+/// Section for displaying user's saved custom designs
+class _MySavedDesignsSection extends ConsumerWidget {
+  const _MySavedDesignsSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return AspectRatio(
-      // Make the personalized hero shorter to match compact layout
-      aspectRatio: 16 / 6,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(children: [
-          // Animated gradient background from the recommended pattern colors
-          Positioned.fill(child: LiveGradientStrip(colors: pattern.colors, speed: 128)),
-          // Subtle overlay for readability
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black.withValues(alpha: 0.12), Colors.black.withValues(alpha: 0.35)],
+    final designsAsync = ref.watch(designsStreamProvider);
+
+    return designsAsync.when(
+      data: (designs) {
+        if (designs.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Section header with manage button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.palette_outlined, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'My Saved Designs',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    // Navigate to My Designs screen for full management
+                    context.push('/designs');
+                  },
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Manage'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: NexGenPalette.cyan,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Horizontal scrolling list of saved designs
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: designs.length.clamp(0, 10), // Max 10 visible
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final design = designs[index];
+                  return _SavedDesignCard(
+                    design: design,
+                    onTap: () => _applyDesign(context, ref, design),
+                    onRemove: () => _confirmRemoveDesign(context, ref, design),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  Future<void> _applyDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
+    // Check for active neighborhood sync before changing lights
+    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+    if (!shouldProceed) return;
+
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No device connected')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final payload = design.toWledPayload();
+      await repo.applyJson(payload);
+      ref.read(activePresetLabelProvider.notifier).state = design.name;
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Applied: ${design.name}')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Apply design failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to apply design')),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmRemoveDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Design?'),
+        content: Text('Remove "${design.name}" from your saved designs?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final deleteDesign = ref.read(deleteDesignProvider);
+      final success = await deleteDesign(design.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'Design removed' : 'Failed to remove design'),
+          ),
+        );
+      }
+    }
+  }
+}
+
+/// Card for displaying a saved design
+class _SavedDesignCard extends StatelessWidget {
+  final CustomDesign design;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  const _SavedDesignCard({
+    required this.design,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  List<Color> _extractColors() {
+    final colors = <Color>[];
+    for (final channel in design.channels.where((ch) => ch.included)) {
+      for (final group in channel.colorGroups.take(3)) {
+        if (group.color.length >= 3) {
+          colors.add(Color.fromARGB(
+            255,
+            group.color[0].clamp(0, 255),
+            group.color[1].clamp(0, 255),
+            group.color[2].clamp(0, 255),
+          ));
+        }
+      }
+    }
+    if (colors.isEmpty) {
+      return [NexGenPalette.violet, NexGenPalette.cyan];
+    }
+    return colors.take(3).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = _extractColors();
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 120,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: colors.length == 1 ? [colors[0], colors[0]] : colors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: colors.first.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Dark overlay
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.1),
+                      Colors.black.withValues(alpha: 0.6),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          // Content
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 12,
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text(title, style: Theme.of(context).textTheme.labelLarge!.withColor(Colors.white70)),
-                  const SizedBox(height: 4),
-                  Text(pattern.name, style: Theme.of(context).textTheme.titleLarge!.withColor(Colors.white)),
-                ]),
+            // Remove button
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                ),
               ),
-              FilledButton.icon(
-                onPressed: () async {
-                  final repo = ref.read(wledRepositoryProvider);
-                  if (repo == null) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-                    }
-                    return;
-                  }
-                  try {
-                    // Use the pattern's toWledPayload() method for proper effect/speed/intensity
-                    await repo.applyJson(pattern.toWledPayload());
-                    // Update the active preset label
-                    ref.read(activePresetLabelProvider.notifier).state = pattern.name;
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${pattern.name} applied!')));
-                    }
-                  } catch (e) {
-                    debugPrint('Spotlight recommended apply failed: $e');
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to play pattern')));
-                    }
-                  }
-                },
-                icon: const Icon(Icons.play_arrow, color: Colors.black),
-                label: const Text('Play'),
+            ),
+            // Design name
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: Text(
+                design.name,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-            ]),
-          ),
-        ]),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-// GradientPattern moved to pattern_models.dart to enable reuse across providers
+/// Section for displaying user's recently used patterns
+class _RecentPatternsSection extends ConsumerWidget {
+  const _RecentPatternsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recentAsync = ref.watch(recentPatternsProvider);
+
+    return recentAsync.when(
+      data: (patterns) {
+        if (patterns.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Section header
+            Row(
+              children: [
+                Icon(Icons.history_rounded, color: NexGenPalette.cyan, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Recent Patterns',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Horizontal scrolling list of recent patterns (most recent on left)
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: patterns.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final pattern = patterns[index];
+                  return _RecentPatternCard(
+                    pattern: pattern,
+                    onTap: () => _applyPattern(context, ref, pattern),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  Future<void> _applyPattern(BuildContext context, WidgetRef ref, GradientPattern pattern) async {
+    // Check for active neighborhood sync before changing lights
+    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+    if (!shouldProceed) return;
+
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No device connected')),
+        );
+      }
+      return;
+    }
+
+    try {
+      // Build WLED JSON payload from pattern
+      final colors = pattern.colors.map((c) {
+        final rgbw = rgbToRgbw(
+          (c.r * 255).round(),
+          (c.g * 255).round(),
+          (c.b * 255).round(),
+          forceZeroWhite: true,
+        );
+        return [rgbw[0], rgbw[1], rgbw[2], rgbw[3]];
+      }).toList();
+
+      final payload = {
+        'on': true,
+        'bri': pattern.brightness,
+        'seg': [
+          {
+            'fx': pattern.effectId,
+            'sx': pattern.speed,
+            'ix': pattern.intensity,
+            'col': colors.isNotEmpty ? colors.take(3).toList() : [[255, 180, 100, 0]],
+          }
+        ],
+      };
+
+      await repo.applyJson(payload);
+      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Applied: ${pattern.name}')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Apply recent pattern failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to apply pattern')),
+        );
+      }
+    }
+  }
+}
+
+/// Card for displaying a recent pattern
+class _RecentPatternCard extends StatelessWidget {
+  final GradientPattern pattern;
+  final VoidCallback onTap;
+
+  const _RecentPatternCard({
+    required this.pattern,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = pattern.colors.isNotEmpty
+        ? pattern.colors
+        : const [Color(0xFFFFB347), Color(0xFFFFE4B5)];
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 120,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: colors.length == 1 ? [colors[0], colors[0]] : colors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: colors.first.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Dark overlay
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.1),
+                      Colors.black.withValues(alpha: 0.6),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Time ago badge
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  pattern.subtitle ?? '',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white70,
+                    fontSize: 9,
+                  ),
+                ),
+              ),
+            ),
+            // Pattern name
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: Text(
+                pattern.name,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Section for displaying user's pinned categories
+class _PinnedCategoriesSection extends ConsumerWidget {
+  const _PinnedCategoriesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pinnedAsync = ref.watch(pinnedCategoriesProvider);
+
+    return pinnedAsync.when(
+      data: (pinnedCategories) {
+        if (pinnedCategories.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final pinned in pinnedCategories) ...[
+              _PinnedCategoryRow(pinnedData: pinned),
+              const SizedBox(height: 24),
+            ],
+          ],
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Row showing a pinned category with its patterns
+class _PinnedCategoryRow extends ConsumerWidget {
+  final PinnedCategoryData pinnedData;
+
+  const _PinnedCategoryRow({required this.pinnedData});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header with unpin button
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.push_pin, color: NexGenPalette.cyan, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  pinnedData.category.name,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () {
+                    // Navigate to category detail
+                    context.push(
+                      AppRoutes.patternCategory.replaceFirst(':categoryId', pinnedData.category.id),
+                      extra: pinnedData.category,
+                    );
+                  },
+                  child: const Text('See All'),
+                  style: TextButton.styleFrom(foregroundColor: NexGenPalette.textSecondary),
+                ),
+                IconButton(
+                  onPressed: () => _confirmUnpin(context, ref),
+                  icon: const Icon(Icons.close, size: 18),
+                  color: NexGenPalette.textSecondary,
+                  tooltip: 'Unpin folder',
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Sub-categories as horizontal scrolling chips
+        if (pinnedData.subCategories.isNotEmpty)
+          SizedBox(
+            height: 80,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: pinnedData.subCategories.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final subCat = pinnedData.subCategories[index];
+                return _SubCategoryChip(
+                  subCategory: subCat,
+                  categoryId: pinnedData.category.id,
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _confirmUnpin(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Unpin Folder?'),
+        content: Text('Remove "${pinnedData.category.name}" from your Explore page?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Unpin'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
+      final success = await notifier.unpinCategory(pinnedData.category.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'Folder unpinned' : 'Failed to unpin folder'),
+          ),
+        );
+      }
+    }
+  }
+}
+
+/// Chip showing a sub-category within a pinned category
+class _SubCategoryChip extends StatelessWidget {
+  final SubCategory subCategory;
+  final String categoryId;
+
+  const _SubCategoryChip({
+    required this.subCategory,
+    required this.categoryId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = subCategory.themeColors;
+
+    return GestureDetector(
+      onTap: () {
+        // Navigate to theme selection for this sub-category
+        context.push(
+          AppRoutes.patternSubCategory
+              .replaceFirst(':categoryId', categoryId)
+              .replaceFirst(':subId', subCategory.id),
+          extra: subCategory.name,
+        );
+      },
+      child: Container(
+        width: 100,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: colors.isEmpty
+                ? [NexGenPalette.violet, NexGenPalette.cyan]
+                : (colors.length == 1 ? [colors[0], colors[0]] : colors),
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Stack(
+          children: [
+            // Dark overlay
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.1),
+                      Colors.black.withValues(alpha: 0.5),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Name
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  subCategory.name,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// GPU-friendly animated gradient strip that simulates a flowing/chase effect
 /// using a LinearGradient and a lightweight GradientTransform.
@@ -687,6 +1456,10 @@ class _GradientPatternCard extends ConsumerWidget {
           : null,
       child: InkWell(
       onTap: () async {
+        // Check for active neighborhood sync before changing lights
+        final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+        if (!shouldProceed) return;
+
         final repo = ref.read(wledRepositoryProvider);
         if (repo == null) {
           if (context.mounted) {
@@ -1396,9 +2169,23 @@ class CategoryDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncSubs = ref.watch(patternSubCategoriesByCategoryProvider(categoryId));
+    final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
+    final isPinned = pinnedIds.contains(categoryId);
     final title = categoryName ?? 'Explore';
     return Scaffold(
-      appBar: GlassAppBar(title: Text(title)),
+      appBar: GlassAppBar(
+        title: Text(title),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+              color: isPinned ? NexGenPalette.cyan : Colors.white,
+            ),
+            tooltip: isPinned ? 'Unpin from Explore' : 'Pin to Explore',
+            onPressed: () => _togglePin(context, ref, isPinned),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: asyncSubs.when(
@@ -1419,6 +2206,25 @@ class CategoryDetailScreen extends ConsumerWidget {
             loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2))),
       ),
     );
+  }
+
+  Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
+    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
+    final success = isPinned
+        ? await notifier.unpinCategory(categoryId)
+        : await notifier.pinCategory(categoryId);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? (isPinned ? 'Folder unpinned from Explore' : 'Folder pinned to Explore')
+                : 'Failed to update pin status',
+          ),
+        ),
+      );
+    }
   }
 }
 
@@ -1475,6 +2281,10 @@ class _PatternItemCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
       onTap: () async {
+        // Check for active neighborhood sync before changing lights
+        final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+        if (!shouldProceed) return;
+
         final repo = ref.read(wledRepositoryProvider);
         if (repo == null) {
           if (context.mounted) {

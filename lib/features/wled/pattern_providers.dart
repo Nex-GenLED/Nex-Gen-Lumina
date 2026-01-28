@@ -1,12 +1,14 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/us_federal_holidays.dart';
+import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/services/sports_schedule_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
+import 'package:nexgen_command/models/usage_analytics_models.dart';
 
 /// Repository provider for the Pattern Library.
 /// For now we use an in-memory mock; can be swapped to Firestore later.
@@ -488,3 +490,477 @@ final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {
     ],
   );
 });
+
+/// Smart recommendations provider that combines:
+/// 1. Upcoming holidays (within 2 weeks, Christmas all December)
+/// 2. Sports teams with games within 7 days
+/// 3. Architectural patterns from learning system
+/// 4. Time-of-day and seasonal context
+final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((ref) async {
+  final now = DateTime.now();
+  final recs = <GradientPattern>[];
+  final addedNames = <String>{};
+
+  void addOnce(GradientPattern p) {
+    if (addedNames.contains(p.name)) return;
+    recs.add(p);
+    addedNames.add(p.name);
+  }
+
+  // ================== 1. UPCOMING HOLIDAYS (2 weeks, Christmas all December) ==================
+  final holidayStart = now;
+  // Christmas exception: show all December
+  final isDecember = now.month == 12;
+  final holidayEnd = isDecember
+      ? DateTime(now.year, 12, 31, 23, 59, 59)
+      : now.add(const Duration(days: 14));
+
+  final holidays = USFederalHolidays.getHolidaysInRange(holidayStart, holidayEnd);
+
+  for (final holiday in holidays.take(2)) { // Max 2 holiday recommendations
+    // Create a pattern from the holiday colors
+    final effectId = holiday.suggestedEffectId;
+    final effectName = _effectNameFromId(effectId);
+
+    addOnce(GradientPattern(
+      name: holiday.name,
+      subtitle: _holidaySubtitle(holiday.name),
+      colors: holiday.suggestedColors,
+      effectId: effectId,
+      effectName: effectName,
+      isStatic: effectId == 0,
+      speed: effectId == 0 ? 0 : 80,
+      intensity: effectId == 0 ? 0 : 150,
+      brightness: 200,
+    ));
+  }
+
+  // ================== 2. SPORTS TEAMS WITH UPCOMING GAMES (7 days) ==================
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
+
+  if (profile != null && profile.sportsTeams.isNotEmpty) {
+    try {
+      final sportsService = ref.read(sportsScheduleServiceProvider);
+      final gameEnd = now.add(const Duration(days: 7));
+      final games = await sportsService.getGamesInRange(
+        profile.sportsTeams,
+        now,
+        gameEnd,
+      );
+
+      // Get unique teams with upcoming games
+      final teamsWithGames = <String>{};
+      for (final game in games) {
+        if (teamsWithGames.length >= 2) break; // Max 2 sports recommendations
+        teamsWithGames.add(game.teamName);
+      }
+
+      // Add pattern for each team with an upcoming game
+      for (final teamName in teamsWithGames) {
+        final teamColors = _getTeamColorsForPattern(teamName);
+        if (teamColors != null && teamColors.isNotEmpty) {
+          // Find the game for context
+          final game = games.firstWhere((g) => g.teamName == teamName);
+          final daysUntil = game.gameTime.difference(now).inDays;
+          final gameContext = daysUntil == 0
+              ? 'Game Day!'
+              : daysUntil == 1
+                  ? 'Game Tomorrow'
+                  : 'Game in $daysUntil days';
+
+          addOnce(GradientPattern(
+            name: '$teamName - $gameContext',
+            subtitle: 'vs ${game.opponent}',
+            colors: teamColors,
+            effectId: 12, // Theater Chase
+            effectName: 'Theater Chase',
+            direction: 'right',
+            isStatic: false,
+            speed: 85,
+            intensity: 180,
+            brightness: 220,
+          ));
+        }
+      }
+    } catch (e) {
+      debugPrint('smartRecommendedPatternsProvider: Sports fetch failed: $e');
+    }
+  }
+
+  // ================== 3. ARCHITECTURAL PATTERN FROM LEARNING SYSTEM ==================
+  // Check user's pattern preferences and add an architectural recommendation
+  try {
+    final frequency = await ref.read(patternFrequencyProvider(30).future).catchError((_) => <String, int>{});
+
+    // Look for frequently used architectural-style patterns
+    final archPatternNames = ['warm white', 'cool white', 'moonlight', 'golden', 'candle', 'elegance', 'glow'];
+    String? preferredArch;
+    int maxCount = 0;
+
+    for (final entry in frequency.entries) {
+      final lowerName = entry.key.toLowerCase();
+      if (archPatternNames.any((arch) => lowerName.contains(arch)) && entry.value > maxCount) {
+        preferredArch = entry.key;
+        maxCount = entry.value;
+      }
+    }
+
+    // Add recommended architectural pattern based on preference or time of day
+    if (preferredArch != null && maxCount >= 3) {
+      // User has a clear architectural preference - recommend similar
+      addOnce(GradientPattern(
+        name: 'Architectural: $preferredArch',
+        subtitle: 'Based on your preferences',
+        colors: const [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+        effectId: 0,
+        effectName: 'Solid',
+        isStatic: true,
+        brightness: 220,
+      ));
+    } else {
+      // Default architectural recommendation based on time of day
+      final hour = now.hour;
+      if (hour >= 18 || hour < 6) {
+        // Evening/night: warm white
+        addOnce(const GradientPattern(
+          name: 'Evening Elegance',
+          subtitle: 'Warm architectural glow',
+          colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+          effectId: 0,
+          effectName: 'Solid',
+          isStatic: true,
+          brightness: 200,
+        ));
+      } else {
+        // Daytime: cool white
+        addOnce(const GradientPattern(
+          name: 'Daylight Accent',
+          subtitle: 'Clean architectural lighting',
+          colors: [Color(0xFF87CEFA), Colors.white],
+          effectId: 0,
+          effectName: 'Solid',
+          isStatic: true,
+          brightness: 180,
+        ));
+      }
+    }
+  } catch (e) {
+    debugPrint('smartRecommendedPatternsProvider: Architectural preference check failed: $e');
+    // Fallback architectural pattern
+    addOnce(const GradientPattern(
+      name: 'Classic Elegance',
+      subtitle: 'Timeless architectural lighting',
+      colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+      effectId: 0,
+      effectName: 'Solid',
+      isStatic: true,
+      brightness: 200,
+    ));
+  }
+
+  // ================== 4. FILL WITH BASE RECOMMENDATIONS IF NEEDED ==================
+  // Add base seasonal/contextual recommendations if we have room
+  final baseRecs = ref.read(recommendedPatternsProvider);
+  for (final rec in baseRecs) {
+    if (recs.length >= 5) break;
+    addOnce(rec);
+  }
+
+  return recs.take(5).toList();
+});
+
+/// Helper to get effect name from WLED effect ID
+String _effectNameFromId(int effectId) {
+  const effectNames = {
+    0: 'Solid',
+    2: 'Breathe',
+    9: 'Chase',
+    12: 'Theater Chase',
+    41: 'Running',
+    43: 'Twinkle',
+    52: 'Fireworks',
+    63: 'Candle',
+    74: 'Fireworks',
+    82: 'Heartbeat',
+    101: 'Candle',
+    108: 'Halloween Eyes',
+  };
+  return effectNames[effectId] ?? 'Effect';
+}
+
+/// Helper to generate subtitle for holiday patterns
+String _holidaySubtitle(String holidayName) {
+  final lower = holidayName.toLowerCase();
+  if (lower.contains('christmas')) return 'Red & Green Festive';
+  if (lower.contains('halloween')) return 'Spooky Orange & Purple';
+  if (lower.contains('valentine')) return 'Romantic Pink & Red';
+  if (lower.contains('july') || lower.contains('independence')) return 'Red, White & Blue';
+  if (lower.contains('patrick')) return 'Lucky Green';
+  if (lower.contains('thanksgiving')) return 'Warm Harvest Colors';
+  if (lower.contains('easter')) return 'Pastel Spring Colors';
+  if (lower.contains('new year')) return 'Gold & Silver Celebration';
+  if (lower.contains('hanukkah')) return 'Blue & White Glow';
+  if (lower.contains('diwali')) return 'Festival of Lights';
+  return 'Festive Colors';
+}
+
+/// Helper to get team colors for pattern generation
+List<Color>? _getTeamColorsForPattern(String teamName) {
+  final lower = teamName.toLowerCase();
+
+  // NFL teams
+  if (lower.contains('chiefs')) return const [Color(0xFFFF0000), Color(0xFFFFD700)];
+  if (lower.contains('bills')) return const [Color(0xFF00338D), Color(0xFFC60C30)];
+  if (lower.contains('ravens')) return const [Color(0xFF241773), Color(0xFF000000)];
+  if (lower.contains('bengals')) return const [Color(0xFFFB4F14), Color(0xFF000000)];
+  if (lower.contains('cowboys')) return const [Color(0xFF003594), Color(0xFFC0C0C0)];
+  if (lower.contains('eagles')) return const [Color(0xFF004C54), Color(0xFFA5ACAF)];
+  if (lower.contains('49ers')) return const [Color(0xFFAA0000), Color(0xFFB3995D)];
+  if (lower.contains('packers')) return const [Color(0xFF203731), Color(0xFFFFB612)];
+  if (lower.contains('lions')) return const [Color(0xFF0076B6), Color(0xFFB0B7BC)];
+  if (lower.contains('broncos')) return const [Color(0xFFFB4F14), Color(0xFF002244)];
+  if (lower.contains('raiders')) return const [Color(0xFF000000), Color(0xFFA5ACAF)];
+  if (lower.contains('chargers')) return const [Color(0xFF0080C6), Color(0xFFFFC20E)];
+
+  // NBA teams
+  if (lower.contains('lakers')) return const [Color(0xFF552583), Color(0xFFFDB927)];
+  if (lower.contains('celtics')) return const [Color(0xFF007A33), Color(0xFFFFFFFF)];
+  if (lower.contains('warriors')) return const [Color(0xFF1D428A), Color(0xFFFFC72C)];
+  if (lower.contains('bulls')) return const [Color(0xFFCE1141), Color(0xFF000000)];
+  if (lower.contains('heat')) return const [Color(0xFF98002E), Color(0xFFF9A01B)];
+
+  // MLB teams
+  if (lower.contains('yankees')) return const [Color(0xFF003087), Color(0xFFFFFFFF)];
+  if (lower.contains('dodgers')) return const [Color(0xFF005A9C), Color(0xFFFFFFFF)];
+  if (lower.contains('royals')) return const [Color(0xFF004687), Color(0xFFFFFFFF)];
+  if (lower.contains('cardinals')) return const [Color(0xFFC41E3A), Color(0xFF0C2340)];
+
+  // NHL teams
+  if (lower.contains('blues')) return const [Color(0xFF002F87), Color(0xFFFCB514)];
+  if (lower.contains('bruins')) return const [Color(0xFFFFB81C), Color(0xFF000000)];
+
+  // MLS teams
+  if (lower.contains('sporting')) return const [Color(0xFF91B0D5), Color(0xFF002F65)];
+
+  // Default fallback
+  return null;
+}
+
+// ==================== PINNED CATEGORIES & SAVED DESIGNS ====================
+
+/// Provider for user's pinned category IDs from their profile
+final pinnedCategoryIdsProvider = Provider<List<String>>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.preferredCategoryIds ?? [],
+    orElse: () => [],
+  );
+});
+
+/// Provider for full pinned category objects with their patterns
+final pinnedCategoriesProvider = FutureProvider<List<PinnedCategoryData>>((ref) async {
+  final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
+  if (pinnedIds.isEmpty) return [];
+
+  final repo = ref.read(patternRepositoryProvider);
+  final categories = await repo.getCategories();
+  final result = <PinnedCategoryData>[];
+
+  for (final categoryId in pinnedIds) {
+    final category = categories.firstWhere(
+      (c) => c.id == categoryId,
+      orElse: () => PatternCategory(id: categoryId, name: 'Unknown', imageUrl: ''),
+    );
+
+    // Get sub-categories for this category
+    final subCategories = await repo.getSubCategoriesByCategory(categoryId);
+
+    result.add(PinnedCategoryData(
+      category: category,
+      subCategories: subCategories,
+    ));
+  }
+
+  return result;
+});
+
+/// Data class for a pinned category with its sub-categories
+class PinnedCategoryData {
+  final PatternCategory category;
+  final List<SubCategory> subCategories;
+
+  const PinnedCategoryData({
+    required this.category,
+    required this.subCategories,
+  });
+}
+
+/// Notifier for managing pinned categories
+class PinnedCategoriesNotifier extends AsyncNotifier<void> {
+  @override
+  Future<void> build() async {}
+
+  /// Add a category to pinned list
+  Future<bool> pinCategory(String categoryId) async {
+    final profileAsync = ref.read(currentUserProfileProvider);
+    final profile = profileAsync.valueOrNull;
+    if (profile == null) return false;
+
+    final currentPinned = List<String>.from(profile.preferredCategoryIds);
+    if (currentPinned.contains(categoryId)) return true; // Already pinned
+
+    currentPinned.add(categoryId);
+
+    try {
+      final userService = ref.read(userServiceProvider);
+      await userService.updateUserProfile(
+        profile.id,
+        {'preferred_category_ids': currentPinned},
+      );
+      ref.invalidate(currentUserProfileProvider);
+      return true;
+    } catch (e) {
+      debugPrint('Failed to pin category: $e');
+      return false;
+    }
+  }
+
+  /// Remove a category from pinned list
+  Future<bool> unpinCategory(String categoryId) async {
+    final profileAsync = ref.read(currentUserProfileProvider);
+    final profile = profileAsync.valueOrNull;
+    if (profile == null) return false;
+
+    final currentPinned = List<String>.from(profile.preferredCategoryIds);
+    if (!currentPinned.contains(categoryId)) return true; // Not pinned
+
+    currentPinned.remove(categoryId);
+
+    try {
+      final userService = ref.read(userServiceProvider);
+      await userService.updateUserProfile(
+        profile.id,
+        {'preferred_category_ids': currentPinned},
+      );
+      ref.invalidate(currentUserProfileProvider);
+      return true;
+    } catch (e) {
+      debugPrint('Failed to unpin category: $e');
+      return false;
+    }
+  }
+
+  /// Check if a category is pinned
+  bool isPinned(String categoryId) {
+    final pinnedIds = ref.read(pinnedCategoryIdsProvider);
+    return pinnedIds.contains(categoryId);
+  }
+}
+
+final pinnedCategoriesNotifierProvider = AsyncNotifierProvider<PinnedCategoriesNotifier, void>(
+  () => PinnedCategoriesNotifier(),
+);
+
+// ==================== RECENT PATTERNS ====================
+
+/// Provider for recent patterns (last 5 patterns used, converted to GradientPattern)
+final recentPatternsProvider = Provider<AsyncValue<List<GradientPattern>>>((ref) {
+  final usageAsync = ref.watch(recentUsageProvider(5));
+
+  return usageAsync.whenData((usageEvents) {
+    final patterns = <GradientPattern>[];
+
+    for (final event in usageEvents) {
+      // Skip if no meaningful data
+      if (event.patternName == null && event.effectName == null && event.colorNames == null) {
+        continue;
+      }
+
+      // Extract colors from wled payload or color names
+      final colors = _extractColorsFromUsageEvent(event);
+
+      patterns.add(GradientPattern(
+        name: event.patternName ?? event.effectName ?? 'Recent Pattern',
+        subtitle: _formatUsageTime(event.createdAt),
+        colors: colors.isNotEmpty ? colors : const [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+        effectId: event.effectId ?? 0,
+        effectName: event.effectName ?? 'Solid',
+        isStatic: event.effectId == null || event.effectId == 0,
+        brightness: event.brightness ?? 200,
+        speed: event.speed ?? 80,
+        intensity: event.intensity ?? 150,
+      ));
+    }
+
+    return patterns.take(5).toList();
+  });
+});
+
+/// Extract colors from a usage event
+List<Color> _extractColorsFromUsageEvent(PatternUsageEvent event) {
+  final colors = <Color>[];
+
+  // Try to extract from wled payload first
+  if (event.wledPayload != null) {
+    final seg = event.wledPayload!['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final firstSeg = seg[0];
+      if (firstSeg is Map) {
+        final col = firstSeg['col'];
+        if (col is List) {
+          for (final c in col) {
+            if (c is List && c.length >= 3) {
+              colors.add(Color.fromARGB(
+                255,
+                (c[0] as num).toInt().clamp(0, 255),
+                (c[1] as num).toInt().clamp(0, 255),
+                (c[2] as num).toInt().clamp(0, 255),
+              ));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback to color names
+  if (colors.isEmpty && event.colorNames != null) {
+    for (final name in event.colorNames!) {
+      final color = _colorFromName(name);
+      if (color != null) colors.add(color);
+    }
+  }
+
+  return colors;
+}
+
+/// Convert color name to Color
+Color? _colorFromName(String name) {
+  final lower = name.toLowerCase();
+  if (lower.contains('red')) return Colors.red;
+  if (lower.contains('green')) return Colors.green;
+  if (lower.contains('blue')) return Colors.blue;
+  if (lower.contains('yellow')) return Colors.yellow;
+  if (lower.contains('orange')) return Colors.orange;
+  if (lower.contains('purple')) return Colors.purple;
+  if (lower.contains('pink')) return Colors.pink;
+  if (lower.contains('cyan')) return Colors.cyan;
+  if (lower.contains('white')) return Colors.white;
+  if (lower.contains('warm')) return const Color(0xFFFFB347);
+  if (lower.contains('gold')) return const Color(0xFFFFD700);
+  return null;
+}
+
+/// Format usage time as relative time string
+String _formatUsageTime(DateTime time) {
+  final now = DateTime.now();
+  final diff = now.difference(time);
+
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  if (diff.inDays == 1) return 'Yesterday';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  return '${time.month}/${time.day}';
+}

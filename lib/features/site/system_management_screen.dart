@@ -990,6 +990,32 @@ class _ModeTab extends ConsumerWidget {
             ]),
           ),
         ),
+        const SizedBox(height: 16),
+
+        // Neighborhood Sync Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.home_work_outlined, color: NexGenPalette.violet),
+                const SizedBox(width: 8),
+                Text('Neighborhood Sync', style: Theme.of(context).textTheme.titleLarge),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Connect with neighbors to create stunning synchronized light shows that flow seamlessly from home to home.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.neighborhoodSync),
+                icon: const Icon(Icons.sync, color: Colors.black),
+                label: const Text('Open Neighborhood Sync'),
+              ),
+            ]),
+          ),
+        ),
       ]),
     );
   }

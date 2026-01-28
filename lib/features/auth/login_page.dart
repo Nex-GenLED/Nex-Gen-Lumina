@@ -193,12 +193,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  void _enterDemo() {
-    // Restore original Demo Mode flow: toggle demo and go straight to dashboard
-    ref.read(demoModeProvider.notifier).state = true;
-    context.go(AppRoutes.dashboard);
-  }
-
   @override
   Widget build(BuildContext context) {
     final midnightBlue = const Color(0xFF0D1B2A);
@@ -372,17 +366,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             )
                           ],
-                        ),
-                        const SizedBox(height: 12),
-                        // Demo Mode entry: mirrors previous flow
-                        Center(
-                          child: TextButton(
-                            onPressed: _loading ? null : _enterDemo,
-                            child: Text(
-                              'Preview Experience (Demo Mode)',
-                              style: GoogleFonts.montserrat(color: Colors.cyanAccent, fontWeight: FontWeight.w600, fontSize: 12),
-                            ),
-                          ),
                         ),
                       ]),
                     ),
