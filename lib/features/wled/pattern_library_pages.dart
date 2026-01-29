@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -443,6 +445,8 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
         return Icons.party_mode_outlined;
       case 'cat_security':
         return Icons.security_outlined;
+      case 'cat_movies':
+        return Icons.movie_outlined;
       default:
         return Icons.palette_outlined;
     }
@@ -463,6 +467,8 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
         return const [Color(0xFFFF69B4), Color(0xFF800080)]; // Pink & purple
       case 'cat_security':
         return const [Color(0xFF87CEEB), Colors.white]; // Light blue & white
+      case 'cat_movies':
+        return const [Color(0xFF6A1B9A), Color(0xFFE91E63)]; // Purple & pink
       default:
         return const [NexGenPalette.violet, NexGenPalette.cyan];
     }
@@ -479,10 +485,10 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          // Navigate to category detail screen
+          // Navigate to new library browser with category ID
           context.push(
-            AppRoutes.patternCategory.replaceFirst(':categoryId', category.id),
-            extra: category,
+            '/library/${category.id}',
+            extra: {'name': category.name},
           );
         },
         borderRadius: BorderRadius.circular(16),
@@ -2630,5 +2636,893 @@ class _StyleChip extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ============================================================================
+// LIBRARY BROWSER SCREEN - Unified hierarchical navigation
+// ============================================================================
+
+/// Unified browser screen for navigating the library hierarchy.
+/// Shows root categories when nodeId is null, otherwise shows children of that node.
+/// Displays pattern grid for palette nodes, folder grid for intermediate nodes.
+class LibraryBrowserScreen extends ConsumerWidget {
+  final String? nodeId;
+  final String? nodeName;
+
+  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Get current node (if any) and children
+    final nodeAsync = nodeId != null
+        ? ref.watch(libraryNodeByIdProvider(nodeId!))
+        : const AsyncValue<LibraryNode?>.data(null);
+    final childrenAsync = ref.watch(libraryChildNodesProvider(nodeId));
+    final ancestorsAsync = nodeId != null
+        ? ref.watch(libraryAncestorsProvider(nodeId!))
+        : const AsyncValue<List<LibraryNode>>.data([]);
+
+    return Scaffold(
+      backgroundColor: NexGenPalette.gunmetal,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // App bar with back button and title
+            _LibraryAppBar(
+              nodeId: nodeId,
+              nodeName: nodeName,
+              nodeAsync: nodeAsync,
+            ),
+            // Breadcrumb navigation
+            if (nodeId != null)
+              ancestorsAsync.when(
+                data: (ancestors) => _LibraryBreadcrumb(
+                  ancestors: ancestors,
+                  currentNodeName: nodeName,
+                ),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+            // Main content
+            Expanded(
+              child: childrenAsync.when(
+                data: (children) {
+                  // Check if this is a palette node - show patterns instead
+                  return nodeAsync.when(
+                    data: (node) {
+                      if (node != null && node.isPalette) {
+                        return _PalettePatternGrid(node: node);
+                      }
+                      // Show children as navigation grid
+                      return _LibraryNodeGrid(children: children);
+                    },
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (_, __) => _LibraryNodeGrid(children: children),
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (err, __) => Center(
+                  child: Text(
+                    'Unable to load content',
+                    style: TextStyle(color: NexGenPalette.textSecondary),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// App bar for the library browser
+class _LibraryAppBar extends StatelessWidget {
+  final String? nodeId;
+  final String? nodeName;
+  final AsyncValue<LibraryNode?> nodeAsync;
+
+  const _LibraryAppBar({
+    required this.nodeId,
+    required this.nodeName,
+    required this.nodeAsync,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = nodeName ?? nodeAsync.whenOrNull(data: (n) => n?.name) ?? 'Design Library';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          if (nodeId != null)
+            GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.gunmetal90,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.arrow_back_ios_new,
+                  size: 20,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          if (nodeId != null) const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              displayName,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Breadcrumb navigation showing path from root to current node
+class _LibraryBreadcrumb extends StatelessWidget {
+  final List<LibraryNode> ancestors;
+  final String? currentNodeName;
+
+  const _LibraryBreadcrumb({
+    required this.ancestors,
+    this.currentNodeName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (ancestors.isEmpty && currentNodeName == null) {
+      return const SizedBox.shrink();
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          // Home/Library root
+          GestureDetector(
+            onTap: () {
+              // Pop all the way back to library root
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            child: Row(
+              children: [
+                Icon(Icons.home, size: 16, color: NexGenPalette.cyan),
+                const SizedBox(width: 4),
+                Text(
+                  'Library',
+                  style: TextStyle(
+                    color: NexGenPalette.cyan,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Ancestor breadcrumbs
+          for (final ancestor in ancestors) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Icon(Icons.chevron_right, size: 16, color: NexGenPalette.textSecondary),
+            ),
+            GestureDetector(
+              onTap: () {
+                // Navigate back to this ancestor
+                final popsNeeded = ancestors.indexOf(ancestor) + 1;
+                for (var i = 0; i < ancestors.length - popsNeeded + 1; i++) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text(
+                ancestor.name,
+                style: TextStyle(
+                  color: NexGenPalette.cyan,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+          // Current node (not clickable)
+          if (currentNodeName != null) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Icon(Icons.chevron_right, size: 16, color: NexGenPalette.textSecondary),
+            ),
+            Text(
+              currentNodeName!,
+              style: TextStyle(
+                color: NexGenPalette.textMedium,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Grid of library nodes (categories, folders, or palettes)
+class _LibraryNodeGrid extends StatelessWidget {
+  final List<LibraryNode> children;
+
+  const _LibraryNodeGrid({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) {
+      return Center(
+        child: Text(
+          'No items found',
+          style: TextStyle(color: NexGenPalette.textSecondary),
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.4,
+      ),
+      itemCount: children.length,
+      itemBuilder: (context, index) {
+        final node = children[index];
+        return _LibraryNodeCard(node: node);
+      },
+    );
+  }
+}
+
+/// Individual node card for navigation
+class _LibraryNodeCard extends StatelessWidget {
+  final LibraryNode node;
+
+  const _LibraryNodeCard({required this.node});
+
+  IconData _iconForNode() {
+    final id = node.id;
+
+    // Category icons
+    if (id.startsWith('cat_')) {
+      switch (id) {
+        case LibraryCategoryIds.architectural:
+          return Icons.home_outlined;
+        case LibraryCategoryIds.holidays:
+          return Icons.celebration_outlined;
+        case LibraryCategoryIds.sports:
+          return Icons.sports_football_outlined;
+        case LibraryCategoryIds.seasonal:
+          return Icons.wb_sunny_outlined;
+        case LibraryCategoryIds.parties:
+          return Icons.party_mode_outlined;
+        case LibraryCategoryIds.security:
+          return Icons.security_outlined;
+        case LibraryCategoryIds.movies:
+          return Icons.movie_outlined;
+      }
+    }
+
+    // Sports folders
+    if (id.startsWith('league_')) return Icons.sports;
+    if (id.contains('ncaa')) return Icons.school_outlined;
+    if (id.startsWith('conf_')) return Icons.groups_outlined;
+
+    // Holiday/seasonal folders
+    if (id.startsWith('holiday_')) return Icons.celebration;
+    if (id.startsWith('season_')) return Icons.nature_outlined;
+    if (id.startsWith('event_')) return Icons.event_outlined;
+
+    // Movie franchise folders
+    if (id == 'franchise_disney') return Icons.castle_outlined;
+    if (id == 'franchise_marvel') return Icons.shield_outlined;
+    if (id == 'franchise_starwars') return Icons.star_outlined;
+    if (id == 'franchise_dc') return Icons.bolt_outlined;
+    if (id == 'franchise_pixar') return Icons.animation_outlined;
+    if (id == 'franchise_dreamworks') return Icons.movie_filter_outlined;
+    if (id == 'franchise_harrypotter') return Icons.auto_fix_high_outlined;
+    if (id == 'franchise_nintendo') return Icons.videogame_asset_outlined;
+
+    // Default based on node type
+    if (node.isPalette) return Icons.palette_outlined;
+    return Icons.folder_outlined;
+  }
+
+  /// Get themed color for folder nodes (static, not flowing gradient)
+  Color _getFolderThemeColor() {
+    final id = node.id;
+
+    // Category colors
+    if (id == LibraryCategoryIds.architectural) return const Color(0xFFFF8C00);
+    if (id == LibraryCategoryIds.holidays) return const Color(0xFFE53935);
+    if (id == LibraryCategoryIds.sports) return const Color(0xFF1976D2);
+    if (id == LibraryCategoryIds.seasonal) return const Color(0xFFE65100);
+    if (id == LibraryCategoryIds.parties) return const Color(0xFF9C27B0);
+    if (id == LibraryCategoryIds.security) return const Color(0xFFD32F2F);
+    if (id == LibraryCategoryIds.movies) return const Color(0xFF6A1B9A);
+
+    // Movie franchise colors
+    if (id == 'franchise_disney') return const Color(0xFF1E88E5);
+    if (id == 'franchise_marvel') return const Color(0xFFB71C1C);
+    if (id == 'franchise_starwars') return const Color(0xFF212121);
+    if (id == 'franchise_dc') return const Color(0xFF0D47A1);
+    if (id == 'franchise_pixar') return const Color(0xFF43A047);
+    if (id == 'franchise_dreamworks') return const Color(0xFF00838F);
+    if (id == 'franchise_harrypotter') return const Color(0xFF5D4037);
+    if (id == 'franchise_nintendo') return const Color(0xFFE53935);
+
+    // Sports league colors
+    if (id == 'league_nfl') return const Color(0xFF013369);
+    if (id == 'league_nba') return const Color(0xFFC9082A);
+    if (id == 'league_mlb') return const Color(0xFF041E42);
+    if (id == 'league_nhl') return const Color(0xFF000000);
+    if (id == 'league_mls') return const Color(0xFF3A5A40);
+
+    // Holiday colors
+    if (id == 'holiday_christmas') return const Color(0xFFC62828);
+    if (id == 'holiday_halloween') return const Color(0xFFFF6F00);
+    if (id == 'holiday_july4th') return const Color(0xFF1565C0);
+    if (id == 'holiday_valentines') return const Color(0xFFD81B60);
+    if (id == 'holiday_stpatricks') return const Color(0xFF2E7D32);
+    if (id == 'holiday_easter') return const Color(0xFF7B1FA2);
+    if (id == 'holiday_thanksgiving') return const Color(0xFFE65100);
+    if (id == 'holiday_newyear') return const Color(0xFFFFD700);
+
+    // Season colors
+    if (id == 'season_spring') return const Color(0xFF4CAF50);
+    if (id == 'season_summer') return const Color(0xFFFFC107);
+    if (id == 'season_autumn') return const Color(0xFFFF5722);
+    if (id == 'season_winter') return const Color(0xFF03A9F4);
+
+    // NCAA colors
+    if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const Color(0xFF1A237E);
+
+    return NexGenPalette.cyan;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Palettes get flowing gradient cards, folders get solid themed cards
+    if (node.isPalette) {
+      return _buildPaletteCard(context);
+    } else {
+      return _buildFolderCard(context);
+    }
+  }
+
+  /// Build a folder card with solid themed background (no flowing gradient)
+  Widget _buildFolderCard(BuildContext context) {
+    final themeColor = _getFolderThemeColor();
+
+    return GestureDetector(
+      onTap: () {
+        context.push('/library/${node.id}', extra: {'name': node.name});
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: themeColor.withValues(alpha: 0.5), width: 1.5),
+        ),
+        child: Stack(
+          children: [
+            // Themed accent bar at top
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  color: themeColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+            // Large icon watermark
+            Positioned(
+              right: -15,
+              bottom: -15,
+              child: Icon(
+                _iconForNode(),
+                size: 80,
+                color: themeColor.withValues(alpha: 0.15),
+              ),
+            ),
+            // Content
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Icon in themed container
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: themeColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      _iconForNode(),
+                      size: 22,
+                      color: themeColor,
+                    ),
+                  ),
+                  // Text content
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        node.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (node.description != null)
+                        Text(
+                          node.description!,
+                          style: TextStyle(
+                            color: NexGenPalette.textSecondary,
+                            fontSize: 10,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // Chevron indicator
+            Positioned(
+              right: 8,
+              top: 12,
+              child: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: themeColor.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build a palette card with flowing gradient colors
+  Widget _buildPaletteCard(BuildContext context) {
+    final colors = node.themeColors ?? [NexGenPalette.cyan, NexGenPalette.blue];
+    final gradient = colors.length >= 2
+        ? [colors[0], colors[1]]
+        : [colors.first, colors.first.withValues(alpha: 0.7)];
+
+    return GestureDetector(
+      onTap: () {
+        context.push('/library/${node.id}', extra: {'name': node.name});
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: gradient,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: gradient.first.withValues(alpha: 0.4),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Subtle icon watermark
+            Positioned(
+              right: -15,
+              bottom: -15,
+              child: Icon(
+                Icons.palette,
+                size: 70,
+                color: Colors.white.withValues(alpha: 0.1),
+              ),
+            ),
+            // Content
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Color dots preview at top
+                  Row(
+                    children: [
+                      for (var i = 0; i < (colors.length > 4 ? 4 : colors.length); i++)
+                        Container(
+                          width: 16,
+                          height: 16,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: colors[i],
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                blurRadius: 2,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  // Text content
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        node.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          shadows: [Shadow(color: Colors.black26, blurRadius: 2)],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (node.description != null)
+                        Text(
+                          node.description!,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: 10,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Grid of patterns generated from a palette node
+class _PalettePatternGrid extends ConsumerWidget {
+  final LibraryNode node;
+
+  const _PalettePatternGrid({required this.node});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final patternsAsync = ref.watch(libraryNodePatternsProvider(node.id));
+
+    return patternsAsync.when(
+      data: (patterns) {
+        if (patterns.isEmpty) {
+          return Center(
+            child: Text(
+              'No patterns available',
+              style: TextStyle(color: NexGenPalette.textSecondary),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Palette preview header
+            if (node.themeColors != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      'Color Palette:',
+                      style: TextStyle(
+                        color: NexGenPalette.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    for (final color in node.themeColors!)
+                      Container(
+                        width: 24,
+                        height: 24,
+                        margin: const EdgeInsets.only(right: 4),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: NexGenPalette.line),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                '${patterns.length} Patterns',
+                style: TextStyle(
+                  color: NexGenPalette.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Pattern grid
+            Expanded(
+              child: GridView.builder(
+                padding: const EdgeInsets.all(16),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.0,
+                ),
+                itemCount: patterns.length,
+                itemBuilder: (context, index) {
+                  final pattern = patterns[index];
+                  return _PatternCard(pattern: pattern);
+                },
+              ),
+            ),
+          ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => Center(
+        child: Text(
+          'Unable to load patterns',
+          style: TextStyle(color: NexGenPalette.textSecondary),
+        ),
+      ),
+    );
+  }
+}
+
+/// Individual pattern card with apply action
+class _PatternCard extends ConsumerWidget {
+  final PatternItem pattern;
+
+  const _PatternCard({required this.pattern});
+
+  /// Extract colors from wledPayload
+  List<Color> _getColors() {
+    try {
+      final payload = pattern.wledPayload;
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final firstSeg = seg.first;
+        if (firstSeg is Map) {
+          final cols = firstSeg['col'];
+          if (cols is List && cols.isNotEmpty) {
+            final colors = <Color>[];
+            for (final col in cols) {
+              if (col is List && col.length >= 3) {
+                colors.add(Color.fromARGB(
+                  255,
+                  (col[0] as num).toInt().clamp(0, 255),
+                  (col[1] as num).toInt().clamp(0, 255),
+                  (col[2] as num).toInt().clamp(0, 255),
+                ));
+              }
+            }
+            if (colors.isNotEmpty) return colors;
+          }
+        }
+      }
+    } catch (_) {}
+    return [NexGenPalette.cyan, NexGenPalette.blue];
+  }
+
+  /// Extract effect ID from wledPayload
+  int _getEffectId() {
+    try {
+      final payload = pattern.wledPayload;
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final firstSeg = seg.first;
+        if (firstSeg is Map) {
+          final fx = firstSeg['fx'];
+          if (fx is int) return fx;
+        }
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  /// Get effect name from effect ID
+  String? _getEffectName() {
+    final effectId = _getEffectId();
+    return kEffectNames[effectId];
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = _getColors();
+    final effectId = _getEffectId();
+    final effectName = _getEffectName();
+
+    return GestureDetector(
+      onTap: () async {
+        await _applyPattern(context, ref);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: NexGenPalette.line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Color preview
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: colors.length >= 2
+                        ? [colors[0], colors[1]]
+                        : [colors.first, colors.first.withValues(alpha: 0.7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    // Effect icon
+                    Center(
+                      child: Icon(
+                        _iconForEffect(effectId),
+                        size: 40,
+                        color: Colors.white.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    // Color dots
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Row(
+                        children: [
+                          for (var i = 0; i < (colors.length > 3 ? 3 : colors.length); i++)
+                            Container(
+                              width: 14,
+                              height: 14,
+                              margin: const EdgeInsets.only(left: 2),
+                              decoration: BoxDecoration(
+                                color: colors[i],
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 1.5),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Pattern info
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      pattern.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (effectName != null)
+                      Text(
+                        effectName,
+                        style: TextStyle(
+                          color: NexGenPalette.textSecondary,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _iconForEffect(int effectId) {
+    if (effectId == 0) return Icons.circle; // Solid
+    if (effectId == 12) return Icons.theater_comedy; // Theater chase
+    if (effectId == 41) return Icons.moving; // Running
+    if (effectId == 38 || effectId == 39) return Icons.blur_on; // Fire effects
+    if (effectId >= 101 && effectId <= 110) return Icons.waves; // Gradient effects
+    return Icons.auto_awesome;
+  }
+
+  Future<void> _applyPattern(BuildContext context, WidgetRef ref) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No device connected')),
+        );
+      }
+      return;
+    }
+
+    try {
+      // Apply the pattern's wledPayload directly
+      await repo.applyJson(pattern.wledPayload);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Applied: ${pattern.name}'),
+            backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to apply pattern: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 }

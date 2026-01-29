@@ -4,6 +4,7 @@ import 'package:nexgen_command/data/us_federal_holidays.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
+import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/sports_schedule_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -964,3 +965,44 @@ String _formatUsageTime(DateTime time) {
   if (diff.inDays < 7) return '${diff.inDays}d ago';
   return '${time.month}/${time.day}';
 }
+
+// ============================================================================
+// LIBRARY HIERARCHY PROVIDERS
+// ============================================================================
+
+/// Provider to get child nodes of a parent node in the library hierarchy.
+/// Pass null for parentId to get root categories.
+final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, String?>((ref, parentId) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return repo.getChildNodes(parentId);
+});
+
+/// Provider to get a single node by its ID.
+final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref, nodeId) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return repo.getNodeById(nodeId);
+});
+
+/// Provider to get the ancestor chain for breadcrumb navigation.
+/// Returns list from root to parent (does not include current node).
+final libraryAncestorsProvider = FutureProvider.family<List<LibraryNode>, String>((ref, nodeId) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return repo.getAncestors(nodeId);
+});
+
+/// Provider to check if a node has children (determines navigation behavior).
+final nodeHasChildrenProvider = FutureProvider.family<bool, String>((ref, nodeId) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return repo.hasChildren(nodeId);
+});
+
+/// Provider to generate patterns for a palette node.
+/// Returns empty list if the node is not a palette.
+final libraryNodePatternsProvider = FutureProvider.family<List<PatternItem>, String>((ref, nodeId) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  final node = await repo.getNodeById(nodeId);
+  if (node != null && node.isPalette) {
+    return repo.generatePatternsForNode(node);
+  }
+  return [];
+});

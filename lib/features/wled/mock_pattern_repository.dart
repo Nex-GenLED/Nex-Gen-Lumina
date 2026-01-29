@@ -2,6 +2,13 @@ import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/sports_library_builder.dart';
+import 'package:nexgen_command/data/holiday_palettes.dart';
+import 'package:nexgen_command/data/seasonal_colorways.dart';
+import 'package:nexgen_command/data/party_event_palettes.dart';
+import 'package:nexgen_command/data/ncaa_conferences.dart';
+import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:flutter/material.dart';
 
 /// In-memory mock data source for the Pattern Library.
@@ -134,7 +141,7 @@ class MockPatternRepository {
   // Premium Categories
   static const PatternCategory catArchitectural = PatternCategory(
     id: 'cat_arch',
-    name: 'Architectural & White',
+    name: 'Architectural Downlighting (White)',
     // Warm white lit home exterior
     imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
   );
@@ -148,14 +155,14 @@ class MockPatternRepository {
 
   static const PatternCategory catSports = PatternCategory(
     id: 'cat_sports',
-    name: 'Game Day',
+    name: 'Game Day Fan Zone',
     // Stadium / team colors
     imageUrl: 'https://images.unsplash.com/photo-1518600506278-4e8ef466b810',
   );
 
   static const PatternCategory catSeasonal = PatternCategory(
     id: 'cat_season',
-    name: 'Seasonal',
+    name: 'Seasonal Vibes',
     // Autumn leaves / Spring flowers
     imageUrl: 'https://images.unsplash.com/photo-1477587458883-47145ed94245',
   );
@@ -169,9 +176,16 @@ class MockPatternRepository {
 
   static const PatternCategory catSecurity = PatternCategory(
     id: 'cat_security',
-    name: 'Security & Alert',
+    name: 'Security & Alerts',
     // Bright white floodlights
     imageUrl: 'https://images.unsplash.com/photo-1579403124614-197f69d8187b',
+  );
+
+  static const PatternCategory catMovies = PatternCategory(
+    id: 'cat_movies',
+    name: 'Movies & Superheroes',
+    // Cinema / movie theme
+    imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1',
   );
 
   static const List<PatternCategory> _categories = [
@@ -180,6 +194,7 @@ class MockPatternRepository {
     catSports,
     catSeasonal,
     catParty,
+    catMovies,
     catSecurity,
   ];
 
@@ -456,5 +471,326 @@ class MockPatternRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  // ================= NEW HIERARCHY SYSTEM =================
+
+  /// Lazily built full hierarchy of all library nodes
+  List<LibraryNode>? _cachedNodes;
+
+  /// Get the full library hierarchy
+  List<LibraryNode> get _allNodes {
+    _cachedNodes ??= _buildFullHierarchy();
+    return _cachedNodes!;
+  }
+
+  /// Build the complete library hierarchy from all data sources
+  List<LibraryNode> _buildFullHierarchy() {
+    final nodes = <LibraryNode>[];
+
+    // Root categories
+    nodes.addAll(_buildRootCategories());
+
+    // Sports: leagues + teams + NCAA
+    nodes.addAll(SportsLibraryBuilder.buildFullSportsHierarchy());
+
+    // Holidays: folders + palettes
+    nodes.addAll(HolidayPalettes.getHolidayFolders());
+    nodes.addAll(HolidayPalettes.getAllHolidayPaletteNodes());
+
+    // Seasonal: folders + colorways
+    nodes.addAll(SeasonalColorways.getSeasonFolders());
+    nodes.addAll(SeasonalColorways.getAllSeasonalPaletteNodes());
+
+    // Parties & Events: folders + palettes
+    nodes.addAll(PartyEventPalettes.getEventFolders());
+    nodes.addAll(PartyEventPalettes.getAllEventPaletteNodes());
+
+    // Movies & Superheroes: franchises + palettes
+    nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
+    nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
+
+    // Architectural & Security: direct palettes
+    nodes.addAll(_buildArchitecturalPalettes());
+    nodes.addAll(_buildSecurityPalettes());
+
+    return nodes;
+  }
+
+  /// Build root category nodes
+  List<LibraryNode> _buildRootCategories() {
+    return const [
+      LibraryNode(
+        id: 'cat_sports',
+        name: 'Game Day Fan Zone',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 0,
+        imageUrl: 'https://images.unsplash.com/photo-1518600506278-4e8ef466b810',
+      ),
+      LibraryNode(
+        id: 'cat_holiday',
+        name: 'Holidays',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 1,
+        imageUrl: 'https://images.unsplash.com/photo-1482517967863-00e15c9b44be',
+      ),
+      LibraryNode(
+        id: 'cat_season',
+        name: 'Seasonal Vibes',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 2,
+        imageUrl: 'https://images.unsplash.com/photo-1477587458883-47145ed94245',
+      ),
+      LibraryNode(
+        id: 'cat_party',
+        name: 'Parties & Events',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 3,
+        imageUrl: 'https://images.unsplash.com/photo-1544491843-0ce2884635f3',
+      ),
+      LibraryNode(
+        id: 'cat_movies',
+        name: 'Movies & Superheroes',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 4,
+        imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1',
+      ),
+      LibraryNode(
+        id: 'cat_arch',
+        name: 'Architectural Downlighting (White)',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 5,
+        imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
+      ),
+      LibraryNode(
+        id: 'cat_security',
+        name: 'Security & Alerts',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 6,
+        imageUrl: 'https://images.unsplash.com/photo-1579403124614-197f69d8187b',
+      ),
+    ];
+  }
+
+  /// Build architectural downlighting palettes
+  List<LibraryNode> _buildArchitecturalPalettes() {
+    return const [
+      LibraryNode(
+        id: 'arch_warmwhite',
+        name: 'Warm White',
+        description: 'Cozy amber glow',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+        sortOrder: 0,
+        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
+      ),
+      LibraryNode(
+        id: 'arch_coolwhite',
+        name: 'Cool White',
+        description: 'Crisp moonlight',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFFFFFFFF), Color(0xFFE0E0E0)],
+        sortOrder: 1,
+        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
+      ),
+      LibraryNode(
+        id: 'arch_daylight',
+        name: 'Daylight',
+        description: 'Natural sunlight',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFFFFFFFF), Color(0xFFFFFDD0)],
+        sortOrder: 2,
+        metadata: {'suggestedEffects': [0], 'defaultSpeed': 0, 'defaultIntensity': 128},
+      ),
+      LibraryNode(
+        id: 'arch_candlelight',
+        name: 'Candlelight',
+        description: 'Flickering warm glow',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFFFF8C00), Color(0xFFFFB347)],
+        sortOrder: 3,
+        metadata: {'suggestedEffects': [101, 88], 'defaultSpeed': 80, 'defaultIntensity': 180},
+      ),
+      LibraryNode(
+        id: 'arch_moonlight',
+        name: 'Moonlight',
+        description: 'Soft blue night',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFF87CEEB), Color(0xFFFFFFFF)],
+        sortOrder: 4,
+        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
+      ),
+      LibraryNode(
+        id: 'arch_golden',
+        name: 'Golden Hour',
+        description: 'Sunset gold tones',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_arch',
+        themeColors: [Color(0xFFFFD700), Color(0xFFFF8C00), Color(0xFFFFB347)],
+        sortOrder: 5,
+        metadata: {'suggestedEffects': [0, 2, 41], 'defaultSpeed': 60, 'defaultIntensity': 128},
+      ),
+    ];
+  }
+
+  /// Build security/alert palettes
+  List<LibraryNode> _buildSecurityPalettes() {
+    return const [
+      LibraryNode(
+        id: 'security_bright',
+        name: 'Security Bright',
+        description: 'Maximum brightness white',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_security',
+        themeColors: [Color(0xFFFFFFFF)],
+        sortOrder: 0,
+        metadata: {'suggestedEffects': [0], 'defaultSpeed': 0, 'defaultIntensity': 255},
+      ),
+      LibraryNode(
+        id: 'security_alert_red',
+        name: 'Alert Red',
+        description: 'Emergency red flash',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_security',
+        themeColors: [Color(0xFFFF0000), Color(0xFF000000)],
+        sortOrder: 1,
+        metadata: {'suggestedEffects': [1, 23], 'defaultSpeed': 200, 'defaultIntensity': 255},
+      ),
+      LibraryNode(
+        id: 'security_police',
+        name: 'Police Lights',
+        description: 'Red and blue flash',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_security',
+        themeColors: [Color(0xFFFF0000), Color(0xFF0000FF)],
+        sortOrder: 2,
+        metadata: {'suggestedEffects': [1, 12], 'defaultSpeed': 180, 'defaultIntensity': 255},
+      ),
+      LibraryNode(
+        id: 'security_amber',
+        name: 'Caution Amber',
+        description: 'Warning amber',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_security',
+        themeColors: [Color(0xFFFFBF00), Color(0xFF000000)],
+        sortOrder: 3,
+        metadata: {'suggestedEffects': [1, 2], 'defaultSpeed': 150, 'defaultIntensity': 255},
+      ),
+      LibraryNode(
+        id: 'security_motion',
+        name: 'Motion Detected',
+        description: 'Bright white on motion',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'cat_security',
+        themeColors: [Color(0xFFFFFFFF), Color(0xFFFFD700)],
+        sortOrder: 4,
+        metadata: {'suggestedEffects': [0], 'defaultSpeed': 0, 'defaultIntensity': 255},
+      ),
+    ];
+  }
+
+  // ================= Hierarchy Query Methods =================
+
+  /// Get child nodes for any parent (null for root categories)
+  Future<List<LibraryNode>> getChildNodes(String? parentId) async {
+    if (parentId == null) {
+      // Return root categories
+      return _allNodes
+          .where((n) => n.nodeType == LibraryNodeType.category && n.parentId == null)
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    }
+
+    return _allNodes
+        .where((n) => n.parentId == parentId)
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
+  /// Get a single node by ID
+  Future<LibraryNode?> getNodeById(String nodeId) async {
+    try {
+      return _allNodes.firstWhere((n) => n.id == nodeId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Get ancestor chain (breadcrumb) for a node
+  Future<List<LibraryNode>> getAncestors(String nodeId) async {
+    final ancestors = <LibraryNode>[];
+    var current = await getNodeById(nodeId);
+
+    while (current != null && current.parentId != null) {
+      current = await getNodeById(current.parentId!);
+      if (current != null) {
+        ancestors.insert(0, current);
+      }
+    }
+
+    return ancestors;
+  }
+
+  /// Check if a node has children
+  Future<bool> hasChildren(String nodeId) async {
+    return _allNodes.any((n) => n.parentId == nodeId);
+  }
+
+  /// Generate patterns for a palette node
+  Future<List<PatternItem>> generatePatternsForNode(LibraryNode node) async {
+    if (!node.isPalette) return [];
+
+    final colors = node.themeColors!;
+    final col = _colorsToWledCol(colors);
+    final effectIds = node.suggestedEffects.isNotEmpty
+        ? node.suggestedEffects
+        : kMotionTemplateEffectIds;
+
+    final items = <PatternItem>[];
+    for (final fxId in effectIds) {
+      final effectName = _effectName(fxId);
+      items.add(PatternItem(
+        id: 'gen_${node.id}_fx_$fxId',
+        name: '${node.name} - $effectName',
+        imageUrl: '',
+        categoryId: _findRootCategoryId(node.id),
+        wledPayload: {
+          'on': true,
+          'bri': 200,
+          'seg': [
+            {
+              'fx': fxId,
+              'col': col,
+              'sx': node.defaultSpeed,
+              'ix': node.defaultIntensity,
+            }
+          ]
+        },
+      ));
+    }
+
+    return items;
+  }
+
+  /// Find the root category ID for a node
+  String _findRootCategoryId(String nodeId) {
+    var current = _allNodes.firstWhere(
+      (n) => n.id == nodeId,
+      orElse: () => const LibraryNode(id: '', name: '', nodeType: LibraryNodeType.palette),
+    );
+
+    while (current.parentId != null) {
+      current = _allNodes.firstWhere(
+        (n) => n.id == current.parentId,
+        orElse: () => const LibraryNode(id: '', name: '', nodeType: LibraryNodeType.category),
+      );
+    }
+
+    return current.id;
   }
 }

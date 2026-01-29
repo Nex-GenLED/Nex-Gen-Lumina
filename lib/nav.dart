@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/ble/controller_setup_wizard.dart';
 import 'package:nexgen_command/features/ble/wled_manual_setup.dart';
 import 'package:nexgen_command/features/wled/pattern_library_pages.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
+import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/features/wled/current_colors_editor_screen.dart';
@@ -159,6 +160,27 @@ class AppRouter {
           final extra = state.extra;
           if (extra is Map && extra['name'] is String) displayName = extra['name'] as String;
           return NoTransitionPage(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
+        },
+      ),
+      // Library hierarchy routes
+      GoRoute(
+        path: AppRoutes.libraryRoot,
+        name: 'library-root',
+        pageBuilder: (context, state) => const NoTransitionPage(child: LibraryBrowserScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.libraryNode,
+        name: 'library-node',
+        pageBuilder: (context, state) {
+          final nodeId = state.pathParameters['nodeId']!;
+          final extra = state.extra;
+          String? nodeName;
+          if (extra is Map && extra['name'] is String) {
+            nodeName = extra['name'] as String;
+          } else if (extra is LibraryNode) {
+            nodeName = extra.name;
+          }
+          return NoTransitionPage(child: LibraryBrowserScreen(nodeId: nodeId, nodeName: nodeName));
         },
       ),
       GoRoute(
@@ -351,4 +373,7 @@ class AppRoutes {
   static const String adminDashboard = '/admin/dashboard';
   // Neighborhood sync
   static const String neighborhoodSync = '/settings/neighborhood-sync';
+  // Library hierarchy routes
+  static const String libraryRoot = '/library';
+  static const String libraryNode = '/library/:nodeId';
 }
