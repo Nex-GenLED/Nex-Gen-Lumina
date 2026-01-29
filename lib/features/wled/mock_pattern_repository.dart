@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/sports_library_builder.dart';
 import 'package:nexgen_command/data/holiday_palettes.dart';
@@ -101,35 +102,149 @@ class MockPatternRepository {
   /// Get effect name from the centralized catalog.
   static String _effectName(int id) => WledEffectsCatalog.getName(id);
 
+  /// Curated effects for colorway pattern generation (respects user colors).
+  /// These are selected to produce 20+ visually distinct variations.
+  /// Includes both WLED native effects and Lumina custom effects (1000+).
+  static const List<int> kColorwayEffectIds = [
+    // WLED Native Effects
+    0,   // Solid
+    2,   // Breathe
+    3,   // Wipe
+    6,   // Sweep
+    10,  // Scan
+    12,  // Fade
+    13,  // Theater
+    15,  // Running
+    17,  // Twinkle
+    20,  // Sparkle
+    28,  // Chase
+    40,  // Scanner
+    49,  // Fairy
+    59,  // Multi Comet
+    76,  // Meteor
+    87,  // Glitter
+    91,  // Bouncing Balls
+    96,  // Drip
+    // Lumina Custom Effects (exclusive to Lumina app)
+    1001, // Rising Tide - lights fill progressively
+    1002, // Falling Tide - lights empty progressively
+    1003, // Pulse Burst - radiates from center outward
+    1005, // Grand Reveal - curtain opening from center
+    1007, // Ocean Swell - sinusoidal wave motion
+  ];
+
+  /// Creative name templates for effects.
+  /// Keys are effect IDs, values are functions that transform colorway name.
+  /// The function receives (colorwayName) and returns a creative pattern name.
+  static String _creativePatternName(int effectId, String colorwayName) {
+    // Pluralize helper - adds 's' if not already ending in 's'
+    String plural(String name) {
+      if (name.toLowerCase().endsWith('s')) return name;
+      if (name.toLowerCase().endsWith('y') && !name.toLowerCase().endsWith('ay') && !name.toLowerCase().endsWith('ey')) {
+        return '${name.substring(0, name.length - 1)}ies';
+      }
+      return '${name}s';
+    }
+
+    // Remove common suffixes for cleaner names
+    String base(String name) {
+      final lower = name.toLowerCase();
+      if (lower.endsWith(' glow') || lower.endsWith(' vibes') || lower.endsWith(' palette')) {
+        return name.substring(0, name.lastIndexOf(' '));
+      }
+      return name;
+    }
+
+    final baseName = base(colorwayName);
+
+    switch (effectId) {
+      case 0:   // Solid
+        return 'Classic $baseName';
+      case 2:   // Breathe
+        return 'Breathing $baseName';
+      case 3:   // Wipe
+        return '$baseName Wave';
+      case 6:   // Sweep
+        return 'Sweeping $baseName';
+      case 10:  // Scan
+        return '$baseName Scanner';
+      case 12:  // Fade
+        return 'Fading ${plural(baseName)}';
+      case 13:  // Theater
+        return '$baseName Marquee';
+      case 15:  // Running
+        return 'Running ${plural(baseName)}';
+      case 17:  // Twinkle
+        return '$baseName Stars';
+      case 20:  // Sparkle
+        return 'Sparkling ${plural(baseName)}';
+      case 28:  // Chase
+        return '$baseName Chase';
+      case 40:  // Scanner
+        return '$baseName Spotlight';
+      case 49:  // Fairy
+        return '$baseName Fairy Lights';
+      case 59:  // Multi Comet
+        return '$baseName Comets';
+      case 76:  // Meteor
+        return '$baseName Meteors';
+      case 87:  // Glitter
+        return 'Glittering ${plural(baseName)}';
+      case 91:  // Bouncing Balls
+        return 'Bouncing ${plural(baseName)}';
+      case 96:  // Drip
+        return '$baseName Drips';
+      // Lumina Custom Effects (1000+)
+      case 1001: // Rising Tide
+        return '$baseName Rising Tide';
+      case 1002: // Falling Tide
+        return '$baseName Falling Tide';
+      case 1003: // Pulse Burst
+        return '$baseName Pulse Burst';
+      case 1005: // Grand Reveal
+        return '$baseName Grand Reveal';
+      case 1007: // Ocean Swell
+        return '$baseName Ocean Swell';
+      default:
+        // Fallback: check if it's a custom effect, otherwise use WLED name
+        if (LuminaCustomEffectsCatalog.isCustomEffect(effectId)) {
+          return '$colorwayName - ${LuminaCustomEffectsCatalog.getName(effectId)}';
+        }
+        return '$colorwayName - ${_effectName(effectId)}';
+    }
+  }
+
   static List<List<int>> _colorsToWledCol(List<Color> colors) {
     // WLED col expects up to 3 color slots; keep first 3 theme colors
     // Force W=0 to keep saturated colors accurate - WLED handles GRB conversion
     return colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList(growable: false);
   }
 
-  /// Generate 50 PatternItems for a given sub-category using its theme palette.
+  /// Generate pattern items for a given sub-category using its theme palette.
+  /// Uses creative naming combining the theme name with effect types.
   Future<List<PatternItem>> generatePatternsForTheme(SubCategory subCat) async {
     final List<List<int>> col = _colorsToWledCol(subCat.themeColors);
     // Determine a backdrop image based on parent category if possible
     final catImage = _categories.firstWhere((c) => c.id == subCat.parentCategoryId, orElse: () => _categories.first).imageUrl;
 
     final List<PatternItem> items = [];
-    for (final fxId in kMotionTemplateEffectIds) {
-      final effectName = _effectName(fxId);
-      final name = '${subCat.name} - $effectName';
+    for (final fxId in kColorwayEffectIds) {
+      // Use creative naming for consistency
+      final creativeName = _creativePatternName(fxId, subCat.name);
+      final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, 128);
       final payload = {
         'seg': [
           {
             'fx': fxId,
             'col': col,
-            'sx': 128,
+            'sx': adjustedSpeed,
             'ix': 128,
           }
         ]
       };
       items.add(PatternItem(
         id: 'gen_${subCat.id}_fx_$fxId',
-        name: name,
+        name: creativeName,
         imageUrl: catImage,
         categoryId: subCat.parentCategoryId,
         wledPayload: payload,
@@ -741,22 +856,31 @@ class MockPatternRepository {
     return _allNodes.any((n) => n.parentId == nodeId);
   }
 
-  /// Generate patterns for a palette node
+  /// Generate patterns for a palette node with creative naming.
+  /// Produces 18 pattern variations with clever names combining the
+  /// colorway name with the effect type.
   Future<List<PatternItem>> generatePatternsForNode(LibraryNode node) async {
     if (!node.isPalette) return [];
 
     final colors = node.themeColors!;
     final col = _colorsToWledCol(colors);
+
+    // Use kColorwayEffectIds for creative naming, fall back to node suggestions
     final effectIds = node.suggestedEffects.isNotEmpty
         ? node.suggestedEffects
-        : kMotionTemplateEffectIds;
+        : kColorwayEffectIds;
 
     final items = <PatternItem>[];
     for (final fxId in effectIds) {
-      final effectName = _effectName(fxId);
+      // Generate creative pattern name
+      final creativeName = _creativePatternName(fxId, node.name);
+
+      // Apply speed adjustment from catalog
+      final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
+
       items.add(PatternItem(
         id: 'gen_${node.id}_fx_$fxId',
-        name: '${node.name} - $effectName',
+        name: creativeName,
         imageUrl: '',
         categoryId: _findRootCategoryId(node.id),
         wledPayload: {
@@ -766,7 +890,7 @@ class MockPatternRepository {
             {
               'fx': fxId,
               'col': col,
-              'sx': node.defaultSpeed,
+              'sx': adjustedSpeed,
               'ix': node.defaultIntensity,
             }
           ]
@@ -793,4 +917,176 @@ class MockPatternRepository {
 
     return current.id;
   }
+
+  // ================= PATTERN LIBRARY SEARCH =================
+
+  /// Search result containing a matching library node or pattern item.
+  /// Contains the match data and the navigation path to reach it.
+
+  /// Search through all existing patterns in the library.
+  /// Returns matching LibraryNodes (palettes, folders) and PatternItems.
+  /// Uses fuzzy matching on names, descriptions, and related keywords.
+  Future<LibrarySearchResults> searchLibrary(String query) async {
+    if (query.trim().isEmpty) {
+      return const LibrarySearchResults(palettes: [], folders: [], patterns: []);
+    }
+
+    final searchTerms = query.toLowerCase().split(RegExp(r'\s+'));
+    final matchingPalettes = <LibraryNode>[];
+    final matchingFolders = <LibraryNode>[];
+    final matchingPatterns = <PatternItem>[];
+
+    // Search all library nodes
+    for (final node in _allNodes) {
+      final score = _calculateMatchScore(node, searchTerms);
+      if (score > 0) {
+        if (node.isPalette) {
+          matchingPalettes.add(node);
+        } else if (node.nodeType == LibraryNodeType.folder || node.nodeType == LibraryNodeType.category) {
+          matchingFolders.add(node);
+        }
+      }
+    }
+
+    // Search existing pattern items
+    for (final item in _items) {
+      if (_patternMatchesQuery(item, searchTerms)) {
+        matchingPatterns.add(item);
+      }
+    }
+
+    // Sort by relevance (name starts with query first)
+    matchingPalettes.sort((a, b) => _compareByRelevance(a.name, b.name, query));
+    matchingFolders.sort((a, b) => _compareByRelevance(a.name, b.name, query));
+    matchingPatterns.sort((a, b) => _compareByRelevance(a.name, b.name, query));
+
+    return LibrarySearchResults(
+      palettes: matchingPalettes.take(10).toList(),
+      folders: matchingFolders.take(5).toList(),
+      patterns: matchingPatterns.take(10).toList(),
+    );
+  }
+
+  /// Calculate match score for a library node against search terms.
+  int _calculateMatchScore(LibraryNode node, List<String> searchTerms) {
+    int score = 0;
+    final nameLower = node.name.toLowerCase();
+    final descLower = (node.description ?? '').toLowerCase();
+
+    for (final term in searchTerms) {
+      // Exact name match (highest score)
+      if (nameLower == term) {
+        score += 100;
+      }
+      // Name starts with term
+      else if (nameLower.startsWith(term)) {
+        score += 50;
+      }
+      // Name contains term
+      else if (nameLower.contains(term)) {
+        score += 25;
+      }
+      // Description contains term
+      else if (descLower.contains(term)) {
+        score += 10;
+      }
+      // Related keyword matching
+      else if (_matchesRelatedKeywords(node, term)) {
+        score += 15;
+      }
+    }
+
+    return score;
+  }
+
+  /// Check if a node matches related keywords (synonyms, common associations).
+  bool _matchesRelatedKeywords(LibraryNode node, String term) {
+    // Build keyword associations based on node type and content
+    final keywords = <String>[];
+    final nameLower = node.name.toLowerCase();
+
+    // Holiday-related keywords
+    if (nameLower.contains('christmas') || nameLower.contains('xmas')) {
+      keywords.addAll(['holiday', 'festive', 'winter', 'december', 'santa', 'red', 'green']);
+    }
+    if (nameLower.contains('halloween')) {
+      keywords.addAll(['spooky', 'scary', 'october', 'orange', 'purple', 'ghost', 'pumpkin']);
+    }
+    if (nameLower.contains('july') || nameLower.contains('independence')) {
+      keywords.addAll(['patriotic', 'america', 'usa', 'fireworks', 'red', 'white', 'blue']);
+    }
+    if (nameLower.contains('valentine')) {
+      keywords.addAll(['love', 'romantic', 'heart', 'pink', 'red', 'february']);
+    }
+    if (nameLower.contains('easter')) {
+      keywords.addAll(['spring', 'pastel', 'bunny', 'egg']);
+    }
+    if (nameLower.contains('patrick')) {
+      keywords.addAll(['irish', 'lucky', 'shamrock', 'green', 'march']);
+    }
+    if (nameLower.contains('thanksgiving')) {
+      keywords.addAll(['fall', 'autumn', 'harvest', 'turkey', 'november', 'orange']);
+    }
+
+    // Sports-related keywords
+    if (node.parentId?.contains('sports') == true || node.parentId?.contains('nfl') == true ||
+        node.parentId?.contains('nba') == true || node.parentId?.contains('mlb') == true) {
+      keywords.addAll(['game', 'team', 'fan', 'sport', 'gameday']);
+    }
+
+    // Architectural keywords
+    if (nameLower.contains('white') || nameLower.contains('warm') || nameLower.contains('cool')) {
+      keywords.addAll(['elegant', 'architectural', 'downlight', 'accent', 'subtle']);
+    }
+
+    // Party keywords
+    if (nameLower.contains('party') || nameLower.contains('birthday') || nameLower.contains('rave')) {
+      keywords.addAll(['fun', 'celebration', 'festive', 'disco', 'dance']);
+    }
+
+    return keywords.any((kw) => kw.contains(term) || term.contains(kw));
+  }
+
+  /// Check if a pattern item matches the search terms.
+  bool _patternMatchesQuery(PatternItem item, List<String> searchTerms) {
+    final nameLower = item.name.toLowerCase();
+    return searchTerms.any((term) => nameLower.contains(term));
+  }
+
+  /// Compare two strings by relevance to a query (for sorting).
+  int _compareByRelevance(String a, String b, String query) {
+    final queryLower = query.toLowerCase();
+    final aLower = a.toLowerCase();
+    final bLower = b.toLowerCase();
+
+    // Exact match first
+    if (aLower == queryLower && bLower != queryLower) return -1;
+    if (bLower == queryLower && aLower != queryLower) return 1;
+
+    // Starts with query
+    if (aLower.startsWith(queryLower) && !bLower.startsWith(queryLower)) return -1;
+    if (bLower.startsWith(queryLower) && !aLower.startsWith(queryLower)) return 1;
+
+    // Alphabetical
+    return aLower.compareTo(bLower);
+  }
+}
+
+/// Search results from the library search.
+class LibrarySearchResults {
+  final List<LibraryNode> palettes;
+  final List<LibraryNode> folders;
+  final List<PatternItem> patterns;
+
+  const LibrarySearchResults({
+    required this.palettes,
+    required this.folders,
+    required this.patterns,
+  });
+
+  /// Returns true if there are any results.
+  bool get hasResults => palettes.isNotEmpty || folders.isNotEmpty || patterns.isNotEmpty;
+
+  /// Total number of results.
+  int get totalCount => palettes.length + folders.length + patterns.length;
 }

@@ -48,11 +48,19 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         ),
         title: const Text('Trace Your Roofline'),
         actions: [
+          // Clear current drawing
           if (_currentMask.hasCustomPoints)
             TextButton.icon(
               onPressed: () => _editorKey.currentState?.clear(),
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Reset'),
+              label: const Text('Clear'),
+            ),
+          // Delete saved roofline from cloud
+          if (existingMask != null && existingMask.hasCustomPoints)
+            TextButton.icon(
+              onPressed: _isSaving ? null : _resetSavedRoofline,
+              icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+              label: const Text('Reset Saved', style: TextStyle(color: Colors.redAccent)),
             ),
         ],
       ),
@@ -239,6 +247,81 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to save roofline: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  /// Reset/delete the saved roofline from the cloud
+  Future<void> _resetSavedRoofline() async {
+    // Confirm with user
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Reset Roofline?'),
+        content: const Text(
+          'This will delete your saved roofline tracing. You can draw a new one afterwards.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isSaving = true);
+
+    try {
+      final profile = ref.read(currentUserProfileProvider).maybeWhen(
+        data: (p) => p,
+        orElse: () => null,
+      );
+
+      if (profile == null) {
+        throw Exception('No user profile found');
+      }
+
+      // Clear the roofline mask by setting it to null
+      final userService = ref.read(userServiceProvider);
+      final updatedProfile = profile.copyWith(
+        rooflineMask: null,
+        updatedAt: DateTime.now(),
+      );
+      await userService.updateUser(updatedProfile);
+
+      // Also clear the local editor
+      _editorKey.currentState?.clear();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Roofline reset successfully. You can now draw a new one.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to reset roofline: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to reset roofline: $e'),
             backgroundColor: Colors.red,
           ),
         );

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
@@ -67,6 +68,8 @@ class _LuminaChatBarState extends ConsumerState<LuminaChatBar> with SingleTicker
         final ok = await service.applyJson(payload);
         if (!ok) throw Exception('Device rejected payload');
         if (mounted) {
+          // Update the active preset label so home screen reflects the change
+          ref.read(activePresetLabelProvider.notifier).state = 'Lumina Pattern';
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pattern applied to your lights')));
         }
       }

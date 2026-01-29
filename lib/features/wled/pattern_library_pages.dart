@@ -24,6 +24,7 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 
 /// Explore screen with Simulated AI search logic
 class ExplorePatternsScreen extends ConsumerStatefulWidget {
@@ -37,25 +38,21 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   bool _hasSearched = false;
-  // When searching, we now surface concrete SmartPattern variations (one per effect)
-  List<SmartPattern> _filteredSmart = const [];
-  // Track current query and style for refinement chips
+  // Library search results containing existing patterns
+  LibrarySearchResults? _searchResults;
+  // Track current query for display
   String _currentQuery = '';
-  ThemeStyle _currentStyle = ThemeStyle.classic;
-  // Track if the current search matched a canonical theme
-  bool _hasCanonicalMatch = false;
 
 
-  Future<void> _handleSearch(String raw, {ThemeStyle style = ThemeStyle.classic}) async {
+  Future<void> _handleSearch(String raw) async {
     final query = raw.trim();
     debugPrint('ExplorePatternsScreen: _handleSearch called with query="$query"');
     if (query.isEmpty) {
       setState(() {
         _isSearching = false;
-        _hasSearched = false; // Show default categories when empty
-        _filteredSmart = const [];
+        _hasSearched = false;
+        _searchResults = null;
         _currentQuery = '';
-        _hasCanonicalMatch = false;
       });
       return;
     }
@@ -64,39 +61,29 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
       _isSearching = true;
       _hasSearched = true;
       _currentQuery = query;
-      _currentStyle = style;
     });
 
     try {
       // Brief delay for smoother UX (debounce handles most of the wait)
       await Future.delayed(const Duration(milliseconds: 300));
-      // Generate multiple variations (one per popular WLED effect) for the query
-      final generator = PatternGenerator();
-      debugPrint('ExplorePatternsScreen: Calling generatePatterns for "$query"');
-      final variations = generator.generatePatterns(query, style: style);
-      debugPrint('ExplorePatternsScreen: generatePatterns returned ${variations.length} patterns');
-      // Check if we matched a canonical theme
-      final hasCanonical = CanonicalPalettes.findTheme(query) != null;
-      debugPrint('ExplorePatternsScreen: hasCanonical=$hasCanonical');
+
+      // Search existing patterns in the library (NOT generating new ones)
+      final repo = ref.read(patternRepositoryProvider);
+      debugPrint('ExplorePatternsScreen: Searching library for "$query"');
+      final results = await repo.searchLibrary(query);
+      debugPrint('ExplorePatternsScreen: Found ${results.totalCount} results (${results.palettes.length} palettes, ${results.folders.length} folders, ${results.patterns.length} patterns)');
+
       setState(() {
-        _filteredSmart = variations;
+        _searchResults = results;
         _isSearching = false;
-        _hasCanonicalMatch = hasCanonical;
       });
     } catch (e, stackTrace) {
-      debugPrint('Simulated AI search failed: $e');
+      debugPrint('Library search failed: $e');
       debugPrint('Stack trace: $stackTrace');
       setState(() {
-        _filteredSmart = const [];
+        _searchResults = const LibrarySearchResults(palettes: [], folders: [], patterns: []);
         _isSearching = false;
-        _hasCanonicalMatch = false;
       });
-    }
-  }
-
-  void _handleStyleChange(ThemeStyle style) {
-    if (_currentQuery.isNotEmpty) {
-      _handleSearch(_currentQuery, style: style);
     }
   }
 
@@ -153,52 +140,33 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // Conditional rendering per simulated AI state
+          // Conditional rendering based on search state
           if (_isSearching)
             Expanded(
               child: Center(
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const CircularProgressIndicator(strokeWidth: 2),
                   const SizedBox(height: 12),
-                  Text('Lumina is generating suggestions...', style: Theme.of(context).textTheme.bodyLarge),
+                  Text('Searching design library...', style: Theme.of(context).textTheme.bodyLarge),
                 ]),
               ),
             )
           else if (_hasSearched)
             Expanded(
-              child: _filteredSmart.isEmpty
-                  ? Center(
-                      child: Text(
-                        "No specific AI matches found. Try 'Holiday' or 'Sports'.",
-                        style: Theme.of(context).textTheme.bodyLarge,
-                        textAlign: TextAlign.center,
-                      ),
+              child: (_searchResults == null || !_searchResults!.hasResults)
+                  ? _NoMatchRedirectWidget(
+                      query: _currentQuery,
+                      onClearSearch: () {
+                        _searchController.clear();
+                        _handleSearch('');
+                      },
                     )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Style variation chips (only show for canonical themes)
-                        if (_hasCanonicalMatch) ...[
-                          _pagePadding(
-                            child: _StyleVariationChips(
-                              currentStyle: _currentStyle,
-                              onStyleSelected: _handleStyleChange,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                        Expanded(
-                          child: ListView.separated(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            itemBuilder: (_, i) => PatternControlCard(pattern: _filteredSmart[i]),
-                            separatorBuilder: (_, __) => const SizedBox(height: 12),
-                            itemCount: _filteredSmart.length,
-                          ),
-                        ),
-                      ],
+                  : _LibrarySearchResultsView(
+                      results: _searchResults!,
+                      query: _currentQuery,
                     ),
             )
-            else
+          else
             // Default explore content (no active search)
             Expanded(
               child: SingleChildScrollView(
@@ -307,7 +275,7 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
               style: Theme.of(context).textTheme.bodyLarge,
               cursorColor: NexGenPalette.cyan,
               decoration: const InputDecoration(
-                hintText: "Ask Lumina for a vibe... (e.g. 'Game Day', 'Spooky')",
+                hintText: "Search designs... (e.g. 'Christmas', 'Chiefs')",
                 hintStyle: TextStyle(color: Colors.white70),
                 border: InputBorder.none,
                 isCollapsed: true,
@@ -354,6 +322,388 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
 }
 
 // GradientPattern moved to pattern_models.dart to enable reuse across providers
+
+/// Widget shown when search finds no matches in the existing library.
+/// Provides friendly message and options to create custom patterns.
+class _NoMatchRedirectWidget extends StatelessWidget {
+  final String query;
+  final VoidCallback onClearSearch;
+
+  const _NoMatchRedirectWidget({
+    required this.query,
+    required this.onClearSearch,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Icon
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [NexGenPalette.cyan.withValues(alpha: 0.3), NexGenPalette.violet.withValues(alpha: 0.3)],
+              ),
+            ),
+            child: const Icon(
+              Icons.lightbulb_outline,
+              color: NexGenPalette.cyan,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Friendly message
+          Text(
+            "We couldn't find '$query' in our design library",
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "But don't worry! Your creativity is our specialty.",
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: NexGenPalette.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+
+          // Option 1: Lumina AI
+          _RedirectOptionCard(
+            icon: Icons.auto_awesome,
+            iconColor: NexGenPalette.cyan,
+            title: 'Describe it to Lumina',
+            description: "Tell Lumina what you're imagining and we'll bring it to life with AI-powered pattern creation.",
+            buttonText: 'Chat with Lumina',
+            onTap: () => context.go('/lumina'),
+          ),
+          const SizedBox(height: 16),
+
+          // Option 2: Design Studio
+          _RedirectOptionCard(
+            icon: Icons.palette_outlined,
+            iconColor: NexGenPalette.violet,
+            title: 'Build it in Design Studio',
+            description: "Pick your colors, choose your effects, and create exactly what you're thinking.",
+            buttonText: 'Open Design Studio',
+            onTap: () => context.push('/design-studio'),
+          ),
+          const SizedBox(height: 24),
+
+          // Clear search link
+          TextButton(
+            onPressed: onClearSearch,
+            child: Text(
+              'Or browse our existing designs',
+              style: TextStyle(color: NexGenPalette.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Card for redirect options in the no-match widget.
+class _RedirectOptionCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String description;
+  final String buttonText;
+  final VoidCallback onTap;
+
+  const _RedirectOptionCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.description,
+    required this.buttonText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: iconColor.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: iconColor, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: NexGenPalette.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onTap,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: iconColor.withValues(alpha: 0.2),
+                foregroundColor: iconColor,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(buttonText),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Displays library search results organized by type.
+class _LibrarySearchResultsView extends ConsumerWidget {
+  final LibrarySearchResults results;
+  final String query;
+
+  const _LibrarySearchResultsView({
+    required this.results,
+    required this.query,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      children: [
+        // Results header
+        Text(
+          'Found ${results.totalCount} results for "$query"',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: NexGenPalette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Matching Palettes (colorways that can be explored)
+        if (results.palettes.isNotEmpty) ...[
+          Text(
+            'Color Themes',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...results.palettes.map((palette) => _LibraryPaletteResultCard(
+            node: palette,
+            onTap: () => context.push('/library/${palette.id}'),
+          )),
+          const SizedBox(height: 20),
+        ],
+
+        // Matching Folders (categories/subcategories)
+        if (results.folders.isNotEmpty) ...[
+          Text(
+            'Categories',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...results.folders.map((folder) => _LibraryFolderResultCard(
+            node: folder,
+            onTap: () => context.push('/library/${folder.id}'),
+          )),
+          const SizedBox(height: 20),
+        ],
+
+        // Matching Pre-built Patterns
+        if (results.patterns.isNotEmpty) ...[
+          Text(
+            'Pre-built Patterns',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...results.patterns.map((pattern) => _PatternCard(
+            pattern: pattern,
+          )),
+        ],
+
+        const SizedBox(height: 40),
+      ],
+    );
+  }
+}
+
+/// Card displaying a palette result from library search.
+class _LibraryPaletteResultCard extends StatelessWidget {
+  final LibraryNode node;
+  final VoidCallback onTap;
+
+  const _LibraryPaletteResultCard({
+    required this.node,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.white.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Color preview
+              if (node.themeColors != null && node.themeColors!.isNotEmpty)
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    gradient: LinearGradient(
+                      colors: node.themeColors!.take(3).toList(),
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                  ),
+                  child: const Icon(Icons.palette, color: NexGenPalette.cyan),
+                ),
+              const SizedBox(width: 16),
+              // Name and description
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      node.name,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (node.description != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        node.description!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // Arrow
+              const Icon(Icons.chevron_right, color: NexGenPalette.textSecondary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Card displaying a folder/category result from library search.
+class _LibraryFolderResultCard extends StatelessWidget {
+  final LibraryNode node;
+  final VoidCallback onTap;
+
+  const _LibraryFolderResultCard({
+    required this.node,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.white.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Folder icon
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: NexGenPalette.violet.withValues(alpha: 0.2),
+                ),
+                child: const Icon(Icons.folder_outlined, color: NexGenPalette.violet),
+              ),
+              const SizedBox(width: 16),
+              // Name
+              Expanded(
+                child: Text(
+                  node.name,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              // Arrow
+              const Icon(Icons.chevron_right, color: NexGenPalette.textSecondary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Browse Design Library section with category cards
 class _DesignLibraryBrowser extends ConsumerWidget {
@@ -430,54 +780,116 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
 
   const _DesignLibraryCategoryCard({required this.category});
 
-  // Map category IDs to icons
-  IconData _iconForCategory(String categoryId) {
+  /// Returns a list of themed icons that represent the category's content.
+  /// Each category gets 4-6 relevant icons to display in a grid.
+  List<IconData> _iconsForCategory(String categoryId) {
     switch (categoryId) {
       case 'cat_arch':
-        return Icons.home_outlined;
+        // Architectural / Downlighting
+        return const [
+          Icons.home_outlined,
+          Icons.villa_outlined,
+          Icons.apartment_outlined,
+          Icons.cottage_outlined,
+          Icons.deck_outlined,
+          Icons.fence_outlined,
+        ];
       case 'cat_holiday':
-        return Icons.celebration_outlined;
+        // Holidays - themed icons for major holidays
+        return const [
+          Icons.park_outlined, // Christmas tree
+          Icons.ac_unit, // Winter/snowflake
+          Icons.egg_outlined, // Easter
+          Icons.favorite_outline, // Valentine's
+          Icons.flag_outlined, // 4th of July
+          Icons.local_florist_outlined, // St. Patrick's (clover-like)
+        ];
       case 'cat_sports':
-        return Icons.sports_football_outlined;
+        // Game Day Fan Zone - sports icons
+        return const [
+          Icons.sports_football_outlined,
+          Icons.sports_baseball_outlined,
+          Icons.sports_basketball_outlined,
+          Icons.sports_hockey_outlined,
+          Icons.sports_soccer_outlined,
+          Icons.emoji_events_outlined, // Trophy
+        ];
       case 'cat_season':
-        return Icons.wb_sunny_outlined;
+        // Seasonal Vibes
+        return const [
+          Icons.wb_sunny_outlined, // Summer
+          Icons.eco_outlined, // Spring
+          Icons.park_outlined, // Fall/Autumn
+          Icons.ac_unit, // Winter
+          Icons.cloud_outlined,
+          Icons.nights_stay_outlined,
+        ];
       case 'cat_party':
-        return Icons.party_mode_outlined;
+        // Parties & Events
+        return const [
+          Icons.cake_outlined, // Birthday
+          Icons.music_note_outlined,
+          Icons.celebration_outlined,
+          Icons.local_bar_outlined,
+          Icons.star_outline,
+          Icons.auto_awesome_outlined,
+        ];
       case 'cat_security':
-        return Icons.security_outlined;
+        // Security & Alerts
+        return const [
+          Icons.security_outlined,
+          Icons.shield_outlined,
+          Icons.notifications_active_outlined,
+          Icons.visibility_outlined,
+          Icons.warning_amber_outlined,
+          Icons.lightbulb_outlined,
+        ];
       case 'cat_movies':
-        return Icons.movie_outlined;
+        // Movies & Superheroes
+        return const [
+          Icons.movie_outlined,
+          Icons.theaters_outlined,
+          Icons.bolt_outlined, // Superhero/power
+          Icons.local_movies_outlined,
+          Icons.star_outline,
+          Icons.flash_on_outlined,
+        ];
       default:
-        return Icons.palette_outlined;
+        return const [
+          Icons.palette_outlined,
+          Icons.color_lens_outlined,
+          Icons.gradient_outlined,
+          Icons.auto_awesome_outlined,
+        ];
     }
   }
 
-  // Map category IDs to gradient colors
-  List<Color> _gradientForCategory(String categoryId) {
+  /// Returns accent color for each category (used for icon highlights and glow).
+  Color _accentForCategory(String categoryId) {
     switch (categoryId) {
       case 'cat_arch':
-        return const [Color(0xFFFFB347), Color(0xFFFF8C00)]; // Warm amber
+        return const Color(0xFFFFB347); // Warm amber
       case 'cat_holiday':
-        return const [Color(0xFFFF0000), Color(0xFF00FF00)]; // Red & green
+        return const Color(0xFFFF4444); // Festive red
       case 'cat_sports':
-        return const [Color(0xFFFF0000), Color(0xFFFFD700)]; // Red & gold
+        return const Color(0xFFFFD700); // Championship gold
       case 'cat_season':
-        return const [Color(0xFF00FFFF), Color(0xFFFF8C00)]; // Cyan & orange
+        return const Color(0xFF00E5FF); // Cyan
       case 'cat_party':
-        return const [Color(0xFFFF69B4), Color(0xFF800080)]; // Pink & purple
+        return const Color(0xFFFF69B4); // Party pink
       case 'cat_security':
-        return const [Color(0xFF87CEEB), Colors.white]; // Light blue & white
+        return const Color(0xFF4FC3F7); // Alert blue
       case 'cat_movies':
-        return const [Color(0xFF6A1B9A), Color(0xFFE91E63)]; // Purple & pink
+        return const Color(0xFFE040FB); // Cinema purple
       default:
-        return const [NexGenPalette.violet, NexGenPalette.cyan];
+        return NexGenPalette.cyan;
     }
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colors = _gradientForCategory(category.id);
-    final icon = _iconForCategory(category.id);
+    final icons = _iconsForCategory(category.id);
+    final accentColor = _accentForCategory(category.id);
     final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
     final isPinned = pinnedIds.contains(category.id);
 
@@ -485,7 +897,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          // Navigate to new library browser with category ID
           context.push(
             '/library/${category.id}',
             extra: {'name': category.name},
@@ -494,33 +905,43 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
+            // Premium dark background with subtle gradient
             gradient: LinearGradient(
-              colors: colors,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
+              colors: [
+                NexGenPalette.gunmetal90,
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
             ),
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: accentColor.withValues(alpha: 0.3),
+              width: 1,
+            ),
             boxShadow: [
               BoxShadow(
-                color: colors.first.withValues(alpha: 0.3),
-                blurRadius: 12,
+                color: accentColor.withValues(alpha: 0.15),
+                blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
           child: Stack(
             children: [
-              // Dark overlay for text readability
-              Positioned.fill(
-                child: DecoratedBox(
+              // Subtle accent glow in corner
+              Positioned(
+                top: -20,
+                right: -20,
+                child: Container(
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
                       colors: [
-                        Colors.black.withValues(alpha: 0.1),
-                        Colors.black.withValues(alpha: 0.5),
+                        accentColor.withValues(alpha: 0.15),
+                        accentColor.withValues(alpha: 0.0),
                       ],
                     ),
                   ),
@@ -531,44 +952,35 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Icon
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(icon, color: Colors.white, size: 20),
+                    // Icon grid - display themed icons
+                    Expanded(
+                      child: _buildIconGrid(icons, accentColor),
                     ),
+                    const SizedBox(height: 8),
                     // Category name
-                    Text(
-                      category.name,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            blurRadius: 4,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            category.name,
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                        ),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: accentColor.withValues(alpha: 0.7),
+                          size: 12,
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ),
-              // Arrow indicator
-              Positioned(
-                right: 8,
-                bottom: 8,
-                child: Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white.withValues(alpha: 0.7),
-                  size: 14,
                 ),
               ),
               // Pin button
@@ -578,15 +990,15 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                 child: GestureDetector(
                   onTap: () => _togglePin(context, ref, isPinned),
                   child: Container(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.all(5),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.4),
+                      color: Colors.black.withValues(alpha: 0.5),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                      color: isPinned ? NexGenPalette.cyan : Colors.white,
-                      size: 16,
+                      color: isPinned ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.7),
+                      size: 14,
                     ),
                   ),
                 ),
@@ -595,6 +1007,54 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// Builds a grid of themed icons with accent color highlights.
+  Widget _buildIconGrid(List<IconData> icons, Color accentColor) {
+    // Take up to 6 icons, arrange in 2 rows of 3
+    final displayIcons = icons.take(6).toList();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate icon size based on available space
+        final iconSize = (constraints.maxWidth - 16) / 3.5;
+
+        return Wrap(
+          spacing: 4,
+          runSpacing: 2,
+          alignment: WrapAlignment.center,
+          runAlignment: WrapAlignment.center,
+          children: displayIcons.asMap().entries.map((entry) {
+            final index = entry.key;
+            final icon = entry.value;
+
+            // Alternate between accent color and muted for visual interest
+            final isHighlighted = index % 2 == 0;
+            final iconColor = isHighlighted
+                ? accentColor
+                : Colors.white.withValues(alpha: 0.5);
+
+            return SizedBox(
+              width: iconSize,
+              height: iconSize,
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: iconSize * 0.7,
+                shadows: isHighlighted
+                    ? [
+                        Shadow(
+                          color: accentColor.withValues(alpha: 0.5),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
@@ -1573,6 +2033,10 @@ class _GradientResultTile extends ConsumerWidget {
   const _GradientResultTile({required this.data});
 
   Future<void> _apply(BuildContext context, WidgetRef ref) async {
+    // Check for active neighborhood sync before changing lights
+    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+    if (!shouldProceed) return;
+
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
       if (context.mounted) {
@@ -1581,19 +2045,16 @@ class _GradientResultTile extends ConsumerWidget {
       return;
     }
     try {
-      // Build color array with W=0 to keep saturated colors accurate
-      List<List<int>> cols = [];
-      for (final c in data.colors.take(3)) {
-        cols.add(rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true));
+      // Use the pattern's toWledPayload() method for proper effect/speed/intensity
+      final success = await repo.applyJson(data.toWledPayload());
+
+      if (!success) {
+        throw Exception('Device did not accept command');
       }
-      if (cols.isEmpty) cols = [rgbToRgbw(255, 255, 255, forceZeroWhite: true)];
-      await repo.applyJson({
-        'on': true,
-        'bri': 210,
-        'seg': [
-          {'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': cols}
-        ]
-      });
+
+      // Update the active preset label so home screen reflects the change
+      ref.read(activePresetLabelProvider.notifier).state = data.name;
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${data.name}')));
       }
@@ -2898,6 +3359,360 @@ class _LibraryNodeCard extends StatelessWidget {
 
   const _LibraryNodeCard({required this.node});
 
+  /// Returns a list of themed icons for the node (used in grid display).
+  /// Each folder type gets 4-6 relevant icons.
+  List<IconData> _iconsForNode() {
+    final id = node.id;
+
+    // Sports leagues
+    if (id == 'league_nfl') {
+      return const [
+        Icons.sports_football_outlined,
+        Icons.stadium_outlined,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.flag_outlined,
+        Icons.star_outline,
+      ];
+    }
+    if (id == 'league_nba') {
+      return const [
+        Icons.sports_basketball_outlined,
+        Icons.stadium_outlined,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.star_outline,
+        Icons.leaderboard_outlined,
+      ];
+    }
+    if (id == 'league_mlb') {
+      return const [
+        Icons.sports_baseball_outlined,
+        Icons.stadium_outlined,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.star_outline,
+        Icons.diamond_outlined,
+      ];
+    }
+    if (id == 'league_nhl') {
+      return const [
+        Icons.sports_hockey_outlined,
+        Icons.ac_unit,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.star_outline,
+        Icons.shield_outlined,
+      ];
+    }
+    if (id == 'league_mls') {
+      return const [
+        Icons.sports_soccer_outlined,
+        Icons.stadium_outlined,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.star_outline,
+        Icons.public_outlined,
+      ];
+    }
+    if (id == 'league_wnba') {
+      return const [
+        Icons.sports_basketball_outlined,
+        Icons.female_outlined,
+        Icons.emoji_events_outlined,
+        Icons.star_outline,
+        Icons.stadium_outlined,
+        Icons.groups_outlined,
+      ];
+    }
+
+    // NCAA
+    if (id == 'ncaa_football' || id == 'ncaa_basketball') {
+      return const [
+        Icons.school_outlined,
+        Icons.sports_outlined,
+        Icons.emoji_events_outlined,
+        Icons.groups_outlined,
+        Icons.stadium_outlined,
+        Icons.star_outline,
+      ];
+    }
+    if (id.startsWith('conf_')) {
+      return const [
+        Icons.groups_outlined,
+        Icons.school_outlined,
+        Icons.emoji_events_outlined,
+        Icons.star_outline,
+        Icons.stadium_outlined,
+        Icons.leaderboard_outlined,
+      ];
+    }
+
+    // Holiday sub-folders
+    if (id == 'holiday_christmas') {
+      return const [
+        Icons.park_outlined,
+        Icons.ac_unit,
+        Icons.card_giftcard_outlined,
+        Icons.star_outline,
+        Icons.celebration_outlined,
+        Icons.nights_stay_outlined,
+      ];
+    }
+    if (id == 'holiday_halloween') {
+      return const [
+        Icons.nightlight_outlined,
+        Icons.pest_control_outlined,
+        Icons.local_fire_department_outlined,
+        Icons.nights_stay_outlined,
+        Icons.auto_awesome_outlined,
+        Icons.face_outlined,
+      ];
+    }
+    if (id == 'holiday_july4th') {
+      return const [
+        Icons.flag_outlined,
+        Icons.star_outline,
+        Icons.celebration_outlined,
+        Icons.local_fire_department_outlined,
+        Icons.wb_sunny_outlined,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'holiday_valentines') {
+      return const [
+        Icons.favorite_outline,
+        Icons.favorite_border,
+        Icons.local_florist_outlined,
+        Icons.card_giftcard_outlined,
+        Icons.star_outline,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'holiday_stpatricks') {
+      return const [
+        Icons.local_florist_outlined,
+        Icons.eco_outlined,
+        Icons.local_bar_outlined,
+        Icons.star_outline,
+        Icons.celebration_outlined,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'holiday_easter') {
+      return const [
+        Icons.egg_outlined,
+        Icons.local_florist_outlined,
+        Icons.grass_outlined,
+        Icons.wb_sunny_outlined,
+        Icons.star_outline,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'holiday_thanksgiving') {
+      return const [
+        Icons.eco_outlined,
+        Icons.restaurant_outlined,
+        Icons.home_outlined,
+        Icons.favorite_outline,
+        Icons.park_outlined,
+        Icons.celebration_outlined,
+      ];
+    }
+    if (id == 'holiday_newyear') {
+      return const [
+        Icons.celebration_outlined,
+        Icons.access_time_outlined,
+        Icons.star_outline,
+        Icons.auto_awesome_outlined,
+        Icons.local_bar_outlined,
+        Icons.music_note_outlined,
+      ];
+    }
+
+    // Season sub-folders
+    if (id == 'season_spring') {
+      return const [
+        Icons.local_florist_outlined,
+        Icons.grass_outlined,
+        Icons.wb_sunny_outlined,
+        Icons.water_drop_outlined,
+        Icons.eco_outlined,
+        Icons.park_outlined,
+      ];
+    }
+    if (id == 'season_summer') {
+      return const [
+        Icons.wb_sunny_outlined,
+        Icons.beach_access_outlined,
+        Icons.pool_outlined,
+        Icons.icecream_outlined,
+        Icons.waves_outlined,
+        Icons.star_outline,
+      ];
+    }
+    if (id == 'season_autumn') {
+      return const [
+        Icons.park_outlined,
+        Icons.eco_outlined,
+        Icons.air_outlined,
+        Icons.local_fire_department_outlined,
+        Icons.nights_stay_outlined,
+        Icons.coffee_outlined,
+      ];
+    }
+    if (id == 'season_winter') {
+      return const [
+        Icons.ac_unit,
+        Icons.nights_stay_outlined,
+        Icons.cloud_outlined,
+        Icons.local_fire_department_outlined,
+        Icons.star_outline,
+        Icons.home_outlined,
+      ];
+    }
+
+    // Party/event sub-folders
+    if (id == 'event_birthday') {
+      return const [
+        Icons.cake_outlined,
+        Icons.celebration_outlined,
+        Icons.card_giftcard_outlined,
+        Icons.star_outline,
+        Icons.music_note_outlined,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'event_wedding') {
+      return const [
+        Icons.favorite_outline,
+        Icons.local_florist_outlined,
+        Icons.celebration_outlined,
+        Icons.star_outline,
+        Icons.music_note_outlined,
+        Icons.diamond_outlined,
+      ];
+    }
+    if (id == 'event_babyshower') {
+      return const [
+        Icons.child_care_outlined,
+        Icons.card_giftcard_outlined,
+        Icons.celebration_outlined,
+        Icons.star_outline,
+        Icons.favorite_outline,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'event_graduation') {
+      return const [
+        Icons.school_outlined,
+        Icons.emoji_events_outlined,
+        Icons.celebration_outlined,
+        Icons.star_outline,
+        Icons.auto_awesome_outlined,
+        Icons.workspace_premium_outlined,
+      ];
+    }
+
+    // Movie franchises
+    if (id == 'franchise_disney') {
+      return const [
+        Icons.castle_outlined,
+        Icons.star_outline,
+        Icons.auto_awesome_outlined,
+        Icons.movie_outlined,
+        Icons.music_note_outlined,
+        Icons.favorite_outline,
+      ];
+    }
+    if (id == 'franchise_marvel') {
+      return const [
+        Icons.shield_outlined,
+        Icons.bolt_outlined,
+        Icons.star_outline,
+        Icons.flash_on_outlined,
+        Icons.military_tech_outlined,
+        Icons.movie_outlined,
+      ];
+    }
+    if (id == 'franchise_starwars') {
+      return const [
+        Icons.star_outline,
+        Icons.nights_stay_outlined,
+        Icons.flash_on_outlined,
+        Icons.rocket_launch_outlined,
+        Icons.movie_outlined,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    if (id == 'franchise_dc') {
+      return const [
+        Icons.bolt_outlined,
+        Icons.shield_outlined,
+        Icons.star_outline,
+        Icons.flash_on_outlined,
+        Icons.nights_stay_outlined,
+        Icons.movie_outlined,
+      ];
+    }
+    if (id == 'franchise_pixar') {
+      return const [
+        Icons.animation_outlined,
+        Icons.auto_awesome_outlined,
+        Icons.star_outline,
+        Icons.lightbulb_outlined,
+        Icons.movie_outlined,
+        Icons.favorite_outline,
+      ];
+    }
+    if (id == 'franchise_dreamworks') {
+      return const [
+        Icons.movie_filter_outlined,
+        Icons.auto_awesome_outlined,
+        Icons.star_outline,
+        Icons.animation_outlined,
+        Icons.pets_outlined,
+        Icons.movie_outlined,
+      ];
+    }
+    if (id == 'franchise_harrypotter') {
+      return const [
+        Icons.auto_fix_high_outlined,
+        Icons.castle_outlined,
+        Icons.star_outline,
+        Icons.flash_on_outlined,
+        Icons.nights_stay_outlined,
+        Icons.movie_outlined,
+      ];
+    }
+    if (id == 'franchise_nintendo') {
+      return const [
+        Icons.videogame_asset_outlined,
+        Icons.star_outline,
+        Icons.gamepad_outlined,
+        Icons.sports_esports_outlined,
+        Icons.auto_awesome_outlined,
+        Icons.emoji_events_outlined,
+      ];
+    }
+
+    // Default fallback icons
+    if (node.isPalette) {
+      return const [
+        Icons.palette_outlined,
+        Icons.color_lens_outlined,
+        Icons.gradient_outlined,
+        Icons.auto_awesome_outlined,
+      ];
+    }
+    return const [
+      Icons.folder_outlined,
+      Icons.category_outlined,
+      Icons.grid_view_outlined,
+      Icons.auto_awesome_outlined,
+    ];
+  }
+
   IconData _iconForNode() {
     final id = node.id;
 
@@ -3008,9 +3823,10 @@ class _LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a folder card with solid themed background (no flowing gradient)
+  /// Build a folder card with icon grid design matching main category cards
   Widget _buildFolderCard(BuildContext context) {
     final themeColor = _getFolderThemeColor();
+    final icons = _iconsForNode();
 
     return GestureDetector(
       onTap: () {
@@ -3018,100 +3834,135 @@ class _LibraryNodeCard extends StatelessWidget {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: NexGenPalette.gunmetal90,
+          // Premium dark background with subtle gradient
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              NexGenPalette.gunmetal90,
+              NexGenPalette.matteBlack.withValues(alpha: 0.95),
+            ],
+          ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: themeColor.withValues(alpha: 0.5), width: 1.5),
+          border: Border.all(
+            color: themeColor.withValues(alpha: 0.3),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: themeColor.withValues(alpha: 0.15),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Stack(
           children: [
-            // Themed accent bar at top
+            // Subtle accent glow in corner
             Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
+              top: -20,
+              right: -20,
               child: Container(
-                height: 4,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
-                  color: themeColor,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    topRight: Radius.circular(16),
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      themeColor.withValues(alpha: 0.15),
+                      themeColor.withValues(alpha: 0.0),
+                    ],
                   ),
                 ),
               ),
             ),
-            // Large icon watermark
-            Positioned(
-              right: -15,
-              bottom: -15,
-              child: Icon(
-                _iconForNode(),
-                size: 80,
-                color: themeColor.withValues(alpha: 0.15),
-              ),
-            ),
             // Content
             Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Icon in themed container
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: themeColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      _iconForNode(),
-                      size: 22,
-                      color: themeColor,
-                    ),
+                  // Icon grid - display themed icons
+                  Expanded(
+                    child: _buildIconGrid(icons, themeColor),
                   ),
-                  // Text content
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 8),
+                  // Folder name
+                  Row(
                     children: [
-                      Text(
-                        node.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (node.description != null)
-                        Text(
-                          node.description!,
-                          style: TextStyle(
-                            color: NexGenPalette.textSecondary,
-                            fontSize: 10,
+                      Expanded(
+                        child: Text(
+                          node.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        color: themeColor.withValues(alpha: 0.7),
+                        size: 12,
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
-            // Chevron indicator
-            Positioned(
-              right: 8,
-              top: 12,
-              child: Icon(
-                Icons.chevron_right,
-                size: 18,
-                color: themeColor.withValues(alpha: 0.7),
-              ),
-            ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Builds a grid of themed icons with accent color highlights.
+  Widget _buildIconGrid(List<IconData> icons, Color accentColor) {
+    // Take up to 6 icons, arrange in 2 rows of 3
+    final displayIcons = icons.take(6).toList();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate icon size based on available space
+        final iconSize = (constraints.maxWidth - 16) / 3.5;
+
+        return Wrap(
+          spacing: 4,
+          runSpacing: 2,
+          alignment: WrapAlignment.center,
+          runAlignment: WrapAlignment.center,
+          children: displayIcons.asMap().entries.map((entry) {
+            final index = entry.key;
+            final icon = entry.value;
+
+            // Alternate between accent color and muted for visual interest
+            final isHighlighted = index % 2 == 0;
+            final iconColor = isHighlighted
+                ? accentColor
+                : Colors.white.withValues(alpha: 0.5);
+
+            return SizedBox(
+              width: iconSize,
+              height: iconSize,
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: iconSize * 0.7,
+                shadows: isHighlighted
+                    ? [
+                        Shadow(
+                          color: accentColor.withValues(alpha: 0.5),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
@@ -3220,7 +4071,7 @@ class _LibraryNodeCard extends StatelessWidget {
   }
 }
 
-/// Grid of patterns generated from a palette node
+/// Grid of patterns generated from a palette node with mood filter
 class _PalettePatternGrid extends ConsumerWidget {
   final LibraryNode node;
 
@@ -3228,19 +4079,13 @@ class _PalettePatternGrid extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final patternsAsync = ref.watch(libraryNodePatternsProvider(node.id));
+    // Watch mood filter and filtered patterns
+    final selectedMood = ref.watch(selectedMoodFilterProvider);
+    final patternsAsync = ref.watch(filteredLibraryNodePatternsProvider(node.id));
+    final moodCountsAsync = ref.watch(nodeMoodCountsProvider(node.id));
 
     return patternsAsync.when(
       data: (patterns) {
-        if (patterns.isEmpty) {
-          return Center(
-            child: Text(
-              'No patterns available',
-              style: TextStyle(color: NexGenPalette.textSecondary),
-            ),
-          );
-        }
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -3272,10 +4117,21 @@ class _PalettePatternGrid extends ConsumerWidget {
                   ],
                 ),
               ),
+            // Mood filter bar
+            _MoodFilterBar(
+              selectedMood: selectedMood,
+              moodCounts: moodCountsAsync.valueOrNull ?? {},
+              onMoodSelected: (mood) {
+                ref.read(selectedMoodFilterProvider.notifier).state = mood;
+              },
+            ),
+            // Pattern count (updates based on filter)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                '${patterns.length} Patterns',
+                selectedMood != null
+                    ? '${patterns.length} ${selectedMood.label} Patterns'
+                    : '${patterns.length} Patterns',
                 style: TextStyle(
                   color: NexGenPalette.textSecondary,
                   fontSize: 12,
@@ -3283,22 +4139,51 @@ class _PalettePatternGrid extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            // Pattern grid
+            // Pattern grid or empty state
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.0,
-                ),
-                itemCount: patterns.length,
-                itemBuilder: (context, index) {
-                  final pattern = patterns[index];
-                  return _PatternCard(pattern: pattern);
-                },
-              ),
+              child: patterns.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            selectedMood?.icon ?? Icons.pattern,
+                            size: 48,
+                            color: NexGenPalette.textSecondary.withValues(alpha: 0.5),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            selectedMood != null
+                                ? 'No ${selectedMood.label} patterns available'
+                                : 'No patterns available',
+                            style: TextStyle(color: NexGenPalette.textSecondary),
+                          ),
+                          if (selectedMood != null) ...[
+                            const SizedBox(height: 8),
+                            TextButton(
+                              onPressed: () {
+                                ref.read(selectedMoodFilterProvider.notifier).state = null;
+                              },
+                              child: const Text('Show All Patterns'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 1.0,
+                      ),
+                      itemCount: patterns.length,
+                      itemBuilder: (context, index) {
+                        final pattern = patterns[index];
+                        return _PatternCard(pattern: pattern);
+                      },
+                    ),
             ),
           ],
         );
@@ -3308,6 +4193,134 @@ class _PalettePatternGrid extends ConsumerWidget {
         child: Text(
           'Unable to load patterns',
           style: TextStyle(color: NexGenPalette.textSecondary),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mood filter bar with horizontally scrollable chips
+class _MoodFilterBar extends StatelessWidget {
+  final EffectMood? selectedMood;
+  final Map<EffectMood, int> moodCounts;
+  final ValueChanged<EffectMood?> onMoodSelected;
+
+  const _MoodFilterBar({
+    required this.selectedMood,
+    required this.moodCounts,
+    required this.onMoodSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            // "All" chip
+            _MoodChip(
+              label: 'All',
+              emoji: '',
+              isSelected: selectedMood == null,
+              count: moodCounts.values.fold(0, (a, b) => a + b),
+              onTap: () => onMoodSelected(null),
+            ),
+            const SizedBox(width: 8),
+            // Mood chips
+            for (final mood in EffectMoodSystem.displayOrder) ...[
+              _MoodChip(
+                label: mood.label,
+                emoji: mood.emoji,
+                isSelected: selectedMood == mood,
+                count: moodCounts[mood] ?? 0,
+                color: mood.color,
+                onTap: () => onMoodSelected(selectedMood == mood ? null : mood),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Individual mood filter chip
+class _MoodChip extends StatelessWidget {
+  final String label;
+  final String emoji;
+  final bool isSelected;
+  final int count;
+  final Color? color;
+  final VoidCallback onTap;
+
+  const _MoodChip({
+    required this.label,
+    required this.emoji,
+    required this.isSelected,
+    required this.count,
+    this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chipColor = color ?? NexGenPalette.cyan;
+
+    return GestureDetector(
+      onTap: count > 0 || isSelected ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? chipColor.withValues(alpha: 0.2)
+              : NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? chipColor : NexGenPalette.line,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (emoji.isNotEmpty) ...[
+              Text(emoji, style: const TextStyle(fontSize: 14)),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? chipColor : (count > 0 ? Colors.white : NexGenPalette.textSecondary),
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
+            if (count > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? chipColor.withValues(alpha: 0.3)
+                      : NexGenPalette.gunmetal,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    color: isSelected ? chipColor : NexGenPalette.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -3489,6 +4502,10 @@ class _PatternCard extends ConsumerWidget {
   }
 
   Future<void> _applyPattern(BuildContext context, WidgetRef ref) async {
+    // Check for active neighborhood sync before changing lights
+    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+    if (!shouldProceed) return;
+
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
       if (context.mounted) {
@@ -3501,7 +4518,14 @@ class _PatternCard extends ConsumerWidget {
 
     try {
       // Apply the pattern's wledPayload directly
-      await repo.applyJson(pattern.wledPayload);
+      final success = await repo.applyJson(pattern.wledPayload);
+
+      if (!success) {
+        throw Exception('Device did not accept command');
+      }
+
+      // Update the active preset label so home screen reflects the change
+      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

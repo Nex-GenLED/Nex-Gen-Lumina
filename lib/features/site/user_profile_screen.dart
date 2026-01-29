@@ -45,19 +45,9 @@ class UserProfileScreen extends ConsumerWidget {
                     onTap: () => context.push(AppRoutes.profileEdit),
                   ),
                   _MenuTile(
-                    icon: Icons.map_outlined,
-                    label: 'Manage Locations',
-                    onTap: () => context.push(AppRoutes.settings),
-                  ),
-                  _MenuTile(
                     icon: Icons.lock_outline,
                     label: 'Security & Password',
                     onTap: () => context.push(AppRoutes.security),
-                  ),
-                  _MenuTile(
-                    icon: Icons.settings_outlined,
-                    label: 'App Settings',
-                    onTap: () => context.push(AppRoutes.settings),
                   ),
                   const SizedBox(height: 8),
                   _MenuTile(

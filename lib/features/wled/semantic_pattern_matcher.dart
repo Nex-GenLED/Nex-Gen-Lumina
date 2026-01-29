@@ -49,11 +49,37 @@ class SemanticPatternMatcher {
       'wedding', 'birthday', 'graduation', 'babyshower', 'baby', 'shower',
       'anniversary', 'engagement', 'retirement', 'housewarming',
 
-      // Sports teams
+      // Sports teams - NFL
       'chiefs', 'cowboys', 'packers', 'patriots', 'steelers', 'eagles',
       'niners', '49ers', 'seahawks', 'broncos', 'raiders', 'chargers',
+      'bills', 'dolphins', 'jets', 'ravens', 'bengals', 'browns',
+      'texans', 'colts', 'jaguars', 'titans', 'bears', 'lions',
+      'vikings', 'falcons', 'panthers', 'saints', 'buccaneers',
+      'cardinals', 'rams', 'commanders', 'giants',
+      // Sports teams - NBA
       'lakers', 'celtics', 'warriors', 'heat', 'bulls', 'knicks',
-      'yankees', 'redsox', 'dodgers', 'cubs', 'astros',
+      'nets', 'mavericks', 'spurs', 'rockets', 'nuggets', 'suns',
+      'bucks', 'sixers', 'raptors', 'clippers', 'thunder', 'grizzlies',
+      'pelicans', 'timberwolves', 'blazers', 'jazz', 'kings', 'cavaliers',
+      'pistons', 'pacers', 'hawks', 'hornets', 'magic', 'wizards',
+      // Sports teams - MLB
+      'royals', 'yankees', 'redsox', 'dodgers', 'cubs', 'astros',
+      'cardinals', 'braves', 'phillies', 'mets', 'rangers', 'padres',
+      'mariners', 'whitesox', 'tigers', 'twins', 'guardians', 'orioles',
+      'bluejays', 'rays', 'athletics', 'angels', 'reds', 'brewers',
+      'pirates', 'rockies', 'diamondbacks', 'marlins', 'nationals',
+      // Sports teams - NHL
+      'blackhawks', 'bruins', 'mapleleafs', 'canadiens', 'redwings',
+      'penguins', 'flyers', 'avalanche', 'lightning', 'goldenknights',
+      'capitals', 'oilers', 'flames', 'blues', 'stars', 'sharks',
+      'ducks', 'kraken', 'wild', 'predators', 'hurricanes', 'devils',
+      'islanders', 'sabres', 'senators', 'canucks',
+      // Sports teams - MLS/Soccer
+      'sportingkc', 'galaxy', 'lafc', 'sounders', 'atlantaunited',
+      'intermiami',
+      // College teams
+      'jayhawks', 'wildcats', 'tigers', 'crimsontide', 'buckeyes',
+      'wolverines', 'fightingirish', 'longhorns', 'bulldogs', 'sooners',
 
       // Seasons
       'winter', 'spring', 'summer', 'fall', 'autumn',

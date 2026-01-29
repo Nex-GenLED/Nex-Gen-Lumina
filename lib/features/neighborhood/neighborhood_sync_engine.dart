@@ -142,6 +142,8 @@ class NeighborhoodSyncEngine {
     SyncType syncType = SyncType.sequentialFlow,
     String? patternName,
     String? scheduleId,
+    Map<String, List<int>>? memberColorOverrides,
+    String? complementTheme,
   }) {
     // Filter to only active participating members
     final activeMembers = _filterActiveMembers(members, scheduleId);
@@ -163,6 +165,10 @@ class NeighborhoodSyncEngine {
         // Animation flows from home to home with calculated delays
         delays = calculateMemberDelays(activeMembers, timingConfig);
         break;
+      case SyncType.complement:
+        // Complement mode: all homes start simultaneously but with different colors
+        delays = {for (var m in activeMembers) m.oderId: 0};
+        break;
     }
 
     // Add a small buffer (2 seconds) before start to ensure all devices receive the command
@@ -182,6 +188,48 @@ class NeighborhoodSyncEngine {
       syncType: syncType,
       patternName: patternName,
       scheduleId: scheduleId,
+      memberColorOverrides: memberColorOverrides,
+      complementTheme: complementTheme,
+    );
+  }
+
+  /// Creates a complement mode sync command using a predefined theme.
+  ///
+  /// Each home in the neighborhood will display a different color from the theme.
+  /// Colors are distributed based on member position order.
+  SyncCommand createComplementCommand({
+    required String groupId,
+    required List<NeighborhoodMember> members,
+    required ComplementTheme theme,
+    int? effectIdOverride,
+    int speed = 128,
+    int intensity = 128,
+    int brightness = 200,
+    String? scheduleId,
+  }) {
+    // Build member color overrides from theme
+    final colorOverrides = theme.buildMemberColorOverrides(members);
+
+    debugPrint('Creating Complement Mode command with theme: ${theme.name}');
+    for (final entry in colorOverrides.entries) {
+      final colorHex = entry.value.map((c) => '0x${c.toRadixString(16)}').join(', ');
+      debugPrint('  ${entry.key}: [$colorHex]');
+    }
+
+    return createSyncCommand(
+      groupId: groupId,
+      members: members,
+      effectId: effectIdOverride ?? theme.recommendedEffectId,
+      colors: theme.themeColors, // Fallback colors
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      timingConfig: const SyncTimingConfig(), // Not used for complement
+      syncType: SyncType.complement,
+      patternName: '${theme.name} (Complement)',
+      scheduleId: scheduleId,
+      memberColorOverrides: colorOverrides,
+      complementTheme: theme.id,
     );
   }
 
@@ -274,8 +322,15 @@ class NeighborhoodSyncEngine {
         return;
       }
 
-      // Build WLED JSON payload
-      final colorArrays = command.colors.map((c) {
+      // Get current member to check for member-specific colors
+      final currentMember = _ref.read(currentUserMemberProvider);
+      final memberId = currentMember?.oderId ?? '';
+
+      // Get colors for this specific member (handles Complement Mode)
+      final memberColors = command.getColorsForMember(memberId);
+
+      // Build WLED JSON payload with member-specific colors
+      final colorArrays = memberColors.map((c) {
         // Convert int color to RGB array
         final r = (c >> 16) & 0xFF;
         final g = (c >> 8) & 0xFF;
@@ -310,9 +365,12 @@ class NeighborhoodSyncEngine {
 
       if (success) {
         debugPrint('Pattern applied successfully');
+        if (command.isComplementMode) {
+          debugPrint('Complement Mode: Applied colors ${memberColors.map((c) => '0x${c.toRadixString(16)}')} for member $memberId');
+        }
 
-        // Update local state metadata
-        final colors = command.colorObjects;
+        // Update local state metadata with member-specific colors
+        final colors = command.getColorObjectsForMember(memberId);
         _ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
           colorSequence: colors,
           effectName: command.patternName,

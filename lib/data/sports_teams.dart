@@ -250,4 +250,67 @@ class SportsTeamsDatabase {
   static List<String> get leagues {
     return allTeams.map((t) => t.league).toSet().toList()..sort();
   }
+
+  /// Searches for a sports team in a query string.
+  /// Returns the first matching team or null.
+  ///
+  /// This method is more sophisticated than simple search() as it:
+  /// - Handles multi-word team names ("Kansas City Royals", "Red Sox")
+  /// - Handles city + team combinations
+  /// - Handles nicknames ("KC Royals", "NY Yankees")
+  /// - Prioritizes longer/more specific matches
+  static SportsTeam? findTeamInQuery(String query) {
+    if (query.isEmpty) return null;
+    final lower = query.toLowerCase();
+
+    // Build a list of potential matches with their specificity score
+    final matches = <_TeamMatch>[];
+
+    for (final team in allTeams) {
+      int score = 0;
+
+      // Check for full display name (e.g., "Kansas City Royals")
+      final displayLower = team.displayName.toLowerCase();
+      if (lower.contains(displayLower)) {
+        score = 100 + displayLower.length; // Highest priority for full name
+      }
+      // Check for city + team name (e.g., "kansas city" + "royals")
+      else if (lower.contains(team.city.toLowerCase()) &&
+               lower.contains(team.name.toLowerCase())) {
+        score = 80 + team.city.length + team.name.length;
+      }
+      // Check for nickname + team name (e.g., "kc royals")
+      else if (team.nickname != null &&
+               lower.contains(team.nickname!.toLowerCase()) &&
+               lower.contains(team.name.toLowerCase())) {
+        score = 70 + team.name.length;
+      }
+      // Check for just team name (e.g., "royals", "chiefs")
+      // Use word boundaries to avoid partial matches
+      else {
+        final teamNameLower = team.name.toLowerCase();
+        final pattern = RegExp('\\b${RegExp.escape(teamNameLower)}\\b');
+        if (pattern.hasMatch(lower)) {
+          score = 50 + teamNameLower.length;
+        }
+      }
+
+      if (score > 0) {
+        matches.add(_TeamMatch(team: team, score: score));
+      }
+    }
+
+    if (matches.isEmpty) return null;
+
+    // Sort by score (highest first) and return the best match
+    matches.sort((a, b) => b.score.compareTo(a.score));
+    return matches.first.team;
+  }
+}
+
+/// Helper class for team matching with scoring
+class _TeamMatch {
+  final SportsTeam team;
+  final int score;
+  const _TeamMatch({required this.team, required this.score});
 }

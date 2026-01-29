@@ -298,23 +298,32 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(0, 0, 0, 100),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Active Neighborhood Sync Banner
-            ActiveSyncBanner(
-              onTap: () => context.push(AppRoutes.neighborhoodSync),
-            ),
-            const SizedBox(height: 16),
             // Section A: Image hero framed, now hosting header + controls overlays
             _buildHeroSection(context, ref, state, profileAsync),
             // Expandable Pattern Adjustment Panel
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
-            // Section B: Design Studio button
+            // Section B: Design Studio & Neighborhood Sync buttons side by side
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GlassActionButton(
-                icon: Icons.palette,
-                label: 'Design Studio',
-                onTap: () => context.push(AppRoutes.designStudio),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GlassActionButton(
+                      icon: Icons.palette,
+                      label: 'Design Studio',
+                      onTap: () => context.push(AppRoutes.designStudio),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GlassActionButton(
+                      icon: Icons.groups_outlined,
+                      label: 'Neighborhood Sync',
+                      onTap: () => context.push(AppRoutes.neighborhoodSync),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),

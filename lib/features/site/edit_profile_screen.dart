@@ -16,6 +16,7 @@ import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
+import 'package:nexgen_command/data/metro_builders.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -448,6 +449,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 onFloorPlanChanged: (v) => setState(() => _floorPlan = v),
                 buildYearValue: _buildYear,
                 onBuildYearChanged: (v) => setState(() => _buildYear = v),
+                userAddress: _addressCtrl.text,
               ),
               const SizedBox(height: 16),
               _InterestsCard(
@@ -853,39 +855,68 @@ class _PrivacyIntelligenceCard extends StatelessWidget {
 }
 
 class _ArchitectureCard extends StatelessWidget {
-  const _ArchitectureCard({super.key, required this.builderValue, required this.onBuilderChanged, required this.floorPlanValue, required this.onFloorPlanChanged, required this.buildYearValue, required this.onBuildYearChanged});
+  const _ArchitectureCard({
+    super.key,
+    required this.builderValue,
+    required this.onBuilderChanged,
+    required this.floorPlanValue,
+    required this.onFloorPlanChanged,
+    required this.buildYearValue,
+    required this.onBuildYearChanged,
+    this.userAddress,
+  });
   final String? builderValue;
   final ValueChanged<String?> onBuilderChanged;
   final String? floorPlanValue;
   final ValueChanged<String?> onFloorPlanChanged;
   final int? buildYearValue;
   final ValueChanged<int?> onBuildYearChanged;
+  final String? userAddress;
 
-  static const List<String> _builders = ['Summit Homes','Lennar','Pulte','Custom Build'];
-
-  List<String> _plansFor(String? builder) {
-    switch (builder) {
-      case 'Summit Homes':
-        return const ['The Preston','Other'];
-      case 'Lennar':
-        return const ['Willow II','Other'];
-      case 'Pulte':
-        return const ['Oakwood Reverse','Other'];
-      case 'Custom Build':
-        return const ['Other'];
-      default:
-        return const ['The Preston','Willow II','Oakwood Reverse','Other'];
-    }
+  /// Get builders based on detected metro area from user's address
+  List<String> _buildersForAddress() {
+    final metroId = MetroBuilders.detectMetroArea(userAddress);
+    return MetroBuilders.getBuildersForMetro(metroId);
   }
 
-  List<int> _years() => [for (int y = 2025; y >= 1950; y--) y];
+  /// Get metro area display name if detected
+  String? _detectedMetroName() {
+    final metroId = MetroBuilders.detectMetroArea(userAddress);
+    if (metroId != null) {
+      return MetroBuilders.metroDisplayNames[metroId];
+    }
+    return null;
+  }
+
+  List<String> _plansFor(String? builder) {
+    // Generic floor plan options - these would ideally come from a database
+    // based on builder-specific models
+    if (builder == null || builder == 'Custom Build') {
+      return const ['Other'];
+    }
+    return const ['Model A', 'Model B', 'Model C', 'Other'];
+  }
+
+  List<int> _years() {
+    final currentYear = DateTime.now().year;
+    return [for (int y = currentYear; y >= 2000; y--) y];
+  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final builders = _buildersForAddress();
+    final metroName = _detectedMetroName();
     final plans = _plansFor(builderValue);
-    final infoText = (builderValue != null && floorPlanValue != null)
-        ? "Matches Found: We have 12 saved lighting designs for the '${builderValue!} - ${floorPlanValue!}' model. Lumina can auto-configure your zones."
+    final years = _years();
+
+    // Validate dropdown values - must be null or in the valid items list
+    final validBuilder = (builderValue != null && builders.contains(builderValue)) ? builderValue : null;
+    final validFloorPlan = (floorPlanValue != null && plans.contains(floorPlanValue)) ? floorPlanValue : null;
+    final validYear = (buildYearValue != null && years.contains(buildYearValue)) ? buildYearValue : null;
+
+    final infoText = (validBuilder != null && validFloorPlan != null)
+        ? "Matches Found: We have 12 saved lighting designs for the '$validBuilder - $validFloorPlan' model. Lumina can auto-configure your zones."
         : 'Tip: Select your builder and floor plan to check for saved designs.';
 
     return _SectionCard(
@@ -894,23 +925,47 @@ class _ArchitectureCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Show detected metro area if found
+          if (metroName != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 18, color: NexGenPalette.cyan),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Showing top builders in $metroName',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.cyan),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           DropdownButtonFormField<String>(
-            value: builderValue,
-            items: _builders.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
+            value: validBuilder,
+            items: builders.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
             onChanged: onBuilderChanged,
             decoration: const InputDecoration(labelText: 'Builder', prefixIcon: Icon(Icons.apartment_outlined)),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: plans.contains(floorPlanValue) ? floorPlanValue : null,
+            value: validFloorPlan,
             items: plans.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
             onChanged: onFloorPlanChanged,
             decoration: const InputDecoration(labelText: 'Floor Plan Model', prefixIcon: Icon(Icons.maps_home_work_outlined)),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
-            value: buildYearValue,
-            items: _years().map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
+            value: validYear,
+            items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
             onChanged: onBuildYearChanged,
             decoration: const InputDecoration(labelText: 'Year Built', prefixIcon: Icon(Icons.calendar_today_outlined)),
           ),

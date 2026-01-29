@@ -43,11 +43,37 @@ class UserService {
       // SECURITY: Encrypt sensitive data before updating
       final userData = user.copyWith(updatedAt: DateTime.now()).toJson();
       final encryptedData = EncryptionService.encryptUserData(userData);
-      await _firestore.collection('users').doc(user.id).update(encryptedData);
+
+      // Remove null values to prevent Firestore from interpreting them as
+      // "delete this field" which can cause permission errors
+      final cleanedData = _removeNullValues(encryptedData);
+
+      // Use set with merge to avoid permissions errors when document structure
+      // doesn't match (e.g., when updating roofline_mask field)
+      await _firestore.collection('users').doc(user.id).set(
+        cleanedData,
+        SetOptions(merge: true),
+      );
     } catch (e) {
       debugPrint('Error updating user: $e');
       rethrow;
     }
+  }
+
+  /// Recursively remove null values from a map to prevent Firestore errors
+  Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) {
+    final result = <String, dynamic>{};
+    for (final entry in data.entries) {
+      final value = entry.value;
+      if (value != null) {
+        if (value is Map<String, dynamic>) {
+          result[entry.key] = _removeNullValues(value);
+        } else {
+          result[entry.key] = value;
+        }
+      }
+    }
+    return result;
   }
 
   /// Update specific fields in user profile by ID

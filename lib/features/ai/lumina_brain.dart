@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -8,6 +9,7 @@ import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
+import 'package:nexgen_command/data/sports_teams.dart';
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
@@ -31,7 +33,18 @@ class LuminaBrain {
       debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
     }
 
-    // TIER 1: Try to match against deterministic event theme library first
+    // TIER 0: Check for sports teams FIRST (highest priority)
+    // This prevents generic keywords like "party" from overshadowing team names
+    final sportsTeam = SportsTeamsDatabase.findTeamInQuery(userPrompt);
+    if (sportsTeam != null && !isOpenEnded) {
+      debugPrint('🏈 TIER 0: Found sports team: ${sportsTeam.displayName} (${sportsTeam.league})');
+      final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
+      debugPrint('   Context modifier: $context');
+      final response = _buildSportsTeamResponse(sportsTeam, context);
+      return response;
+    }
+
+    // TIER 1: Try to match against deterministic event theme library
     // Note: We still allow theme matches for open-ended queries since
     // "give me a party" could match a party theme, which is expected behavior
     final themeMatch = EventThemeLibrary.matchQuery(userPrompt);
@@ -111,7 +124,6 @@ class LuminaBrain {
     // Extract fields from cached data
     final patternName = cachedData['patternName'] as String? ?? 'Pattern';
     final thought = cachedData['thought'] as String? ?? '';
-    final wled = cachedData['wled'] as Map<String, dynamic>?;
 
     // Build a friendly verbal response
     final verbal = thought.isNotEmpty
@@ -195,6 +207,143 @@ class LuminaBrain {
     final verbal = subtitle.isNotEmpty
         ? '$subtitle - here we go!'
         : 'Perfect! Applying $name now.';
+
+    return '$verbal ${jsonEncode(jsonObject)}';
+  }
+
+  /// Builds a response for a sports team with the appropriate effect based on context.
+  static String _buildSportsTeamResponse(SportsTeam team, EventContext context) {
+    // Determine effect based on context
+    int effectId;
+    String effectName;
+    int speed;
+    int intensity;
+    bool isStatic;
+
+    switch (context) {
+      case EventContext.party:
+        // High energy for party context - chase/running effect
+        effectId = 41; // Running
+        effectName = 'Running';
+        speed = 180;
+        intensity = 220;
+        isStatic = false;
+        break;
+      case EventContext.celebration:
+        // Medium energy - twinkle/sparkle
+        effectId = 43; // Twinkle
+        effectName = 'Twinkle';
+        speed = 120;
+        intensity = 180;
+        isStatic = false;
+        break;
+      case EventContext.elegant:
+        // Slow, sophisticated - breathe
+        effectId = 2; // Breathe
+        effectName = 'Breathe';
+        speed = 50;
+        intensity = 140;
+        isStatic = false;
+        break;
+      case EventContext.staticSimple:
+        // No movement
+        effectId = 0; // Solid
+        effectName = 'Solid';
+        speed = 128;
+        intensity = 128;
+        isStatic = true;
+        break;
+      case EventContext.romantic:
+      case EventContext.neutral:
+        // Default: gentle breathe
+        effectId = 2; // Breathe
+        effectName = 'Breathe';
+        speed = 70;
+        intensity = 150;
+        isStatic = false;
+        break;
+    }
+
+    // Build pattern name based on context
+    String patternName;
+    String subtitle;
+    switch (context) {
+      case EventContext.party:
+        patternName = '${team.displayName} Party';
+        subtitle = 'High-energy ${team.name} colors chase';
+        break;
+      case EventContext.celebration:
+        patternName = '${team.displayName} Celebration';
+        subtitle = 'Festive ${team.name} sparkle';
+        break;
+      case EventContext.elegant:
+        patternName = '${team.displayName} Elegance';
+        subtitle = 'Sophisticated ${team.name} glow';
+        break;
+      case EventContext.staticSimple:
+        patternName = '${team.displayName} Colors';
+        subtitle = 'Pure ${team.name} team colors';
+        break;
+      case EventContext.romantic:
+      case EventContext.neutral:
+        patternName = '${team.displayName} Spirit';
+        subtitle = '${team.name} team pride';
+        break;
+    }
+
+    // Build colors array from team colors
+    final colorsArray = team.colors.map((color) {
+      return {
+        'name': _colorToName(color),
+        'rgb': [color.red, color.green, color.blue, 0], // Force W=0 for saturated colors
+      };
+    }).toList();
+
+    // Build WLED segment colors
+    final segColors = <int>[];
+    for (final color in team.colors) {
+      segColors.addAll([color.red, color.green, color.blue]);
+    }
+
+    // Build WLED payload
+    final wledPayload = {
+      'on': true,
+      'bri': 255,
+      'seg': [
+        {
+          'id': 0,
+          'on': true,
+          'bri': 255,
+          'col': segColors.isEmpty
+              ? [[255, 255, 255]]
+              : [
+                  for (final color in team.colors) [color.red, color.green, color.blue]
+                ],
+          'fx': effectId,
+          'sx': speed,
+          'ix': intensity,
+        }
+      ],
+    };
+
+    // Build JSON object
+    final jsonObject = {
+      'patternName': patternName,
+      'thought': subtitle,
+      'colors': colorsArray,
+      'effect': {
+        'name': effectName,
+        'id': effectId,
+        'direction': effectId == 41 ? 'right' : 'none',
+        'isStatic': isStatic,
+      },
+      'speed': speed,
+      'intensity': intensity,
+      'wled': wledPayload,
+    };
+
+    // Format as a friendly message with embedded JSON
+    final verbal = 'Go ${team.name}! $subtitle - here we go!';
 
     return '$verbal ${jsonEncode(jsonObject)}';
   }

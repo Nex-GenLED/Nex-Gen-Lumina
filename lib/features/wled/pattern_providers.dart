@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/sports_schedule_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -1005,4 +1006,65 @@ final libraryNodePatternsProvider = FutureProvider.family<List<PatternItem>, Str
     return repo.generatePatternsForNode(node);
   }
   return [];
+});
+
+// ============================================================================
+// LIBRARY SEARCH PROVIDERS
+// ============================================================================
+
+/// Search the pattern library for existing patterns.
+/// Returns matching palettes, folders, and pre-built pattern items.
+final librarySearchProvider = FutureProvider.family<LibrarySearchResults, String>((ref, query) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return repo.searchLibrary(query);
+});
+
+// ============================================================================
+// Mood Filter System
+// ============================================================================
+
+/// Currently selected mood filter for the Explore Patterns page.
+/// null = show all effects (no filter)
+final selectedMoodFilterProvider = StateProvider<EffectMood?>((ref) => null);
+
+/// Filtered patterns for a library node, respecting the mood filter.
+/// If no mood is selected, returns all patterns.
+/// If a mood is selected, filters to only patterns with matching effects.
+final filteredLibraryNodePatternsProvider = FutureProvider.family<List<PatternItem>, String>((ref, nodeId) async {
+  final allPatterns = await ref.watch(libraryNodePatternsProvider(nodeId).future);
+  final selectedMood = ref.watch(selectedMoodFilterProvider);
+
+  if (selectedMood == null) {
+    return allPatterns;
+  }
+
+  // Filter patterns to only those matching the selected mood
+  final moodEffectIds = EffectMoodSystem.getEffectIdsForMood(selectedMood);
+  return allPatterns.where((pattern) {
+    final effectId = MockPatternRepository.effectIdFromPayload(pattern.wledPayload);
+    return effectId != null && moodEffectIds.contains(effectId);
+  }).toList();
+});
+
+/// Get mood counts for the patterns of a specific node.
+/// Useful for showing badges on mood filter chips.
+final nodeMoodCountsProvider = FutureProvider.family<Map<EffectMood, int>, String>((ref, nodeId) async {
+  final allPatterns = await ref.watch(libraryNodePatternsProvider(nodeId).future);
+
+  final counts = <EffectMood, int>{};
+  for (final mood in EffectMood.values) {
+    counts[mood] = 0;
+  }
+
+  for (final pattern in allPatterns) {
+    final effectId = MockPatternRepository.effectIdFromPayload(pattern.wledPayload);
+    if (effectId != null) {
+      final mood = EffectMoodSystem.getMood(effectId);
+      if (mood != null) {
+        counts[mood] = (counts[mood] ?? 0) + 1;
+      }
+    }
+  }
+
+  return counts;
 });

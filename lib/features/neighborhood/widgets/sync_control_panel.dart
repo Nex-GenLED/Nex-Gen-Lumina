@@ -28,6 +28,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   int _selectedBrightness = 200;
   List<Color> _selectedColors = [const Color(0xFF00BCD4), const Color(0xFFFFFFFF)];
   SyncType _selectedSyncType = SyncType.sequentialFlow;
+  ComplementTheme _selectedComplementTheme = ComplementThemes.july4th;
 
   @override
   Widget build(BuildContext context) {
@@ -101,13 +102,24 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
             _buildSyncTypeSelector(),
             const SizedBox(height: 16),
 
-            // Effect selector
-            _buildEffectSelector(),
-            const SizedBox(height: 16),
+            // Show different options based on sync type
+            if (_selectedSyncType == SyncType.complement) ...[
+              // Complement theme selector
+              _buildComplementThemeSelector(),
+              const SizedBox(height: 16),
 
-            // Color selector
-            _buildColorSelector(),
-            const SizedBox(height: 16),
+              // Show member color preview
+              _buildComplementPreview(),
+              const SizedBox(height: 16),
+            ] else ...[
+              // Effect selector
+              _buildEffectSelector(),
+              const SizedBox(height: 16),
+
+              // Color selector
+              _buildColorSelector(),
+              const SizedBox(height: 16),
+            ],
 
             // Speed/Intensity sliders
             _buildParameterSliders(),
@@ -587,6 +599,206 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     );
   }
 
+  Widget _buildComplementThemeSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Complement Theme',
+          style: TextStyle(
+            color: Colors.grey.shade500,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: ComplementThemes.all.map((theme) {
+              final isSelected = _selectedComplementTheme.id == theme.id;
+              return InkWell(
+                onTap: () => setState(() => _selectedComplementTheme = theme),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.cyan.withOpacity(0.15) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: isSelected
+                        ? Border.all(color: Colors.cyan.withOpacity(0.5))
+                        : null,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        theme.icon,
+                        color: isSelected ? Colors.cyan : Colors.grey.shade500,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              theme.name,
+                              style: TextStyle(
+                                color: isSelected ? Colors.cyan : Colors.white,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              theme.description,
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Color preview swatches
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: theme.colorObjects.take(4).map((color) {
+                          return Container(
+                            width: 16,
+                            height: 16,
+                            margin: const EdgeInsets.only(left: 4),
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(width: 8),
+                      if (isSelected)
+                        const Icon(Icons.check_circle, color: Colors.cyan, size: 18),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildComplementPreview() {
+    // Show which color each home will display
+    final sortedMembers = List<NeighborhoodMember>.from(widget.members)
+      ..sort((a, b) => a.positionIndex.compareTo(b.positionIndex));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.palette, color: Colors.cyan.shade300, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              'Color Assignment Preview',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade800),
+          ),
+          child: Column(
+            children: sortedMembers.asMap().entries.map((entry) {
+              final index = entry.key;
+              final member = entry.value;
+              final color = Color(_selectedComplementTheme.getColorForIndex(index) | 0xFF000000);
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.2),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: color.withOpacity(0.4),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        member.displayName,
+                        style: TextStyle(
+                          color: Colors.grey.shade300,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    // Position indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade800,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '#${index + 1}',
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tip: Reorder homes in the Members section to change color assignments',
+          style: TextStyle(
+            color: Colors.grey.shade600,
+            fontSize: 11,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildActionButton(bool isActive) {
     return SizedBox(
       width: double.infinity,
@@ -610,19 +822,34 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     final timingConfig = ref.read(syncTimingConfigProvider);
     final engine = ref.read(neighborhoodSyncEngineProvider);
 
-    // Create sync command
-    final command = engine.createSyncCommand(
-      groupId: widget.group.id,
-      members: widget.members,
-      effectId: _selectedEffectId,
-      colors: _selectedColors.map((c) => c.value).toList(),
-      speed: _selectedSpeed,
-      intensity: _selectedIntensity,
-      brightness: _selectedBrightness,
-      timingConfig: timingConfig,
-      syncType: _selectedSyncType,
-      patternName: kEffectNames[_selectedEffectId] ?? 'Effect #$_selectedEffectId',
-    );
+    SyncCommand command;
+
+    if (_selectedSyncType == SyncType.complement) {
+      // Use complement mode with theme-based color distribution
+      command = engine.createComplementCommand(
+        groupId: widget.group.id,
+        members: widget.members,
+        theme: _selectedComplementTheme,
+        effectIdOverride: 0, // Solid color for complement mode
+        speed: _selectedSpeed,
+        intensity: _selectedIntensity,
+        brightness: _selectedBrightness,
+      );
+    } else {
+      // Standard sync command
+      command = engine.createSyncCommand(
+        groupId: widget.group.id,
+        members: widget.members,
+        effectId: _selectedEffectId,
+        colors: _selectedColors.map((c) => c.value).toList(),
+        speed: _selectedSpeed,
+        intensity: _selectedIntensity,
+        brightness: _selectedBrightness,
+        timingConfig: timingConfig,
+        syncType: _selectedSyncType,
+        patternName: kEffectNames[_selectedEffectId] ?? 'Effect #$_selectedEffectId',
+      );
+    }
 
     // Broadcast to all members
     ref.read(neighborhoodNotifierProvider.notifier).broadcastSync(command);

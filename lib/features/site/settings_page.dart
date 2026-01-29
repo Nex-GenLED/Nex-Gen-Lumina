@@ -58,9 +58,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
         children: [
-          // Simple Mode Toggle (Top Priority)
-          const _SimpleModeToggleCard(),
-          const SizedBox(height: 16),
           _UserProfileEntry(),
           // Keep spacing after profile entry
           const SizedBox(height: 16),
@@ -79,6 +76,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
           const _VoiceAssistantsCard(),
+          const SizedBox(height: 16),
+          const _SimpleModeToggleCard(),
           const SizedBox(height: 16),
           const _GrowthCard(),
           const SizedBox(height: 16),
@@ -1133,14 +1132,6 @@ class _SimpleModeToggleCard extends ConsumerWidget {
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
-            if (!isSimpleMode) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => _confirmEnableSimpleMode(context, ref),
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Try Simple Mode'),
-              ),
-            ],
           ],
         ),
       ),

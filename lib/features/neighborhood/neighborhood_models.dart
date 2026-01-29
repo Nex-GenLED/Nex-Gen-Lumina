@@ -63,6 +63,10 @@ enum SyncType {
 
   /// All homes animate in perfect unison (same frame at same moment).
   simultaneous,
+
+  /// Each home displays a different color from a coordinated theme.
+  /// e.g., July 4th: House 1=Red, House 2=White, House 3=Blue
+  complement,
 }
 
 extension SyncTypeExtension on SyncType {
@@ -74,6 +78,8 @@ extension SyncTypeExtension on SyncType {
         return 'Sequential Flow';
       case SyncType.simultaneous:
         return 'Simultaneous';
+      case SyncType.complement:
+        return 'Complement Mode';
     }
   }
 
@@ -85,6 +91,8 @@ extension SyncTypeExtension on SyncType {
         return 'Animation flows from home to home in sequence';
       case SyncType.simultaneous:
         return 'All homes animate in perfect unison';
+      case SyncType.complement:
+        return 'Each home shows a different color from a theme';
     }
   }
 
@@ -96,6 +104,8 @@ extension SyncTypeExtension on SyncType {
         return Icons.trending_flat;
       case SyncType.simultaneous:
         return Icons.sync;
+      case SyncType.complement:
+        return Icons.palette_outlined;
     }
   }
 
@@ -608,6 +618,15 @@ class SyncCommand {
   final String? patternName;
   final String? scheduleId;
 
+  /// Member-specific color overrides for Complement Mode.
+  /// Key: member userId, Value: list of colors (as int values) for that member.
+  /// If a member is not in this map, they use the default [colors] field.
+  final Map<String, List<int>>? memberColorOverrides;
+
+  /// The complement theme being used (e.g., "july4th", "christmas").
+  /// Helps UI display the correct theme name.
+  final String? complementTheme;
+
   const SyncCommand({
     required this.id,
     required this.groupId,
@@ -622,10 +641,20 @@ class SyncCommand {
     this.syncType = SyncType.sequentialFlow,
     this.patternName,
     this.scheduleId,
+    this.memberColorOverrides,
+    this.complementTheme,
   });
 
   factory SyncCommand.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Parse memberColorOverrides from Firestore
+    Map<String, List<int>>? colorOverrides;
+    if (data['memberColorOverrides'] != null) {
+      final raw = data['memberColorOverrides'] as Map<String, dynamic>;
+      colorOverrides = raw.map((k, v) => MapEntry(k, List<int>.from(v)));
+    }
+
     return SyncCommand(
       id: doc.id,
       groupId: data['groupId'] ?? '',
@@ -642,6 +671,8 @@ class SyncCommand {
       syncType: SyncTypeExtension.fromJson(data['syncType']),
       patternName: data['patternName'],
       scheduleId: data['scheduleId'],
+      memberColorOverrides: colorOverrides,
+      complementTheme: data['complementTheme'],
     );
   }
 
@@ -659,6 +690,8 @@ class SyncCommand {
       'syncType': syncType.toJson(),
       'patternName': patternName,
       'scheduleId': scheduleId,
+      if (memberColorOverrides != null) 'memberColorOverrides': memberColorOverrides,
+      if (complementTheme != null) 'complementTheme': complementTheme,
     };
   }
 
@@ -675,6 +708,24 @@ class SyncCommand {
   List<Color> get colorObjects {
     return colors.map((c) => Color(c | 0xFF000000)).toList();
   }
+
+  /// Get the colors for a specific member.
+  /// In Complement Mode, returns member-specific colors if assigned.
+  /// Otherwise returns the default colors.
+  List<int> getColorsForMember(String memberId) {
+    if (syncType == SyncType.complement && memberColorOverrides != null) {
+      return memberColorOverrides![memberId] ?? colors;
+    }
+    return colors;
+  }
+
+  /// Get the colors for a specific member as Flutter Color objects.
+  List<Color> getColorObjectsForMember(String memberId) {
+    return getColorsForMember(memberId).map((c) => Color(c | 0xFF000000)).toList();
+  }
+
+  /// Check if this command uses Complement Mode.
+  bool get isComplementMode => syncType == SyncType.complement;
 }
 
 /// Status of a member in the neighborhood sync.
@@ -723,6 +774,217 @@ extension MemberSyncStatusExtension on MemberSyncStatus {
         return Icons.sync;
       case MemberSyncStatus.error:
         return Icons.error_outline;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Complement Mode Theme Presets
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A predefined color theme for Complement Mode.
+/// Each home in the neighborhood displays a different color from the palette.
+class ComplementTheme {
+  final String id;
+  final String name;
+  final String description;
+  final IconData icon;
+
+  /// The colors to distribute across homes (as RGB int values).
+  /// Colors are assigned in order: Home 1 gets colors[0], Home 2 gets colors[1], etc.
+  /// If there are more homes than colors, colors wrap around.
+  final List<int> themeColors;
+
+  /// Optional effect ID that works best with this theme (0 = solid color).
+  final int recommendedEffectId;
+
+  const ComplementTheme({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.icon,
+    required this.themeColors,
+    this.recommendedEffectId = 0,
+  });
+
+  /// Get the color for a specific home index (0-based).
+  /// Wraps around if there are more homes than colors.
+  int getColorForIndex(int homeIndex) {
+    return themeColors[homeIndex % themeColors.length];
+  }
+
+  /// Get all colors as Flutter Color objects.
+  List<Color> get colorObjects {
+    return themeColors.map((c) => Color(c | 0xFF000000)).toList();
+  }
+
+  /// Builds the member color overrides map for a list of members.
+  Map<String, List<int>> buildMemberColorOverrides(List<NeighborhoodMember> members) {
+    final sorted = List<NeighborhoodMember>.from(members)
+      ..sort((a, b) => a.positionIndex.compareTo(b.positionIndex));
+
+    final overrides = <String, List<int>>{};
+    for (int i = 0; i < sorted.length; i++) {
+      // Each member gets a single solid color from the theme
+      final color = getColorForIndex(i);
+      overrides[sorted[i].oderId] = [color];
+    }
+    return overrides;
+  }
+}
+
+/// Pre-built complement themes for common holidays and events.
+class ComplementThemes {
+  ComplementThemes._();
+
+  /// July 4th / Independence Day - Red, White, Blue
+  static const july4th = ComplementTheme(
+    id: 'july4th',
+    name: 'July 4th',
+    description: 'Red, White, Blue - American Independence Day',
+    icon: Icons.flag,
+    themeColors: [
+      0xFF0000, // Red
+      0xFFFFFF, // White
+      0x0000FF, // Blue
+    ],
+    recommendedEffectId: 0, // Solid
+  );
+
+  /// Christmas - Red, Green, White
+  static const christmas = ComplementTheme(
+    id: 'christmas',
+    name: 'Christmas',
+    description: 'Red, Green, White - Classic holiday colors',
+    icon: Icons.ac_unit,
+    themeColors: [
+      0xFF0000, // Red
+      0x00FF00, // Green
+      0xFFFFFF, // White
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Halloween - Orange, Purple, Green
+  static const halloween = ComplementTheme(
+    id: 'halloween',
+    name: 'Halloween',
+    description: 'Orange, Purple, Green - Spooky season',
+    icon: Icons.nightlight_round,
+    themeColors: [
+      0xFF6600, // Orange
+      0x9900FF, // Purple
+      0x00FF00, // Green
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// St. Patrick's Day - Green, Gold, White
+  static const stPatricks = ComplementTheme(
+    id: 'stpatricks',
+    name: "St. Patrick's Day",
+    description: 'Green, Gold, White - Irish celebration',
+    icon: Icons.eco,
+    themeColors: [
+      0x00FF00, // Green
+      0xFFD700, // Gold
+      0xFFFFFF, // White
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Valentine's Day - Red, Pink, White
+  static const valentines = ComplementTheme(
+    id: 'valentines',
+    name: "Valentine's Day",
+    description: 'Red, Pink, White - Colors of love',
+    icon: Icons.favorite,
+    themeColors: [
+      0xFF0000, // Red
+      0xFF69B4, // Hot Pink
+      0xFFFFFF, // White
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Easter - Pastel colors
+  static const easter = ComplementTheme(
+    id: 'easter',
+    name: 'Easter',
+    description: 'Pastel Pink, Yellow, Blue, Green',
+    icon: Icons.egg,
+    themeColors: [
+      0xFFB6C1, // Light Pink
+      0xFFFF99, // Light Yellow
+      0x87CEEB, // Sky Blue
+      0x98FB98, // Pale Green
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Mardi Gras - Purple, Gold, Green
+  static const mardiGras = ComplementTheme(
+    id: 'mardigras',
+    name: 'Mardi Gras',
+    description: 'Purple, Gold, Green - New Orleans tradition',
+    icon: Icons.masks,
+    themeColors: [
+      0x9400D3, // Purple
+      0xFFD700, // Gold
+      0x00FF00, // Green
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Pride - Rainbow colors
+  static const pride = ComplementTheme(
+    id: 'pride',
+    name: 'Pride',
+    description: 'Rainbow - Celebration of diversity',
+    icon: Icons.wb_sunny,
+    themeColors: [
+      0xFF0000, // Red
+      0xFF7F00, // Orange
+      0xFFFF00, // Yellow
+      0x00FF00, // Green
+      0x0000FF, // Blue
+      0x8B00FF, // Violet
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// Sports Team - Generic team colors (user can customize)
+  static const gameDay = ComplementTheme(
+    id: 'gameday',
+    name: 'Game Day',
+    description: 'Show team spirit across the neighborhood',
+    icon: Icons.sports_football,
+    themeColors: [
+      0xFF0000, // Team color 1 (placeholder)
+      0xFFFFFF, // Team color 2 (placeholder)
+    ],
+    recommendedEffectId: 0,
+  );
+
+  /// All available themes
+  static const List<ComplementTheme> all = [
+    july4th,
+    christmas,
+    halloween,
+    stPatricks,
+    valentines,
+    easter,
+    mardiGras,
+    pride,
+    gameDay,
+  ];
+
+  /// Get a theme by ID
+  static ComplementTheme? getById(String id) {
+    try {
+      return all.firstWhere((t) => t.id == id);
+    } catch (_) {
+      return null;
     }
   }
 }
