@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
 import 'widgets/member_position_list.dart';
+import 'widgets/neighborhood_onboarding.dart';
 import 'widgets/schedule_list.dart';
 import 'widgets/sync_control_panel.dart';
 
@@ -45,7 +46,12 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
       body: groupsAsync.when(
         data: (groups) {
           if (groups.isEmpty) {
-            return _buildEmptyState();
+            // Show engaging onboarding experience
+            return NeighborhoodOnboarding(
+              onCreateGroup: _showCreateGroupDialog,
+              onJoinGroup: _showJoinGroupDialog,
+              onFindNearby: _showFindNearbyDialog,
+            );
           }
 
           // Auto-select first group if none selected
@@ -61,116 +67,12 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
         loading: () => const Center(
           child: CircularProgressIndicator(color: Colors.cyan),
         ),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 48),
-              const SizedBox(height: 16),
-              Text(
-                'Error loading groups',
-                style: TextStyle(color: Colors.grey.shade400),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => ref.invalidate(userNeighborhoodsProvider),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: Colors.cyan.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.home_work_outlined,
-                size: 48,
-                color: Colors.cyan,
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Neighborhood Sync',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Connect with your neighbors to create stunning synchronized light shows that flow from home to home.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade400,
-                fontSize: 15,
-              ),
-            ),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _showCreateGroupDialog,
-                icon: const Icon(Icons.add),
-                label: const Text('Create a Group'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.cyan,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _showJoinGroupDialog,
-                icon: const Icon(Icons.group_add),
-                label: const Text('Join with Invite Code'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.cyan,
-                  side: const BorderSide(color: Colors.cyan),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton.icon(
-                onPressed: _showFindNearbyDialog,
-                icon: Icon(Icons.location_searching, color: Colors.grey.shade400),
-                label: Text(
-                  'Find Nearby Groups',
-                  style: TextStyle(color: Colors.grey.shade400),
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
+        error: (e, _) => NeighborhoodErrorState(
+          onRetry: () => ref.invalidate(userNeighborhoodsProvider),
+          onCreateGroup: _showCreateGroupDialog,
+          errorMessage: e.toString().contains('permission')
+              ? 'Please check your internet connection and try again.'
+              : null,
         ),
       ),
     );
@@ -402,31 +304,70 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
   Widget _buildGroupActions(NeighborhoodGroup group) {
     return Column(
       children: [
-        // Add new member button
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _showJoinGroupDialog,
-            icon: const Icon(Icons.person_add_outlined),
-            label: const Text('Invite Neighbors'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.cyan,
-              side: const BorderSide(color: Colors.cyan),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+        // Share invite section
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.cyan.withOpacity(0.1),
+                Colors.purple.withOpacity(0.05),
+              ],
             ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.cyan.withOpacity(0.2)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.share, color: Colors.cyan, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Grow Your Crew',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Share your invite code with neighbors to expand the light show!',
+                style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _copyInviteCode(group.inviteCode),
+                  icon: const Icon(Icons.copy, size: 18),
+                  label: Text('Copy Code: ${group.inviteCode}'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.cyan,
+                    side: const BorderSide(color: Colors.cyan),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
-        // Leave/Delete group
-        TextButton(
+        // Leave group
+        TextButton.icon(
           onPressed: () => _showLeaveGroupDialog(group),
-          child: Text(
-            'Leave Group',
-            style: TextStyle(color: Colors.grey.shade500),
+          icon: Icon(Icons.logout, size: 16, color: Colors.grey.shade600),
+          label: Text(
+            'Leave Crew',
+            style: TextStyle(color: Colors.grey.shade600),
           ),
         ),
       ],
@@ -451,13 +392,37 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey.shade900,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Join a Neighborhood',
-          style: TextStyle(color: Colors.white),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.cyan.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.login, color: Colors.cyan, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Join the Party',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              'Got an invite code? Enter it below to join your neighbors\' light show crew.',
+              style: TextStyle(
+                color: Colors.grey.shade400,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 20),
             TextField(
               controller: controller,
               autofocus: true,
@@ -470,7 +435,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
               ),
               textAlign: TextAlign.center,
               decoration: InputDecoration(
-                labelText: 'Invite Code',
+                labelText: 'Secret Code',
                 hintText: 'XXXXXX',
                 labelStyle: TextStyle(color: Colors.grey.shade500),
                 hintStyle: TextStyle(color: Colors.grey.shade700),
@@ -493,8 +458,8 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
               controller: nameController,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: 'Your Home Name',
-                hintText: 'e.g., The Jones House',
+                labelText: 'Your Home\'s Nickname',
+                hintText: 'e.g., The Corner House, Casa de Lumina',
                 labelStyle: TextStyle(color: Colors.grey.shade500),
                 hintStyle: TextStyle(color: Colors.grey.shade700),
                 enabledBorder: OutlineInputBorder(
@@ -517,7 +482,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
               style: TextStyle(color: Colors.grey.shade500),
             ),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () async {
               if (controller.text.trim().length != 6) return;
 
@@ -532,17 +497,25 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
               if (group == null && mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Invalid invite code. Please try again.'),
-                    backgroundColor: Colors.red,
+                    content: Text('Hmm, that code didn\'t work. Double-check it and try again!'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+              } else if (group != null && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Welcome to ${group.name}! Let\'s light it up!'),
+                    backgroundColor: Colors.green.shade700,
                   ),
                 );
               }
             },
+            icon: const Icon(Icons.celebration, size: 18),
+            label: const Text('Join In'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.cyan,
               foregroundColor: Colors.black,
             ),
-            child: const Text('Join'),
           ),
         ],
       ),
@@ -724,9 +697,24 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
     return AlertDialog(
       backgroundColor: Colors.grey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text(
-        'Create a Neighborhood',
-        style: TextStyle(color: Colors.white),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.cyan.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.celebration, color: Colors.cyan, size: 20),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Start Your Block Party',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ),
+        ],
       ),
       content: SizedBox(
         width: 320,
@@ -738,8 +726,8 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
               // Group Name
               _buildTextField(
                 controller: _groupNameController,
-                label: 'Neighborhood Name',
-                hint: 'e.g., Maple Street Lights',
+                label: 'Give Your Crew a Name',
+                hint: 'e.g., Maple Street Lights, The Block Squad',
                 autofocus: true,
               ),
               const SizedBox(height: 16),
@@ -747,16 +735,16 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
               // Your Home Name
               _buildTextField(
                 controller: _homeNameController,
-                label: 'Your Home Name',
-                hint: 'e.g., The Smith House',
+                label: 'Your Home\'s Nickname',
+                hint: 'e.g., Casa de Lumina, The Corner House',
               ),
               const SizedBox(height: 16),
 
               // Description (optional)
               _buildTextField(
                 controller: _descriptionController,
-                label: 'Description (optional)',
-                hint: 'Tell neighbors about your group',
+                label: 'Hype It Up (optional)',
+                hint: 'What makes your crew special?',
                 maxLines: 2,
               ),
               const SizedBox(height: 16),
@@ -856,13 +844,9 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
             style: TextStyle(color: Colors.grey.shade500),
           ),
         ),
-        ElevatedButton(
+        ElevatedButton.icon(
           onPressed: _isLoading ? null : _createGroup,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.cyan,
-            foregroundColor: Colors.black,
-          ),
-          child: _isLoading
+          icon: _isLoading
               ? const SizedBox(
                   width: 16,
                   height: 16,
@@ -871,7 +855,12 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
                     color: Colors.black,
                   ),
                 )
-              : const Text('Create'),
+              : const Icon(Icons.rocket_launch, size: 18),
+          label: const Text('Let\'s Go!'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.cyan,
+            foregroundColor: Colors.black,
+          ),
         ),
       ],
     );
@@ -1028,16 +1017,36 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
-                  const Icon(Icons.location_searching, color: Colors.cyan),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.cyan.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.explore, color: Colors.cyan, size: 20),
+                  ),
                   const SizedBox(width: 12),
                   const Expanded(
-                    child: Text(
-                      'Find Nearby Groups',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Discover Nearby Crews',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'See who\'s already syncing in your area',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   // Radius selector
@@ -1131,17 +1140,40 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.location_off, color: Colors.grey.shade600, size: 48),
-              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.cyan.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.flag, color: Colors.cyan, size: 40),
+              ),
+              const SizedBox(height: 20),
               const Text(
-                'No public groups found nearby',
-                style: TextStyle(color: Colors.white, fontSize: 16),
+                'You Could Be First!',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Be the first to create a neighborhood group in your area!',
+                'No sync crews found nearby yet. Be a trailblazer and start one — your neighbors will thank you!',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade500),
+                style: TextStyle(color: Colors.grey.shade400, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  // Trigger create group dialog
+                },
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Start a Block Party'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.cyan,
+                ),
               ),
             ],
           ),

@@ -203,9 +203,35 @@ EffectCategory categorizeEffect(int effectId) {
 
 /// Convert WLED speed (0-255) to animation duration
 Duration speedToDuration(int wledSpeed) {
-  // Dampen the speed mapping for smoother preview animations
-  // Map 0-255 to 6s (slowest) to 1.5s (fastest) instead of 0.3s
-  // This eliminates sub-1-second animations that cause chaotic flashing
-  final seconds = 6.0 - (wledSpeed / 255.0) * 4.5;
+  // Dampen the speed mapping significantly for smooth, elegant preview animations
+  // Map 0-255 to 8s (slowest) to 3s (fastest)
+  // This ensures animations are always smooth and not chaotic
+  final seconds = 8.0 - (wledSpeed / 255.0) * 5.0;
   return Duration(milliseconds: (seconds * 1000).round());
+}
+
+/// Convert WLED speed (0-255) to animation duration with effect-specific adjustments
+Duration speedToDurationForEffect(int wledSpeed, EffectCategory category) {
+  // Base duration calculation
+  final baseDuration = speedToDuration(wledSpeed);
+
+  // Apply effect-specific multipliers for optimal visual appearance
+  switch (category) {
+    case EffectCategory.twinkle:
+      // Twinkle needs to be slower to avoid jarring sparkle changes
+      return Duration(milliseconds: (baseDuration.inMilliseconds * 1.5).round());
+    case EffectCategory.fire:
+      // Fire looks best with moderate speed
+      return Duration(milliseconds: (baseDuration.inMilliseconds * 1.2).round());
+    case EffectCategory.chase:
+      // Chase can be slightly faster for better visual flow
+      return baseDuration;
+    case EffectCategory.rainbow:
+      // Rainbow benefits from slower color cycling
+      return Duration(milliseconds: (baseDuration.inMilliseconds * 1.3).round());
+    case EffectCategory.breathe:
+    case EffectCategory.wave:
+    case EffectCategory.solid:
+      return baseDuration;
+  }
 }

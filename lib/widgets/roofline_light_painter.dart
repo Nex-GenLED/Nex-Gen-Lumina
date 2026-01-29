@@ -21,7 +21,18 @@ class RooflineLightPainter extends CustomPainter {
   final RooflineMask? mask;
   final bool isOn;
   final int brightness;
-  final int ledCount; // Virtual LED count for simulation
+  final int? ledCount; // Virtual LED count for simulation (null = auto-calculate)
+
+  /// Target aspect ratio of the display container (width/height).
+  /// Used to transform roofline points for BoxFit.cover display.
+  final double? targetAspectRatio;
+
+  /// Image alignment within the container (for BoxFit.cover).
+  /// Default is center (0, 0). Range: -1 to 1 for both x and y.
+  final Offset imageAlignment;
+
+  /// Whether the image is displayed with BoxFit.cover (true) or BoxFit.contain (false).
+  final bool useBoxFitCover;
 
   RooflineLightPainter({
     required this.colors,
@@ -32,7 +43,10 @@ class RooflineLightPainter extends CustomPainter {
     this.mask,
     this.isOn = true,
     this.brightness = 255,
-    this.ledCount = 120,
+    this.ledCount,
+    this.targetAspectRatio,
+    this.imageAlignment = Offset.zero,
+    this.useBoxFitCover = false,
   });
 
   @override
@@ -45,8 +59,19 @@ class RooflineLightPainter extends CustomPainter {
 
     // Check if we have custom roofline points
     if (mask != null && mask!.hasCustomPoints && mask!.points.length >= 2) {
-      // Use custom roofline path
-      final canvasPoints = mask!.points
+      // Get the points, potentially transformed for BoxFit.cover
+      List<Offset> normalizedPoints = mask!.points;
+
+      // Transform points if using BoxFit.cover and we have aspect ratio info
+      if (useBoxFitCover && targetAspectRatio != null && mask!.sourceAspectRatio != null) {
+        normalizedPoints = mask!.getPointsForCover(
+          targetAspectRatio: targetAspectRatio!,
+          alignment: imageAlignment,
+        );
+      }
+
+      // Convert normalized points to canvas coordinates
+      final canvasPoints = normalizedPoints
           .map((p) => Offset(p.dx * size.width, p.dy * size.height))
           .toList();
 
@@ -109,8 +134,13 @@ class RooflineLightPainter extends CustomPainter {
       totalLength += (points[i] - points[i - 1]).distance;
     }
 
+    // Calculate effective LED count based on path length if not specified
+    // Use approximately 1 LED per 4 pixels for a balanced look
+    // Minimum 20 LEDs, maximum 150 to avoid performance issues
+    final effectiveLedCount = ledCount ?? (totalLength / 4).round().clamp(20, 150);
+
     // Get positions along the path for each virtual LED
-    final ledPositions = _getLedPositionsAlongPath(points, totalLength);
+    final ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
 
     switch (category) {
       case EffectCategory.solid:
@@ -120,13 +150,13 @@ class RooflineLightPainter extends CustomPainter {
         _paintBreathePath(canvas, path, ledPositions, colors, brightness);
         break;
       case EffectCategory.chase:
-        _paintChasePath(canvas, ledPositions, colors, brightness);
+        _paintChasePath(canvas, ledPositions, colors, brightness, effectiveLedCount);
         break;
       case EffectCategory.rainbow:
         _paintRainbowPath(canvas, ledPositions, brightness);
         break;
       case EffectCategory.twinkle:
-        _paintTwinklePath(canvas, ledPositions, colors, brightness);
+        _paintTwinklePath(canvas, ledPositions, colors, brightness, effectiveLedCount);
         break;
       case EffectCategory.wave:
         _paintWavePath(canvas, ledPositions, colors, brightness);
@@ -138,14 +168,14 @@ class RooflineLightPainter extends CustomPainter {
   }
 
   /// Calculate LED positions distributed along the path
-  List<Offset> _getLedPositionsAlongPath(List<Offset> points, double totalLength) {
+  List<Offset> _getLedPositionsAlongPath(List<Offset> points, double totalLength, int effectiveLedCount) {
     final positions = <Offset>[];
-    final segmentLength = totalLength / ledCount;
+    final segmentLength = totalLength / effectiveLedCount;
 
     double accumulatedLength = 0;
     int segmentIndex = 0;
 
-    for (int i = 0; i < ledCount; i++) {
+    for (int i = 0; i < effectiveLedCount; i++) {
       final targetLength = i * segmentLength;
 
       // Find the segment containing this position
@@ -156,7 +186,7 @@ class RooflineLightPainter extends CustomPainter {
 
         if (accumulatedLength + segLen >= targetLength) {
           // Position is in this segment
-          final progressInSegment = (targetLength - accumulatedLength) / segLen;
+          final progressInSegment = segLen > 0 ? (targetLength - accumulatedLength) / segLen : 0.0;
           final pos = Offset(
             segStart.dx + (segEnd.dx - segStart.dx) * progressInSegment,
             segStart.dy + (segEnd.dy - segStart.dy) * progressInSegment,
@@ -229,25 +259,29 @@ class RooflineLightPainter extends CustomPainter {
   }
 
   /// Paint chase effect along path
-  void _paintChasePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    // Longer chase segment for smoother visual flow
-    final chaseLength = ledCount ~/ 3;
-    final chaseStart = (animationPhase * ledCount).floor();
+  void _paintChasePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
+    // Longer chase segment for smoother visual flow (40% of total length)
+    final chaseLength = effectiveLedCount * 2 ~/ 5;
+    // Use smooth interpolation for chase position instead of floor()
+    final chasePosition = animationPhase * effectiveLedCount;
 
     for (int i = 0; i < positions.length; i++) {
-      int distance = (i - chaseStart) % ledCount;
-      if (distance < 0) distance += ledCount;
+      // Calculate distance from chase head with smooth interpolation
+      double distance = (i - chasePosition) % effectiveLedCount;
+      if (distance < 0) distance += effectiveLedCount;
 
       if (distance < chaseLength) {
-        final trailFade = 1.0 - (distance / chaseLength);
+        // Smooth fade using sine curve for more elegant transition
+        final normalizedDist = distance / chaseLength;
+        final trailFade = math.cos(normalizedDist * math.pi / 2); // Cosine fade for smooth tail
         final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
         final color = colors[colorIndex];
 
         final ledPaint = Paint()
-          ..color = color.withValues(alpha: 0.9 * brightness * trailFade)
+          ..color = color.withValues(alpha: 0.85 * brightness * trailFade)
           ..blendMode = BlendMode.screen
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 8 * trailFade);
-        canvas.drawCircle(positions[i], 8 + 6 * trailFade, ledPaint);
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 6 + 4 * trailFade);
+        canvas.drawCircle(positions[i], 6 + 5 * trailFade, ledPaint);
       }
     }
   }
@@ -267,32 +301,44 @@ class RooflineLightPainter extends CustomPainter {
   }
 
   /// Paint twinkle effect along path
-  void _paintTwinklePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    // Slower sparkle change rate for smoother, less chaotic animation
-    final random = math.Random((animationPhase * 500).floor());
+  void _paintTwinklePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
+    // Much slower sparkle change rate for smooth, elegant animation
+    // Only change sparkle set every ~0.5 seconds (about 10 changes per 5-second cycle)
+    final sparkleSet = (animationPhase * 10).floor();
+    final random = math.Random(sparkleSet);
 
-    // Base glow
+    // Base glow - always visible for consistent appearance
     for (final pos in positions) {
       final basePaint = Paint()
-        ..color = colors.first.withValues(alpha: 0.2 * brightness)
+        ..color = colors.first.withValues(alpha: 0.25 * brightness)
         ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-      canvas.drawCircle(pos, 4, basePaint);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+      canvas.drawCircle(pos, 3, basePaint);
     }
 
-    // Reduced sparkle count for more elegant effect
-    final sparkleCount = (intensity / 50).ceil().clamp(2, 8);
+    // Calculate sparkle transition for smooth fade in/out
+    final sparklePhase = (animationPhase * 10) % 1.0;
+    final fadeMultiplier = sparklePhase < 0.3
+        ? sparklePhase / 0.3 // Fade in during first 30%
+        : sparklePhase > 0.7
+            ? (1.0 - sparklePhase) / 0.3 // Fade out during last 30%
+            : 1.0; // Full brightness in middle
+
+    // Reduced sparkle count based on display size for elegant effect
+    final maxSparkles = (effectiveLedCount / 15).ceil().clamp(3, 12);
+    final sparkleCount = (intensity / 40).ceil().clamp(2, maxSparkles);
+
     for (int i = 0; i < sparkleCount; i++) {
       final posIndex = random.nextInt(positions.length);
       final pos = positions[posIndex];
-      final sparkleOpacity = 0.5 + random.nextDouble() * 0.5;
-      final sparkleSize = 6.0 + random.nextDouble() * 8.0;
+      final sparkleOpacity = (0.5 + random.nextDouble() * 0.5) * fadeMultiplier;
+      final sparkleSize = 5.0 + random.nextDouble() * 6.0;
       final colorIndex = random.nextInt(colors.length);
 
       final sparklePaint = Paint()
         ..color = colors[colorIndex].withValues(alpha: sparkleOpacity * brightness)
         ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
       canvas.drawCircle(pos, sparkleSize, sparklePaint);
     }
   }
@@ -300,23 +346,25 @@ class RooflineLightPainter extends CustomPainter {
   /// Paint wave effect along path
   void _paintWavePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
     for (int i = 0; i < positions.length; i++) {
-      // Reduced wave frequency for smoother, more elegant motion
-      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 2.5);
-      final ledBrightness = 0.3 + (waveValue + 1) / 2 * 0.7;
+      // Lower wave frequency (1.5 cycles) for smoother, more elegant motion
+      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 1.5);
+      // Higher minimum brightness for more consistent appearance
+      final ledBrightness = 0.4 + (waveValue + 1) / 2 * 0.6;
       final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
       final color = colors[colorIndex];
 
       final ledPaint = Paint()
-        ..color = color.withValues(alpha: 0.8 * brightness * ledBrightness)
+        ..color = color.withValues(alpha: 0.75 * brightness * ledBrightness)
         ..blendMode = BlendMode.screen
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4 + 4 * ledBrightness);
-      canvas.drawCircle(positions[i], 5 + 4 * ledBrightness, ledPaint);
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3 + 3 * ledBrightness);
+      canvas.drawCircle(positions[i], 4 + 3 * ledBrightness, ledPaint);
     }
   }
 
   /// Paint fire effect along path
   void _paintFirePath(Canvas canvas, List<Offset> positions, double brightness) {
-    final random = math.Random((animationPhase * 100).floor());
+    // Slower flicker rate for more realistic fire effect (about 15 changes per 5-second cycle)
+    final flickerSet = (animationPhase * 15).floor();
     final fireColors = [
       const Color(0xFFFF4500),
       const Color(0xFFFF6600),
@@ -324,16 +372,27 @@ class RooflineLightPainter extends CustomPainter {
       const Color(0xFFFFAA00),
     ];
 
-    for (final pos in positions) {
-      final flicker = 0.4 + random.nextDouble() * 0.6;
-      final colorIndex = random.nextInt(fireColors.length);
+    // Calculate flicker transition for smooth changes
+    final flickerPhase = (animationPhase * 15) % 1.0;
+    final transitionBlend = flickerPhase < 0.2
+        ? flickerPhase / 0.2
+        : flickerPhase > 0.8
+            ? (1.0 - flickerPhase) / 0.2
+            : 1.0;
+
+    for (int i = 0; i < positions.length; i++) {
+      final pos = positions[i];
+      // Use position index in random seed for spatial consistency
+      final posRandom = math.Random(flickerSet + i);
+      final flicker = (0.5 + posRandom.nextDouble() * 0.5) * (0.7 + transitionBlend * 0.3);
+      final colorIndex = posRandom.nextInt(fireColors.length);
       final fireColor = fireColors[colorIndex];
 
       final firePaint = Paint()
-        ..color = fireColor.withValues(alpha: 0.7 * brightness * flicker)
+        ..color = fireColor.withValues(alpha: 0.65 * brightness * flicker)
         ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-      canvas.drawCircle(pos, 6 + random.nextDouble() * 4, firePaint);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      canvas.drawCircle(pos, 5 + posRandom.nextDouble() * 3, firePaint);
     }
   }
 
@@ -375,27 +434,30 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint chase/running light effect
   void _paintChase(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    final ledWidth = rect.width / ledCount;
-    // Longer chase segment for smoother visual flow
-    final chaseLength = ledCount ~/ 3; // Chase segment is 1/3 of total length
+    // Calculate LED count based on rect width for rect-based effects
+    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
+    final ledWidth = rect.width / effectiveLedCount;
+    // Longer chase segment for smoother visual flow (40% of total length)
+    final chaseLength = effectiveLedCount * 2 ~/ 5;
 
-    // Calculate chase position
-    final chaseStart = (animationPhase * ledCount).floor();
+    // Calculate chase position with smooth interpolation
+    final chasePosition = animationPhase * effectiveLedCount;
 
-    for (int i = 0; i < ledCount; i++) {
-      // Calculate distance from chase head
-      int distance = (i - chaseStart) % ledCount;
-      if (distance < 0) distance += ledCount;
+    for (int i = 0; i < effectiveLedCount; i++) {
+      // Calculate distance from chase head with smooth interpolation
+      double distance = (i - chasePosition) % effectiveLedCount;
+      if (distance < 0) distance += effectiveLedCount;
 
       double ledBrightness = 0.0;
       Color ledColor = colors.first;
 
       if (distance < chaseLength) {
-        // In the chase segment
-        final trailFade = 1.0 - (distance / chaseLength);
+        // Smooth fade using cosine curve for elegant transition
+        final normalizedDist = distance / chaseLength;
+        final trailFade = math.cos(normalizedDist * math.pi / 2);
         ledBrightness = trailFade;
         // Cycle through colors
-        final colorIndex = (i ~/ (ledCount / colors.length)) % colors.length;
+        final colorIndex = (i ~/ (effectiveLedCount / colors.length)).clamp(0, colors.length - 1);
         ledColor = colors[colorIndex];
       }
 
@@ -408,7 +470,7 @@ class RooflineLightPainter extends CustomPainter {
         );
 
         final paint = Paint()
-          ..color = ledColor.withValues(alpha: 0.7 * brightness * ledBrightness)
+          ..color = ledColor.withValues(alpha: 0.65 * brightness * ledBrightness)
           ..blendMode = BlendMode.screen;
 
         canvas.drawRect(ledRect, paint);
@@ -437,22 +499,32 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint twinkle/sparkle effect
   void _paintTwinkle(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    // Base layer with low opacity
+    // Base layer with consistent low opacity
     final basePaint = Paint()
-      ..color = colors.first.withValues(alpha: 0.2 * brightness)
+      ..color = colors.first.withValues(alpha: 0.25 * brightness)
       ..blendMode = BlendMode.screen;
     canvas.drawRect(rect, basePaint);
 
-    // Random sparkle points based on animation phase
-    // Slower sparkle change rate for smoother, less chaotic animation
-    final random = math.Random((animationPhase * 500).floor());
-    final sparkleCount = (intensity / 40).ceil().clamp(3, 10); // Reduced max sparkles
+    // Much slower sparkle change rate (about 10 changes per full cycle)
+    final sparkleSet = (animationPhase * 10).floor();
+    final random = math.Random(sparkleSet);
+
+    // Calculate sparkle transition for smooth fade in/out
+    final sparklePhase = (animationPhase * 10) % 1.0;
+    final fadeMultiplier = sparklePhase < 0.3
+        ? sparklePhase / 0.3
+        : sparklePhase > 0.7
+            ? (1.0 - sparklePhase) / 0.3
+            : 1.0;
+
+    // Reduced sparkle count for elegant effect
+    final sparkleCount = (intensity / 40).ceil().clamp(3, 8);
 
     for (int i = 0; i < sparkleCount; i++) {
       final x = rect.left + random.nextDouble() * rect.width;
       final y = rect.top + random.nextDouble() * rect.height;
-      final sparkleSize = 4.0 + random.nextDouble() * 8.0;
-      final sparkleOpacity = 0.3 + random.nextDouble() * 0.7;
+      final sparkleSize = 4.0 + random.nextDouble() * 6.0;
+      final sparkleOpacity = (0.4 + random.nextDouble() * 0.6) * fadeMultiplier;
 
       final colorIndex = random.nextInt(colors.length);
       final sparkleColor = colors[colorIndex];
@@ -468,16 +540,18 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint wave effect
   void _paintWave(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    final ledWidth = rect.width / ledCount;
+    // Calculate LED count based on rect width
+    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
+    final ledWidth = rect.width / effectiveLedCount;
 
-    for (int i = 0; i < ledCount; i++) {
-      // Calculate wave position
-      // Reduced wave frequency for smoother, more elegant motion
-      final waveValue = math.sin((i / ledCount + animationPhase) * math.pi * 2.5);
-      final ledBrightness = 0.3 + (waveValue + 1) / 2 * 0.7;
+    for (int i = 0; i < effectiveLedCount; i++) {
+      // Lower wave frequency (1.5 cycles) for smoother, more elegant motion
+      final waveValue = math.sin((i / effectiveLedCount + animationPhase) * math.pi * 1.5);
+      // Higher minimum brightness for consistent appearance
+      final ledBrightness = 0.4 + (waveValue + 1) / 2 * 0.6;
 
       // Cycle through colors
-      final colorIndex = (i ~/ (ledCount / colors.length)) % colors.length;
+      final colorIndex = (i ~/ (effectiveLedCount / colors.length)).clamp(0, colors.length - 1);
       final ledColor = colors[colorIndex];
 
       final ledRect = Rect.fromLTWH(
@@ -488,7 +562,7 @@ class RooflineLightPainter extends CustomPainter {
       );
 
       final paint = Paint()
-        ..color = ledColor.withValues(alpha: 0.6 * brightness * ledBrightness)
+        ..color = ledColor.withValues(alpha: 0.55 * brightness * ledBrightness)
         ..blendMode = BlendMode.screen;
 
       canvas.drawRect(ledRect, paint);
@@ -497,7 +571,11 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Paint fire-like flickering effect
   void _paintFire(Canvas canvas, Rect rect, double brightness) {
-    final random = math.Random((animationPhase * 100).floor());
+    // Calculate LED count based on rect width
+    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
+
+    // Slower flicker rate (about 15 changes per full cycle)
+    final flickerSet = (animationPhase * 15).floor();
 
     // Fire colors: red, orange, yellow
     final fireColors = [
@@ -507,11 +585,21 @@ class RooflineLightPainter extends CustomPainter {
       const Color(0xFFFFAA00), // Yellow-orange
     ];
 
-    final ledWidth = rect.width / ledCount;
+    // Calculate flicker transition for smooth changes
+    final flickerPhase = (animationPhase * 15) % 1.0;
+    final transitionBlend = flickerPhase < 0.2
+        ? flickerPhase / 0.2
+        : flickerPhase > 0.8
+            ? (1.0 - flickerPhase) / 0.2
+            : 1.0;
 
-    for (int i = 0; i < ledCount; i++) {
-      final flicker = 0.4 + random.nextDouble() * 0.6;
-      final colorIndex = random.nextInt(fireColors.length);
+    final ledWidth = rect.width / effectiveLedCount;
+
+    for (int i = 0; i < effectiveLedCount; i++) {
+      // Use position index in random seed for spatial consistency
+      final posRandom = math.Random(flickerSet + i);
+      final flicker = (0.5 + posRandom.nextDouble() * 0.5) * (0.7 + transitionBlend * 0.3);
+      final colorIndex = posRandom.nextInt(fireColors.length);
       final fireColor = fireColors[colorIndex];
 
       final ledRect = Rect.fromLTWH(
@@ -522,7 +610,7 @@ class RooflineLightPainter extends CustomPainter {
       );
 
       final paint = Paint()
-        ..color = fireColor.withValues(alpha: 0.6 * brightness * flicker)
+        ..color = fireColor.withValues(alpha: 0.55 * brightness * flicker)
         ..blendMode = BlendMode.screen;
 
       canvas.drawRect(ledRect, paint);
@@ -563,6 +651,9 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.brightness != brightness ||
         oldDelegate.speed != speed ||
         oldDelegate.intensity != intensity ||
-        oldDelegate.mask != mask;
+        oldDelegate.mask != mask ||
+        oldDelegate.targetAspectRatio != targetAspectRatio ||
+        oldDelegate.imageAlignment != imageAlignment ||
+        oldDelegate.useBoxFitCover != useBoxFitCover;
   }
 }

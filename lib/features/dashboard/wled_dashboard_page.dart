@@ -506,12 +506,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             // AR Roofline overlay - shows animated LED effects on the house
             if (state.isOn && state.connected)
               Positioned.fill(
-                child: AnimatedRooflineOverlay(
-                  previewColors: [state.color],
-                  previewEffectId: state.effectId,
-                  previewSpeed: state.speed,
-                  brightness: state.brightness,
-                  forceOn: state.isOn,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate the target aspect ratio for proper roofline positioning
+                    final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
+                    return AnimatedRooflineOverlay(
+                      previewColors: [state.color],
+                      previewEffectId: state.effectId,
+                      previewSpeed: state.speed,
+                      brightness: state.brightness,
+                      forceOn: state.isOn,
+                      // Pass BoxFit.cover parameters for correct roofline positioning
+                      targetAspectRatio: targetAspectRatio,
+                      imageAlignment: const Offset(0, 0.3), // Matches hero image alignment
+                      useBoxFitCover: true,
+                    );
+                  },
                 ),
               ),
             // Gradient overlay for legibility

@@ -83,10 +83,17 @@ class RooflineEditorState extends State<RooflineEditor> {
 
   /// Get the current roofline mask
   RooflineMask getMask() {
+    // Calculate source aspect ratio from the loaded image
+    double? aspectRatio;
+    if (_imageSize != Size.zero) {
+      aspectRatio = _imageSize.width / _imageSize.height;
+    }
+
     return RooflineMask(
       points: List.from(_points),
       maskHeight: 0.25, // Keep default as fallback
       isManuallyDrawn: _points.isNotEmpty,
+      sourceAspectRatio: aspectRatio,
     );
   }
 

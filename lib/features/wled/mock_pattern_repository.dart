@@ -857,7 +857,7 @@ class MockPatternRepository {
   }
 
   /// Generate patterns for a palette node with creative naming.
-  /// Produces 18 pattern variations with clever names combining the
+  /// Produces 23 pattern variations with clever names combining the
   /// colorway name with the effect type.
   Future<List<PatternItem>> generatePatternsForNode(LibraryNode node) async {
     if (!node.isPalette) return [];
@@ -865,10 +865,8 @@ class MockPatternRepository {
     final colors = node.themeColors!;
     final col = _colorsToWledCol(colors);
 
-    // Use kColorwayEffectIds for creative naming, fall back to node suggestions
-    final effectIds = node.suggestedEffects.isNotEmpty
-        ? node.suggestedEffects
-        : kColorwayEffectIds;
+    // Always use full kColorwayEffectIds for 23 creative pattern variations
+    final effectIds = kColorwayEffectIds;
 
     final items = <PatternItem>[];
     for (final fxId in effectIds) {

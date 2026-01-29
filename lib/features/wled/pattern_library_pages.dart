@@ -3425,16 +3425,60 @@ class _LibraryNodeCard extends StatelessWidget {
         Icons.groups_outlined,
       ];
     }
-
-    // NCAA
-    if (id == 'ncaa_football' || id == 'ncaa_basketball') {
+    // NWSL - Women's Professional Soccer League
+    if (id == 'league_nwsl') {
       return const [
-        Icons.school_outlined,
-        Icons.sports_outlined,
+        Icons.sports_soccer_outlined,
+        Icons.female_outlined,
         Icons.emoji_events_outlined,
-        Icons.groups_outlined,
         Icons.stadium_outlined,
+        Icons.shield_outlined,
         Icons.star_outline,
+      ];
+    }
+
+    // NCAA Football
+    if (id == 'ncaa_football') {
+      return const [
+        Icons.sports_football_outlined,
+        Icons.school_outlined,
+        Icons.emoji_events_outlined,
+        Icons.stadium_outlined,
+        Icons.military_tech_outlined,
+        Icons.star_outline,
+      ];
+    }
+    // NCAA Basketball
+    if (id == 'ncaa_basketball') {
+      return const [
+        Icons.sports_basketball_outlined,
+        Icons.school_outlined,
+        Icons.emoji_events_outlined,
+        Icons.stadium_outlined,
+        Icons.military_tech_outlined,
+        Icons.star_outline,
+      ];
+    }
+    // NCAA Football Conference folders (SEC, Big Ten, ACC, etc.)
+    if (id.startsWith('ncaafb_')) {
+      return const [
+        Icons.sports_football_outlined,
+        Icons.school_outlined,
+        Icons.groups_outlined,
+        Icons.emoji_events_outlined,
+        Icons.stadium_outlined,
+        Icons.leaderboard_outlined,
+      ];
+    }
+    // NCAA Basketball Conference folders
+    if (id.startsWith('ncaabb_')) {
+      return const [
+        Icons.sports_basketball_outlined,
+        Icons.school_outlined,
+        Icons.groups_outlined,
+        Icons.emoji_events_outlined,
+        Icons.stadium_outlined,
+        Icons.leaderboard_outlined,
       ];
     }
     if (id.startsWith('conf_')) {
@@ -3469,14 +3513,15 @@ class _LibraryNodeCard extends StatelessWidget {
         Icons.face_outlined,
       ];
     }
-    if (id == 'holiday_july4th') {
+    // 4th of July - American flag, fireworks, USA patriotic theme
+    if (id == 'holiday_july4' || id == 'holiday_july4th') {
       return const [
-        Icons.flag_outlined,
-        Icons.star_outline,
-        Icons.celebration_outlined,
-        Icons.local_fire_department_outlined,
-        Icons.wb_sunny_outlined,
-        Icons.auto_awesome_outlined,
+        Icons.flag_outlined,              // American flag
+        Icons.auto_awesome_outlined,      // Fireworks/sparklers
+        Icons.star_outline,               // Stars (USA)
+        Icons.local_fire_department_outlined, // Fireworks explosion
+        Icons.celebration_outlined,       // Celebration
+        Icons.public_outlined,            // USA/globe
       ];
     }
     if (id == 'holiday_valentines') {
@@ -3489,14 +3534,15 @@ class _LibraryNodeCard extends StatelessWidget {
         Icons.auto_awesome_outlined,
       ];
     }
+    // St. Patrick's Day - shamrock/clover, pot of gold, leprechaun theme
     if (id == 'holiday_stpatricks') {
       return const [
-        Icons.local_florist_outlined,
-        Icons.eco_outlined,
-        Icons.local_bar_outlined,
-        Icons.star_outline,
-        Icons.celebration_outlined,
-        Icons.auto_awesome_outlined,
+        Icons.eco_outlined,               // 4-leaf clover/shamrock
+        Icons.paid_outlined,              // Pot of gold coins
+        Icons.local_bar_outlined,         // Irish pub/beer
+        Icons.local_florist_outlined,     // Clover/green plants
+        Icons.looks_outlined,             // Rainbow (to pot of gold)
+        Icons.auto_awesome_outlined,      // Lucky sparkle/magic
       ];
     }
     if (id == 'holiday_easter') {
@@ -3519,14 +3565,15 @@ class _LibraryNodeCard extends StatelessWidget {
         Icons.celebration_outlined,
       ];
     }
-    if (id == 'holiday_newyear') {
+    // New Year's Eve - champagne, clock midnight, disco ball, confetti theme
+    if (id == 'holiday_newyears' || id == 'holiday_newyear') {
       return const [
-        Icons.celebration_outlined,
-        Icons.access_time_outlined,
-        Icons.star_outline,
-        Icons.auto_awesome_outlined,
-        Icons.local_bar_outlined,
-        Icons.music_note_outlined,
+        Icons.local_bar_outlined,         // Champagne glass
+        Icons.schedule_outlined,          // Clock striking midnight
+        Icons.blur_circular_outlined,     // Disco ball
+        Icons.celebration_outlined,       // Confetti/celebration
+        Icons.auto_awesome_outlined,      // Fireworks/sparkle
+        Icons.music_note_outlined,        // Party music
       ];
     }
 
@@ -3573,44 +3620,92 @@ class _LibraryNodeCard extends StatelessWidget {
     }
 
     // Party/event sub-folders
-    if (id == 'event_birthday') {
+    // Birthdays parent folder
+    if (id == 'event_birthdays' || id == 'event_birthday') {
       return const [
-        Icons.cake_outlined,
-        Icons.celebration_outlined,
-        Icons.card_giftcard_outlined,
-        Icons.star_outline,
-        Icons.music_note_outlined,
-        Icons.auto_awesome_outlined,
+        Icons.cake_outlined,              // Birthday cake
+        Icons.celebration_outlined,       // Party celebration
+        Icons.card_giftcard_outlined,     // Presents
+        Icons.emoji_emotions_outlined,    // Happy faces
+        Icons.music_note_outlined,        // Party music
+        Icons.auto_awesome_outlined,      // Candle sparkle
       ];
     }
-    if (id == 'event_wedding') {
+    // Boy Birthday - superhero, dinosaur, sports, adventure themes
+    if (id == 'event_bday_boy') {
       return const [
-        Icons.favorite_outline,
-        Icons.local_florist_outlined,
-        Icons.celebration_outlined,
-        Icons.star_outline,
-        Icons.music_note_outlined,
-        Icons.diamond_outlined,
+        Icons.rocket_launch_outlined,     // Space/adventure
+        Icons.sports_soccer_outlined,     // Sports
+        Icons.videogame_asset_outlined,   // Gaming
+        Icons.pets_outlined,              // Dinosaur/animals
+        Icons.bolt_outlined,              // Superhero power
+        Icons.directions_car_outlined,    // Race cars/trucks
       ];
     }
+    // Girl Birthday - princess, unicorn, fairy, magical themes
+    if (id == 'event_bday_girl') {
+      return const [
+        Icons.auto_awesome_outlined,      // Magic sparkle/unicorn
+        Icons.local_florist_outlined,     // Flowers/fairy garden
+        Icons.favorite_outline,           // Hearts/love
+        Icons.star_outline,               // Princess star
+        Icons.pets_outlined,              // Animals/butterflies
+        Icons.castle_outlined,            // Princess castle
+      ];
+    }
+    // Adult Birthday - elegant, party, celebration themes
+    if (id == 'event_bday_adult') {
+      return const [
+        Icons.local_bar_outlined,         // Cocktails/champagne
+        Icons.celebration_outlined,       // Party celebration
+        Icons.music_note_outlined,        // Party music
+        Icons.cake_outlined,              // Birthday cake
+        Icons.star_outline,               // Milestone star
+        Icons.emoji_events_outlined,      // Trophy/achievement
+      ];
+    }
+    // Weddings - romance, flowers, rings, elegance
+    if (id == 'event_weddings' || id == 'event_wedding') {
+      return const [
+        Icons.favorite_outline,           // Love/hearts
+        Icons.diamond_outlined,           // Wedding rings
+        Icons.local_florist_outlined,     // Wedding flowers
+        Icons.celebration_outlined,       // Celebration
+        Icons.music_note_outlined,        // Wedding music
+        Icons.church_outlined,            // Ceremony
+      ];
+    }
+    // Baby Shower - babies, gifts, soft themes
     if (id == 'event_babyshower') {
       return const [
-        Icons.child_care_outlined,
-        Icons.card_giftcard_outlined,
-        Icons.celebration_outlined,
-        Icons.star_outline,
-        Icons.favorite_outline,
-        Icons.auto_awesome_outlined,
+        Icons.child_care_outlined,        // Baby
+        Icons.child_friendly_outlined,    // Stroller
+        Icons.card_giftcard_outlined,     // Baby gifts
+        Icons.favorite_outline,           // Love/hearts
+        Icons.cloud_outlined,             // Soft clouds
+        Icons.star_outline,               // Twinkle stars
       ];
     }
+    // Graduation - academic, achievement, celebration
     if (id == 'event_graduation') {
       return const [
-        Icons.school_outlined,
-        Icons.emoji_events_outlined,
-        Icons.celebration_outlined,
-        Icons.star_outline,
-        Icons.auto_awesome_outlined,
-        Icons.workspace_premium_outlined,
+        Icons.school_outlined,            // Graduation cap
+        Icons.workspace_premium_outlined, // Diploma/certificate
+        Icons.emoji_events_outlined,      // Achievement trophy
+        Icons.celebration_outlined,       // Celebration
+        Icons.auto_awesome_outlined,      // Success sparkle
+        Icons.star_outline,               // Achievement star
+      ];
+    }
+    // Anniversary - romance, milestone, elegance
+    if (id == 'event_anniversary') {
+      return const [
+        Icons.favorite_outline,           // Love/hearts
+        Icons.diamond_outlined,           // Diamond anniversary
+        Icons.local_bar_outlined,         // Champagne toast
+        Icons.local_florist_outlined,     // Anniversary flowers
+        Icons.celebration_outlined,       // Celebration
+        Icons.auto_awesome_outlined,      // Sparkle/romance
       ];
     }
 
@@ -3790,16 +3885,18 @@ class _LibraryNodeCard extends StatelessWidget {
     if (id == 'league_mlb') return const Color(0xFF041E42);
     if (id == 'league_nhl') return const Color(0xFF000000);
     if (id == 'league_mls') return const Color(0xFF3A5A40);
+    if (id == 'league_wnba') return const Color(0xFFFF6F00);
+    if (id == 'league_nwsl') return const Color(0xFF0D47A1);
 
     // Holiday colors
     if (id == 'holiday_christmas') return const Color(0xFFC62828);
     if (id == 'holiday_halloween') return const Color(0xFFFF6F00);
-    if (id == 'holiday_july4th') return const Color(0xFF1565C0);
+    if (id == 'holiday_july4' || id == 'holiday_july4th') return const Color(0xFF1565C0);
     if (id == 'holiday_valentines') return const Color(0xFFD81B60);
     if (id == 'holiday_stpatricks') return const Color(0xFF2E7D32);
     if (id == 'holiday_easter') return const Color(0xFF7B1FA2);
     if (id == 'holiday_thanksgiving') return const Color(0xFFE65100);
-    if (id == 'holiday_newyear') return const Color(0xFFFFD700);
+    if (id == 'holiday_newyears' || id == 'holiday_newyear') return const Color(0xFFFFD700);
 
     // Season colors
     if (id == 'season_spring') return const Color(0xFF4CAF50);
@@ -3807,7 +3904,11 @@ class _LibraryNodeCard extends StatelessWidget {
     if (id == 'season_autumn') return const Color(0xFFFF5722);
     if (id == 'season_winter') return const Color(0xFF03A9F4);
 
-    // NCAA colors
+    // NCAA Football conference colors
+    if (id.startsWith('ncaafb_')) return const Color(0xFF8B0000);
+    // NCAA Basketball conference colors
+    if (id.startsWith('ncaabb_')) return const Color(0xFFFF6F00);
+    // NCAA parent folder colors
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const Color(0xFF1A237E);
 
     return NexGenPalette.cyan;

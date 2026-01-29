@@ -10,7 +10,7 @@ service cloud.firestore {
     function cannotModifyCriticalFields() {
       return request.resource.data.owner_id == resource.data.owner_id &&
              request.resource.data.id == resource.data.id &&
-             request.resource.data.email == resource.data.email;
+             request.resource.data.email.lower() == resource.data.email.lower();
     }
 
     // SECURITY: Validate dealer email is from authorized domain

@@ -14,7 +14,11 @@ class UserService {
       // SECURITY: Encrypt sensitive data before storing
       final userData = user.toJson();
       final encryptedData = EncryptionService.encryptUserData(userData);
-      await _firestore.collection('users').doc(user.id).set(encryptedData);
+
+      // Remove null values to prevent Firestore errors
+      final cleanedData = _removeNullValues(encryptedData);
+
+      await _firestore.collection('users').doc(user.id).set(cleanedData);
     } catch (e) {
       debugPrint('Error creating user: $e');
       rethrow;
@@ -68,12 +72,29 @@ class UserService {
       if (value != null) {
         if (value is Map<String, dynamic>) {
           result[entry.key] = _removeNullValues(value);
+        } else if (value is List) {
+          result[entry.key] = _cleanList(value);
         } else {
           result[entry.key] = value;
         }
       }
     }
     return result;
+  }
+
+  /// Recursively clean a list by removing nulls and processing nested structures
+  List<dynamic> _cleanList(List<dynamic> list) {
+    return list
+        .where((item) => item != null)
+        .map((item) {
+          if (item is Map<String, dynamic>) {
+            return _removeNullValues(item);
+          } else if (item is List) {
+            return _cleanList(item);
+          }
+          return item;
+        })
+        .toList();
   }
 
   /// Update specific fields in user profile by ID

@@ -29,6 +29,18 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Brightness override (0-255)
   final int? brightness;
 
+  /// Target aspect ratio of the display container (width/height).
+  /// Used to correctly position roofline when displaying with BoxFit.cover.
+  final double? targetAspectRatio;
+
+  /// Image alignment within the container (for BoxFit.cover).
+  /// Default is center (0, 0). Range: -1 to 1 for both x and y.
+  final Offset imageAlignment;
+
+  /// Whether the image is displayed with BoxFit.cover.
+  /// Set to true when the overlay is used with a cover-fitted image.
+  final bool useBoxFitCover;
+
   const AnimatedRooflineOverlay({
     super.key,
     this.previewColors,
@@ -37,6 +49,9 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
     this.mask,
     this.forceOn,
     this.brightness,
+    this.targetAspectRatio,
+    this.imageAlignment = Offset.zero,
+    this.useBoxFitCover = false,
   });
 
   @override
@@ -83,25 +98,25 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
       // Widget-level preview override
       effectiveColors = widget.previewColors!;
       effectiveEffectId = widget.previewEffectId ?? 0;
-      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
+      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
       final rawSpeed = widget.previewSpeed ?? 128;
-      effectiveSpeed = (rawSpeed * 0.7).round().clamp(0, 200);
+      effectiveSpeed = (rawSpeed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = widget.forceOn ?? true;
     } else if (arPreview.isActive) {
       // AR preview mode (from Lumina AI)
       effectiveColors = arPreview.colors;
       effectiveEffectId = arPreview.effectId;
-      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
-      effectiveSpeed = (arPreview.speed * 0.7).round().clamp(0, 200);
+      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
+      effectiveSpeed = (arPreview.speed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = true;
     } else {
       // Live WLED state
       effectiveColors = [wledState.color];
       effectiveEffectId = wledState.effectId;
-      // Cap speed for smoother preview experience (reduce by 30% and cap at 200)
-      effectiveSpeed = (wledState.speed * 0.7).round().clamp(0, 200);
+      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
+      effectiveSpeed = (wledState.speed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? wledState.brightness;
       isOn = widget.forceOn ?? wledState.isOn;
     }
@@ -113,9 +128,9 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     final category = categorizeEffect(effectiveEffectId);
     final needsAnimation = category != EffectCategory.solid;
 
-    // Update animation duration based on speed
+    // Update animation duration based on speed and effect category
     if (needsAnimation) {
-      final duration = speedToDuration(effectiveSpeed);
+      final duration = speedToDurationForEffect(effectiveSpeed, category);
       if (_controller.duration != duration) {
         _controller.duration = duration;
         if (!_controller.isAnimating) {
@@ -139,6 +154,9 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             mask: mask,
             isOn: isOn,
             brightness: effectiveBrightness,
+            targetAspectRatio: widget.targetAspectRatio,
+            imageAlignment: widget.imageAlignment,
+            useBoxFitCover: widget.useBoxFitCover,
           ),
           size: Size.infinite,
         );

@@ -145,13 +145,22 @@ class HouseImageWithOverlay extends ConsumerWidget {
             // Layer 4: Animated roofline overlay (only when on)
             if (isOn && colors.isNotEmpty)
               Positioned.fill(
-                child: AnimatedRooflineOverlay(
-                  previewColors: colors,
-                  previewEffectId: effectId,
-                  previewSpeed: speed,
-                  mask: mask,
-                  forceOn: isOn,
-                  brightness: brightness,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate target aspect ratio for proper roofline positioning
+                    final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
+                    final isCoverFit = fit == BoxFit.cover;
+                    return AnimatedRooflineOverlay(
+                      previewColors: colors,
+                      previewEffectId: effectId,
+                      previewSpeed: speed,
+                      mask: mask,
+                      forceOn: isOn,
+                      brightness: brightness,
+                      targetAspectRatio: targetAspectRatio,
+                      useBoxFitCover: isCoverFit,
+                    );
+                  },
                 ),
               ),
 
