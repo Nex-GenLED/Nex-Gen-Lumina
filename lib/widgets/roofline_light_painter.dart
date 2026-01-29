@@ -99,7 +99,7 @@ class RooflineLightPainter extends CustomPainter {
         _paintChase(canvas, rooflineRect, effectiveColors, brightnessFactor);
         break;
       case EffectCategory.rainbow:
-        _paintRainbow(canvas, rooflineRect, brightnessFactor);
+        _paintRainbow(canvas, rooflineRect, effectiveColors, brightnessFactor);
         break;
       case EffectCategory.twinkle:
         _paintTwinkle(canvas, rooflineRect, effectiveColors, brightnessFactor);
@@ -153,7 +153,7 @@ class RooflineLightPainter extends CustomPainter {
         _paintChasePath(canvas, ledPositions, colors, brightness, effectiveLedCount);
         break;
       case EffectCategory.rainbow:
-        _paintRainbowPath(canvas, ledPositions, brightness);
+        _paintRainbowPath(canvas, ledPositions, colors, brightness);
         break;
       case EffectCategory.twinkle:
         _paintTwinklePath(canvas, ledPositions, colors, brightness, effectiveLedCount);
@@ -297,11 +297,28 @@ class RooflineLightPainter extends CustomPainter {
     }
   }
 
-  /// Paint rainbow effect along path
-  void _paintRainbowPath(Canvas canvas, List<Offset> positions, double brightness) {
+  /// Paint rainbow/gradient effect along path
+  /// If colors has multiple entries, cycles through those colors instead of generating rainbow
+  void _paintRainbowPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
+    // Use provided colors if multiple are available, otherwise generate rainbow
+    final usePatternColors = colors.length > 1;
+
     for (int i = 0; i < positions.length; i++) {
-      final hue = ((i / positions.length + animationPhase) % 1.0) * 360;
-      final color = HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor();
+      Color color;
+      if (usePatternColors) {
+        // Cycle through the pattern colors with animation
+        final colorProgress = (i / positions.length + animationPhase) % 1.0;
+        final colorIndex = (colorProgress * colors.length).floor() % colors.length;
+        final nextIndex = (colorIndex + 1) % colors.length;
+        final blend = (colorProgress * colors.length) % 1.0;
+
+        // Smooth interpolation between adjacent colors
+        color = Color.lerp(colors[colorIndex], colors[nextIndex], blend) ?? colors[colorIndex];
+      } else {
+        // Fall back to rainbow hue generation
+        final hue = ((i / positions.length + animationPhase) % 1.0) * 360;
+        color = HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor();
+      }
 
       // Brighter, tighter LED points
       final ledPaint = Paint()
@@ -493,17 +510,33 @@ class RooflineLightPainter extends CustomPainter {
     }
   }
 
-  /// Paint rainbow cycling effect
-  void _paintRainbow(Canvas canvas, Rect rect, double brightness) {
-    final rainbowColors = <Color>[];
-    for (int i = 0; i < 7; i++) {
-      final hue = ((i / 7 + animationPhase) % 1.0) * 360;
-      rainbowColors.add(HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor());
+  /// Paint rainbow/gradient cycling effect
+  /// If colors has multiple entries, cycles through those colors instead of generating rainbow
+  void _paintRainbow(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
+    List<Color> gradientColors;
+
+    if (colors.length > 1) {
+      // Use provided pattern colors, cycling with animation
+      // Create a smooth cycling gradient by repeating the colors
+      gradientColors = <Color>[];
+      final colorCount = colors.length;
+      for (int i = 0; i < colorCount * 2; i++) {
+        final progress = (i / (colorCount * 2) + animationPhase) % 1.0;
+        final colorIndex = (progress * colorCount).floor() % colorCount;
+        gradientColors.add(colors[colorIndex]);
+      }
+    } else {
+      // Fall back to rainbow hue generation
+      gradientColors = <Color>[];
+      for (int i = 0; i < 7; i++) {
+        final hue = ((i / 7 + animationPhase) % 1.0) * 360;
+        gradientColors.add(HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor());
+      }
     }
 
     final paint = Paint()
       ..shader = LinearGradient(
-        colors: rainbowColors.map((c) => c.withValues(alpha: 0.85 * brightness)).toList(),
+        colors: gradientColors.map((c) => c.withValues(alpha: 0.85 * brightness)).toList(),
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
       ).createShader(rect)

@@ -511,7 +511,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     // Calculate the target aspect ratio for proper roofline positioning
                     final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
                     return AnimatedRooflineOverlay(
-                      previewColors: [state.color],
+                      previewColors: state.displayColors,
                       previewEffectId: state.effectId,
                       previewSpeed: state.speed,
                       brightness: state.brightness,
