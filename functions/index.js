@@ -14,6 +14,10 @@ const openaiApiKey = defineString("OPENAI_API_KEY");
 const alexaClientId = defineString("ALEXA_CLIENT_ID");
 const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
 
+// Google Home OAuth configuration (add to .env file)
+const googleClientId = defineString("GOOGLE_CLIENT_ID");
+const googleClientSecret = defineString("GOOGLE_CLIENT_SECRET");
+
 /**
  * OpenAI Proxy Cloud Function for Lumina AI
  *
@@ -980,6 +984,571 @@ exports.cleanupOldData = onCall(
     }
   }
 );
+
+// ============================================================================
+// GOOGLE HOME SMART HOME ACTION ENDPOINTS
+// ============================================================================
+
+/**
+ * Google Smart Home Fulfillment Endpoint
+ *
+ * Handles all Google Smart Home intents:
+ * - SYNC: Returns available devices
+ * - QUERY: Returns current device state
+ * - EXECUTE: Executes commands
+ * - DISCONNECT: Handles account unlinking
+ */
+exports.googleSmartHome = onRequest({ region: "us-central1" }, async (req, res) => {
+  addSecurityHeaders(res);
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed");
+    return;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+
+  const token = authHeader.substring(7);
+  let userId;
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    userId = decodedToken.uid;
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    res.status(401).json({ error: "invalid_token" });
+    return;
+  }
+
+  const body = req.body;
+  const { requestId } = body;
+  const input = body.inputs?.[0];
+
+  if (!input) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+
+  const intent = input.intent;
+  console.log(`Google Home ${intent} for user ${userId}`);
+
+  try {
+    switch (intent) {
+      case "action.devices.SYNC":
+        res.json(await handleGoogleSync(requestId, userId));
+        break;
+      case "action.devices.QUERY":
+        res.json(await handleGoogleQuery(requestId, userId, input.payload));
+        break;
+      case "action.devices.EXECUTE":
+        res.json(await handleGoogleExecute(requestId, userId, input.payload));
+        break;
+      case "action.devices.DISCONNECT":
+        await handleGoogleDisconnect(userId);
+        res.json({});
+        break;
+      default:
+        res.status(400).json({ error: "unsupported_intent" });
+    }
+  } catch (error) {
+    console.error(`Google Home ${intent} error:`, error);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/**
+ * Handle Google SYNC intent
+ */
+async function handleGoogleSync(requestId, userId) {
+  const userDoc = await db.collection("users").doc(userId).get();
+  const profile = userDoc.exists ? userDoc.data() : {};
+  const propertyName = profile.propertyName || "House Lights";
+
+  const scenesSnapshot = await db
+    .collection("users")
+    .doc(userId)
+    .collection("scenes")
+    .get();
+
+  const devices = [];
+
+  // Main lighting device
+  devices.push({
+    id: "lumina-main",
+    type: "action.devices.types.LIGHT",
+    traits: [
+      "action.devices.traits.OnOff",
+      "action.devices.traits.Brightness",
+    ],
+    name: {
+      name: propertyName,
+      defaultNames: ["Lumina Lights", "House Lights"],
+      nicknames: [propertyName, "outdoor lights", "house lights"],
+    },
+    willReportState: true,
+    roomHint: "Outside",
+    deviceInfo: {
+      manufacturer: "Nex-Gen Lumina",
+      model: "WLED Controller",
+      hwVersion: "1.0",
+      swVersion: "1.0",
+    },
+    customData: { userId, type: "main" },
+  });
+
+  // Add scenes
+  scenesSnapshot.docs.forEach((doc) => {
+    const scene = doc.data();
+    if (scene.type === "system") return;
+
+    devices.push({
+      id: `scene-${doc.id}`,
+      type: "action.devices.types.SCENE",
+      traits: ["action.devices.traits.Scene"],
+      name: {
+        name: scene.name,
+        defaultNames: [scene.name],
+      },
+      willReportState: false,
+      attributes: { sceneReversible: false },
+      customData: { userId, type: "scene", sceneId: doc.id },
+    });
+  });
+
+  console.log(`Google SYNC returning ${devices.length} devices`);
+
+  return {
+    requestId,
+    payload: {
+      agentUserId: userId,
+      devices,
+    },
+  };
+}
+
+/**
+ * Handle Google QUERY intent
+ */
+async function handleGoogleQuery(requestId, userId, payload) {
+  const { devices } = payload;
+  const deviceStates = {};
+
+  const stateDoc = await db
+    .collection("users")
+    .doc(userId)
+    .collection("device_state")
+    .doc("current")
+    .get();
+
+  const state = stateDoc.exists ? stateDoc.data() : { on: false, brightness: 200 };
+
+  for (const device of devices) {
+    if (device.id === "lumina-main") {
+      deviceStates[device.id] = {
+        online: true,
+        on: state.on ?? false,
+        brightness: Math.round((state.brightness ?? 200) / 255 * 100),
+      };
+    } else {
+      deviceStates[device.id] = { online: true };
+    }
+  }
+
+  return {
+    requestId,
+    payload: { devices: deviceStates },
+  };
+}
+
+/**
+ * Handle Google EXECUTE intent
+ */
+async function handleGoogleExecute(requestId, userId, payload) {
+  const { commands } = payload;
+  const results = [];
+
+  for (const command of commands) {
+    for (const device of command.devices) {
+      for (const execution of command.execution) {
+        try {
+          const newState = await executeGoogleCommand(userId, device, execution);
+          results.push({
+            ids: [device.id],
+            status: "SUCCESS",
+            states: newState,
+          });
+        } catch (error) {
+          console.error(`Execute error for ${device.id}:`, error);
+          results.push({
+            ids: [device.id],
+            status: "ERROR",
+            errorCode: error.code || "hardError",
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    requestId,
+    payload: { commands: results },
+  };
+}
+
+/**
+ * Execute a Google command
+ */
+async function executeGoogleCommand(userId, device, execution) {
+  const { command, params } = execution;
+  let commandPayload = {};
+  let newState = {};
+
+  switch (command) {
+    case "action.devices.commands.OnOff":
+      commandPayload = { type: "power", payload: { on: params.on } };
+      newState = { on: params.on };
+      break;
+
+    case "action.devices.commands.BrightnessAbsolute":
+      const bri = Math.round(params.brightness / 100 * 255);
+      commandPayload = { type: "brightness", payload: { brightness: bri, on: true } };
+      newState = { on: true, brightness: params.brightness };
+      break;
+
+    case "action.devices.commands.ActivateScene":
+      const sceneId = device.customData?.sceneId;
+      if (!sceneId) throw { code: "notSupported" };
+      commandPayload = { type: "scene", payload: { sceneId } };
+      newState = { on: true };
+      break;
+
+    default:
+      throw { code: "notSupported" };
+  }
+
+  // Send command to Firestore for processing
+  await db.collection("users").doc(userId).collection("commands").add({
+    type: commandPayload.type,
+    payload: commandPayload.payload,
+    controllerId: "primary",
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    source: "google_home",
+    expiresAt: new Date(Date.now() + 60000),
+  });
+
+  return newState;
+}
+
+/**
+ * Handle Google DISCONNECT intent
+ */
+async function handleGoogleDisconnect(userId) {
+  await db
+    .collection("users")
+    .doc(userId)
+    .collection("integrations")
+    .doc("google_home")
+    .set({
+      isLinked: false,
+      unlinkedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+  console.log(`Google Home unlinked for user ${userId}`);
+}
+
+/**
+ * Google Home OAuth Authorization Endpoint
+ */
+exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
+  addSecurityHeaders(res);
+
+  const { client_id, redirect_uri, state, response_type } = req.query;
+
+  if (!client_id || !redirect_uri || !state) {
+    res.status(400).send("Missing required OAuth parameters");
+    return;
+  }
+
+  // Validate client_id
+  const expectedClientId = googleClientId.value();
+  if (expectedClientId && client_id !== expectedClientId) {
+    res.status(400).send("Invalid client_id");
+    return;
+  }
+
+  // Validate redirect_uri is from Google
+  if (!redirect_uri.includes("google.com") && !redirect_uri.includes("googleusercontent.com")) {
+    res.status(400).send("Invalid redirect_uri");
+    return;
+  }
+
+  // Return login page (similar to Alexa but for Google)
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Link Nex-Gen Lumina to Google Home</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 400px;
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #4285f4 0%, #ea4335 25%, #fbbc05 50%, #34a853 75%);
+      border-radius: 20px;
+      margin: 0 auto 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+    }
+    h1 { color: #fff; text-align: center; font-size: 24px; margin-bottom: 8px; }
+    p { color: rgba(255,255,255,0.7); text-align: center; margin-bottom: 32px; font-size: 14px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; color: rgba(255,255,255,0.9); margin-bottom: 8px; font-size: 14px; }
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-size: 16px;
+    }
+    input:focus { outline: none; border-color: #4285f4; }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #4285f4 0%, #34a853 100%);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error { color: #ff5252; text-align: center; margin-top: 16px; font-size: 14px; }
+    .loading { display: none; text-align: center; color: #4285f4; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🏠</div>
+    <h1>Link to Google Home</h1>
+    <p>Sign in with your Nex-Gen Lumina account to enable voice control with Google Assistant.</p>
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" required placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required placeholder="Your password">
+      </div>
+      <button type="submit" id="submitBtn">Link Account</button>
+    </form>
+    <div class="loading" id="loading">Linking your account...</div>
+    <div class="error" id="error"></div>
+  </div>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2VhrbVD1lBbs_b_JuCkjLa1Yh_AsbWJs",
+      authDomain: "icrt6menwsv2d8all8oijs021b06s5.firebaseapp.com",
+      projectId: "icrt6menwsv2d8all8oijs021b06s5",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const redirectUri = decodeURIComponent("${redirect_uri}");
+    const state = "${state}";
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const submitBtn = document.getElementById('submitBtn');
+      const loading = document.getElementById('loading');
+      const error = document.getElementById('error');
+      submitBtn.disabled = true;
+      loading.style.display = 'block';
+      error.textContent = '';
+      try {
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const idToken = await userCredential.user.getIdToken();
+        const generateCodeFunction = firebase.functions().httpsCallable('generateGoogleAuthCode');
+        const result = await generateCodeFunction({ idToken, state });
+        const authCode = result.data.code;
+        window.location.href = redirectUri + '?state=' + encodeURIComponent(state) + '&code=' + encodeURIComponent(authCode);
+      } catch (err) {
+        error.textContent = err.message || 'Failed to sign in.';
+        submitBtn.disabled = false;
+        loading.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
+  `;
+
+  res.status(200).send(html);
+});
+
+/**
+ * Generate secure authorization code for Google OAuth
+ */
+exports.generateGoogleAuthCode = onCall({ region: "us-central1" }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const { idToken, state } = request.data;
+
+  if (!idToken || !state) {
+    throw new HttpsError("invalid-argument", "Missing required parameters");
+  }
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const userId = decodedToken.uid;
+
+    const crypto = require("crypto");
+    const authCode = crypto.randomBytes(32).toString("base64url");
+
+    await db.collection("google_oauth_codes").doc(authCode).set({
+      userId,
+      state,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)),
+      used: false,
+    });
+
+    return { code: authCode };
+  } catch (error) {
+    console.error("Error generating Google auth code:", error);
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+/**
+ * Google Home OAuth Token Endpoint
+ */
+exports.googleToken = onRequest({ region: "us-central1" }, async (req, res) => {
+  addSecurityHeaders(res);
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed");
+    return;
+  }
+
+  const { grant_type, code, refresh_token, client_id, client_secret } = req.body;
+
+  // Validate client credentials
+  const expectedClientId = googleClientId.value();
+  const expectedClientSecret = googleClientSecret.value();
+
+  if (expectedClientId && expectedClientSecret) {
+    if (client_id !== expectedClientId || client_secret !== expectedClientSecret) {
+      res.status(401).json({ error: "invalid_client" });
+      return;
+    }
+  }
+
+  try {
+    if (grant_type === "authorization_code") {
+      const codeDoc = await db.collection("google_oauth_codes").doc(code).get();
+
+      if (!codeDoc.exists) {
+        res.status(400).json({ error: "invalid_grant" });
+        return;
+      }
+
+      const codeData = codeDoc.data();
+
+      if (codeData.used || Date.now() > codeData.expiresAt.toDate().getTime()) {
+        res.status(400).json({ error: "invalid_grant" });
+        return;
+      }
+
+      const userId = codeData.userId;
+      await codeDoc.ref.update({ used: true });
+
+      const customToken = await admin.auth().createCustomToken(userId);
+
+      await db.collection("users").doc(userId).collection("integrations").doc("google_home").set({
+        isLinked: true,
+        linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      const crypto = require("crypto");
+      const refreshToken = crypto.randomBytes(32).toString("base64url");
+
+      await db.collection("google_oauth_refresh_tokens").doc(refreshToken).set({
+        userId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        active: true,
+      });
+
+      console.log(`Google Home linked for user ${userId}`);
+
+      res.json({
+        access_token: customToken,
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: refreshToken,
+      });
+
+    } else if (grant_type === "refresh_token") {
+      const tokenDoc = await db.collection("google_oauth_refresh_tokens").doc(refresh_token).get();
+
+      if (!tokenDoc.exists || !tokenDoc.data().active) {
+        res.status(400).json({ error: "invalid_grant" });
+        return;
+      }
+
+      const userId = tokenDoc.data().userId;
+      const customToken = await admin.auth().createCustomToken(userId);
+
+      res.json({
+        access_token: customToken,
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: refresh_token,
+      });
+
+    } else {
+      res.status(400).json({ error: "unsupported_grant_type" });
+    }
+  } catch (error) {
+    console.error("Google token error:", error);
+    res.status(400).json({ error: "invalid_grant" });
+  }
+});
 
 /**
  * Admin endpoint to get AI usage statistics

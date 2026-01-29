@@ -215,7 +215,7 @@ final areaAnyOnProvider = FutureProvider<bool>((ref) async {
     }
     final results = await Future.wait(futures.map((f) async {
       try {
-        return await f.timeout(const Duration(seconds: 4));
+        return await f.timeout(const Duration(seconds: 15));
       } catch (e) {
         debugPrint('areaAnyOnProvider: state query failed: $e');
         return null;
