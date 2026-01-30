@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/geofence/geofence_monitor.dart';
 import 'package:nexgen_command/features/ai/lumina_chat_screen.dart';
 import 'package:nexgen_command/features/site/settings_page.dart';
@@ -37,6 +39,10 @@ class MainScaffold extends ConsumerStatefulWidget {
 
 class _MainScaffoldState extends ConsumerState<MainScaffold> {
   bool _tourChecked = false;
+
+  // Voice recognition state
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _voiceListening = false;
 
   final _pages = const [
     WledDashboardPage(),
@@ -81,6 +87,77 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   }
 
   @override
+  void dispose() {
+    _speech.stop();
+    super.dispose();
+  }
+
+  /// Handle long-press on Lumina button to start voice recognition
+  Future<void> _handleVoiceLongPress() async {
+    if (_voiceListening) {
+      await _speech.stop();
+      setState(() => _voiceListening = false);
+      return;
+    }
+
+    try {
+      final available = await _speech.initialize(
+        onStatus: (status) {
+          debugPrint('Voice status: $status');
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) {
+              setState(() => _voiceListening = false);
+            }
+          }
+        },
+        onError: (error) {
+          debugPrint('Voice error: ${error.errorMsg}');
+          if (mounted) {
+            setState(() => _voiceListening = false);
+          }
+        },
+      );
+
+      if (!available) {
+        debugPrint('Voice recognition not available');
+        return;
+      }
+
+      setState(() => _voiceListening = true);
+
+      await _speech.listen(
+        onResult: (result) async {
+          if (!mounted) return;
+
+          final recognizedWords = result.recognizedWords;
+          debugPrint('Voice recognized: $recognizedWords (final: ${result.finalResult})');
+
+          // Only process final results
+          if (result.finalResult && recognizedWords.isNotEmpty) {
+            setState(() => _voiceListening = false);
+            await _speech.stop();
+
+            // Set the pending voice message for Lumina to consume
+            ref.read(pendingVoiceMessageProvider.notifier).state = recognizedWords;
+
+            // Navigate to Lumina tab (index 2)
+            ref.read(selectedTabIndexProvider.notifier).state = 2;
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.confirmation,
+          partialResults: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Voice initialization failed: $e');
+      if (mounted) {
+        setState(() => _voiceListening = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Auto-connect to saved controller on app load
     ref.watch(autoConnectControllerProvider);
@@ -117,7 +194,12 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
             bottom: 0,
             child: isSimpleMode
                 ? SimpleNavBar(index: tabIndex, onTap: _onTap)
-                : GlassDockNavBar(index: tabIndex, onTap: _onTap),
+                : GlassDockNavBar(
+                    index: tabIndex,
+                    onTap: _onTap,
+                    onLuminaLongPress: _handleVoiceLongPress,
+                    isVoiceListening: _voiceListening,
+                  ),
           ),
         ]),
       ),

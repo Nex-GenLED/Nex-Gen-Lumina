@@ -49,6 +49,14 @@ class UserProfileScreen extends ConsumerWidget {
                     label: 'Security & Password',
                     onTap: () => context.push(AppRoutes.security),
                   ),
+                  // Show "Manage Users" for users with installation access
+                  if (model?.installationId != null) ...[
+                    _MenuTile(
+                      icon: Icons.people_outline,
+                      label: 'Manage Family Members',
+                      onTap: () => context.push(AppRoutes.subUsers),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   _MenuTile(
                     icon: Icons.logout,

@@ -687,70 +687,182 @@ class MockPatternRepository {
     ];
   }
 
-  /// Build architectural downlighting palettes
+  /// Architectural white style definitions with colors
+  static const _archWhiteStyles = [
+    (id: 'warmwhite', name: 'Warm White', desc: 'Cozy amber glow', colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)]),
+    (id: 'coolwhite', name: 'Cool White', desc: 'Crisp moonlight', colors: [Color(0xFFFFFFFF), Color(0xFFE0E0E0)]),
+    (id: 'daylight', name: 'Daylight', desc: 'Natural sunlight', colors: [Color(0xFFFFFFFF), Color(0xFFFFFDD0)]),
+    (id: 'candlelight', name: 'Candlelight', desc: 'Flickering warm glow', colors: [Color(0xFFFF8C00), Color(0xFFFFB347)]),
+    (id: 'moonlight', name: 'Moonlight', desc: 'Soft blue night', colors: [Color(0xFF87CEEB), Color(0xFFFFFFFF)]),
+    (id: 'goldenhour', name: 'Golden Hour', desc: 'Sunset gold tones', colors: [Color(0xFFFFD700), Color(0xFFFF8C00), Color(0xFFFFB347)]),
+  ];
+
+  /// Galaxy & Starlight style definitions - combines with dim levels
+  static const _galaxyDimLevels = [
+    (level: 50, name: '50%', desc: 'Half brightness dim'),
+    (level: 40, name: '40%', desc: 'Subtle dim'),
+    (level: 30, name: '30%', desc: 'Low dim'),
+  ];
+
+  /// Build architectural downlighting folders and spacing pattern palettes
   List<LibraryNode> _buildArchitecturalPalettes() {
-    return const [
-      LibraryNode(
-        id: 'arch_warmwhite',
-        name: 'Warm White',
-        description: 'Cozy amber glow',
-        nodeType: LibraryNodeType.palette,
+    final nodes = <LibraryNode>[];
+
+    // Create a folder for each white style
+    for (var i = 0; i < _archWhiteStyles.length; i++) {
+      final style = _archWhiteStyles[i];
+
+      // Add the folder node for this white style
+      nodes.add(LibraryNode(
+        id: 'arch_${style.id}',
+        name: style.name,
+        description: style.desc,
+        nodeType: LibraryNodeType.folder,
         parentId: 'cat_arch',
-        themeColors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
-        sortOrder: 0,
-        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
-      ),
-      LibraryNode(
-        id: 'arch_coolwhite',
-        name: 'Cool White',
-        description: 'Crisp moonlight',
-        nodeType: LibraryNodeType.palette,
-        parentId: 'cat_arch',
-        themeColors: [Color(0xFFFFFFFF), Color(0xFFE0E0E0)],
-        sortOrder: 1,
-        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
-      ),
-      LibraryNode(
-        id: 'arch_daylight',
-        name: 'Daylight',
-        description: 'Natural sunlight',
-        nodeType: LibraryNodeType.palette,
-        parentId: 'cat_arch',
-        themeColors: [Color(0xFFFFFFFF), Color(0xFFFFFDD0)],
-        sortOrder: 2,
-        metadata: {'suggestedEffects': [0], 'defaultSpeed': 0, 'defaultIntensity': 128},
-      ),
-      LibraryNode(
-        id: 'arch_candlelight',
-        name: 'Candlelight',
-        description: 'Flickering warm glow',
-        nodeType: LibraryNodeType.palette,
-        parentId: 'cat_arch',
-        themeColors: [Color(0xFFFF8C00), Color(0xFFFFB347)],
-        sortOrder: 3,
-        metadata: {'suggestedEffects': [101, 88], 'defaultSpeed': 80, 'defaultIntensity': 180},
-      ),
-      LibraryNode(
-        id: 'arch_moonlight',
-        name: 'Moonlight',
-        description: 'Soft blue night',
-        nodeType: LibraryNodeType.palette,
-        parentId: 'cat_arch',
-        themeColors: [Color(0xFF87CEEB), Color(0xFFFFFFFF)],
-        sortOrder: 4,
-        metadata: {'suggestedEffects': [0, 2], 'defaultSpeed': 60, 'defaultIntensity': 128},
-      ),
-      LibraryNode(
-        id: 'arch_golden',
-        name: 'Golden Hour',
-        description: 'Sunset gold tones',
-        nodeType: LibraryNodeType.palette,
-        parentId: 'cat_arch',
-        themeColors: [Color(0xFFFFD700), Color(0xFFFF8C00), Color(0xFFFFB347)],
-        sortOrder: 5,
-        metadata: {'suggestedEffects': [0, 2, 41], 'defaultSpeed': 60, 'defaultIntensity': 128},
-      ),
-    ];
+        themeColors: style.colors,
+        sortOrder: i,
+      ));
+
+      // Generate spacing patterns: X on Y off (X: 1-4, Y: 1-4)
+      var patternIndex = 0;
+      for (var onCount = 1; onCount <= 4; onCount++) {
+        for (var offCount = 1; offCount <= 4; offCount++) {
+          final patternName = '$onCount On $offCount Off';
+          final patternDesc = '$onCount LED${onCount > 1 ? 's' : ''} on, $offCount off';
+
+          nodes.add(LibraryNode(
+            id: 'arch_${style.id}_${onCount}on${offCount}off',
+            name: patternName,
+            description: patternDesc,
+            nodeType: LibraryNodeType.palette,
+            parentId: 'arch_${style.id}',
+            themeColors: style.colors,
+            sortOrder: patternIndex,
+            metadata: {
+              'suggestedEffects': [0], // Solid effect for downlighting
+              'defaultSpeed': 0,
+              'defaultIntensity': 128,
+              'grouping': onCount,
+              'spacing': offCount,
+            },
+          ));
+          patternIndex++;
+        }
+      }
+    }
+
+    // Add Galaxy & Starlight section
+    final styleCount = _archWhiteStyles.length;
+    nodes.add(const LibraryNode(
+      id: 'arch_galaxy',
+      name: 'Galaxy & Starlight',
+      description: 'Elegant stars with dimmed twinkling accents',
+      nodeType: LibraryNodeType.folder,
+      parentId: 'cat_arch',
+      themeColors: [Color(0xFFFFFFFF), Color(0xFF87CEEB)],
+      sortOrder: 100, // After regular styles
+    ));
+
+    // Create sub-folders for each white style within Galaxy section
+    for (var i = 0; i < _archWhiteStyles.length; i++) {
+      final style = _archWhiteStyles[i];
+
+      nodes.add(LibraryNode(
+        id: 'arch_galaxy_${style.id}',
+        name: '${style.name} Stars',
+        description: 'Galaxy effect with ${style.name.toLowerCase()}',
+        nodeType: LibraryNodeType.folder,
+        parentId: 'arch_galaxy',
+        themeColors: style.colors,
+        sortOrder: i,
+      ));
+
+      // Generate Galaxy patterns: X bright Y dimmed (X: 1-4, Y: 1-4) at various dim levels
+      var patternIndex = 0;
+      for (final dimLevel in _galaxyDimLevels) {
+        // Add a sub-folder for each dim level
+        final dimFolderId = 'arch_galaxy_${style.id}_dim${dimLevel.level}';
+        nodes.add(LibraryNode(
+          id: dimFolderId,
+          name: 'Dim at ${dimLevel.name}',
+          description: 'Accents dimmed to ${dimLevel.level}% brightness',
+          nodeType: LibraryNodeType.folder,
+          parentId: 'arch_galaxy_${style.id}',
+          themeColors: style.colors,
+          sortOrder: patternIndex ~/ 16,
+        ));
+
+        for (var brightCount = 1; brightCount <= 4; brightCount++) {
+          for (var dimCount = 1; dimCount <= 4; dimCount++) {
+            final patternName = '$brightCount Bright $dimCount Dim';
+            final patternDesc = '$brightCount bright, $dimCount at ${dimLevel.level}%';
+
+            nodes.add(LibraryNode(
+              id: 'arch_galaxy_${style.id}_${dimLevel.level}_${brightCount}b${dimCount}d',
+              name: patternName,
+              description: patternDesc,
+              nodeType: LibraryNodeType.palette,
+              parentId: dimFolderId,
+              themeColors: style.colors,
+              sortOrder: patternIndex % 16,
+              metadata: {
+                'suggestedEffects': [0, 17, 49], // Solid, Twinkle, Fairy
+                'defaultSpeed': 60,
+                'defaultIntensity': 128,
+                'grouping': brightCount,
+                'spacing': dimCount,
+                'isGalaxyPattern': true,
+                'dimLevel': dimLevel.level,
+                'brightCount': brightCount,
+                'dimCount': dimCount,
+              },
+            ));
+            patternIndex++;
+          }
+        }
+      }
+
+      // Add special "Twinkling Stars" patterns with twinkle effect
+      final twinkleFolderId = 'arch_galaxy_${style.id}_twinkle';
+      nodes.add(LibraryNode(
+        id: twinkleFolderId,
+        name: 'Twinkling Stars',
+        description: 'Soft twinkling star effect',
+        nodeType: LibraryNodeType.folder,
+        parentId: 'arch_galaxy_${style.id}',
+        themeColors: style.colors,
+        sortOrder: 10,
+      ));
+
+      for (var brightCount = 1; brightCount <= 4; brightCount++) {
+        for (var dimCount = 1; dimCount <= 4; dimCount++) {
+          final patternName = '$brightCount Solid $dimCount Twinkle';
+          final patternDesc = '$brightCount steady, $dimCount twinkling';
+
+          nodes.add(LibraryNode(
+            id: 'arch_galaxy_${style.id}_twinkle_${brightCount}s${dimCount}t',
+            name: patternName,
+            description: patternDesc,
+            nodeType: LibraryNodeType.palette,
+            parentId: twinkleFolderId,
+            themeColors: style.colors,
+            sortOrder: (brightCount - 1) * 4 + (dimCount - 1),
+            metadata: {
+              'suggestedEffects': [17, 49, 80], // Twinkle, Fairy, Twinklefox
+              'defaultSpeed': 80,
+              'defaultIntensity': 180,
+              'grouping': brightCount,
+              'spacing': dimCount,
+              'isTwinklePattern': true,
+              'brightCount': brightCount,
+              'dimCount': dimCount,
+            },
+          ));
+        }
+      }
+    }
+
+    return nodes;
   }
 
   /// Build security/alert palettes
@@ -865,16 +977,52 @@ class MockPatternRepository {
     final colors = node.themeColors!;
     final col = _colorsToWledCol(colors);
 
-    // Always use full kColorwayEffectIds for 23 creative pattern variations
-    final effectIds = kColorwayEffectIds;
+    // Check for special pattern types
+    final isGalaxyPattern = node.metadata?['isGalaxyPattern'] == true;
+    final isTwinklePattern = node.metadata?['isTwinklePattern'] == true;
+    final hasSpacingMetadata = node.metadata?['grouping'] != null && node.metadata?['spacing'] != null;
+    final grouping = node.metadata?['grouping'] as int?;
+    final spacing = node.metadata?['spacing'] as int?;
+
+    // Handle Galaxy patterns (bright + dimmed)
+    if (isGalaxyPattern) {
+      return _generateGalaxyPatterns(node, col);
+    }
+
+    // Handle Twinkle patterns (bright + twinkling)
+    if (isTwinklePattern) {
+      return _generateTwinklePatterns(node, col);
+    }
+
+    // For architectural spacing patterns, generate fewer effects focused on solid/simple
+    // For regular palettes, use full kColorwayEffectIds for 23 creative pattern variations
+    final effectIds = hasSpacingMetadata
+        ? const [0, 2, 12, 15, 41] // Solid, Breathe, Fade, Running, Lighthouse - good for downlighting
+        : kColorwayEffectIds;
 
     final items = <PatternItem>[];
     for (final fxId in effectIds) {
       // Generate creative pattern name
-      final creativeName = _creativePatternName(fxId, node.name);
+      final creativeName = hasSpacingMetadata && fxId == 0
+          ? node.name // For solid effect, just use the spacing name (e.g., "1 On 2 Off")
+          : _creativePatternName(fxId, node.name);
 
       // Apply speed adjustment from catalog
       final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
+
+      // Build segment data
+      final segData = <String, dynamic>{
+        'fx': fxId,
+        'col': col,
+        'sx': adjustedSpeed,
+        'ix': node.defaultIntensity,
+      };
+
+      // Add grouping and spacing for architectural patterns
+      if (hasSpacingMetadata && grouping != null && spacing != null) {
+        segData['gp'] = grouping;
+        segData['sp'] = spacing;
+      }
 
       items.add(PatternItem(
         id: 'gen_${node.id}_fx_$fxId',
@@ -884,12 +1032,149 @@ class MockPatternRepository {
         wledPayload: {
           'on': true,
           'bri': 200,
+          'seg': [segData]
+        },
+      ));
+    }
+
+    return items;
+  }
+
+  /// Generate Galaxy patterns with bright and dimmed sections.
+  /// Creates an elegant starfield effect with some lights brighter than others.
+  List<PatternItem> _generateGalaxyPatterns(LibraryNode node, List<List<int>> col) {
+    final dimLevel = (node.metadata?['dimLevel'] as int?) ?? 50;
+    final brightCount = (node.metadata?['brightCount'] as int?) ?? 1;
+    final dimCount = (node.metadata?['dimCount'] as int?) ?? 1;
+
+    // Calculate brightness values
+    final fullBrightness = 255;
+    final dimBrightness = (255 * dimLevel / 100).round();
+
+    final items = <PatternItem>[];
+
+    // Pattern variations for galaxy effect
+    final galaxyEffects = [
+      (id: 0, name: 'Solid Stars', desc: 'Static starfield'),
+      (id: 2, name: 'Breathing Stars', desc: 'Gently pulsing'),
+      (id: 17, name: 'Sparkling Galaxy', desc: 'Random sparkles'),
+      (id: 49, name: 'Fairy Stars', desc: 'Magical shimmer'),
+    ];
+
+    for (final effect in galaxyEffects) {
+      // Create pattern with grouping/spacing to simulate bright/dim pattern
+      // The "dim" effect is achieved via lower intensity on the spacing pixels
+      items.add(PatternItem(
+        id: 'gen_${node.id}_galaxy_${effect.id}',
+        name: '${node.name} - ${effect.name}',
+        imageUrl: '',
+        categoryId: _findRootCategoryId(node.id),
+        wledPayload: {
+          'on': true,
+          'bri': fullBrightness,
           'seg': [
             {
-              'fx': fxId,
+              'fx': effect.id,
               'col': col,
-              'sx': adjustedSpeed,
-              'ix': node.defaultIntensity,
+              'sx': effect.id == 0 ? 0 : 80,
+              'ix': dimBrightness, // Use dim level for intensity
+              'gp': brightCount,
+              'sp': dimCount,
+            }
+          ]
+        },
+      ));
+    }
+
+    // Add a special "Cascade" pattern that alternates brightness
+    items.add(PatternItem(
+      id: 'gen_${node.id}_galaxy_cascade',
+      name: '${node.name} - Star Cascade',
+      imageUrl: '',
+      categoryId: _findRootCategoryId(node.id),
+      wledPayload: {
+        'on': true,
+        'bri': fullBrightness,
+        'seg': [
+          {
+            'fx': 12, // Fade effect
+            'col': col,
+            'sx': 60,
+            'ix': dimBrightness,
+            'gp': brightCount,
+            'sp': dimCount,
+          }
+        ]
+      },
+    ));
+
+    return items;
+  }
+
+  /// Generate Twinkle patterns with solid and twinkling sections.
+  /// Creates an elegant effect with some lights steady and others twinkling.
+  List<PatternItem> _generateTwinklePatterns(LibraryNode node, List<List<int>> col) {
+    final brightCount = (node.metadata?['brightCount'] as int?) ?? 1;
+    final dimCount = (node.metadata?['dimCount'] as int?) ?? 1;
+
+    final items = <PatternItem>[];
+
+    // Twinkle effect variations
+    final twinkleEffects = [
+      (id: 17, name: 'Classic Twinkle', speed: 80, intensity: 180),
+      (id: 49, name: 'Fairy Twinkle', speed: 100, intensity: 200),
+      (id: 80, name: 'Twinklefox', speed: 90, intensity: 190),
+      (id: 74, name: 'Colortwinkles', speed: 70, intensity: 160),
+      (id: 87, name: 'Glitter Stars', speed: 120, intensity: 220),
+    ];
+
+    for (final effect in twinkleEffects) {
+      items.add(PatternItem(
+        id: 'gen_${node.id}_twinkle_${effect.id}',
+        name: '${node.name} - ${effect.name}',
+        imageUrl: '',
+        categoryId: _findRootCategoryId(node.id),
+        wledPayload: {
+          'on': true,
+          'bri': 220,
+          'seg': [
+            {
+              'fx': effect.id,
+              'col': col,
+              'sx': effect.speed,
+              'ix': effect.intensity,
+              'gp': brightCount,
+              'sp': dimCount,
+            }
+          ]
+        },
+      ));
+    }
+
+    // Add slow/medium/fast variations of the basic twinkle
+    final speedVariations = [
+      (name: 'Slow Shimmer', speed: 40),
+      (name: 'Gentle Sparkle', speed: 80),
+      (name: 'Lively Stars', speed: 150),
+    ];
+
+    for (final variation in speedVariations) {
+      items.add(PatternItem(
+        id: 'gen_${node.id}_twinkle_speed_${variation.speed}',
+        name: '${node.name} - ${variation.name}',
+        imageUrl: '',
+        categoryId: _findRootCategoryId(node.id),
+        wledPayload: {
+          'on': true,
+          'bri': 220,
+          'seg': [
+            {
+              'fx': 17, // Twinkle
+              'col': col,
+              'sx': variation.speed,
+              'ix': 180,
+              'gp': brightCount,
+              'sp': dimCount,
             }
           ]
         },

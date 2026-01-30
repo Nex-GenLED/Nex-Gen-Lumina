@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
-import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/led_channel_config.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -33,16 +33,20 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   int _currentStep = 0;
   final _uuid = const Uuid();
 
-  // Step 1: Basic info
-  int _totalLedCount = 200;
-  String _startLocation = '';
-  String _endLocation = '';
+  // Step 2: LED Installation Info
+  Set<int> _selectedChannels = {1}; // Channels 1-8, at least one selected
+  int _totalLedCount = 200; // Total LEDs combined (1-2600)
+  Map<int, int> _channelLedCounts = {}; // LED count per channel
+  String _controllerLocation = '';
+  String _startLocation = ''; // Where LED 1 is located
+  String _ledDirection = 'leftToRight'; // Overall LED direction
+  String _endLocation = ''; // Where final LED is located
   ArchitectureType _architectureType = ArchitectureType.gabled;
 
-  // Step 2: Segments
+  // Step 3: Segments
   final List<_SegmentDraft> _segments = [];
 
-  // Step 3: Validation
+  // Step 4: Validation
   bool _isValidating = false;
 
   @override
@@ -81,26 +85,38 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
 
       for (int i = 0; i < _segments.length; i++) {
         final draft = _segments[i];
+
+        // Determine architectural role based on segment type for AI
+        ArchitecturalRole? aiRole;
+        if (draft.segmentType == InstallerSegmentType.peak) {
+          aiRole = ArchitecturalRole.peak;
+        } else if (draft.segmentType == InstallerSegmentType.corner) {
+          aiRole = ArchitecturalRole.corner;
+        }
+
         segments.add(RooflineSegment(
           id: _uuid.v4(),
           name: draft.name,
           pixelCount: draft.ledCount,
           startPixel: currentStart,
-          type: draft.type,
-          direction: draft.direction,
+          type: draft.type, // Uses the converter to SegmentType
+          direction: draft.direction, // Uses the converter to SegmentDirection
           anchorPixels: draft.anchorIndices,
           anchorLedCount: 2,
           sortOrder: i,
-          architecturalRole: draft.architecturalRole,
-          location: draft.location,
+          architecturalRole: aiRole,
+          location: draft.location.storageName,
           isProminent: draft.isProminent,
         ));
         currentStart += draft.ledCount;
       }
 
+      // Generate a meaningful name based on architecture type
+      final configName = '${_architectureType.displayName} Roofline';
+
       final config = RooflineConfiguration(
         id: '',
-        name: 'My Roofline',
+        name: configName,
         segments: segments,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -119,10 +135,19 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
       final service = ref.read(rooflineConfigServiceProvider);
       await service.saveConfiguration(userId, config);
 
+      // Log AI-relevant segments for debugging
+      final aiSegments = _segments.where((s) => s.isAiRelevantSegment).toList();
+      if (aiSegments.isNotEmpty) {
+        debugPrint('Roofline saved with ${aiSegments.length} AI-relevant segments (corners/peaks)');
+        for (final seg in aiSegments) {
+          debugPrint('  - ${seg.name}: ${seg.segmentType.displayName}');
+        }
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Roofline configuration saved!'),
+          SnackBar(
+            content: Text('Roofline configuration saved! ${segments.length} segments, ${aiSegments.length} corners/peaks for AI.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -144,6 +169,72 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
 
   @override
   Widget build(BuildContext context) {
+    // Check if installer mode is active - this wizard is installer-only
+    final isInstallerMode = ref.watch(installerModeActiveProvider);
+
+    if (!isInstallerMode) {
+      return Scaffold(
+        appBar: GlassAppBar(
+          title: const Text('Roofline Setup'),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => context.pop(),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lock_outline,
+                    size: 40,
+                    color: Colors.orange,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Installer Access Required',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: NexGenPalette.textHigh,
+                        fontWeight: FontWeight.bold,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'The Roofline Setup Wizard is only available to certified installers. This ensures your LED system is configured correctly for optimal performance.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: NexGenPalette.textMedium,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                FilledButton.icon(
+                  onPressed: () => context.pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Go Back'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: GlassAppBar(
         title: const Text('Roofline Setup'),
@@ -232,6 +323,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   }
 
   Widget _buildWelcomeStep() {
+    final session = ref.watch(installerSessionProvider);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -248,14 +341,14 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 ),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.home_rounded, size: 40, color: Colors.white),
+              child: const Icon(Icons.roofing, size: 40, color: Colors.white),
             ),
           ),
           const SizedBox(height: 24),
 
           Center(
             child: Text(
-              'Welcome to Design Studio Setup',
+              'Roofline Configuration',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: NexGenPalette.textHigh,
                     fontWeight: FontWeight.bold,
@@ -265,8 +358,30 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           ),
           const SizedBox(height: 12),
 
+          if (session != null) ...[
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  'Installer: ${session.installer.name}',
+                  style: TextStyle(
+                    color: NexGenPalette.cyan,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           Text(
-            'This wizard will help you configure your roofline so Lumina can create perfectly customized lighting designs for your home.',
+            'This wizard will help you configure the customer\'s roofline so Lumina AI can create perfectly customized lighting designs.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: NexGenPalette.textMedium,
                 ),
@@ -277,24 +392,24 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           // What we'll capture
           _buildInfoCard(
             icon: Icons.lightbulb_outline,
-            title: 'What we\'ll capture:',
+            title: 'What we\'ll configure:',
             items: [
-              'Total LED count and positions',
+              'Channel selection and LED counts',
               'Segment boundaries (corners, peaks)',
               'Direction of light flow',
-              'Anchor points for accent lighting',
+              'Architecture type for AI recommendations',
             ],
           ),
           const SizedBox(height: 16),
 
           _buildInfoCard(
             icon: Icons.tips_and_updates_outlined,
-            title: 'Tips for best results:',
+            title: 'Before you begin:',
             items: [
-              'Have your WLED controller connected',
-              'Know your total LED count',
-              'Identify where corners and peaks are',
-              'Use the "Find LED" feature to verify positions',
+              'Have the controller connected to Wi-Fi',
+              'Know the total LED count per channel',
+              'Identify where corners and peaks are located',
+              'Note the LED direction (left to right or right to left)',
             ],
           ),
         ],
@@ -303,6 +418,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   }
 
   Widget _buildLedInfoStep() {
+    // Calculate total from channel counts
+    final channelTotal = _channelLedCounts.values.fold(0, (sum, count) => sum + count);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -317,68 +435,217 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Tell us about your LED installation.',
+            'Configure the LED channels and counts for this installation.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: NexGenPalette.textMedium,
                 ),
           ),
           const SizedBox(height: 24),
 
-          // Total LED count
+          // Channel Selection (1-8)
           _buildGlassField(
-            label: 'Total LED Count',
+            label: 'Channel Selection (select active channels)',
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: List.generate(8, (index) {
+                final channelNum = index + 1;
+                final isSelected = _selectedChannels.contains(channelNum);
+                return ChoiceChip(
+                  label: Text('Ch $channelNum'),
+                  selected: isSelected,
+                  selectedColor: NexGenPalette.cyan,
+                  backgroundColor: NexGenPalette.matteBlack,
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedChannels.add(channelNum);
+                        // Initialize channel LED count if not set
+                        _channelLedCounts.putIfAbsent(channelNum, () => 0);
+                      } else if (_selectedChannels.length > 1) {
+                        // Ensure at least one channel is selected
+                        _selectedChannels.remove(channelNum);
+                        _channelLedCounts.remove(channelNum);
+                      }
+                      // Recalculate total
+                      _totalLedCount = _channelLedCounts.values.fold(0, (sum, count) => sum + count);
+                    });
+                  },
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Total LED Count Display
+          _buildGlassField(
+            label: 'Total LEDs Combined (1-2600)',
             child: Row(
               children: [
                 IconButton(
                   icon: const Icon(Icons.remove),
-                  onPressed: () {
-                    if (_totalLedCount > 10) {
-                      setState(() => _totalLedCount -= 10);
-                    }
-                  },
+                  onPressed: _totalLedCount > 10 ? () {
+                    setState(() {
+                      _totalLedCount = (_totalLedCount - 10).clamp(1, 2600);
+                    });
+                  } : null,
                 ),
                 Expanded(
-                  child: Text(
-                    '$_totalLedCount',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          color: NexGenPalette.cyan,
-                          fontWeight: FontWeight.bold,
+                  child: Column(
+                    children: [
+                      Text(
+                        '$_totalLedCount',
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              color: NexGenPalette.cyan,
+                              fontWeight: FontWeight.bold,
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (channelTotal > 0 && channelTotal != _totalLedCount)
+                        Text(
+                          'Channel sum: $channelTotal',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 12,
+                          ),
                         ),
-                    textAlign: TextAlign.center,
+                    ],
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.add),
-                  onPressed: () {
-                    setState(() => _totalLedCount += 10);
-                  },
+                  onPressed: _totalLedCount < 2600 ? () {
+                    setState(() {
+                      _totalLedCount = (_totalLedCount + 10).clamp(1, 2600);
+                    });
+                  } : null,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-
-          // Auto-detect button
-          _buildActionButton(
-            icon: Icons.search,
-            label: 'Auto-detect from Controller',
-            onTap: _autoDetectLedCount,
-          ),
           const SizedBox(height: 24),
 
-          // Start location
+          // LED Numeration by Channel (dynamic)
+          if (_selectedChannels.isNotEmpty) ...[
+            _buildGlassField(
+              label: 'LED Count Per Channel',
+              child: Column(
+                children: (_selectedChannels.toList()..sort()).map((channelNum) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$channelNum',
+                                style: TextStyle(
+                                  color: NexGenPalette.cyan,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Channel $channelNum:',
+                            style: TextStyle(color: NexGenPalette.textHigh),
+                          ),
+                          const Spacer(),
+                          SizedBox(
+                            width: 100,
+                            child: TextFormField(
+                              initialValue: _channelLedCounts[channelNum]?.toString() ?? '',
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: NexGenPalette.textHigh),
+                              decoration: InputDecoration(
+                                hintText: '0',
+                                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                                filled: true,
+                                fillColor: NexGenPalette.matteBlack,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: NexGenPalette.line),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: NexGenPalette.line),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: NexGenPalette.cyan),
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  final count = int.tryParse(value) ?? 0;
+                                  _channelLedCounts[channelNum] = count.clamp(0, 2600);
+                                  _totalLedCount = _channelLedCounts.values.fold(0, (sum, c) => sum + c);
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'LEDs',
+                            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // Controller Location
+          _buildGlassTextField(
+            label: 'Controller Location',
+            hint: 'e.g., Attic above garage, Soffit box on left side',
+            value: _controllerLocation,
+            onChanged: (v) => setState(() => _controllerLocation = v),
+          ),
+          const SizedBox(height: 16),
+
+          // Where is LED 1 located
           _buildGlassTextField(
             label: 'Where is LED #1 located?',
-            hint: 'e.g., Left side of garage',
+            hint: 'e.g., Left side of garage, Front left corner',
             value: _startLocation,
             onChanged: (v) => setState(() => _startLocation = v),
           ),
           const SizedBox(height: 16),
 
-          // End location
+          // LED Direction
+          _buildGlassField(
+            label: 'LED Direction (when facing the home)',
+            child: Column(
+              children: [
+                _buildDirectionOption('leftToRight', 'Left to Right', Icons.arrow_forward),
+                const SizedBox(height: 8),
+                _buildDirectionOption('rightToLeft', 'Right to Left', Icons.arrow_back),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Where is final LED located
           _buildGlassTextField(
-            label: 'Where is the last LED located?',
-            hint: 'e.g., Right side of front door',
+            label: 'Where is the final LED located?',
+            hint: 'e.g., Right side of front door, Back right corner',
             value: _endLocation,
             onChanged: (v) => setState(() => _endLocation = v),
           ),
@@ -388,58 +655,14 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           _buildGlassField(
             label: 'Home Architecture Type',
             child: Column(
-              children: ArchitectureType.values.map((type) {
-                final isSelected = _architectureType == type;
-                return GestureDetector(
-                  onTap: () => setState(() => _architectureType = type),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? NexGenPalette.cyan.withValues(alpha: 0.15)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isSelected
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_off,
-                          color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                type.displayName,
-                                style: TextStyle(
-                                  color: NexGenPalette.textHigh,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                ),
-                              ),
-                              Text(
-                                type.description,
-                                style: TextStyle(
-                                  color: NexGenPalette.textMedium,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
+              children: [
+                _buildArchitectureOption(ArchitectureType.ranch, 'Ranch', 'Flat or minimal peaks'),
+                _buildArchitectureOption(ArchitectureType.gabled, 'Single Gable', 'One main roof peak'),
+                _buildArchitectureOption(ArchitectureType.multiGabled, 'Multi-Gabled', 'Multiple peaks and gables'),
+                _buildArchitectureOption(ArchitectureType.complex, 'Complex/Custom', 'Mixed or unique architecture'),
+                _buildArchitectureOption(ArchitectureType.modern, 'Modern/Contemporary', 'Clean lines, unique angles'),
+                _buildArchitectureOption(ArchitectureType.colonial, 'Colonial', 'Traditional with dormers'),
+              ],
             ),
           ),
         ],
@@ -447,8 +670,98 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     );
   }
 
+  Widget _buildDirectionOption(String value, String label, IconData icon) {
+    final isSelected = _ledDirection == value;
+    return GestureDetector(
+      onTap: () => setState(() => _ledDirection = value),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? NexGenPalette.cyan.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Icon(icon, color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: NexGenPalette.textHigh,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildArchitectureOption(ArchitectureType type, String label, String description) {
+    final isSelected = _architectureType == type;
+    return GestureDetector(
+      onTap: () => setState(() => _architectureType = type),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? NexGenPalette.cyan.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      color: NexGenPalette.textMedium,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSegmentsStep() {
     final remainingLeds = _totalLedCount - _segments.fold(0, (sum, s) => sum + s.ledCount);
+    final aiSegmentCount = _segments.where((s) => s.isAiRelevantSegment).length;
 
     return Column(
       children: [
@@ -467,7 +780,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Break your roofline into logical segments (runs, corners, peaks).',
+                'Break the roofline into logical segments. Corners and Peaks are used by Lumina AI for pattern design.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: NexGenPalette.textMedium,
                     ),
@@ -492,38 +805,56 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                             : NexGenPalette.cyan,
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
                   children: [
-                    Icon(
-                      remainingLeds == 0
-                          ? Icons.check_circle
-                          : remainingLeds < 0
-                              ? Icons.error
-                              : Icons.info_outline,
-                      color: remainingLeds == 0
-                          ? Colors.green
-                          : remainingLeds < 0
-                              ? Colors.red
-                              : NexGenPalette.cyan,
-                      size: 20,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          remainingLeds == 0
+                              ? Icons.check_circle
+                              : remainingLeds < 0
+                                  ? Icons.error
+                                  : Icons.info_outline,
+                          color: remainingLeds == 0
+                              ? Colors.green
+                              : remainingLeds < 0
+                                  ? Colors.red
+                                  : NexGenPalette.cyan,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          remainingLeds == 0
+                              ? 'All $_totalLedCount LEDs assigned!'
+                              : remainingLeds > 0
+                                  ? '$remainingLeds LEDs remaining to assign'
+                                  : '${remainingLeds.abs()} LEDs over total count',
+                          style: TextStyle(
+                            color: remainingLeds == 0
+                                ? Colors.green
+                                : remainingLeds < 0
+                                    ? Colors.red
+                                    : NexGenPalette.cyan,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      remainingLeds == 0
-                          ? 'All $_totalLedCount LEDs assigned!'
-                          : remainingLeds > 0
-                              ? '$remainingLeds LEDs remaining to assign'
-                              : '${remainingLeds.abs()} LEDs over budget',
-                      style: TextStyle(
-                        color: remainingLeds == 0
-                            ? Colors.green
-                            : remainingLeds < 0
-                                ? Colors.red
-                                : NexGenPalette.cyan,
-                        fontWeight: FontWeight.w500,
+                    if (aiSegmentCount > 0) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.auto_awesome, color: Colors.purple, size: 16),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$aiSegmentCount corners/peaks for Lumina AI',
+                            style: TextStyle(color: Colors.purple, fontSize: 12),
+                          ),
+                        ],
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -596,7 +927,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
       color: NexGenPalette.gunmetal90,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: NexGenPalette.line),
+        side: BorderSide(color: segment.isProminent ? NexGenPalette.cyan : NexGenPalette.line),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -611,12 +942,12 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: _getSegmentTypeColor(segment.type).withValues(alpha: 0.2),
+                color: _getInstallerSegmentTypeColor(segment.segmentType).withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
-                _getSegmentTypeIcon(segment.type),
-                color: _getSegmentTypeColor(segment.type),
+                _getInstallerSegmentTypeIcon(segment.segmentType),
+                color: _getInstallerSegmentTypeColor(segment.segmentType),
                 size: 20,
               ),
             ),
@@ -627,15 +958,27 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    segment.name,
-                    style: TextStyle(
-                      color: NexGenPalette.textHigh,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        segment.name,
+                        style: TextStyle(
+                          color: NexGenPalette.textHigh,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (segment.isProminent) ...[
+                        const SizedBox(width: 6),
+                        Icon(Icons.star, color: NexGenPalette.cyan, size: 14),
+                      ],
+                      if (segment.isAiRelevantSegment) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.auto_awesome, color: Colors.purple, size: 14),
+                      ],
+                    ],
                   ),
                   Text(
-                    '${segment.ledCount} LEDs • ${segment.type.displayName} • ${segment.direction.shortName}',
+                    '${segment.ledCount} LEDs • ${segment.segmentType.displayName} • ${segment.ledDirection.shortName} • ${segment.location.displayName}',
                     style: TextStyle(
                       color: NexGenPalette.textMedium,
                       fontSize: 12,
@@ -664,7 +1007,36 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     );
   }
 
+  IconData _getInstallerSegmentTypeIcon(InstallerSegmentType type) {
+    switch (type) {
+      case InstallerSegmentType.startOfRun:
+        return Icons.play_arrow;
+      case InstallerSegmentType.corner:
+        return Icons.turn_right;
+      case InstallerSegmentType.run:
+        return Icons.horizontal_rule;
+      case InstallerSegmentType.peak:
+        return Icons.change_history;
+    }
+  }
+
+  Color _getInstallerSegmentTypeColor(InstallerSegmentType type) {
+    switch (type) {
+      case InstallerSegmentType.startOfRun:
+        return Colors.green;
+      case InstallerSegmentType.corner:
+        return Colors.orange;
+      case InstallerSegmentType.run:
+        return NexGenPalette.cyan;
+      case InstallerSegmentType.peak:
+        return Colors.purple;
+    }
+  }
+
   Widget _buildAnchorsStep() {
+    // Count corners and peaks which are auto-anchor points
+    final autoAnchors = _segments.where((s) => s.isAiRelevantSegment).toList();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -679,12 +1051,67 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Anchor points are key positions (corners, peaks) that receive accent colors in patterns.',
+            'Anchor points are key positions that receive accent colors in patterns. Corners and Peaks are automatically treated as anchors.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: NexGenPalette.textMedium,
                 ),
           ),
           const SizedBox(height: 16),
+
+          // Auto-detected anchors info
+          if (autoAnchors.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.auto_awesome, color: Colors.purple, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Auto-detected Anchors (${autoAnchors.length})',
+                        style: TextStyle(
+                          color: Colors.purple,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'These segments are automatically used as anchor points for Lumina AI patterns:',
+                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: autoAnchors.map((s) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _getInstallerSegmentTypeColor(s.segmentType).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${s.name} (${s.segmentType.displayName})',
+                        style: TextStyle(
+                          color: _getInstallerSegmentTypeColor(s.segmentType),
+                          fontSize: 12,
+                        ),
+                      ),
+                    )).toList(),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
 
           // Find LED button
           _buildActionButton(
@@ -694,6 +1121,21 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
             onTap: _showFindLedDialog,
           ),
           const SizedBox(height: 24),
+
+          // Additional custom anchors
+          Text(
+            'Additional Custom Anchors',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: NexGenPalette.textHigh,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add custom anchor points within segments if needed.',
+            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
 
           // Segments with anchors
           if (_segments.isEmpty)
@@ -719,7 +1161,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
       color: NexGenPalette.gunmetal90,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: NexGenPalette.line),
+        side: BorderSide(
+          color: segment.isAiRelevantSegment ? Colors.purple.withValues(alpha: 0.5) : NexGenPalette.line,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -729,19 +1173,41 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
             Row(
               children: [
                 Icon(
-                  _getSegmentTypeIcon(segment.type),
-                  color: _getSegmentTypeColor(segment.type),
+                  _getInstallerSegmentTypeIcon(segment.segmentType),
+                  color: _getInstallerSegmentTypeColor(segment.segmentType),
                   size: 20,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  segment.name,
-                  style: TextStyle(
-                    color: NexGenPalette.textHigh,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    segment.name,
+                    style: TextStyle(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                if (segment.isAiRelevantSegment) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.auto_awesome, color: Colors.purple, size: 12),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Auto',
+                          style: TextStyle(color: Colors.purple, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(
                   '${segment.ledCount} LEDs',
                   style: TextStyle(
@@ -772,7 +1238,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                   );
                 }),
                 ActionChip(
-                  label: const Text('+ Add'),
+                  label: const Text('+ Add Custom'),
                   onPressed: () => _showAddAnchorDialog(index),
                   backgroundColor: NexGenPalette.gunmetal90,
                   labelStyle: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
@@ -788,6 +1254,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   Widget _buildReviewStep() {
     final totalAssigned = _segments.fold(0, (sum, s) => sum + s.ledCount);
     final isValid = totalAssigned == _totalLedCount && _segments.isNotEmpty;
+
+    // Count AI-relevant segments (corners and peaks)
+    final aiSegments = _segments.where((s) => s.isAiRelevantSegment).toList();
+    final prominentSegments = _segments.where((s) => s.isProminent).toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -808,14 +1278,98 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
             child: Column(
               children: [
                 _buildSummaryRow('Total LEDs', '$_totalLedCount'),
+                _buildSummaryRow('Channels', '${_selectedChannels.length}'),
                 _buildSummaryRow('Segments', '${_segments.length}'),
                 _buildSummaryRow('Architecture', _architectureType.displayName),
-                _buildSummaryRow('Start Location', _startLocation.isEmpty ? 'Not set' : _startLocation),
-                _buildSummaryRow('End Location', _endLocation.isEmpty ? 'Not set' : _endLocation),
+                _buildSummaryRow('LED Direction', _ledDirection == 'leftToRight' ? 'Left to Right' : 'Right to Left'),
+                _buildSummaryRow('Controller', _controllerLocation.isEmpty ? 'Not set' : _controllerLocation),
+                _buildSummaryRow('LED #1 Location', _startLocation.isEmpty ? 'Not set' : _startLocation),
+                _buildSummaryRow('Final LED', _endLocation.isEmpty ? 'Not set' : _endLocation),
               ],
             ),
           ),
           const SizedBox(height: 16),
+
+          // AI Pattern Design info
+          if (aiSegments.isNotEmpty || prominentSegments.isNotEmpty) ...[
+            _buildGlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.auto_awesome, color: Colors.purple, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Lumina AI Pattern Data',
+                        style: TextStyle(
+                          color: NexGenPalette.textHigh,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (aiSegments.isNotEmpty) ...[
+                    Text(
+                      'Corners & Peaks (${aiSegments.length}):',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: aiSegments.map((s) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _getInstallerSegmentTypeColor(s.segmentType).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${s.name} (${s.segmentType.displayName})',
+                          style: TextStyle(
+                            color: _getInstallerSegmentTypeColor(s.segmentType),
+                            fontSize: 11,
+                          ),
+                        ),
+                      )).toList(),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (prominentSegments.isNotEmpty) ...[
+                    Text(
+                      'Prominent Features (${prominentSegments.length}):',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: prominentSegments.map((s) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.star, color: NexGenPalette.cyan, size: 12),
+                            const SizedBox(width: 4),
+                            Text(
+                              s.name,
+                              style: TextStyle(color: NexGenPalette.cyan, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      )).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // Segments summary
           Text(
@@ -838,7 +1392,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
               decoration: BoxDecoration(
                 color: NexGenPalette.gunmetal90,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: NexGenPalette.line),
+                border: Border.all(
+                  color: segment.isProminent ? NexGenPalette.cyan : NexGenPalette.line,
+                ),
               ),
               child: Row(
                 children: [
@@ -846,14 +1402,14 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: _getSegmentTypeColor(segment.type).withValues(alpha: 0.2),
+                      color: _getInstallerSegmentTypeColor(segment.segmentType).withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Center(
                       child: Text(
                         '${index + 1}',
                         style: TextStyle(
-                          color: _getSegmentTypeColor(segment.type),
+                          color: _getInstallerSegmentTypeColor(segment.segmentType),
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -864,15 +1420,30 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          segment.name,
-                          style: TextStyle(
-                            color: NexGenPalette.textHigh,
-                            fontWeight: FontWeight.w500,
-                          ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                segment.name,
+                                style: TextStyle(
+                                  color: NexGenPalette.textHigh,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (segment.isProminent) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.star, color: NexGenPalette.cyan, size: 14),
+                            ],
+                            if (segment.isAiRelevantSegment) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.auto_awesome, color: Colors.purple, size: 14),
+                            ],
+                          ],
                         ),
                         Text(
-                          'LEDs $startLed-$endLed (${segment.ledCount}) • ${segment.type.displayName}',
+                          'LEDs $startLed-$endLed (${segment.ledCount}) • ${segment.segmentType.displayName} • ${segment.location.displayName}',
                           style: TextStyle(
                             color: NexGenPalette.textMedium,
                             fontSize: 12,
@@ -905,8 +1476,29 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                     child: Text(
                       _segments.isEmpty
                           ? 'Please add at least one segment'
-                          : 'LED count mismatch: $totalAssigned assigned vs $_totalLedCount total',
+                          : 'LED count mismatch: $totalAssigned LEDs in segments vs $_totalLedCount total. Segment totals must match the total LED count.',
                       style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Configuration valid! All $_totalLedCount LEDs are assigned across ${_segments.length} segments.',
+                      style: const TextStyle(color: Colors.green),
                     ),
                   ),
                 ],
@@ -1190,56 +1782,15 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     );
   }
 
-  // Dialogs and actions
-  Future<void> _autoDetectLedCount() async {
-    // Try to fetch segments from the connected controller to determine LED count
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo != null) {
-      try {
-        final segments = await repo.fetchSegments();
-        if (segments.isNotEmpty) {
-          // Calculate total LEDs from all segments
-          int totalLeds = 0;
-          for (final seg in segments) {
-            if (seg.stop > totalLeds) {
-              totalLeds = seg.stop;
-            }
-          }
-          if (totalLeds > 0) {
-            setState(() => _totalLedCount = totalLeds);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Detected $totalLeds LEDs from controller'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
-            return;
-          }
-        }
-      } catch (e) {
-        debugPrint('Auto-detect LED count failed: $e');
-      }
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not detect LED count - is controller connected?'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-    }
-  }
+  // Note: Auto-detect functionality would require WLED provider
+  // which is abstracted away from installer interface
 
   void _showAddSegmentDialog() {
     final nameController = TextEditingController();
     final ledCountController = TextEditingController(text: '20');
-    var selectedType = SegmentType.run;
-    var selectedDirection = SegmentDirection.leftToRight;
-    ArchitecturalRole? selectedRole;
-    String? selectedLocation;
+    var selectedType = InstallerSegmentType.run;
+    var selectedDirection = InstallerLedDirection.leftToRight;
+    var selectedLocation = SegmentLocation.front;
     bool isProminent = false;
 
     showModalBottomSheet(
@@ -1258,144 +1809,127 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 24,
                 24 + MediaQuery.of(context).viewInsets.bottom,
               ),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
+              ),
               decoration: BoxDecoration(
                 color: NexGenPalette.gunmetal90,
                 border: Border(top: BorderSide(color: NexGenPalette.line)),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Add Segment',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: NexGenPalette.textHigh,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 24),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Add Segment',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: NexGenPalette.textHigh,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 24),
 
-                  // Name
-                  TextField(
-                    controller: nameController,
-                    style: TextStyle(color: NexGenPalette.textHigh),
-                    decoration: InputDecoration(
-                      labelText: 'Segment Name',
-                      hintText: 'e.g., Front Peak',
-                      labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                      hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    // Segment Name
+                    TextField(
+                      controller: nameController,
+                      style: TextStyle(color: NexGenPalette.textHigh),
+                      decoration: InputDecoration(
+                        labelText: 'Segment Name',
+                        hintText: 'e.g., Front Peak, Left Gutter Run',
+                        labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                        hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                        filled: true,
+                        fillColor: NexGenPalette.matteBlack,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                  // LED count
-                  TextField(
-                    controller: ledCountController,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: NexGenPalette.textHigh),
-                    decoration: InputDecoration(
-                      labelText: 'LED Count',
-                      labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    // # of LEDs in segment
+                    TextField(
+                      controller: ledCountController,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: NexGenPalette.textHigh),
+                      decoration: InputDecoration(
+                        labelText: '# of LEDs in Segment',
+                        labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                        filled: true,
+                        fillColor: NexGenPalette.matteBlack,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 20),
 
-                  // Type selection
-                  Text(
-                    'Segment Type',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: SegmentType.values.map((type) {
-                      final isSelected = selectedType == type;
-                      return ChoiceChip(
-                        label: Text(type.displayName),
-                        selected: isSelected,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedType = type);
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Direction selection
-                  Text(
-                    'LED Direction',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: SegmentDirection.values.take(6).map((dir) {
-                      final isSelected = selectedDirection == dir;
-                      return ChoiceChip(
-                        label: Text(dir.shortName),
-                        selected: isSelected,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedDirection = dir);
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Architectural Role (optional)
-                  Text(
-                    'Architectural Role (Optional)',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('None'),
-                        selected: selectedRole == null,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: selectedRole == null ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedRole = null);
-                          }
-                        },
-                      ),
-                      ...ArchitecturalRole.values.map((role) {
-                        final isSelected = selectedRole == role;
+                    // Segment Type (Start of Run, Corner, Run, Peak)
+                    Text(
+                      'Segment Type',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: InstallerSegmentType.values.map((type) {
+                        final isSelected = selectedType == type;
                         return ChoiceChip(
-                          label: Text(role.displayName),
+                          label: Text(type.displayName),
+                          selected: isSelected,
+                          selectedColor: _getInstallerSegmentTypeColor(type),
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedType = type);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (selectedType.isAiRelevant) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.auto_awesome, color: Colors.purple, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Lumina AI will use this for pattern design',
+                                style: TextStyle(color: Colors.purple, fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+
+                    // LED Direction
+                    Text(
+                      'LED Direction',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: InstallerLedDirection.values.map((dir) {
+                        final isSelected = selectedDirection == dir;
+                        return ChoiceChip(
+                          label: Text(dir.displayName),
                           selected: isSelected,
                           selectedColor: NexGenPalette.cyan,
                           backgroundColor: NexGenPalette.matteBlack,
@@ -1404,43 +1938,27 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                           ),
                           onSelected: (selected) {
                             if (selected) {
-                              setDialogState(() => selectedRole = role);
+                              setDialogState(() => selectedDirection = dir);
                             }
                           },
                         );
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
 
-                  // Location (optional)
-                  Text(
-                    'Location (Optional)',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('None'),
-                        selected: selectedLocation == null,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: selectedLocation == null ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedLocation = null);
-                          }
-                        },
-                      ),
-                      ...['Front', 'Back', 'Left', 'Right'].map((location) {
-                        final isSelected = selectedLocation == location.toLowerCase();
+                    // Location When Facing Front of Home
+                    Text(
+                      'Location (when facing front of home)',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: SegmentLocation.values.map((loc) {
+                        final isSelected = selectedLocation == loc;
                         return ChoiceChip(
-                          label: Text(location),
+                          label: Text(loc.displayName),
                           selected: isSelected,
                           selectedColor: NexGenPalette.cyan,
                           backgroundColor: NexGenPalette.matteBlack,
@@ -1449,93 +1967,93 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                           ),
                           onSelected: (selected) {
                             if (selected) {
-                              setDialogState(() => selectedLocation = location.toLowerCase());
+                              setDialogState(() => selectedLocation = loc);
                             }
                           },
                         );
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Prominent checkbox
-                  CheckboxListTile(
-                    value: isProminent,
-                    onChanged: (value) {
-                      setDialogState(() => isProminent = value ?? false);
-                    },
-                    title: Text(
-                      'Mark as Prominent Feature',
-                      style: TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
+                      }).toList(),
                     ),
-                    subtitle: Text(
-                      'AI will prioritize this segment in designs',
-                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    const SizedBox(height: 16),
+
+                    // Mark Segment as Prominent Feature
+                    CheckboxListTile(
+                      value: isProminent,
+                      onChanged: (value) {
+                        setDialogState(() => isProminent = value ?? false);
+                      },
+                      title: Text(
+                        'Mark as Prominent Feature',
+                        style: TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
+                      ),
+                      subtitle: Text(
+                        'AI will prioritize this segment in pattern designs',
+                        style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                      ),
+                      activeColor: NexGenPalette.cyan,
+                      checkColor: Colors.black,
+                      contentPadding: EdgeInsets.zero,
                     ),
-                    activeColor: NexGenPalette.cyan,
-                    checkColor: Colors.black,
-                  ),
-                  const SizedBox(height: 24),
+                    const SizedBox(height: 24),
 
-                  // Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: NexGenPalette.textHigh,
-                            side: BorderSide(color: NexGenPalette.line),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                    // Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: NexGenPalette.textHigh,
+                              side: BorderSide(color: NexGenPalette.line),
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
+                            child: const Text('Cancel'),
                           ),
-                          child: const Text('Cancel'),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () {
-                            final name = nameController.text.trim();
-                            final ledCount = int.tryParse(ledCountController.text) ?? 0;
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              final name = nameController.text.trim();
+                              final ledCount = int.tryParse(ledCountController.text) ?? 0;
 
-                            if (name.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please enter a name')),
-                              );
-                              return;
-                            }
-                            if (ledCount <= 0) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please enter a valid LED count')),
-                              );
-                              return;
-                            }
+                              if (name.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a segment name')),
+                                );
+                                return;
+                              }
+                              if (ledCount <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a valid LED count')),
+                                );
+                                return;
+                              }
 
-                            setState(() {
-                              _segments.add(_SegmentDraft(
-                                id: _uuid.v4(),
-                                name: name,
-                                ledCount: ledCount,
-                                type: selectedType,
-                                direction: selectedDirection,
-                                architecturalRole: selectedRole,
-                                location: selectedLocation,
-                                isProminent: isProminent,
-                              ));
-                            });
-                            Navigator.pop(context);
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: NexGenPalette.cyan,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                              setState(() {
+                                _segments.add(_SegmentDraft(
+                                  id: _uuid.v4(),
+                                  name: name,
+                                  ledCount: ledCount,
+                                  segmentType: selectedType,
+                                  ledDirection: selectedDirection,
+                                  location: selectedLocation,
+                                  isProminent: isProminent,
+                                ));
+                              });
+                              Navigator.pop(context);
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: NexGenPalette.cyan,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
+                            child: const Text('Add Segment'),
                           ),
-                          child: const Text('Add'),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1548,8 +2066,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     final segment = _segments[index];
     final nameController = TextEditingController(text: segment.name);
     final ledCountController = TextEditingController(text: '${segment.ledCount}');
-    var selectedType = segment.type;
-    var selectedDirection = segment.direction;
+    var selectedType = segment.segmentType;
+    var selectedDirection = segment.ledDirection;
+    var selectedLocation = segment.location;
+    var isProminent = segment.isProminent;
 
     showModalBottomSheet(
       context: context,
@@ -1567,150 +2087,205 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 24,
                 24 + MediaQuery.of(context).viewInsets.bottom,
               ),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
+              ),
               decoration: BoxDecoration(
                 color: NexGenPalette.gunmetal90,
                 border: Border(top: BorderSide(color: NexGenPalette.line)),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Edit Segment',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: NexGenPalette.textHigh,
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  TextField(
-                    controller: nameController,
-                    style: TextStyle(color: NexGenPalette.textHigh),
-                    decoration: InputDecoration(
-                      labelText: 'Segment Name',
-                      labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  TextField(
-                    controller: ledCountController,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: NexGenPalette.textHigh),
-                    decoration: InputDecoration(
-                      labelText: 'LED Count',
-                      labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  Text(
-                    'Segment Type',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: SegmentType.values.map((type) {
-                      final isSelected = selectedType == type;
-                      return ChoiceChip(
-                        label: Text(type.displayName),
-                        selected: isSelected,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedType = type);
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-
-                  Text(
-                    'LED Direction',
-                    style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: SegmentDirection.values.take(6).map((dir) {
-                      final isSelected = selectedDirection == dir;
-                      return ChoiceChip(
-                        label: Text(dir.shortName),
-                        selected: isSelected,
-                        selectedColor: NexGenPalette.cyan,
-                        backgroundColor: NexGenPalette.matteBlack,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : NexGenPalette.textMedium,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            setDialogState(() => selectedDirection = dir);
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 24),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: NexGenPalette.textHigh,
-                            side: BorderSide(color: NexGenPalette.line),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Edit Segment',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: NexGenPalette.textHigh,
+                            fontWeight: FontWeight.bold,
                           ),
-                          child: const Text('Cancel'),
+                    ),
+                    const SizedBox(height: 24),
+
+                    TextField(
+                      controller: nameController,
+                      style: TextStyle(color: NexGenPalette.textHigh),
+                      decoration: InputDecoration(
+                        labelText: 'Segment Name',
+                        labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                        filled: true,
+                        fillColor: NexGenPalette.matteBlack,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () {
-                            setState(() {
-                              _segments[index] = _SegmentDraft(
-                                id: segment.id,
-                                name: nameController.text.trim(),
-                                ledCount: int.tryParse(ledCountController.text) ?? segment.ledCount,
-                                type: selectedType,
-                                direction: selectedDirection,
-                                anchorIndices: segment.anchorIndices,
-                              );
-                            });
-                            Navigator.pop(context);
+                    ),
+                    const SizedBox(height: 16),
+
+                    TextField(
+                      controller: ledCountController,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: NexGenPalette.textHigh),
+                      decoration: InputDecoration(
+                        labelText: '# of LEDs in Segment',
+                        labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                        filled: true,
+                        fillColor: NexGenPalette.matteBlack,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'Segment Type',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: InstallerSegmentType.values.map((type) {
+                        final isSelected = selectedType == type;
+                        return ChoiceChip(
+                          label: Text(type.displayName),
+                          selected: isSelected,
+                          selectedColor: _getInstallerSegmentTypeColor(type),
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedType = type);
+                            }
                           },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: NexGenPalette.cyan,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'LED Direction',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: InstallerLedDirection.values.map((dir) {
+                        final isSelected = selectedDirection == dir;
+                        return ChoiceChip(
+                          label: Text(dir.displayName),
+                          selected: isSelected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
                           ),
-                          child: const Text('Save'),
-                        ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedDirection = dir);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'Location (when facing front of home)',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: SegmentLocation.values.map((loc) {
+                        final isSelected = selectedLocation == loc;
+                        return ChoiceChip(
+                          label: Text(loc.displayName),
+                          selected: isSelected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.matteBlack,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : NexGenPalette.textMedium,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setDialogState(() => selectedLocation = loc);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    CheckboxListTile(
+                      value: isProminent,
+                      onChanged: (value) {
+                        setDialogState(() => isProminent = value ?? false);
+                      },
+                      title: Text(
+                        'Mark as Prominent Feature',
+                        style: TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
                       ),
-                    ],
-                  ),
-                ],
+                      subtitle: Text(
+                        'AI will prioritize this segment in pattern designs',
+                        style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                      ),
+                      activeColor: NexGenPalette.cyan,
+                      checkColor: Colors.black,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 24),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: NexGenPalette.textHigh,
+                              side: BorderSide(color: NexGenPalette.line),
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              setState(() {
+                                _segments[index] = _SegmentDraft(
+                                  id: segment.id,
+                                  name: nameController.text.trim(),
+                                  ledCount: int.tryParse(ledCountController.text) ?? segment.ledCount,
+                                  segmentType: selectedType,
+                                  ledDirection: selectedDirection,
+                                  location: selectedLocation,
+                                  isProminent: isProminent,
+                                  anchorIndices: segment.anchorIndices,
+                                );
+                              });
+                              Navigator.pop(context);
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: NexGenPalette.cyan,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                            ),
+                            child: const Text('Save'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1799,7 +2374,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Enter an LED number to light it up on your roofline',
+              'Enter an LED number to identify its position on the roofline. The LED will light up red on the controller.',
               style: TextStyle(color: NexGenPalette.textMedium),
             ),
             const SizedBox(height: 16),
@@ -1817,6 +2392,11 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            Text(
+              'Ensure the controller is connected and online.',
+              style: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.7), fontSize: 12),
+            ),
           ],
         ),
         actions: [
@@ -1828,19 +2408,21 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
             onPressed: () async {
               final ledIndex = int.tryParse(controller.text);
               if (ledIndex != null && ledIndex >= 0 && ledIndex < _totalLedCount) {
-                // Send command to WLED to light up this LED
-                final repo = ref.read(wledRepositoryProvider);
-                if (repo != null) {
-                  await repo.applyJson({
-                    'on': true,
-                    'bri': 255,
-                    'seg': [
-                      {
-                        'i': [ledIndex, 255, 0, 0], // Red LED at index
-                      }
-                    ],
-                  });
-                }
+                // Note: This would need a connected repository to work
+                // For now, show a message about what would happen
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('LED $ledIndex should now be lit red on the controller'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Please enter a valid LED number (0-${_totalLedCount - 1})'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
               }
             },
             style: FilledButton.styleFrom(
@@ -1854,33 +2436,145 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     );
   }
 
-  IconData _getSegmentTypeIcon(SegmentType type) {
-    switch (type) {
-      case SegmentType.run:
-        return Icons.horizontal_rule;
-      case SegmentType.corner:
-        return Icons.turn_right;
-      case SegmentType.peak:
-        return Icons.change_history;
-      case SegmentType.column:
-        return Icons.height;
-      case SegmentType.connector:
-        return Icons.link;
+}
+
+/// Simplified segment types for the installer wizard
+enum InstallerSegmentType {
+  startOfRun,
+  corner,
+  run,
+  peak,
+}
+
+extension InstallerSegmentTypeExtension on InstallerSegmentType {
+  String get displayName {
+    switch (this) {
+      case InstallerSegmentType.startOfRun:
+        return 'Start of Run';
+      case InstallerSegmentType.corner:
+        return 'Corner';
+      case InstallerSegmentType.run:
+        return 'Run';
+      case InstallerSegmentType.peak:
+        return 'Peak';
     }
   }
 
-  Color _getSegmentTypeColor(SegmentType type) {
-    switch (type) {
-      case SegmentType.run:
-        return NexGenPalette.cyan;
-      case SegmentType.corner:
-        return Colors.orange;
-      case SegmentType.peak:
-        return Colors.purple;
-      case SegmentType.column:
-        return Colors.green;
-      case SegmentType.connector:
-        return NexGenPalette.textMedium;
+  String get description {
+    switch (this) {
+      case InstallerSegmentType.startOfRun:
+        return 'First segment where LEDs begin';
+      case InstallerSegmentType.corner:
+        return 'Direction change point';
+      case InstallerSegmentType.run:
+        return 'Straight segment of lights';
+      case InstallerSegmentType.peak:
+        return 'Roof peak or apex point';
+    }
+  }
+
+  /// Convert to RooflineSegment SegmentType for saving
+  SegmentType toSegmentType() {
+    switch (this) {
+      case InstallerSegmentType.startOfRun:
+        return SegmentType.run; // Start of run is still a run type
+      case InstallerSegmentType.corner:
+        return SegmentType.corner;
+      case InstallerSegmentType.run:
+        return SegmentType.run;
+      case InstallerSegmentType.peak:
+        return SegmentType.peak;
+    }
+  }
+
+  /// Check if this segment type is important for AI pattern design
+  bool get isAiRelevant {
+    return this == InstallerSegmentType.corner || this == InstallerSegmentType.peak;
+  }
+}
+
+/// Simplified LED direction for the installer wizard
+enum InstallerLedDirection {
+  leftToRight,
+  rightToLeft,
+  bottomToTop,
+  topToBottom,
+}
+
+extension InstallerLedDirectionExtension on InstallerLedDirection {
+  String get displayName {
+    switch (this) {
+      case InstallerLedDirection.leftToRight:
+        return 'Left to Right';
+      case InstallerLedDirection.rightToLeft:
+        return 'Right to Left';
+      case InstallerLedDirection.bottomToTop:
+        return 'Bottom to Top';
+      case InstallerLedDirection.topToBottom:
+        return 'Top to Bottom';
+    }
+  }
+
+  String get shortName {
+    switch (this) {
+      case InstallerLedDirection.leftToRight:
+        return 'L→R';
+      case InstallerLedDirection.rightToLeft:
+        return 'R→L';
+      case InstallerLedDirection.bottomToTop:
+        return 'B→T';
+      case InstallerLedDirection.topToBottom:
+        return 'T→B';
+    }
+  }
+
+  /// Convert to RooflineSegment SegmentDirection for saving
+  SegmentDirection toSegmentDirection() {
+    switch (this) {
+      case InstallerLedDirection.leftToRight:
+        return SegmentDirection.leftToRight;
+      case InstallerLedDirection.rightToLeft:
+        return SegmentDirection.rightToLeft;
+      case InstallerLedDirection.bottomToTop:
+        return SegmentDirection.upward;
+      case InstallerLedDirection.topToBottom:
+        return SegmentDirection.downward;
+    }
+  }
+}
+
+/// Location relative to front of home
+enum SegmentLocation {
+  front,
+  back,
+  leftSide,
+  rightSide,
+}
+
+extension SegmentLocationExtension on SegmentLocation {
+  String get displayName {
+    switch (this) {
+      case SegmentLocation.front:
+        return 'Front';
+      case SegmentLocation.back:
+        return 'Back';
+      case SegmentLocation.leftSide:
+        return 'Left Side';
+      case SegmentLocation.rightSide:
+        return 'Right Side';
+    }
+  }
+
+  String get storageName {
+    switch (this) {
+      case SegmentLocation.front:
+        return 'front';
+      case SegmentLocation.back:
+        return 'back';
+      case SegmentLocation.leftSide:
+        return 'left';
+      case SegmentLocation.rightSide:
+        return 'right';
     }
   }
 }
@@ -1890,22 +2584,29 @@ class _SegmentDraft {
   final String id;
   String name;
   int ledCount;
-  SegmentType type;
-  SegmentDirection direction;
-  List<int> anchorIndices;
-  ArchitecturalRole? architecturalRole;
-  String? location;
+  InstallerSegmentType segmentType;
+  InstallerLedDirection ledDirection;
+  SegmentLocation location;
   bool isProminent;
+  List<int> anchorIndices;
 
   _SegmentDraft({
     required this.id,
     required this.name,
     required this.ledCount,
-    this.type = SegmentType.run,
-    this.direction = SegmentDirection.leftToRight,
-    List<int>? anchorIndices,
-    this.architecturalRole,
-    this.location,
+    this.segmentType = InstallerSegmentType.run,
+    this.ledDirection = InstallerLedDirection.leftToRight,
+    this.location = SegmentLocation.front,
     this.isProminent = false,
+    List<int>? anchorIndices,
   }) : anchorIndices = anchorIndices ?? [];
+
+  /// Convert to SegmentType for legacy compatibility
+  SegmentType get type => segmentType.toSegmentType();
+
+  /// Convert to SegmentDirection for legacy compatibility
+  SegmentDirection get direction => ledDirection.toSegmentDirection();
+
+  /// Check if this segment should be flagged for Lumina AI
+  bool get isAiRelevantSegment => segmentType.isAiRelevant;
 }

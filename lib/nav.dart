@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 // Feature imports
 import 'package:nexgen_command/features/auth/login_page.dart';
 import 'package:nexgen_command/features/auth/signup_page.dart';
 import 'package:nexgen_command/features/auth/forgot_password_page.dart';
+import 'package:nexgen_command/features/auth/link_account_screen.dart';
+import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
+import 'package:nexgen_command/features/users/sub_users_screen.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/discovery/discovery_page.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart';
@@ -39,7 +44,11 @@ import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart'
 import 'package:nexgen_command/features/properties/my_properties_screen.dart';
 import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
+import 'package:nexgen_command/features/installer/installer_landing_screen.dart';
+import 'package:nexgen_command/features/installer/media_landing_screen.dart';
+import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
+import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
@@ -65,6 +74,26 @@ class _AuthStateListenable extends ChangeNotifier {
 /// 2. Add a GoRoute to the routes list
 /// 3. Navigate using context.go() or context.push()
 /// 4. Use context.pop() to go back.
+/// Helper to create an unlinked user profile for new Firebase Auth users.
+Future<void> _createUnlinkedUserProfile(User user) async {
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      'id': user.uid,
+      'email': user.email ?? '',
+      'display_name': user.displayName ?? user.email?.split('@').first ?? 'User',
+      'photo_url': user.photoURL,
+      'owner_id': user.uid,
+      'created_at': FieldValue.serverTimestamp(),
+      'updated_at': FieldValue.serverTimestamp(),
+      'installation_role': 'unlinked',
+      'welcome_completed': false,
+    }, SetOptions(merge: true));
+    debugPrint('Created unlinked user profile for ${user.uid}');
+  } catch (e) {
+    debugPrint('Error creating unlinked user profile: $e');
+  }
+}
+
 class AppRouter {
   static final _authListenable = _AuthStateListenable();
 
@@ -72,23 +101,120 @@ class AppRouter {
     initialLocation: AppRoutes.login,
     // Refresh route when auth state changes
     refreshListenable: _authListenable,
-    // Redirect based on authentication state
-    redirect: (context, state) {
+    // Redirect based on authentication state and installation access
+    redirect: (context, state) async {
       final user = FirebaseAuth.instance.currentUser;
       final isLoggedIn = user != null;
+
+      // Define route categories
       final isAuthRoute = state.matchedLocation == AppRoutes.login ||
           state.matchedLocation == AppRoutes.signUp ||
           state.matchedLocation == AppRoutes.forgotPassword;
 
-      // If user is logged in and trying to access auth routes, redirect to dashboard
-      if (isLoggedIn && isAuthRoute) {
+      final isLinkRoute = state.matchedLocation == AppRoutes.linkAccount ||
+          state.matchedLocation == AppRoutes.joinWithCode;
+
+      final isInstallerRoute = state.matchedLocation.startsWith('/installer') ||
+          state.matchedLocation.startsWith('/admin');
+
+      // If user is not logged in
+      if (!isLoggedIn) {
+        // Allow auth routes and welcome wizard
+        if (isAuthRoute || state.matchedLocation == AppRoutes.welcome) {
+          return null;
+        }
+        return AppRoutes.login;
+      }
+
+      // User is logged in
+      // If trying to access auth routes, redirect to dashboard (or link-account if unlinked)
+      if (isAuthRoute) {
+        // Check if user has installation access
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+
+          if (userDoc.exists) {
+            final data = userDoc.data()!;
+            final role = data['installation_role'] as String?;
+            final installationId = data['installation_id'] as String?;
+
+            // Unlinked users go to link-account
+            if (role == null || role == 'unlinked') {
+              return AppRoutes.linkAccount;
+            }
+
+            // Installers and admins don't need an installation
+            if (role == 'installer' || role == 'admin') {
+              return AppRoutes.dashboard;
+            }
+
+            // Primary and subUser need an installation
+            if (installationId == null) {
+              return AppRoutes.linkAccount;
+            }
+          } else {
+            // User exists in Auth but not Firestore - create unlinked profile
+            await _createUnlinkedUserProfile(user);
+            return AppRoutes.linkAccount;
+          }
+        } catch (e) {
+          debugPrint('Redirect: Error checking user status: $e');
+        }
         return AppRoutes.dashboard;
       }
 
-      // If user is not logged in and trying to access protected routes, redirect to login
-      // (but allow auth routes and welcome wizard)
-      if (!isLoggedIn && !isAuthRoute && state.matchedLocation != AppRoutes.welcome) {
-        return AppRoutes.login;
+      // Allow link routes and installer routes without further checks
+      if (isLinkRoute || isInstallerRoute || state.matchedLocation == AppRoutes.welcome) {
+        return null;
+      }
+
+      // For protected routes (dashboard, settings, etc.), verify installation access
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        if (!userDoc.exists) {
+          await _createUnlinkedUserProfile(user);
+          return AppRoutes.linkAccount;
+        }
+
+        final data = userDoc.data()!;
+        final role = data['installation_role'] as String?;
+        final installationId = data['installation_id'] as String?;
+
+        // Unlinked users must go to link-account
+        if (role == null || role == 'unlinked') {
+          return AppRoutes.linkAccount;
+        }
+
+        // Installers and admins have unrestricted access
+        if (role == 'installer' || role == 'admin') {
+          return null;
+        }
+
+        // Primary and subUser need a valid installation
+        if (installationId == null) {
+          return AppRoutes.linkAccount;
+        }
+
+        // Check if installation is still active
+        final installDoc = await FirebaseFirestore.instance
+            .collection('installations')
+            .doc(installationId)
+            .get();
+
+        if (installDoc.exists && installDoc.data()?['is_active'] == false) {
+          // Installation deactivated - show error (for now, redirect to link-account)
+          return AppRoutes.linkAccount;
+        }
+      } catch (e) {
+        debugPrint('Redirect: Error checking installation access: $e');
+        // On error, allow access (fail open for better UX, security handled by Firestore rules)
       }
 
       // No redirect needed
@@ -109,6 +235,20 @@ class AppRouter {
         path: AppRoutes.forgotPassword,
         name: 'forgot-password',
         pageBuilder: (context, state) => const NoTransitionPage(child: ForgotPasswordPage()),
+      ),
+      // Installation access control routes
+      GoRoute(
+        path: AppRoutes.linkAccount,
+        name: 'link-account',
+        pageBuilder: (context, state) => const NoTransitionPage(child: LinkAccountScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.joinWithCode,
+        name: 'join-with-code',
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: JoinWithCodeScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.discovery,
@@ -219,6 +359,11 @@ class AppRouter {
         pageBuilder: (context, state) => const NoTransitionPage(child: SecuritySettingsScreen()),
       ),
       GoRoute(
+        path: AppRoutes.subUsers,
+        name: 'sub-users',
+        pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
+      ),
+      GoRoute(
         path: AppRoutes.deviceSetup,
         name: 'device-setup',
         pageBuilder: (context, state) => const NoTransitionPage(child: DeviceSetupPage()),
@@ -305,6 +450,11 @@ class AppRouter {
       ),
       // Installer mode routes
       GoRoute(
+        path: AppRoutes.installerLanding,
+        name: 'installer-landing',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerLandingScreen()),
+      ),
+      GoRoute(
         path: AppRoutes.installerPin,
         name: 'installer-pin',
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
@@ -313,6 +463,22 @@ class AppRouter {
         path: AppRoutes.installerWizard,
         name: 'installer-wizard',
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
+      ),
+      // Media mode routes
+      GoRoute(
+        path: AppRoutes.mediaLanding,
+        name: 'media-landing',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaLandingScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.mediaAccessCode,
+        name: 'media-access-code',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaAccessCodeScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.mediaDashboard,
+        name: 'media-dashboard',
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaDashboardScreen()),
       ),
       // Admin management routes
       GoRoute(
@@ -366,8 +532,13 @@ class AppRoutes {
   static const String rooflineSetupWizard = '/roofline-setup-wizard';
   static const String currentColors = '/settings/current-colors';
   // Installer mode routes
+  static const String installerLanding = '/installer';
   static const String installerPin = '/installer/pin';
   static const String installerWizard = '/installer/wizard';
+  // Media mode routes
+  static const String mediaLanding = '/media';
+  static const String mediaAccessCode = '/media/code';
+  static const String mediaDashboard = '/media/dashboard';
   // Admin management routes
   static const String adminPin = '/admin/pin';
   static const String adminDashboard = '/admin/dashboard';
@@ -376,4 +547,9 @@ class AppRoutes {
   // Library hierarchy routes
   static const String libraryRoot = '/library';
   static const String libraryNode = '/library/:nodeId';
+  // Installation access control routes
+  static const String linkAccount = '/link-account';
+  static const String joinWithCode = '/join-with-code';
+  static const String systemDeactivated = '/system-deactivated';
+  static const String subUsers = '/settings/users';
 }

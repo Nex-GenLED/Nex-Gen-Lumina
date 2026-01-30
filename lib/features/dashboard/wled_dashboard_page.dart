@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -18,10 +17,9 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/widgets/mini_schedule_list.dart';
-import 'package:nexgen_command/features/voice/dashboard_voice_control.dart';
-import 'package:nexgen_command/features/voice/widgets/voice_control_fab.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -52,26 +50,14 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   // Pattern adjustment panel expanded state
   bool _adjustmentPanelExpanded = false;
 
-  // Voice control state
-  bool _voiceListening = false;
-  late final stt.SpeechToText _speech;
-  String? _voiceFeedbackMessage;
-
   // Track if user has acknowledged sync warning during this session
   bool _syncWarningAcknowledged = false;
 
   @override
   void initState() {
     super.initState();
-    _speech = stt.SpeechToText();
     // Defer the check to after first frame to ensure context/router are ready
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
-  }
-
-  @override
-  void dispose() {
-    _speech.stop();
-    super.dispose();
   }
 
   /// Checks for active sync and shows warning if needed.
@@ -168,95 +154,85 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     }
   }
 
-  /// Toggle voice listening and process the command when speech is recognized
-  Future<void> _toggleVoice() async {
-    if (_voiceListening) {
-      await _speech.stop();
-      setState(() => _voiceListening = false);
-      return;
-    }
-
-    try {
-      final available = await _speech.initialize(
-        onStatus: (status) {
-          debugPrint('Voice status: $status');
-        },
-        onError: (error) {
-          debugPrint('Voice error: ${error.errorMsg}');
-          if (mounted) {
-            setState(() {
-              _voiceListening = false;
-              _voiceFeedbackMessage = 'Voice recognition error';
-            });
-          }
-        },
-      );
-
-      if (!available) {
-        if (mounted) {
-          setState(() {
-            _voiceFeedbackMessage = 'Voice recognition not available';
-          });
-        }
-        return;
-      }
-
-      setState(() => _voiceListening = true);
-
-      await _speech.listen(
-        onResult: (result) async {
-          if (!mounted) return;
-
-          final recognizedWords = result.recognizedWords;
-          debugPrint('Voice recognized: $recognizedWords (final: ${result.finalResult})');
-
-          // Only process final results
-          if (result.finalResult && recognizedWords.isNotEmpty) {
-            setState(() => _voiceListening = false);
-            await _speech.stop();
-
-            // Process the voice command
-            final handler = ref.read(voiceCommandHandlerProvider);
-            final feedback = await handler.processCommand(recognizedWords);
-
-            if (mounted) {
-              setState(() {
-                _voiceFeedbackMessage = feedback;
-              });
-
-              // Clear feedback after 2.5 seconds
-              Future.delayed(const Duration(milliseconds: 2500), () {
-                if (mounted) {
-                  setState(() {
-                    _voiceFeedbackMessage = null;
-                  });
-                }
-              });
-            }
-          }
-        },
-        listenOptions: stt.SpeechListenOptions(
-          listenMode: stt.ListenMode.confirmation,
-          partialResults: true,
+  /// Builds the "Viewing As" banner displayed when media user is viewing a customer
+  Widget _buildViewAsBanner(BuildContext context, WidgetRef ref, String customerName) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            NexGenPalette.cyan.withValues(alpha: 0.9),
+            NexGenPalette.blue.withValues(alpha: 0.9),
+          ],
         ),
-      );
-    } catch (e) {
-      debugPrint('Voice initialization failed: $e');
-      if (mounted) {
-        setState(() {
-          _voiceListening = false;
-          _voiceFeedbackMessage = 'Failed to start voice recognition';
-        });
-      }
-    }
+        boxShadow: [
+          BoxShadow(
+            color: NexGenPalette.cyan.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            const Icon(Icons.visibility, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Viewing customer system: $customerName',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                ref.read(viewAsControllerProvider).exitViewAsMode();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Exit', style: TextStyle(fontSize: 12)),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () => context.push(AppRoutes.mediaDashboard),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              icon: const Icon(Icons.search, size: 16),
+              label: const Text('Switch', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(wledStateProvider);
     final ip = ref.watch(selectedDeviceIpProvider);
-    final profileAsync = ref.watch(currentUserProfileProvider);
+    // Use view-as-aware profile provider to support media user viewing customer systems
+    final profileAsync = ref.watch(activeUserProfileProvider);
     final isRemoteMode = ref.watch(isRemoteModeProvider);
+    final isViewingAsCustomer = ref.watch(isViewingAsCustomerProvider);
 
     // Debug: Log connection state
     debugPrint('📊 Dashboard build: ip=$ip, connected=${state.connected}, isOn=${state.isOn}, remote=$isRemoteMode');
@@ -278,7 +254,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     return Scaffold(
       appBar: GlassAppBar(
-        title: Text('Hello, $userName'),
+        title: Text(isViewingAsCustomer ? 'Viewing: $userName' : 'Hello, $userName'),
         actions: [
           // Enhanced connection status indicator
           const Padding(
@@ -295,8 +271,17 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         ],
       ),
       body: Stack(children: [
+        // View As Banner when media user is viewing a customer
+        if (isViewingAsCustomer)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildViewAsBanner(context, ref, userName),
+          ),
         SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 100),
+          // Add top padding when view-as banner is shown
+          padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, 100),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // Section A: Image hero framed, now hosting header + controls overlays
             _buildHeroSection(context, ref, state, profileAsync),
@@ -344,32 +329,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
           ]),
         ),
-        // Voice control FAB - giant microphone button with glow animation
-        Positioned(
-          right: 20,
-          bottom: 120, // Position above the bottom nav bar
-          child: VoiceControlFab(
-            onTap: _toggleVoice,
-            isListening: _voiceListening,
-          ),
-        ),
-        // Voice feedback overlay - shows confirmation messages
-        if (_voiceFeedbackMessage != null)
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 220, // Position above the voice FAB
-            child: Center(
-              child: VoiceCommandFeedback(
-                message: _voiceFeedbackMessage!,
-                onDismiss: () {
-                  setState(() {
-                    _voiceFeedbackMessage = null;
-                  });
-                },
-              ),
-            ),
-          ),
       ]),
     );
   }

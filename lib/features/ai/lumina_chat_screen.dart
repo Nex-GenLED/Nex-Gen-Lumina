@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
+import 'package:nexgen_command/features/ai/vibe_feedback_dialog.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -19,6 +20,9 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/services/architectural_parser_service.dart';
 import 'package:nexgen_command/services/segment_pattern_generator.dart';
+import 'package:nexgen_command/services/pattern_analytics_service.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class LuminaChatScreen extends ConsumerStatefulWidget {
@@ -56,6 +60,10 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   static List<Color> currentPreviewColors = [];
   // Slide up/down animation controller for the preview bar
   late final AnimationController _previewBarAnim;
+
+  // === Feedback Tracking ===
+  // Track the last query for feedback recording (static to persist)
+  static String? _lastQueryForFeedback;
   
   Future<void> _handleThumbsUp(_Msg msg) async {
     // Update UI immediately to show feedback was received
@@ -67,6 +75,8 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       if (user == null) return;
       final svc = ref.read(userServiceProvider);
       final colorNames = msg.preview != null ? msg.preview!.colors.take(3).map(_colorName).toList() : <String>[];
+
+      // Record to user-specific preferences
       await svc.logPatternUsage(
         userId: user.uid,
         colorNames: colorNames,
@@ -74,6 +84,21 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
         paletteId: msg.preview?.paletteId,
         wled: msg.wledPayload,
       );
+
+      // Record to global analytics for cross-user learning
+      if (msg.wledPayload != null && _lastQueryForFeedback != null) {
+        final analyticsService = ref.read(patternAnalyticsServiceProvider);
+        final colors = msg.preview?.colors.map((c) => [c.red, c.green, c.blue]).toList() ?? <List<int>>[];
+        await analyticsService.recordThumbsUp(
+          query: _lastQueryForFeedback!,
+          effectId: msg.preview?.effectId ?? 0,
+          effectName: msg.preview?.effectName ?? 'Unknown',
+          colors: colors,
+          colorNames: msg.preview?.colorNames ?? colorNames,
+          userId: user.uid,
+        );
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thanks! I\'ll suggest more like this.')));
       }
@@ -140,47 +165,220 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
 
   Future<void> _handleThumbsDown(_Msg msg) async {
     try {
-      final choice = await showDialog<String>(context: context, builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF2A2A2A),
-          title: const Text('What was wrong?', style: TextStyle(color: Colors.white)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            ListTile(title: const Text('Wrong Colors', style: TextStyle(color: Colors.white70)), onTap: () => Navigator.of(ctx).pop('Wrong Colors')),
-            ListTile(title: const Text('Too Fast', style: TextStyle(color: Colors.white70)), onTap: () => Navigator.of(ctx).pop('Too Fast')),
-            ListTile(title: const Text('Wrong Vibe', style: TextStyle(color: Colors.white70)), onTap: () => Navigator.of(ctx).pop('Wrong Vibe')),
-          ]),
-        );
-      });
-      if (choice == null) return;
+      // Use enhanced feedback dialog for richer vibe clarification
+      final result = await showEnhancedFeedbackDialog(context);
+      if (result == null) return;
+
       // Update UI immediately to show feedback was received
       setState(() {
         msg.feedbackGiven = false;
       });
+
       final user = ref.read(authStateProvider).maybeWhen(data: (u) => u, orElse: () => null);
       if (user == null) return;
+
       final svc = ref.read(userServiceProvider);
-      // Map choice to dislike keywords
+      final analyticsService = ref.read(patternAnalyticsServiceProvider);
+
+      // Map feedback type to dislike keywords for user-specific preferences
       final List<String> keywords = [];
-      if (choice == 'Wrong Colors') {
+      if (result.feedbackType == 'Wrong Colors') {
         final names = msg.preview != null ? msg.preview!.colors.take(2).map(_colorName).toList() : <String>[];
         if (names.isNotEmpty) {
           keywords.addAll(names);
         } else {
           keywords.add('Colors');
         }
-      } else if (choice == 'Too Fast') {
+      } else if (result.feedbackType == 'Too Fast') {
         keywords.add('Fast');
-      } else if (choice == 'Wrong Vibe') {
+      } else if (result.feedbackType == 'Too Slow') {
+        keywords.add('Slow');
+      } else if (result.feedbackType == 'Wrong Vibe') {
         keywords.add('Wrong Vibe');
+        // If user specified a desired vibe, record it for learning
+        if (result.desiredVibe != null) {
+          keywords.add(result.desiredVibe!);
+        }
+      } else if (result.feedbackType == 'Too Bright') {
+        keywords.add('Bright');
       }
+
+      // Record user-specific dislikes
       for (final k in keywords) {
         await svc.addDislike(user.uid, k);
       }
+
+      // Record to global analytics for cross-user learning
+      if (_lastQueryForFeedback != null) {
+        // Build feedback reason string
+        String reason = result.feedbackType;
+        if (result.desiredVibe != null && result.desiredVibe != 'custom') {
+          reason = '${result.feedbackType}: wanted ${result.desiredVibe}';
+        } else if (result.customFeedback != null) {
+          reason = '${result.feedbackType}: ${result.customFeedback}';
+        }
+
+        await analyticsService.recordThumbsDown(
+          query: _lastQueryForFeedback!,
+          effectId: msg.preview?.effectId ?? 0,
+          effectName: msg.preview?.effectName ?? 'Unknown',
+          reason: reason,
+          userId: user.uid,
+        );
+
+        // If this was a "Wrong Vibe" feedback with clarification, record vibe correction
+        if (result.feedbackType == 'Wrong Vibe' && result.desiredVibe != null) {
+          // Detect what vibe the AI thought it was providing
+          final detectedVibe = _detectVibeFromPattern(msg.preview);
+          final desiredVibe = result.desiredVibe == 'custom'
+              ? result.customFeedback ?? 'unknown'
+              : result.desiredVibe!;
+
+          await analyticsService.recordVibeCorrection(
+            query: _lastQueryForFeedback!,
+            detectedVibe: detectedVibe,
+            desiredVibe: desiredVibe,
+            originalEffectId: msg.preview?.effectId,
+            userId: user.uid,
+          );
+        }
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Got it — I\'ll avoid that.')));
+        String snackMessage = 'Got it — I\'ll improve next time.';
+        if (result.desiredVibe != null && result.desiredVibe != 'custom') {
+          snackMessage = 'Got it — I\'ll aim for ${result.desiredVibe!.toLowerCase()} next time.';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(snackMessage)));
       }
     } catch (e) {
       debugPrint('ThumbsDown failed: $e');
+    }
+  }
+
+  /// Attempts to detect what vibe the AI intended based on the pattern preview.
+  String _detectVibeFromPattern(_PatternPreview? preview) {
+    if (preview == null) return 'unknown';
+
+    // Check effect name for vibe hints
+    final effectName = preview.effectName?.toLowerCase() ?? '';
+    if (effectName.contains('chase') || effectName.contains('running')) return 'energetic';
+    if (effectName.contains('breathe') || effectName.contains('fade')) return 'calm';
+    if (effectName.contains('twinkle') || effectName.contains('sparkle')) return 'playful';
+    if (effectName.contains('rainbow') || effectName.contains('colorful')) return 'vibrant';
+    if (effectName.contains('pulse')) return 'dynamic';
+    if (effectName.contains('solid') || effectName.contains('static')) return 'subtle';
+
+    // Check colors for vibe hints
+    final hasWarm = preview.colors.any((c) {
+      final hsv = HSVColor.fromColor(c);
+      return hsv.hue < 60 || hsv.hue > 300;
+    });
+    final hasCool = preview.colors.any((c) {
+      final hsv = HSVColor.fromColor(c);
+      return hsv.hue >= 180 && hsv.hue <= 270;
+    });
+
+    if (hasWarm && !hasCool) return 'warm';
+    if (hasCool && !hasWarm) return 'cool';
+
+    return 'balanced';
+  }
+
+  /// Records a pattern application to the global analytics service for cross-user learning.
+  Future<void> _recordPatternApplied(String query, _PatternPreview? preview, Map<String, dynamic> wledPayload) async {
+    try {
+      final user = ref.read(authStateProvider).maybeWhen(data: (u) => u, orElse: () => null);
+      final analyticsService = ref.read(patternAnalyticsServiceProvider);
+
+      // Extract colors as RGB arrays
+      final colors = preview?.colors.map((c) => [c.red, c.green, c.blue]).toList() ?? <List<int>>[];
+      final colorNames = preview?.colorNames.isNotEmpty == true
+          ? preview!.colorNames
+          : preview?.colors.map(_colorName).toList() ?? <String>[];
+
+      // Extract speed, intensity, brightness from wled payload
+      int speed = preview?.speed ?? 128;
+      int intensity = preview?.intensity ?? 128;
+      int brightness = 210;
+      final seg = wledPayload['seg'];
+      if (seg is List && seg.isNotEmpty && seg.first is Map) {
+        final first = seg.first as Map;
+        speed = (first['sx'] as num?)?.toInt() ?? speed;
+        intensity = (first['ix'] as num?)?.toInt() ?? intensity;
+      }
+      if (wledPayload['bri'] is num) {
+        brightness = (wledPayload['bri'] as num).toInt();
+      }
+
+      await analyticsService.recordPatternApplied(
+        query: query,
+        effectId: preview?.effectId ?? 0,
+        effectName: preview?.effectName ?? 'Unknown',
+        colors: colors,
+        colorNames: colorNames,
+        speed: speed,
+        intensity: intensity,
+        brightness: brightness,
+        userId: user?.uid,
+        wledPayload: wledPayload,
+      );
+    } catch (e) {
+      debugPrint('Failed to record pattern applied: $e');
+    }
+  }
+
+  /// Applies a pattern directly from a chat message's Apply button
+  Future<void> _applyPatternFromChat(Map<String, dynamic> wledPayload, _PatternPreview? preview) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No controller connected')),
+      );
+      return;
+    }
+
+    try {
+      final ok = await repo.applyJson(wledPayload);
+      if (!ok) {
+        debugPrint('WLED rejected payload from chat Apply button');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern')),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        // Store pattern metadata for home screen display
+        if (preview != null) {
+          ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+            colorSequence: preview.colors,
+            colorNames: preview.colorNames,
+            effectName: preview.effectName,
+          );
+        }
+
+        // Update the active preset label
+        String patternLabel = preview?.patternName ?? 'Lumina Pattern';
+        ref.read(activePresetLabelProvider.notifier).state = patternLabel;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$patternLabel applied!')),
+        );
+
+        // Clear chat history after successful application
+        _clearChatHistory();
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Apply pattern from chat failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error applying pattern: $e')),
+        );
+      }
     }
   }
 
@@ -267,6 +465,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     _activePreview = null;
     showPreviewBar = false;
     currentPreviewColors = [];
+    _lastQueryForFeedback = null;
   }
 
   // Load and cache the background image used for real-time previews.
@@ -312,6 +511,8 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       // This prevents stale patterns from visually persisting
       showPreviewBar = false;
       currentPreviewColors = [];
+      // Track query for feedback recording
+      _lastQueryForFeedback = prompt;
     });
     _previewBarAnim.reverse();
     _input.clear();
@@ -320,6 +521,22 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     try {
       final repo = ref.read(wledRepositoryProvider);
       // We proceed even if repo is null, to at least show the verbal response.
+
+      // === SCHEDULE DETECTION ===
+      // Check if this is a schedule request before processing as a pattern
+      if (_detectScheduleIntent(prompt)) {
+        final confirmation = await _parseAndCreateSchedule(prompt);
+        if (confirmation != null) {
+          setState(() {
+            _messages.add(_Msg.assistant(confirmation));
+            _isThinking = false;
+          });
+          _scrollToEndSoon();
+          return; // Exit early - schedule created successfully
+        }
+        // If schedule parsing failed, fall through to pattern generation
+        // The user might want an immediate pattern instead
+      }
 
       // === PHASE 2: Architectural Parser ===
       // Try to parse the command with architectural understanding
@@ -478,6 +695,9 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
                     effectName: preview.effectName,
                   );
                 }
+
+                // Record pattern application to global analytics for learning
+                _recordPatternApplied(prompt, preview, wled);
 
                 // Extract pattern label: prefer patternName > thought > verbal
                 String patternLabel = 'Lumina Pattern';
@@ -881,12 +1101,311 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
     return cleaned.trim();
   }
 
+  // ==========================================================================
+  // SCHEDULE DETECTION AND CREATION
+  // These methods enable Lumina to understand and create schedules from
+  // natural language requests like "run Chiefs pattern sunset to sunrise daily"
+  // ==========================================================================
+
+  /// Detects if the user's message is a schedule-related request.
+  /// Returns true if the message contains scheduling intent keywords.
+  bool _detectScheduleIntent(String text) {
+    final lowerText = text.toLowerCase();
+
+    // Schedule-specific keywords
+    final scheduleKeywords = [
+      'schedule',
+      'automate',
+      'automation',
+      'every day',
+      'every night',
+      'every evening',
+      'every morning',
+      'daily',
+      'nightly',
+      'weekly',
+      'weeknight',
+      'weekend',
+      'for the week',
+      'for the entire week',
+      'all week',
+      'each night',
+      'each day',
+      'recurring',
+    ];
+
+    // Time range patterns indicating scheduling
+    final timeRangePatterns = [
+      'sunset to sunrise',
+      'sunrise to sunset',
+      'dusk to dawn',
+      'dawn to dusk',
+      'until sunrise',
+      'until sunset',
+      'from sunset',
+      'from sunrise',
+      'at sunset',
+      'at sunrise',
+    ];
+
+    // Day of week mentions (strong indicator of scheduling)
+    final dayKeywords = [
+      'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+      'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+    ];
+
+    // Check for explicit schedule keywords
+    for (final keyword in scheduleKeywords) {
+      if (lowerText.contains(keyword)) return true;
+    }
+
+    // Check for time range patterns (strong schedule indicators)
+    for (final pattern in timeRangePatterns) {
+      if (lowerText.contains(pattern)) return true;
+    }
+
+    // Check for day mentions combined with time indicators
+    final hasDayMention = dayKeywords.any((day) => lowerText.contains(day));
+    final hasTimeIndicator = lowerText.contains('pm') ||
+                             lowerText.contains('am') ||
+                             lowerText.contains('sunset') ||
+                             lowerText.contains('sunrise');
+
+    if (hasDayMention && hasTimeIndicator) return true;
+
+    // Pattern: "run X at Y" or "set X at Y" with time
+    final runAtPattern = RegExp(r'(run|set|play|start)\s+.+\s+(at|from)\s+\d{1,2}', caseSensitive: false);
+    if (runAtPattern.hasMatch(lowerText)) return true;
+
+    return false;
+  }
+
+  /// Parses a schedule request and creates the schedule.
+  /// Returns a friendly confirmation message or null if parsing failed.
+  Future<String?> _parseAndCreateSchedule(String text) async {
+    final lowerText = text.toLowerCase();
+
+    // =========================================================================
+    // STEP 1: Extract the pattern/action from the request
+    // =========================================================================
+    String? patternName;
+    String actionLabel;
+
+    // Look for pattern names in the request
+    // Common patterns: sports teams, holidays, colors, effects
+    final patternMatchers = [
+      // Sports teams
+      RegExp(r'(chiefs|titans|patriots|cowboys|raiders|eagles|packers|steelers|broncos|chargers|ravens|bengals|browns|49ers|seahawks|rams|cardinals|saints|falcons|panthers|buccaneers|vikings|bears|lions|giants|jets|dolphins|bills|colts|texans|jaguars|commanders)\s*(pattern|mode)?', caseSensitive: false),
+      // NCAA teams
+      RegExp(r'(vols|volunteers|crimson tide|tide|bulldogs|gators|seminoles|hurricanes|longhorns|sooners|buckeyes|wolverines|spartans|wildcats|tigers|jayhawks|cornhuskers|badgers|hawkeyes|golden gophers)\s*(pattern|mode)?', caseSensitive: false),
+      // Holidays
+      RegExp(r'(christmas|halloween|thanksgiving|fourth of july|independence day|valentines|easter|st patricks|new years|holiday)\s*(pattern|mode)?', caseSensitive: false),
+      // Generic patterns
+      RegExp(r'(warm white|cool white|bright white|rainbow|festive|party|calm|relaxing|cozy|romantic)\s*(pattern|mode)?', caseSensitive: false),
+    ];
+
+    for (final pattern in patternMatchers) {
+      final match = pattern.firstMatch(lowerText);
+      if (match != null) {
+        patternName = match.group(1)!;
+        // Capitalize first letter of each word
+        patternName = patternName.split(' ').map((word) =>
+          word.isNotEmpty ? '${word[0].toUpperCase()}${word.substring(1)}' : word
+        ).join(' ');
+        break;
+      }
+    }
+
+    // Determine action label
+    if (patternName != null) {
+      actionLabel = 'Pattern: $patternName';
+    } else if (lowerText.contains('off') || lowerText.contains('turn off')) {
+      actionLabel = 'Turn Off';
+      patternName = 'Off';
+    } else if (lowerText.contains('on') || lowerText.contains('turn on')) {
+      actionLabel = 'Turn On';
+      patternName = 'On';
+    } else if (lowerText.contains('warm')) {
+      actionLabel = 'Pattern: Warm White';
+      patternName = 'Warm White';
+    } else if (lowerText.contains('cool')) {
+      actionLabel = 'Pattern: Cool White';
+      patternName = 'Cool White';
+    } else {
+      // Try to extract a custom pattern name from quotes or after "run"/"play"
+      final quotedMatch = RegExp(r'"([^"]+)"').firstMatch(text);
+      if (quotedMatch != null) {
+        patternName = quotedMatch.group(1);
+        actionLabel = 'Pattern: $patternName';
+      } else {
+        // Default to "Custom Pattern" from Lumina
+        actionLabel = 'Pattern: Lumina Custom';
+        patternName = 'Lumina Custom';
+      }
+    }
+
+    // =========================================================================
+    // STEP 2: Determine ON time
+    // =========================================================================
+    String timeLabel;
+
+    if (lowerText.contains('sunset') || lowerText.contains('dusk') || lowerText.contains('evening')) {
+      timeLabel = 'Sunset';
+    } else if (lowerText.contains('sunrise') || lowerText.contains('dawn') || lowerText.contains('morning')) {
+      timeLabel = 'Sunrise';
+    } else if (lowerText.contains('midnight')) {
+      timeLabel = '12:00 AM';
+    } else if (lowerText.contains('noon')) {
+      timeLabel = '12:00 PM';
+    } else {
+      // Try to parse specific time like "8 pm" or "8:00 pm"
+      final timeMatch = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', caseSensitive: false).firstMatch(lowerText);
+      if (timeMatch != null) {
+        final hour = timeMatch.group(1)!;
+        final minute = timeMatch.group(2) ?? '00';
+        final ampm = timeMatch.group(3)!.toUpperCase();
+        timeLabel = '$hour:$minute $ampm';
+      } else {
+        // Default to sunset for lighting schedules
+        timeLabel = 'Sunset';
+      }
+    }
+
+    // =========================================================================
+    // STEP 3: Determine OFF time
+    // =========================================================================
+    String? offTimeLabel;
+
+    final offTimePatterns = [
+      RegExp(r'(?:to|until|through|->|→|-)\s*(sunrise|dawn)', caseSensitive: false),
+      RegExp(r'(?:to|until|through|->|→|-)\s*(sunset|dusk)', caseSensitive: false),
+      RegExp(r'(?:to|until|through|->|→|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)', caseSensitive: false),
+    ];
+
+    for (final pattern in offTimePatterns) {
+      final match = pattern.firstMatch(lowerText);
+      if (match != null) {
+        final captured = match.group(1)!.toLowerCase();
+        if (captured == 'sunrise' || captured == 'dawn') {
+          offTimeLabel = 'Sunrise';
+        } else if (captured == 'sunset' || captured == 'dusk') {
+          offTimeLabel = 'Sunset';
+        } else {
+          final hour = match.group(1)!;
+          final minute = match.group(2) ?? '00';
+          final ampm = match.group(3)!.toUpperCase();
+          offTimeLabel = '$hour:$minute $ampm';
+        }
+        break;
+      }
+    }
+
+    // Check for common patterns
+    if (offTimeLabel == null) {
+      if (lowerText.contains('dusk to dawn') || lowerText.contains('sunset to sunrise')) {
+        offTimeLabel = 'Sunrise';
+      } else if (lowerText.contains('dawn to dusk') || lowerText.contains('sunrise to sunset')) {
+        offTimeLabel = 'Sunset';
+      }
+    }
+
+    // =========================================================================
+    // STEP 4: Determine repeat days
+    // =========================================================================
+    List<String> repeatDays;
+
+    if (lowerText.contains('every night') || lowerText.contains('nightly') ||
+        lowerText.contains('every evening') || lowerText.contains('daily') ||
+        lowerText.contains('every day') || lowerText.contains('for the week') ||
+        lowerText.contains('for the entire week') || lowerText.contains('all week')) {
+      repeatDays = ['Daily'];
+    } else if (lowerText.contains('weeknight')) {
+      repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    } else if (lowerText.contains('weekend')) {
+      repeatDays = ['Sat', 'Sun'];
+    } else {
+      // Check for specific days mentioned
+      final dayMap = {
+        'monday': 'Mon', 'mon': 'Mon',
+        'tuesday': 'Tue', 'tue': 'Tue',
+        'wednesday': 'Wed', 'wed': 'Wed',
+        'thursday': 'Thu', 'thu': 'Thu',
+        'friday': 'Fri', 'fri': 'Fri',
+        'saturday': 'Sat', 'sat': 'Sat',
+        'sunday': 'Sun', 'sun': 'Sun',
+      };
+
+      final foundDays = <String>{};
+      for (final entry in dayMap.entries) {
+        if (lowerText.contains(entry.key)) {
+          foundDays.add(entry.value);
+        }
+      }
+
+      repeatDays = foundDays.isNotEmpty ? foundDays.toList() : ['Daily'];
+    }
+
+    // =========================================================================
+    // STEP 5: Create the schedule
+    // =========================================================================
+    final scheduleId = DateTime.now().millisecondsSinceEpoch.toString();
+    final schedule = ScheduleItem(
+      id: scheduleId,
+      timeLabel: timeLabel,
+      offTimeLabel: offTimeLabel,
+      repeatDays: repeatDays,
+      actionLabel: actionLabel,
+      enabled: true,
+    );
+
+    // Add to the schedules provider
+    try {
+      await ref.read(schedulesProvider.notifier).add(schedule);
+    } catch (e) {
+      debugPrint('Failed to create schedule: $e');
+      return null;
+    }
+
+    // =========================================================================
+    // STEP 6: Generate friendly confirmation message
+    // =========================================================================
+    final daysDescription = repeatDays.contains('Daily')
+        ? 'every day'
+        : repeatDays.length == 5 && !repeatDays.contains('Sat') && !repeatDays.contains('Sun')
+            ? 'on weeknights'
+            : repeatDays.length == 2 && repeatDays.contains('Sat') && repeatDays.contains('Sun')
+                ? 'on weekends'
+                : 'on ${repeatDays.join(", ")}';
+
+    final timeDesc = timeLabel.toLowerCase();
+    final offTimeDesc = offTimeLabel?.toLowerCase();
+
+    String confirmation;
+    if (offTimeDesc != null) {
+      confirmation = 'Perfect! I\'ve scheduled your $patternName pattern to run $daysDescription from $timeDesc until $offTimeDesc. You can view and manage this in your Schedule tab.';
+    } else {
+      confirmation = 'Perfect! I\'ve scheduled your $patternName pattern to start $daysDescription at $timeDesc. You can view and manage this in your Schedule tab.';
+    }
+
+    return confirmation;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Listen for user profile updates to pick up the house image URL
     ref.listen(currentUserProfileProvider, (previous, next) {
       final url = next.maybeWhen(data: (u) => u?.housePhotoUrl, orElse: () => null);
       _setHouseImageFromUrl(url);
+    });
+
+    // Listen for pending voice messages from long-press on Lumina nav button
+    ref.listen(pendingVoiceMessageProvider, (previous, next) {
+      if (next != null && next.isNotEmpty) {
+        // Consume the message immediately
+        ref.read(pendingVoiceMessageProvider.notifier).state = null;
+        // Send it to the AI
+        _send(next);
+      }
     });
 
     // Note: Chat history now persists across tab navigation until app exit
@@ -939,6 +1458,7 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
               onThumbsUp: _handleThumbsUp,
               onThumbsDown: _handleThumbsDown,
               onRefinement: _sendRefinement,
+              onApply: _applyPatternFromChat,
             ),
           ),
 
@@ -954,20 +1474,6 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Live preview bar, appears just above the input console
-                    LivePreviewContainer(
-                      show: showPreviewBar,
-                      animation: _previewBarAnim,
-                      imageProvider: _houseImageProvider,
-                      colors: currentPreviewColors,
-                      effectId: _activePreview?.effectId ?? 0,
-                      speed: _activePreview?.speed ?? 128,
-                      onClose: () {
-                        setState(() => showPreviewBar = false);
-                        _previewBarAnim.reverse();
-                      },
-                    ),
-                    const SizedBox(height: 10),
                     _InputConsole(
                       controller: _input,
                       focusNode: _focus,
@@ -1000,7 +1506,8 @@ class _MessageList extends StatelessWidget {
   final void Function(_Msg) onThumbsUp;
   final void Function(_Msg) onThumbsDown;
   final void Function(String)? onRefinement;
-  const _MessageList({required this.scrollController, required this.messages, required this.isThinking, this.bottomReserve = 12, this.topReserve = 0, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
+  final void Function(Map<String, dynamic> wledPayload, _PatternPreview? preview)? onApply;
+  const _MessageList({required this.scrollController, required this.messages, required this.isThinking, this.bottomReserve = 12, this.topReserve = 0, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement, this.onApply});
 
   @override
   Widget build(BuildContext context) {
@@ -1058,10 +1565,14 @@ class _MessageList extends StatelessWidget {
                 _Role.assistant => _AssistantBubble(
                   text: m.text,
                   preview: m.preview,
+                  wledPayload: m.wledPayload,
                   feedbackGiven: m.feedbackGiven,
                   onThumbsUp: () => onThumbsUp(m),
                   onThumbsDown: () => onThumbsDown(m),
                   onRefinement: isLastAssistantWithPreview ? onRefinement : null,
+                  onApply: (m.wledPayload != null && onApply != null)
+                      ? () => onApply!(m.wledPayload!, m.preview)
+                      : null,
                 ),
                 _Role.thinking => const _ThinkingBubble(),
               },
@@ -1118,11 +1629,13 @@ class _UserBubble extends StatelessWidget {
 class _AssistantBubble extends StatelessWidget {
   final String text;
   final _PatternPreview? preview;
+  final Map<String, dynamic>? wledPayload;
   final bool? feedbackGiven; // null = no feedback, true = thumbs up, false = thumbs down
   final VoidCallback onThumbsUp;
   final VoidCallback onThumbsDown;
   final void Function(String)? onRefinement;
-  const _AssistantBubble({required this.text, this.preview, this.feedbackGiven, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement});
+  final VoidCallback? onApply;
+  const _AssistantBubble({required this.text, this.preview, this.wledPayload, this.feedbackGiven, required this.onThumbsUp, required this.onThumbsDown, this.onRefinement, this.onApply});
 
   @override
   Widget build(BuildContext context) {
@@ -1151,6 +1664,23 @@ class _AssistantBubble extends StatelessWidget {
             if (preview != null) ...[
               const SizedBox(height: 10),
               _PatternTile(preview: preview!),
+              // Apply button - always visible when there's a pattern with payload
+              if (onApply != null) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onApply,
+                    icon: const Icon(Icons.bolt_rounded, color: Colors.black, size: 18),
+                    label: const Text('Apply to Lights', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: NexGenPalette.cyan,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
               // Refinement chips for pattern adjustments
               if (onRefinement != null) ...[
                 const SizedBox(height: 10),

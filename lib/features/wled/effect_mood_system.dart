@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/effect_database.dart';
 
 /// Effect mood categories for user-friendly filtering.
 /// Each mood groups effects by the "vibe" they create.
+///
+/// NOTE: This enum is kept for backward compatibility with existing UI code.
+/// The new EffectMoodCategory in effect_database.dart provides more granular control.
 enum EffectMood {
   /// Gentle, relaxing effects - breathe, fade, solid
   calmElegant,
@@ -95,85 +99,107 @@ extension EffectMoodDisplay on EffectMood {
         return Icons.waves;
     }
   }
+
+  /// Convert to the new EffectMoodCategory set for database lookups
+  Set<EffectMoodCategory> toEffectMoodCategories() {
+    switch (this) {
+      case EffectMood.calmElegant:
+        return {EffectMoodCategory.calm, EffectMoodCategory.elegant, EffectMoodCategory.romantic};
+      case EffectMood.subtleMagic:
+        return {EffectMoodCategory.magical, EffectMoodCategory.romantic};
+      case EffectMood.festiveFun:
+        return {EffectMoodCategory.festive, EffectMoodCategory.playful};
+      case EffectMood.dramatic:
+        return {EffectMoodCategory.mysterious};
+      case EffectMood.smoothMotion:
+        return {EffectMoodCategory.natural, EffectMoodCategory.modern};
+    }
+  }
 }
 
 /// Maps effect IDs to their mood categories.
-/// Includes both WLED native effects and Lumina custom effects.
+/// Now powered by the comprehensive EffectDatabase.
+///
+/// This class provides backward compatibility while leveraging the new
+/// EffectDatabase for more accurate mood matching.
 class EffectMoodSystem {
   EffectMoodSystem._();
 
-  /// Effect ID to mood mapping
-  static const Map<int, EffectMood> _effectMoods = {
-    // Calm & Elegant - gentle, relaxing
-    0: EffectMood.calmElegant,    // Solid
-    2: EffectMood.calmElegant,    // Breathe
-    12: EffectMood.calmElegant,   // Fade
-    1007: EffectMood.calmElegant, // Ocean Swell (custom)
+  /// Convert EffectMoodCategory to legacy EffectMood
+  static EffectMood? _categoryToLegacyMood(EffectMoodCategory category) {
+    switch (category) {
+      case EffectMoodCategory.calm:
+      case EffectMoodCategory.elegant:
+      case EffectMoodCategory.romantic:
+      case EffectMoodCategory.cozy:
+        return EffectMood.calmElegant;
+      case EffectMoodCategory.magical:
+        return EffectMood.subtleMagic;
+      case EffectMoodCategory.festive:
+      case EffectMoodCategory.playful:
+        return EffectMood.festiveFun;
+      case EffectMoodCategory.mysterious:
+        return EffectMood.dramatic;
+      case EffectMoodCategory.natural:
+      case EffectMoodCategory.modern:
+        return EffectMood.smoothMotion;
+    }
+  }
 
-    // Subtle Magic - twinkling, magical
-    17: EffectMood.subtleMagic,   // Twinkle
-    20: EffectMood.subtleMagic,   // Sparkle
-    49: EffectMood.subtleMagic,   // Fairy
-    87: EffectMood.subtleMagic,   // Glitter
+  /// Get the mood for an effect ID (legacy API)
+  /// Returns the primary mood based on the new EffectDatabase
+  static EffectMood? getMood(int effectId) {
+    final metadata = EffectDatabase.getEffect(effectId);
+    if (metadata == null || metadata.moods.isEmpty) return null;
 
-    // Festive Fun - high energy, party
-    13: EffectMood.festiveFun,    // Theater
-    15: EffectMood.festiveFun,    // Running
-    28: EffectMood.festiveFun,    // Chase
-    91: EffectMood.festiveFun,    // Bouncing Balls
-
-    // Dramatic - impressive, attention-grabbing
-    59: EffectMood.dramatic,      // Multi Comet
-    76: EffectMood.dramatic,      // Meteor
-    1001: EffectMood.dramatic,    // Rising Tide (custom)
-    1002: EffectMood.dramatic,    // Falling Tide (custom)
-    1003: EffectMood.dramatic,    // Pulse Burst (custom)
-    1005: EffectMood.dramatic,    // Grand Reveal (custom)
-
-    // Smooth Motion - continuous flowing
-    3: EffectMood.smoothMotion,   // Wipe
-    6: EffectMood.smoothMotion,   // Sweep
-    10: EffectMood.smoothMotion,  // Scan
-    40: EffectMood.smoothMotion,  // Scanner
-    96: EffectMood.smoothMotion,  // Drip
-  };
-
-  /// Get the mood for an effect ID
-  static EffectMood? getMood(int effectId) => _effectMoods[effectId];
+    // Return the first matching mood, preferring certain categories
+    for (final category in metadata.moods) {
+      final legacyMood = _categoryToLegacyMood(category);
+      if (legacyMood != null) return legacyMood;
+    }
+    return null;
+  }
 
   /// Get all effect IDs for a specific mood
+  /// Now powered by the comprehensive EffectDatabase
   static List<int> getEffectIdsForMood(EffectMood mood) {
-    return _effectMoods.entries
-        .where((e) => e.value == mood)
-        .map((e) => e.key)
-        .toList();
+    final categories = mood.toEffectMoodCategories();
+    final effects = EffectDatabase.getEffectsForAnyMood(categories);
+    return effects.map((e) => e.id).toList();
   }
 
   /// Get all effect IDs that match any of the given moods
   static List<int> getEffectIdsForMoods(Set<EffectMood> moods) {
-    if (moods.isEmpty) return _effectMoods.keys.toList();
-    return _effectMoods.entries
-        .where((e) => moods.contains(e.value))
-        .map((e) => e.key)
-        .toList();
+    if (moods.isEmpty) return EffectDatabase.effects.keys.toList();
+
+    final categories = <EffectMoodCategory>{};
+    for (final mood in moods) {
+      categories.addAll(mood.toEffectMoodCategories());
+    }
+
+    final effects = EffectDatabase.getEffectsForAnyMood(categories);
+    return effects.map((e) => e.id).toList();
   }
 
   /// Check if an effect ID matches a mood
   static bool effectMatchesMood(int effectId, EffectMood mood) {
-    return _effectMoods[effectId] == mood;
+    final categories = mood.toEffectMoodCategories();
+    final metadata = EffectDatabase.getEffect(effectId);
+    if (metadata == null) return false;
+    return metadata.moods.intersection(categories).isNotEmpty;
   }
 
   /// Filter a list of effect IDs to only those matching the given mood
   static List<int> filterByMood(List<int> effectIds, EffectMood? mood) {
     if (mood == null) return effectIds;
-    return effectIds.where((id) => _effectMoods[id] == mood).toList();
+    return effectIds.where((id) => effectMatchesMood(id, mood)).toList();
   }
 
   /// Get mood counts for a list of effect IDs (for UI display)
   static Map<EffectMood, int> getMoodCounts(List<int> effectIds) {
     final counts = <EffectMood, int>{};
     for (final mood in EffectMood.values) {
-      counts[mood] = effectIds.where((id) => _effectMoods[id] == mood).length;
+      counts[mood] = effectIds.where((id) => effectMatchesMood(id, mood)).length;
     }
     return counts;
   }
@@ -186,4 +212,108 @@ class EffectMoodSystem {
     EffectMood.dramatic,
     EffectMood.smoothMotion,
   ];
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW: Enhanced API using EffectDatabase
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Check if an effect respects user colors
+  /// CRITICAL: Use this to avoid recommending rainbow/palette effects for themed lighting
+  static bool effectRespectsColors(int effectId) {
+    return EffectDatabase.effectRespectsColors(effectId);
+  }
+
+  /// Get all effects that respect user colors
+  static List<int> getColorRespectingEffectIds() {
+    return EffectDatabase.getColorRespectingEffects().map((e) => e.id).toList();
+  }
+
+  /// Get effects that override colors (rainbow, palette-based)
+  /// Use ONLY when user explicitly requests rainbow/multicolor
+  static List<int> getColorOverridingEffectIds() {
+    return EffectDatabase.getColorOverridingEffects().map((e) => e.id).toList();
+  }
+
+  /// Get effect metadata
+  static EffectMetadata? getEffectMetadata(int effectId) {
+    return EffectDatabase.getEffect(effectId);
+  }
+
+  /// Find effects matching multiple criteria
+  /// Always respects colors unless explicitly disabled
+  static List<int> findMatchingEffectIds({
+    EffectMood? mood,
+    MotionType? motionType,
+    EnergyLevel? minEnergy,
+    EnergyLevel? maxEnergy,
+    String? occasion,
+    bool requireColorRespect = true,
+  }) {
+    final categories = mood?.toEffectMoodCategories();
+
+    final effects = EffectDatabase.findMatchingEffects(
+      moods: categories,
+      motionType: motionType,
+      minEnergy: minEnergy,
+      maxEnergy: maxEnergy,
+      occasion: occasion,
+      requireColorRespect: requireColorRespect,
+    );
+
+    return effects.map((e) => e.id).toList();
+  }
+
+  /// Get recommended effects for a scenario
+  /// ALWAYS respects colors by default (critical for themed lighting)
+  static List<int> getRecommendedEffectIds({
+    required String scenario,
+    bool allowColorOverride = false,
+  }) {
+    return EffectDatabase.getRecommendedEffectIds(
+      scenario: scenario,
+      colorRespectRequired: !allowColorOverride,
+    );
+  }
+
+  /// Check if an effect should be avoided for a given occasion
+  static bool shouldAvoidEffectForOccasion(int effectId, String occasion) {
+    return EffectDatabase.shouldAvoidEffect(effectId, occasion);
+  }
+
+  /// Get the best effect for a mood + color respect requirement
+  static int? getBestEffectForMood(EffectMood mood, {bool mustRespectColors = true}) {
+    final effectIds = findMatchingEffectIds(
+      mood: mood,
+      requireColorRespect: mustRespectColors,
+    );
+
+    if (effectIds.isEmpty) return null;
+
+    // Return the first one (they're generally in order of preference)
+    return effectIds.first;
+  }
+
+  /// Get effect name
+  static String getEffectName(int effectId) {
+    return EffectDatabase.getEffect(effectId)?.name ?? 'Unknown';
+  }
+
+  /// Get effect description
+  static String getEffectDescription(int effectId) {
+    return EffectDatabase.getEffect(effectId)?.description ?? '';
+  }
+
+  /// Get recommended speed range for an effect
+  static (int min, int max, int default_) getRecommendedSpeedRange(int effectId) {
+    final metadata = EffectDatabase.getEffect(effectId);
+    if (metadata == null) return (0, 255, 128);
+    return (metadata.minSpeed, metadata.maxSpeed, metadata.defaultSpeed);
+  }
+
+  /// Get recommended intensity range for an effect
+  static (int min, int max, int default_) getRecommendedIntensityRange(int effectId) {
+    final metadata = EffectDatabase.getEffect(effectId);
+    if (metadata == null) return (0, 255, 128);
+    return (metadata.minIntensity, metadata.maxIntensity, metadata.defaultIntensity);
+  }
 }

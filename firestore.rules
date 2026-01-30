@@ -6,6 +6,20 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Helper function to check if the authenticated user has media/admin access
+    // Media users can view any customer's data for content creation purposes
+    function hasMediaAccess() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role in ['media', 'dealer', 'admin'];
+    }
+
+    // Helper function to check if user can read another user's data
+    // Either the owner OR a user with media access privileges
+    function canReadUserData(userId) {
+      return isOwner(userId) || hasMediaAccess();
+    }
+
     // SECURITY: Prevent tampering with critical fields
     function cannotModifyCriticalFields() {
       return request.resource.data.owner_id == resource.data.owner_id &&
@@ -22,9 +36,45 @@ service cloud.firestore {
              email.matches('.*@authorized-dealer.com');
     }
 
-    // User profiles - private to each user
+    // Helper function to check if user is a primary user of any installation
+    function isPrimaryUser() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'primary';
+    }
+
+    // Helper function to check if user is an installer
+    function isInstaller() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'installer';
+    }
+
+    // Helper function to check if user is an admin
+    function isAdmin() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'admin';
+    }
+
+    // Helper function to check if user belongs to a specific installation
+    function belongsToInstallation(installationId) {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_id == installationId;
+    }
+
+    // Helper function to check if user is the primary user of a specific installation
+    function isPrimaryUserOfInstallation(installationId) {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/installations/$(installationId)) &&
+             get(/databases/$(database)/documents/installations/$(installationId)).data.primary_user_id == request.auth.uid;
+    }
+
+    // User profiles - private to each user, but readable by media/dealer/admin roles
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      // Media users can read any user profile for content creation
+      allow read: if canReadUserData(userId);
 
       // SECURITY: On create, enforce owner_id matches auth uid
       allow create: if isOwner(userId) &&
@@ -54,8 +104,8 @@ service cloud.firestore {
 
       // Controllers subcollection - WLED devices registered to user
       match /controllers/{controllerId} {
-        // Users can read their own controllers
-        allow read: if isOwner(userId);
+        // Users can read their own controllers, media users can view for content
+        allow read: if canReadUserData(userId);
 
         // Users can create controllers (from device discovery/setup)
         allow create: if isOwner(userId);
@@ -69,8 +119,8 @@ service cloud.firestore {
 
       // Schedules subcollection - automation schedules for lighting
       match /schedules/{scheduleId} {
-        // Users can read their own schedules
-        allow read: if isOwner(userId);
+        // Users can read their own schedules, media users can view for content
+        allow read: if canReadUserData(userId);
 
         // Users can create schedules
         allow create: if isOwner(userId);
@@ -84,8 +134,8 @@ service cloud.firestore {
 
       // Commands subcollection - Cloud Relay commands for remote WLED control
       match /commands/{commandId} {
-        // Users can read their own commands
-        allow read: if isOwner(userId);
+        // Users can read their own commands, media users can view system state
+        allow read: if canReadUserData(userId);
 
         // Users can create commands (sent from app when remote)
         allow create: if isOwner(userId);
@@ -99,8 +149,8 @@ service cloud.firestore {
 
       // Geofences subcollection - location-based automation triggers
       match /geofences/{geofenceId} {
-        // Users can read their own geofences
-        allow read: if isOwner(userId);
+        // Users can read their own geofences, media users can view for content
+        allow read: if canReadUserData(userId);
 
         // Users can create geofences
         allow create: if isOwner(userId);
@@ -326,6 +376,85 @@ service cloud.firestore {
 
     match /oauth_refresh_tokens/{tokenId} {
       allow read, write: if false; // Only Cloud Functions can access
+    }
+
+    // ==================== Installer Mode Collections ====================
+
+    // Dealers collection - managed by admins
+    match /dealers/{dealerCode} {
+      // Authenticated users can read dealers (for validation during installer login)
+      allow read: if request.auth != null;
+
+      // Only admins can manage dealers
+      allow create, update, delete: if hasMediaAccess() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
+    }
+
+    // Installers collection - managed by dealers/admins
+    match /installers/{installerId} {
+      // Authenticated users can read installers (for PIN validation)
+      allow read: if request.auth != null;
+
+      // Dealers can manage their own installers, admins can manage all
+      allow create, update, delete: if hasMediaAccess();
+    }
+
+    // Installation records - created during customer setup
+    match /installations/{installationId} {
+      // Users who belong to this installation can read it, plus media/dealer/admin
+      allow read: if belongsToInstallation(installationId) || hasMediaAccess() || isAdmin();
+
+      // Installers and admins can create installation records
+      allow create: if (isInstaller() || isAdmin()) &&
+        request.resource.data.keys().hasAll(['primary_user_id', 'dealer_code', 'installer_code', 'installed_at']);
+
+      // Primary users of this installation can update it, plus admins
+      allow update: if isPrimaryUserOfInstallation(installationId) || isAdmin();
+
+      // Only admins can delete installations
+      allow delete: if isAdmin();
+
+      // Sub-users subcollection - managed by primary users
+      match /subUsers/{subUserId} {
+        // Anyone in the installation can read sub-users list
+        allow read: if belongsToInstallation(installationId) || hasMediaAccess();
+
+        // Primary users of this installation can manage sub-users
+        allow create, update, delete: if isPrimaryUserOfInstallation(installationId) || isAdmin();
+      }
+    }
+
+    // ==================== Invitations Collection ====================
+
+    // Invitations - for inviting sub-users to join an installation
+    match /invitations/{invitationId} {
+      // Primary user who created the invitation can read it
+      // Invitee (by email) can also read it to accept
+      allow read: if request.auth != null && (
+        resource.data.primary_user_id == request.auth.uid ||
+        resource.data.invitee_email == request.auth.token.email ||
+        isAdmin()
+      );
+
+      // Primary users can create invitations for their installation
+      allow create: if request.auth != null && isPrimaryUser() &&
+        request.resource.data.keys().hasAll(['installation_id', 'primary_user_id', 'invitee_email', 'token', 'expires_at', 'status', 'permissions']) &&
+        request.resource.data.primary_user_id == request.auth.uid &&
+        request.resource.data.status == 'pending';
+
+      // Invitee can update (accept) the invitation
+      // Primary user can update (revoke) the invitation
+      allow update: if request.auth != null && (
+        resource.data.invitee_email == request.auth.token.email ||
+        resource.data.primary_user_id == request.auth.uid ||
+        isAdmin()
+      );
+
+      // Primary user can delete their invitations
+      allow delete: if request.auth != null && (
+        resource.data.primary_user_id == request.auth.uid ||
+        isAdmin()
+      );
     }
   }
 }

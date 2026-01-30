@@ -8,48 +8,158 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
-import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/features/voice/dashboard_voice_control.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 /// Simplified dashboard for less tech-savvy users.
 /// Shows large, easy-to-use controls with minimal complexity.
-class SimpleDashboard extends ConsumerWidget {
+class SimpleDashboard extends ConsumerStatefulWidget {
   const SimpleDashboard({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SimpleDashboard> createState() => _SimpleDashboardState();
+}
+
+class _SimpleDashboardState extends ConsumerState<SimpleDashboard> {
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _voiceListening = false;
+  String? _voiceFeedbackMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final ref = this.ref;
     final wledState = ref.watch(wledStateProvider);
-    final brightness = wledState?.brightness ?? 128;
-    final isOn = wledState?.isOn ?? false;
+    final brightness = wledState.brightness;
+    final isOn = wledState.isOn;
 
     return Scaffold(
       backgroundColor: NexGenPalette.deepNavy,
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
-          children: [
-            // Header
-            _buildHeader(context),
-            const SizedBox(height: 32),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+              children: [
+                // Header
+                _buildHeader(context),
+                const SizedBox(height: 32),
 
-            // Large On/Off Buttons
-            _buildPowerButtons(context, ref, isOn),
-            const SizedBox(height: 32),
+                // Large On/Off Buttons
+                _buildPowerButtons(context, ref, isOn),
+                const SizedBox(height: 32),
 
-            // Brightness Slider
-            _buildBrightnessSlider(context, ref, brightness),
-            const SizedBox(height: 32),
+                // Brightness Slider
+                _buildBrightnessSlider(context, ref, brightness),
+                const SizedBox(height: 32),
 
-            // My Favorites Section
-            _buildFavoritesSection(context, ref),
-            const SizedBox(height: 32),
+                // My Favorites Section
+                _buildFavoritesSection(context, ref),
+                const SizedBox(height: 32),
 
-            // Voice Control Button
-            _buildVoiceButton(context),
-          ],
-        ),
+                // Voice Control Button
+                _buildVoiceButton(context),
+              ],
+            ),
+          ),
+          // Voice feedback overlay
+          if (_voiceFeedbackMessage != null)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 180,
+              child: Center(
+                child: _VoiceFeedbackCard(
+                  message: _voiceFeedbackMessage!,
+                  onDismiss: () => setState(() => _voiceFeedbackMessage = null),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  /// Toggle voice listening and process the command when speech is recognized
+  Future<void> _toggleVoice() async {
+    if (_voiceListening) {
+      await _speech.stop();
+      setState(() => _voiceListening = false);
+      return;
+    }
+
+    try {
+      final available = await _speech.initialize(
+        onStatus: (status) {
+          debugPrint('Voice status: $status');
+        },
+        onError: (error) {
+          debugPrint('Voice error: ${error.errorMsg}');
+          if (mounted) {
+            setState(() {
+              _voiceListening = false;
+              _voiceFeedbackMessage = 'Voice recognition error';
+            });
+          }
+        },
+      );
+
+      if (!available) {
+        if (mounted) {
+          setState(() {
+            _voiceFeedbackMessage = 'Voice recognition not available';
+          });
+        }
+        return;
+      }
+
+      setState(() => _voiceListening = true);
+
+      await _speech.listen(
+        onResult: (result) async {
+          if (!mounted) return;
+
+          final recognizedWords = result.recognizedWords;
+          debugPrint('Voice recognized: $recognizedWords (final: ${result.finalResult})');
+
+          // Only process final results
+          if (result.finalResult && recognizedWords.isNotEmpty) {
+            setState(() => _voiceListening = false);
+            await _speech.stop();
+
+            // Process the voice command
+            final handler = ref.read(voiceCommandHandlerProvider);
+            final feedback = await handler.processCommand(recognizedWords);
+
+            if (mounted) {
+              setState(() {
+                _voiceFeedbackMessage = feedback;
+              });
+
+              // Clear feedback after 2.5 seconds
+              Future.delayed(const Duration(milliseconds: 2500), () {
+                if (mounted) {
+                  setState(() {
+                    _voiceFeedbackMessage = null;
+                  });
+                }
+              });
+            }
+          }
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.confirmation,
+          partialResults: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Voice initialization failed: $e');
+      if (mounted) {
+        setState(() {
+          _voiceListening = false;
+          _voiceFeedbackMessage = 'Failed to start voice recognition';
+        });
+      }
+    }
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -246,20 +356,26 @@ class SimpleDashboard extends ConsumerWidget {
 
   Widget _buildVoiceButton(BuildContext context) {
     return GestureDetector(
-      onTap: () => context.push(AppRoutes.voiceAssistants),
-      child: Container(
+      onTap: _toggleVoice,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         height: 100,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [NexGenPalette.violet, NexGenPalette.cyan],
+          gradient: LinearGradient(
+            colors: _voiceListening
+                ? [NexGenPalette.cyan, NexGenPalette.cyan.withOpacity(0.8)]
+                : [NexGenPalette.violet, NexGenPalette.cyan],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: NexGenPalette.cyan.withOpacity(0.3),
-              blurRadius: 20,
+              color: _voiceListening
+                  ? NexGenPalette.cyan.withOpacity(0.6)
+                  : NexGenPalette.cyan.withOpacity(0.3),
+              blurRadius: _voiceListening ? 30 : 20,
+              spreadRadius: _voiceListening ? 2 : 0,
               offset: const Offset(0, 4),
             ),
           ],
@@ -267,10 +383,14 @@ class SimpleDashboard extends ConsumerWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.mic, color: Colors.white, size: 36),
+            Icon(
+              _voiceListening ? Icons.mic : Icons.mic_none,
+              color: Colors.white,
+              size: 36,
+            ),
             const SizedBox(width: 16),
             Text(
-              'Voice Control',
+              _voiceListening ? 'Listening...' : 'Voice Control',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -294,6 +414,121 @@ class SimpleDashboard extends ConsumerWidget {
 
   void _setBrightness(WidgetRef ref, int brightness) {
     ref.read(wledStateProvider.notifier).setBrightness(brightness);
+  }
+}
+
+/// Voice feedback card for Simple Mode
+class _VoiceFeedbackCard extends StatefulWidget {
+  final String message;
+  final VoidCallback onDismiss;
+
+  const _VoiceFeedbackCard({
+    required this.message,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_VoiceFeedbackCard> createState() => _VoiceFeedbackCardState();
+}
+
+class _VoiceFeedbackCardState extends State<_VoiceFeedbackCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scaleAnimation;
+  late final Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+    );
+
+    _controller.forward();
+
+    // Auto-dismiss after 2 seconds
+    Future.delayed(const Duration(milliseconds: 2000), () {
+      if (mounted) {
+        _controller.reverse().then((_) => widget.onDismiss());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Opacity(
+          opacity: _fadeAnimation.value,
+          child: Transform.scale(
+            scale: _scaleAnimation.value,
+            child: child,
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.5), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: NexGenPalette.cyan.withValues(alpha: 0.3),
+              blurRadius: 20,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle_rounded,
+                color: NexGenPalette.cyan,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                widget.message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

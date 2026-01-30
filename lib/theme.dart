@@ -170,6 +170,8 @@ class NexGenPalette {
   static const cyan = Color(0xFF00F0FF); // Nex‑Gen Cyan
   static const blue = Color(0xFF007BFF); // Accent Blue for gradients
   static const violet = Color(0xFF7000FF); // Electric Violet
+  static const magenta = Color(0xFFFF00FF); // Electric Magenta for Media Mode
+  static const amber = Color(0xFFFFAB00); // Amber for warnings
   static const primary = cyan; // Alias for cyan
   static const secondary = violet; // Alias for violet
     // Special accents

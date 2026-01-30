@@ -1,10 +1,20 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
+import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/models/installation_model.dart';
+import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/nav.dart';
 
 /// Main wizard shell for installer setup flow
 class InstallerSetupWizard extends ConsumerStatefulWidget {
@@ -63,6 +73,12 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           ],
         ),
         actions: [
+          // Media Dashboard button for viewing customer systems
+          IconButton(
+            icon: const Icon(Icons.camera_alt_outlined, color: NexGenPalette.cyan),
+            tooltip: 'Media Dashboard',
+            onPressed: () => context.push(AppRoutes.mediaDashboard),
+          ),
           // Installer mode indicator with PIN display
           Container(
             margin: const EdgeInsets.only(right: 16),
@@ -321,26 +337,325 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     ref.read(installerWizardStepProvider.notifier).state = step;
   }
 
-  void _completeSetup() {
-    // TODO: Save all configuration, create user account, etc.
+  bool _isProcessing = false;
+
+  /// Generate a secure temporary password for the customer
+  String _generateTempPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    final random = Random.secure();
+    return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  Future<void> _completeSetup() async {
+    final customerInfo = ref.read(installerCustomerInfoProvider);
+    final session = ref.read(installerSessionProvider);
+
+    if (session == null) {
+      _showError('Installer session expired. Please re-enter your PIN.');
+      return;
+    }
+
+    if (!customerInfo.isValid) {
+      _showError('Please complete all required customer information.');
+      return;
+    }
+
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+
+    try {
+      // 1. Generate temporary password
+      final tempPassword = _generateTempPassword();
+
+      // 2. Create Firebase Auth account for customer
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: customerInfo.email.trim().toLowerCase(),
+        password: tempPassword,
+      );
+      final userId = credential.user!.uid;
+
+      // 3. Determine site mode and max sub-users
+      final siteMode = ref.read(siteModeProvider);
+      final maxSubUsers = siteMode == SiteMode.commercial ? 20 : 5;
+
+      // 4. Create Installation document
+      final installationRef = FirebaseFirestore.instance.collection('installations').doc();
+
+      final installation = Installation(
+        id: installationRef.id,
+        primaryUserId: userId,
+        dealerCode: session.dealer.dealerCode,
+        installerCode: session.installer.installerCode,
+        installerName: session.installer.name,
+        dealerCompanyName: session.dealer.companyName,
+        installedAt: DateTime.now(),
+        warrantyExpires: DateTime.now().add(const Duration(days: 365 * 5)),
+        controllerSerials: [], // TODO: Get from controller setup step
+        address: customerInfo.address,
+        city: customerInfo.city,
+        state: customerInfo.state,
+        zipCode: customerInfo.zipCode,
+        maxSubUsers: maxSubUsers,
+        siteMode: siteMode,
+        isActive: true,
+        primaryUserName: customerInfo.name,
+        primaryUserEmail: customerInfo.email,
+        primaryUserPhone: customerInfo.phone,
+      );
+
+      await installationRef.set(installation.toJson());
+
+      // 5. Create UserModel with Primary role
+      final userModel = UserModel(
+        id: userId,
+        email: customerInfo.email.trim().toLowerCase(),
+        displayName: customerInfo.name,
+        phoneNumber: customerInfo.phone,
+        address: '${customerInfo.address}\n${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}',
+        ownerId: userId,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        installationId: installationRef.id,
+        installationRole: InstallationRole.primary,
+        primaryUserId: userId,
+        linkedAt: DateTime.now(),
+      );
+
+      await FirebaseFirestore.instance.collection('users').doc(userId).set(userModel.toJson());
+
+      // 6. Create installation record for tracking/analytics
+      final installationRecord = InstallationRecord(
+        id: installationRef.id,
+        customerId: userId,
+        customerInfo: customerInfo,
+        dealerCode: session.dealer.dealerCode,
+        installerCode: session.installer.installerCode,
+        installerName: session.installer.name,
+        dealerCompanyName: session.dealer.companyName,
+        installedAt: DateTime.now(),
+        controllerIds: [],
+        notes: customerInfo.notes.isNotEmpty ? customerInfo.notes : null,
+      );
+
+      await FirebaseFirestore.instance
+          .collection('installation_records')
+          .doc(installationRef.id)
+          .set(installationRecord.toMap());
+
+      // 7. Increment installer's installation count
+      final installerQuery = await FirebaseFirestore.instance
+          .collection('installers')
+          .where('fullPin', isEqualTo: session.installer.fullPin)
+          .limit(1)
+          .get();
+
+      if (installerQuery.docs.isNotEmpty) {
+        await installerQuery.docs.first.reference.update({
+          'totalInstallations': FieldValue.increment(1),
+        });
+      }
+
+      // 8. Sign out installer from customer's account
+      await FirebaseAuth.instance.signOut();
+
+      setState(() => _isProcessing = false);
+
+      // 9. Show handoff credentials screen
+      if (mounted) {
+        _showHandoffCredentials(
+          customerName: customerInfo.name,
+          email: customerInfo.email,
+          tempPassword: tempPassword,
+          installationId: installationRef.id,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _isProcessing = false);
+      String errorMessage;
+      switch (e.code) {
+        case 'email-already-in-use':
+          errorMessage = 'An account with this email already exists.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'The email address is invalid.';
+          break;
+        case 'weak-password':
+          errorMessage = 'The password is too weak.';
+          break;
+        default:
+          errorMessage = 'Failed to create account: ${e.message}';
+      }
+      _showError(errorMessage);
+    } catch (e) {
+      setState(() => _isProcessing = false);
+      _showError('Setup failed: $e');
+    }
+  }
+
+  void _showError(String message) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: NexGenPalette.gunmetal90,
-        title: const Text('Setup Complete!', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'The system has been configured successfully. The customer can now use the app.',
-          style: TextStyle(color: NexGenPalette.textMedium),
+        title: const Text('Error', style: TextStyle(color: Colors.red)),
+        content: Text(message, style: const TextStyle(color: NexGenPalette.textMedium)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK', style: TextStyle(color: NexGenPalette.cyan)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHandoffCredentials({
+    required String customerName,
+    required String email,
+    required String tempPassword,
+    required String installationId,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 28),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text('Setup Complete!', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Customer account has been created successfully.',
+                style: TextStyle(color: NexGenPalette.textMedium),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'CUSTOMER LOGIN CREDENTIALS',
+                style: TextStyle(
+                  color: NexGenPalette.cyan,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildCredentialRow('Name', customerName),
+              const SizedBox(height: 8),
+              _buildCredentialRow('Email', email, canCopy: true),
+              const SizedBox(height: 8),
+              _buildCredentialRow('Temporary Password', tempPassword, canCopy: true, isPassword: true),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Customer should change their password after first login.',
+                        style: TextStyle(color: Colors.amber, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () {
+              // Copy all credentials to clipboard
+              final credentials = 'Lumina App Login\n\nEmail: $email\nTemporary Password: $tempPassword\n\nPlease change your password after first login.';
+              Clipboard.setData(ClipboardData(text: credentials));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Credentials copied to clipboard'),
+                  backgroundColor: NexGenPalette.cyan,
+                ),
+              );
+            },
+            child: const Text('Copy All', style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () {
               Navigator.of(context).pop();
               ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+              // Reset wizard state
+              ref.read(installerWizardStepProvider.notifier).state = InstallerWizardStep.customerInfo;
+              ref.read(installerCustomerInfoProvider.notifier).state = const CustomerInfo();
               this.context.go('/');
             },
-            child: const Text('Done', style: TextStyle(color: NexGenPalette.cyan)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+            ),
+            child: const Text('Done', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCredentialRow(String label, String value, {bool canCopy = false, bool isPassword = false}) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.line.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: isPassword ? FontWeight.w600 : FontWeight.normal,
+                    fontFamily: isPassword ? 'monospace' : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (canCopy)
+            IconButton(
+              icon: const Icon(Icons.copy, color: NexGenPalette.cyan, size: 18),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$label copied'),
+                    backgroundColor: NexGenPalette.cyan,
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

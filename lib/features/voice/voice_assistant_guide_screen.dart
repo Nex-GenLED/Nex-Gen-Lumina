@@ -908,7 +908,7 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 12),
-            _buildFeatureRow(context, Icons.check_circle, 'Native WLED integration built-in'),
+            _buildFeatureRow(context, Icons.check_circle, 'Native LED controller integration'),
             _buildFeatureRow(context, Icons.check_circle, 'Works with any voice assistant'),
             _buildFeatureRow(context, Icons.check_circle, 'Advanced automations and triggers'),
             _buildFeatureRow(context, Icons.check_circle, 'Dashboard widgets and controls'),
@@ -926,7 +926,7 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
               child: OutlinedButton.icon(
                 onPressed: () => _launchUrl('https://www.home-assistant.io/integrations/wled/'),
                 icon: const Icon(Icons.open_in_new),
-                label: const Text('View WLED Integration Guide'),
+                label: const Text('View Integration Guide'),
               ),
             ),
           ],

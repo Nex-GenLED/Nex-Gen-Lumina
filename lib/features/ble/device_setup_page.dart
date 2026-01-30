@@ -14,6 +14,9 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
 class DeviceSetupPage extends ConsumerStatefulWidget {
@@ -56,11 +59,70 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   @override
   void initState() {
     super.initState();
+
+    // Check user permissions before allowing controller pairing
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _checkPairingPermission();
+    });
+
     // Avoid plugin calls on web/simulation; provide a mock experience.
     if (kIsWeb || kSimulationMode) {
       _mockPopulate();
     } else {
       _startScan();
+    }
+  }
+
+  /// Verify the current user has permission to add new controllers.
+  /// Only primary users and installers can pair new devices.
+  Future<void> _checkPairingPermission() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You must be signed in to add controllers.')),
+        );
+        context.pop();
+      }
+      return;
+    }
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('User profile not found.')),
+          );
+          context.pop();
+        }
+        return;
+      }
+
+      final data = userDoc.data()!;
+      final roleStr = data['installation_role'] as String?;
+      final role = InstallationRoleExtension.fromJson(roleStr);
+
+      // Only primary users and installers can add new controllers
+      if (role != InstallationRole.primary && role != InstallationRole.installer) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Only system owners can add new controllers.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          context.pop();
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Error checking pairing permission: $e');
+      // Allow through in case of network issues to avoid blocking installers
     }
   }
 

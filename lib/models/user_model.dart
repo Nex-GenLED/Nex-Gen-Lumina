@@ -1,7 +1,41 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
+import 'package:nexgen_command/models/user_role.dart';
+import 'package:nexgen_command/models/sub_user_permissions.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/utils/input_validation.dart';
+
+/// User role for access control
+enum UserRole {
+  /// Standard homeowner account (default)
+  residential,
+  /// Professional account with media access to customer systems
+  media,
+  /// Dealer account
+  dealer,
+  /// System administrator
+  admin,
+}
+
+extension UserRoleExtension on UserRole {
+  String get displayName {
+    switch (this) {
+      case UserRole.residential:
+        return 'Residential';
+      case UserRole.media:
+        return 'Media Professional';
+      case UserRole.dealer:
+        return 'Dealer';
+      case UserRole.admin:
+        return 'Administrator';
+    }
+  }
+
+  /// Whether this role can view other users' systems
+  bool get canViewCustomerSystems {
+    return this == UserRole.media || this == UserRole.dealer || this == UserRole.admin;
+  }
+}
 
 /// Annual seasonal color window model
 class SeasonalColorWindow {
@@ -48,6 +82,9 @@ class UserModel {
   final String ownerId;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// User role for access control (residential, media, dealer, admin)
+  final UserRole userRole;
 
   // Profile enrichment for personalization and suggestions
   final String? location; // freeform city/region/country
@@ -132,6 +169,28 @@ class UserModel {
   /// User's saved schedules for automation
   final List<ScheduleItem> schedules;
 
+  // ========== Installation Access Control ==========
+
+  /// The installation this user belongs to (null for unlinked/installer/admin).
+  final String? installationId;
+
+  /// User's role within the installation system.
+  /// Determines access level: primary (owner), subUser, installer, admin, unlinked.
+  final InstallationRole installationRole;
+
+  /// For sub-users: the primary user who owns the installation.
+  /// For primary users: equals their own ID.
+  final String? primaryUserId;
+
+  /// When this user was linked to their installation.
+  final DateTime? linkedAt;
+
+  /// Permissions for sub-users (null for primary/installer/admin).
+  final SubUserPermissions? subUserPermissions;
+
+  /// Invitation token used to link this account (for audit trail).
+  final String? invitationToken;
+
   UserModel({
     required this.id,
     required String email,
@@ -140,6 +199,7 @@ class UserModel {
     required this.ownerId,
     required this.createdAt,
     required this.updatedAt,
+    this.userRole = UserRole.residential,
     String? location,
     this.timeZone,
     List<String>? preferredCategoryIds,
@@ -181,6 +241,13 @@ class UserModel {
     List<String>? sportsTeamPriority,
     this.weeklySchedulePreviewEnabled = true,
     this.schedules = const [],
+    // Installation access control
+    this.installationId,
+    this.installationRole = InstallationRole.unlinked,
+    this.primaryUserId,
+    this.linkedAt,
+    this.subUserPermissions,
+    this.invitationToken,
   })  :
         // SECURITY: Validate and sanitize all user inputs
         email = InputValidation.validateEmail(email) ?? email,
@@ -221,6 +288,7 @@ class UserModel {
       ownerId: json['owner_id'] as String,
       createdAt: (json['created_at'] as Timestamp).toDate(),
       updatedAt: (json['updated_at'] as Timestamp).toDate(),
+      userRole: _parseUserRole(json['user_role'] as String?),
       location: json['location'] as String?,
       timeZone: json['time_zone'] as String?,
       preferredCategoryIds: (json['preferred_category_ids'] as List?)?.map((e) => e.toString()).toList() ?? const [],
@@ -282,7 +350,34 @@ class UserModel {
               .map((e) => ScheduleItem.fromJson(e))
               .toList() ??
           const [],
+      // Installation access control
+      installationId: json['installation_id'] as String?,
+      installationRole: InstallationRoleExtension.fromJson(json['installation_role'] as String?),
+      primaryUserId: json['primary_user_id'] as String?,
+      linkedAt: json['linked_at'] != null
+          ? (json['linked_at'] as Timestamp).toDate()
+          : null,
+      subUserPermissions: json['sub_user_permissions'] != null
+          ? SubUserPermissions.fromJson(json['sub_user_permissions'] as Map<String, dynamic>)
+          : null,
+      invitationToken: json['invitation_token'] as String?,
     );
+  }
+
+  /// Parse user role from string, defaulting to residential
+  static UserRole _parseUserRole(String? roleStr) {
+    if (roleStr == null) return UserRole.residential;
+    switch (roleStr) {
+      case 'media':
+        return UserRole.media;
+      case 'dealer':
+        return UserRole.dealer;
+      case 'admin':
+        return UserRole.admin;
+      case 'residential':
+      default:
+        return UserRole.residential;
+    }
   }
 
   Map<String, dynamic> toJson() {
@@ -294,6 +389,7 @@ class UserModel {
       'owner_id': ownerId,
       'created_at': Timestamp.fromDate(createdAt),
       'updated_at': Timestamp.fromDate(updatedAt),
+      'user_role': userRole.name,
       'location': location,
       'time_zone': timeZone,
       'preferred_category_ids': preferredCategoryIds,
@@ -336,6 +432,13 @@ class UserModel {
       'sports_team_priority': sportsTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
       'schedules': schedules.map((e) => e.toJson()).toList(),
+      // Installation access control
+      if (installationId != null) 'installation_id': installationId,
+      'installation_role': installationRole.toJson(),
+      if (primaryUserId != null) 'primary_user_id': primaryUserId,
+      if (linkedAt != null) 'linked_at': Timestamp.fromDate(linkedAt!),
+      if (subUserPermissions != null) 'sub_user_permissions': subUserPermissions!.toJson(),
+      if (invitationToken != null) 'invitation_token': invitationToken,
     };
   }
 
@@ -347,6 +450,7 @@ class UserModel {
     String? ownerId,
     DateTime? createdAt,
     DateTime? updatedAt,
+    UserRole? userRole,
     String? location,
     String? timeZone,
     List<String>? preferredCategoryIds,
@@ -388,6 +492,13 @@ class UserModel {
     List<String>? sportsTeamPriority,
     bool? weeklySchedulePreviewEnabled,
     List<ScheduleItem>? schedules,
+    // Installation access control
+    String? installationId,
+    InstallationRole? installationRole,
+    String? primaryUserId,
+    DateTime? linkedAt,
+    SubUserPermissions? subUserPermissions,
+    String? invitationToken,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -397,6 +508,7 @@ class UserModel {
       ownerId: ownerId ?? this.ownerId,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      userRole: userRole ?? this.userRole,
       location: location ?? this.location,
       timeZone: timeZone ?? this.timeZone,
       preferredCategoryIds: preferredCategoryIds ?? this.preferredCategoryIds,
@@ -438,6 +550,29 @@ class UserModel {
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,
       schedules: schedules ?? this.schedules,
+      // Installation access control
+      installationId: installationId ?? this.installationId,
+      installationRole: installationRole ?? this.installationRole,
+      primaryUserId: primaryUserId ?? this.primaryUserId,
+      linkedAt: linkedAt ?? this.linkedAt,
+      subUserPermissions: subUserPermissions ?? this.subUserPermissions,
+      invitationToken: invitationToken ?? this.invitationToken,
     );
   }
+
+  /// Helper to check if user has access to an installation.
+  bool get hasInstallationAccess =>
+      installationRole != InstallationRole.unlinked &&
+      (installationId != null ||
+          installationRole == InstallationRole.installer ||
+          installationRole == InstallationRole.admin);
+
+  /// Helper to check if user is the primary owner of their installation.
+  bool get isPrimaryOwner => installationRole == InstallationRole.primary;
+
+  /// Helper to check if user can pair new controllers.
+  bool get canPairControllers => installationRole.canPairControllers;
+
+  /// Helper to check if user can invite sub-users.
+  bool get canInviteSubUsers => installationRole.canInviteUsers;
 }

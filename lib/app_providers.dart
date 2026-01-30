@@ -141,3 +141,8 @@ final remoteAccessConfigProvider = Provider<RemoteAccessConfig?>((ref) {
 /// Tracks the currently selected tab index in the main navigation.
 /// Used by screens like Lumina to detect when the user navigates away.
 final selectedTabIndexProvider = StateProvider<int>((ref) => 0);
+
+/// Holds a pending voice message to be sent to Lumina chat.
+/// When set, the Lumina chat screen will automatically consume and send it.
+/// Set to null after the message is consumed.
+final pendingVoiceMessageProvider = StateProvider<String?>((ref) => null);

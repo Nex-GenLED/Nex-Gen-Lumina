@@ -204,7 +204,27 @@ class InstallerModeNotifier extends StateNotifier<bool> {
       return true;
     } catch (e) {
       debugPrint('InstallerMode: Error validating PIN: $e');
-      // For development/testing, allow a master PIN
+      // Master admin PIN for Nex-Gen administrative access
+      if (enteredPin == '8817') {
+        debugPrint('InstallerMode: Using master admin PIN');
+        _ref.read(installerSessionProvider.notifier).state = InstallerSession(
+          installer: const InstallerInfo(
+            installerCode: '17',
+            dealerCode: '88',
+            name: 'Nex-Gen Administrator',
+          ),
+          dealer: const DealerInfo(
+            dealerCode: '88',
+            name: 'Nex-Gen Admin',
+            companyName: 'Nex-Gen LED Systems',
+          ),
+          authenticatedAt: DateTime.now(),
+        );
+        state = true;
+        _resetSessionTimer();
+        return true;
+      }
+      // For development/testing, allow a development master PIN
       if (enteredPin == '0000') {
         debugPrint('InstallerMode: Using development master PIN');
         _ref.read(installerSessionProvider.notifier).state = InstallerSession(

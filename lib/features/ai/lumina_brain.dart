@@ -9,6 +9,7 @@ import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
+import 'package:nexgen_command/services/pattern_analytics_service.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'dart:convert';
 
@@ -96,6 +97,19 @@ class LuminaBrain {
         contextBlock = '$contextBlock\n\n$avoidanceContext';
         debugPrint('📋 Injected avoidance context (${historyService.historySize} suggestions in history)');
       }
+    }
+
+    // Inject global learning context from cross-user analytics
+    // This helps the AI make better recommendations based on what works well for all users
+    try {
+      final analyticsService = ref.read(patternAnalyticsServiceProvider);
+      final globalContext = await analyticsService.buildGlobalLearningContext(userPrompt);
+      if (globalContext != null && globalContext.isNotEmpty) {
+        contextBlock = '$contextBlock\n\n$globalContext';
+        debugPrint('🌐 Injected global learning context from analytics');
+      }
+    } catch (e) {
+      debugPrint('Failed to inject global learning context: $e');
     }
 
     // Use higher temperature for open-ended queries to increase creativity
@@ -384,7 +398,22 @@ class LuminaBrain {
     String refinementPrompt, {
     required Map<String, dynamic> currentPattern,
   }) async {
-    final contextBlock = _buildContextBlock(ref);
+    String contextBlock = _buildContextBlock(ref);
+
+    // Inject global learning context for refinements too
+    // This helps the AI understand what adjustments work well for users
+    try {
+      final analyticsService = ref.read(patternAnalyticsServiceProvider);
+      // Extract the original query from the pattern if available
+      final originalQuery = currentPattern['originalQuery'] as String? ?? refinementPrompt;
+      final globalContext = await analyticsService.buildGlobalLearningContext(originalQuery);
+      if (globalContext != null && globalContext.isNotEmpty) {
+        contextBlock = '$contextBlock\n\n$globalContext';
+      }
+    } catch (e) {
+      debugPrint('Failed to inject global learning context for refinement: $e');
+    }
+
     return LuminaAI.chatRefinement(
       refinementPrompt,
       currentPattern: currentPattern,

@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -25,6 +26,47 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
+import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
+import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
+
+/// Helper to execute custom Lumina effects (ID >= 1000).
+/// Returns true if the effect was a custom effect and was executed.
+/// Returns false if it's a native WLED effect (caller should send payload directly).
+///
+/// Custom Lumina effects animate by sending sequential WLED payloads from the app.
+/// The animation plays once and leaves the LEDs in the final frame state.
+Future<bool> _executeCustomEffectIfNeeded({
+  required int effectId,
+  required List<List<int>> colors,
+  required WledRepository repo,
+  int? totalPixels,
+}) async {
+  // Check if this is a custom Lumina effect
+  if (!LuminaCustomEffectsCatalog.isCustomEffect(effectId)) {
+    return false; // Not a custom effect, let caller handle normally
+  }
+
+  // Get total pixel count if not provided
+  final pixelCount = totalPixels ?? await repo.getTotalLedCount() ?? 150;
+
+  // Create the effect service with a callback to send payloads to WLED
+  final effectService = LuminaEffectService(
+    sendToWled: (payload) async {
+      await repo.applyJson(payload);
+    },
+  );
+
+  // Execute the custom effect animation (plays once, ends on final frame)
+  await effectService.executeEffect(
+    effectId: effectId,
+    colors: colors.isNotEmpty ? colors : [[255, 255, 255, 0]],
+    totalPixels: pixelCount,
+    durationMs: 3000, // Animation duration - 3 seconds for smooth reveal
+    loop: false, // Play once and stop on final frame
+  );
+
+  return true;
+}
 
 /// Explore screen with Simulated AI search logic
 class ExplorePatternsScreen extends ConsumerStatefulWidget {
@@ -712,6 +754,7 @@ class _DesignLibraryBrowser extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final categoriesAsync = ref.watch(patternCategoriesProvider);
+    final selectedMood = ref.watch(selectedMoodFilterProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,6 +777,14 @@ class _DesignLibraryBrowser extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        // Global mood selector - pre-filter patterns when navigating
+        _GlobalMoodSelector(
+          selectedMood: selectedMood,
+          onMoodSelected: (mood) {
+            ref.read(selectedMoodFilterProvider.notifier).state = mood;
+          },
         ),
         const SizedBox(height: 16),
         // Category grid
@@ -1413,20 +1464,31 @@ class _RecentPatternsSection extends ConsumerWidget {
         return [rgbw[0], rgbw[1], rgbw[2], rgbw[3]];
       }).toList();
 
-      final payload = {
-        'on': true,
-        'bri': pattern.brightness,
-        'seg': [
-          {
-            'fx': pattern.effectId,
-            'sx': pattern.speed,
-            'ix': pattern.intensity,
-            'col': colors.isNotEmpty ? colors.take(3).toList() : [[255, 180, 100, 0]],
-          }
-        ],
-      };
+      // Check if this is a custom Lumina effect (ID >= 1000)
+      final isCustomEffect = await _executeCustomEffectIfNeeded(
+        effectId: pattern.effectId,
+        colors: colors.isNotEmpty ? colors.take(3).toList() : [[255, 180, 100, 0]],
+        repo: repo,
+      );
 
-      await repo.applyJson(payload);
+      if (!isCustomEffect) {
+        // Standard WLED effect - send payload directly
+        final payload = {
+          'on': true,
+          'bri': pattern.brightness,
+          'seg': [
+            {
+              'fx': pattern.effectId,
+              'sx': pattern.speed,
+              'ix': pattern.intensity,
+              'col': colors.isNotEmpty ? colors.take(3).toList() : [[255, 180, 100, 0]],
+            }
+          ],
+        };
+
+        await repo.applyJson(payload);
+      }
+
       ref.read(activePresetLabelProvider.notifier).state = pattern.name;
 
       if (context.mounted) {
@@ -3107,72 +3169,105 @@ class _StyleChip extends StatelessWidget {
 /// Unified browser screen for navigating the library hierarchy.
 /// Shows root categories when nodeId is null, otherwise shows children of that node.
 /// Displays pattern grid for palette nodes, folder grid for intermediate nodes.
-class LibraryBrowserScreen extends ConsumerWidget {
+class LibraryBrowserScreen extends ConsumerStatefulWidget {
   final String? nodeId;
   final String? nodeName;
 
   const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
+}
+
+class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
+  bool _isPaletteView = false;
+
+  @override
+  void dispose() {
+    // Reset mood filter when leaving a palette view
+    if (_isPaletteView) {
+      // Use Future.microtask to avoid modifying providers during dispose
+      Future.microtask(() {
+        ref.read(selectedMoodFilterProvider.notifier).state = null;
+      });
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // Get current node (if any) and children
-    final nodeAsync = nodeId != null
-        ? ref.watch(libraryNodeByIdProvider(nodeId!))
+    final nodeAsync = widget.nodeId != null
+        ? ref.watch(libraryNodeByIdProvider(widget.nodeId!))
         : const AsyncValue<LibraryNode?>.data(null);
-    final childrenAsync = ref.watch(libraryChildNodesProvider(nodeId));
-    final ancestorsAsync = nodeId != null
-        ? ref.watch(libraryAncestorsProvider(nodeId!))
+    final childrenAsync = ref.watch(libraryChildNodesProvider(widget.nodeId));
+    final ancestorsAsync = widget.nodeId != null
+        ? ref.watch(libraryAncestorsProvider(widget.nodeId!))
         : const AsyncValue<List<LibraryNode>>.data([]);
 
-    return Scaffold(
-      backgroundColor: NexGenPalette.gunmetal,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // App bar with back button and title
-            _LibraryAppBar(
-              nodeId: nodeId,
-              nodeName: nodeName,
-              nodeAsync: nodeAsync,
-            ),
-            // Breadcrumb navigation
-            if (nodeId != null)
-              ancestorsAsync.when(
-                data: (ancestors) => _LibraryBreadcrumb(
-                  ancestors: ancestors,
-                  currentNodeName: nodeName,
-                ),
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        // Reset mood filter when navigating back from a palette view
+        if (_isPaletteView && didPop) {
+          ref.read(selectedMoodFilterProvider.notifier).state = null;
+        }
+      },
+      child: Scaffold(
+        backgroundColor: NexGenPalette.gunmetal,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // App bar with back button and title
+              _LibraryAppBar(
+                nodeId: widget.nodeId,
+                nodeName: widget.nodeName,
+                nodeAsync: nodeAsync,
               ),
-            // Main content
-            Expanded(
-              child: childrenAsync.when(
-                data: (children) {
-                  // Check if this is a palette node - show patterns instead
-                  return nodeAsync.when(
-                    data: (node) {
-                      if (node != null && node.isPalette) {
-                        return _PalettePatternGrid(node: node);
-                      }
-                      // Show children as navigation grid
-                      return _LibraryNodeGrid(children: children);
-                    },
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (_, __) => _LibraryNodeGrid(children: children),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (err, __) => Center(
-                  child: Text(
-                    'Unable to load content',
-                    style: TextStyle(color: NexGenPalette.textSecondary),
+              // Breadcrumb navigation
+              if (widget.nodeId != null)
+                ancestorsAsync.when(
+                  data: (ancestors) => _LibraryBreadcrumb(
+                    ancestors: ancestors,
+                    currentNodeName: widget.nodeName,
+                  ),
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+              // Main content
+              Expanded(
+                child: childrenAsync.when(
+                  data: (children) {
+                    // Check if this is a palette node - show patterns instead
+                    return nodeAsync.when(
+                      data: (node) {
+                        if (node != null && node.isPalette) {
+                          // Track that we're viewing a palette
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && !_isPaletteView) {
+                              setState(() => _isPaletteView = true);
+                            }
+                          });
+                          return _PalettePatternGrid(node: node);
+                        }
+                        // Show children as navigation grid
+                        return _LibraryNodeGrid(children: children);
+                      },
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (_, __) => _LibraryNodeGrid(children: children),
+                    );
+                  },
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (err, __) => Center(
+                    child: Text(
+                      'Unable to load content',
+                      style: TextStyle(color: NexGenPalette.textSecondary),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -4428,6 +4523,152 @@ class _MoodChip extends StatelessWidget {
   }
 }
 
+/// Global mood selector for the main Explore page.
+/// Allows users to pre-filter patterns by mood before navigating into categories.
+/// The selection persists when navigating to color cards.
+class _GlobalMoodSelector extends StatelessWidget {
+  final EffectMood? selectedMood;
+  final ValueChanged<EffectMood?> onMoodSelected;
+
+  const _GlobalMoodSelector({
+    required this.selectedMood,
+    required this.onMoodSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.tune, size: 16, color: NexGenPalette.textSecondary),
+            const SizedBox(width: 6),
+            Text(
+              'Pre-filter by mood',
+              style: TextStyle(
+                color: NexGenPalette.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+            if (selectedMood != null) ...[
+              const Spacer(),
+              GestureDetector(
+                onTap: () => onMoodSelected(null),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Clear filter',
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.close, size: 12, color: NexGenPalette.cyan),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              // "All" chip (no filter)
+              _GlobalMoodChip(
+                label: 'All Moods',
+                emoji: '',
+                isSelected: selectedMood == null,
+                color: NexGenPalette.cyan,
+                onTap: () => onMoodSelected(null),
+              ),
+              const SizedBox(width: 8),
+              // Mood chips
+              for (final mood in EffectMoodSystem.displayOrder) ...[
+                _GlobalMoodChip(
+                  label: mood.label,
+                  emoji: mood.emoji,
+                  isSelected: selectedMood == mood,
+                  color: mood.color,
+                  onTap: () => onMoodSelected(selectedMood == mood ? null : mood),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact mood chip for the global mood selector
+class _GlobalMoodChip extends StatelessWidget {
+  final String label;
+  final String emoji;
+  final bool isSelected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _GlobalMoodChip({
+    required this.label,
+    required this.emoji,
+    required this.isSelected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withValues(alpha: 0.2)
+              : NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? color : NexGenPalette.line,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (emoji.isNotEmpty) ...[
+              Text(emoji, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? color : Colors.white,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Individual pattern card with apply action
 class _PatternCard extends ConsumerWidget {
   final PatternItem pattern;
@@ -4618,25 +4859,32 @@ class _PatternCard extends ConsumerWidget {
     }
 
     try {
-      // Apply the pattern's wledPayload directly
-      final success = await repo.applyJson(pattern.wledPayload);
+      // Extract effect ID and colors from payload to check for custom effects
+      final effectId = _getEffectId();
+      final colorsRgbw = _getColorsRgbw();
 
-      if (!success) {
-        throw Exception('Device did not accept command');
+      // Check if this is a custom Lumina effect (ID >= 1000)
+      final isCustomEffect = await _executeCustomEffectIfNeeded(
+        effectId: effectId,
+        colors: colorsRgbw,
+        repo: repo,
+      );
+
+      if (!isCustomEffect) {
+        // Standard WLED effect - apply the pattern's wledPayload directly
+        final success = await repo.applyJson(pattern.wledPayload);
+
+        if (!success) {
+          throw Exception('Device did not accept command');
+        }
       }
 
       // Update the active preset label so home screen reflects the change
       ref.read(activePresetLabelProvider.notifier).state = pattern.name;
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Applied: ${pattern.name}'),
-            backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        // Show pattern adjustment panel in a bottom sheet
+        _showAdjustmentPanel(context, ref);
       }
     } catch (e) {
       if (context.mounted) {
@@ -4649,5 +4897,353 @@ class _PatternCard extends ConsumerWidget {
         );
       }
     }
+  }
+
+  /// Extract colors as RGBW arrays for custom effect execution
+  List<List<int>> _getColorsRgbw() {
+    try {
+      final payload = pattern.wledPayload;
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final firstSeg = seg.first;
+        if (firstSeg is Map) {
+          final cols = firstSeg['col'];
+          if (cols is List && cols.isNotEmpty) {
+            final colors = <List<int>>[];
+            for (final col in cols) {
+              if (col is List && col.length >= 3) {
+                colors.add([
+                  (col[0] as num).toInt().clamp(0, 255),
+                  (col[1] as num).toInt().clamp(0, 255),
+                  (col[2] as num).toInt().clamp(0, 255),
+                  col.length >= 4 ? (col[3] as num).toInt().clamp(0, 255) : 0,
+                ]);
+              }
+            }
+            if (colors.isNotEmpty) return colors;
+          }
+        }
+      }
+    } catch (_) {}
+    return [[255, 255, 255, 0]];
+  }
+
+  void _showAdjustmentPanel(BuildContext context, WidgetRef ref) {
+    // Extract pattern values from wledPayload
+    final payload = pattern.wledPayload;
+    final seg = payload['seg'];
+    int effectId = 0;
+    int speed = 128;
+    int intensity = 128;
+    int grouping = 1;
+    int spacing = 0;
+    List<Color> colors = _getColors();
+
+    if (seg is List && seg.isNotEmpty) {
+      final firstSeg = seg.first;
+      if (firstSeg is Map) {
+        effectId = (firstSeg['fx'] as int?) ?? 0;
+        speed = (firstSeg['sx'] as int?) ?? 128;
+        intensity = (firstSeg['ix'] as int?) ?? 128;
+        grouping = (firstSeg['gp'] as int?) ?? 1;
+        spacing = (firstSeg['sp'] as int?) ?? 0;
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => _PatternAdjustmentBottomSheet(
+        patternName: pattern.name,
+        effectId: effectId,
+        speed: speed,
+        intensity: intensity,
+        grouping: grouping,
+        spacing: spacing,
+        colors: colors,
+      ),
+    );
+  }
+}
+
+/// Bottom sheet containing PatternAdjustmentPanel for fine-tuning a selected pattern
+class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
+  final String patternName;
+  final int effectId;
+  final int speed;
+  final int intensity;
+  final int grouping;
+  final int spacing;
+  final List<Color> colors;
+
+  const _PatternAdjustmentBottomSheet({
+    required this.patternName,
+    required this.effectId,
+    required this.speed,
+    required this.intensity,
+    required this.grouping,
+    required this.spacing,
+    required this.colors,
+  });
+
+  @override
+  ConsumerState<_PatternAdjustmentBottomSheet> createState() => _PatternAdjustmentBottomSheetState();
+}
+
+class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmentBottomSheet> {
+  late int _speed;
+  late int _intensity;
+  late int _grouping;
+  late int _spacing;
+  late int _effectId;
+  late bool _reverse;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _speed = widget.speed;
+    _intensity = widget.intensity;
+    _grouping = widget.grouping;
+    _spacing = widget.spacing;
+    _effectId = widget.effectId;
+    _reverse = false;
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _applyChange(Map<String, dynamic> segUpdate) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 200), () async {
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo != null) {
+        await repo.applyJson({'seg': [segUpdate]});
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isStatic = _effectId == 0;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: widget.colors.length >= 2
+                            ? [widget.colors[0], widget.colors[1]]
+                            : [widget.colors.first, widget.colors.first],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isStatic ? Icons.circle : Icons.auto_awesome,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Now Playing',
+                          style: TextStyle(
+                            color: NexGenPalette.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          widget.patternName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // Speed slider (hide for static effects)
+              if (!isStatic) ...[
+                _buildSliderRow(
+                  icon: Icons.speed,
+                  label: 'Speed',
+                  value: _speed.toDouble(),
+                  onChanged: (v) {
+                    setState(() => _speed = v.round());
+                    _applyChange({'sx': _speed});
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+              // Intensity slider
+              _buildSliderRow(
+                icon: Icons.tune,
+                label: 'Intensity',
+                value: _intensity.toDouble(),
+                onChanged: (v) {
+                  setState(() => _intensity = v.round());
+                  _applyChange({'ix': _intensity});
+                },
+              ),
+              const SizedBox(height: 12),
+              // Direction toggle (hide for static effects)
+              if (!isStatic) ...[
+                Row(
+                  children: [
+                    const Icon(Icons.swap_horiz, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('Direction', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('L→R', style: TextStyle(fontSize: 12))),
+                        ButtonSegment(value: true, label: Text('R→L', style: TextStyle(fontSize: 12))),
+                      ],
+                      selected: {_reverse},
+                      onSelectionChanged: (s) {
+                        final rev = s.isNotEmpty ? s.first : false;
+                        setState(() => _reverse = rev);
+                        _applyChange({'rev': rev});
+                      },
+                      style: ButtonStyle(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+              // Pixel layout section
+              Row(
+                children: [
+                  const Icon(Icons.grid_view, color: NexGenPalette.cyan, size: 20),
+                  const SizedBox(width: 8),
+                  Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Grouping slider
+              _buildSliderRow(
+                icon: Icons.blur_on,
+                label: 'Grouping',
+                value: _grouping.toDouble(),
+                min: 1,
+                max: 10,
+                divisions: 9,
+                onChanged: (v) {
+                  setState(() => _grouping = v.round());
+                  _applyChange({'gp': _grouping});
+                },
+              ),
+              const SizedBox(height: 8),
+              // Spacing slider
+              _buildSliderRow(
+                icon: Icons.space_bar,
+                label: 'Spacing',
+                value: _spacing.toDouble(),
+                min: 0,
+                max: 10,
+                divisions: 10,
+                onChanged: (v) {
+                  setState(() => _spacing = v.round());
+                  _applyChange({'sp': _spacing});
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSliderRow({
+    required IconData icon,
+    required String label,
+    required double value,
+    required ValueChanged<double> onChanged,
+    double min = 0,
+    double max = 255,
+    int? divisions,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: NexGenPalette.cyan, size: 20),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 60,
+          child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13)),
+        ),
+        Expanded(
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 36,
+          child: Text(
+            '${value.round()}',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    );
   }
 }

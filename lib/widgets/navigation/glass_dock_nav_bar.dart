@@ -5,14 +5,19 @@ import 'package:nexgen_command/widgets/navigation/dock_item.dart';
 import 'package:nexgen_command/widgets/navigation/dock_center.dart';
 
 /// Glassmorphic bottom navigation dock with 5 items
+/// Supports long-press on the center Lumina button for voice input
 class GlassDockNavBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
+  final VoidCallback? onLuminaLongPress;
+  final bool isVoiceListening;
 
   const GlassDockNavBar({
     super.key,
     required this.index,
     required this.onTap,
+    this.onLuminaLongPress,
+    this.isVoiceListening = false,
   });
 
   @override
@@ -55,6 +60,8 @@ class GlassDockNavBar extends StatelessWidget {
                   active: index == 2,
                   selected: selected,
                   onTap: () => onTap(2),
+                  onLongPress: onLuminaLongPress,
+                  isListening: isVoiceListening,
                 ),
                 DockItem(
                   label: 'Explore',
