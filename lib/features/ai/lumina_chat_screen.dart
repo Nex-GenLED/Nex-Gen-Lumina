@@ -1846,6 +1846,9 @@ class _HouseHero extends StatelessWidget {
     this.speed = 128,
   });
 
+  // Match dashboard image alignment (shifted down 30%)
+  static const _imageAlignment = Alignment(0, 0.3);
+
   @override
   Widget build(BuildContext context) {
     final hasImage = imageProvider != null;
@@ -1854,11 +1857,11 @@ class _HouseHero extends StatelessWidget {
       height: height,
       child: ClipRRect(
         child: Stack(fit: StackFit.expand, children: [
-          // Base image
+          // Base image - use same alignment as dashboard
           if (hasImage)
-            Image(image: imageProvider!, fit: BoxFit.cover, alignment: Alignment.center)
+            Image(image: imageProvider!, fit: BoxFit.cover, alignment: _imageAlignment)
           else
-            Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: Alignment.center),
+            Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: _imageAlignment),
 
           // Subtle dark gradient from bottom for legibility
           Positioned.fill(
@@ -1874,14 +1877,24 @@ class _HouseHero extends StatelessWidget {
           ),
 
           // AR preview overlay with animated LED effects on roofline
+          // Uses LayoutBuilder to pass proper BoxFit.cover parameters for correct alignment
           if (hasOverlay)
             Positioned.fill(
-              child: AnimatedRooflineOverlay(
-                previewColors: overlayColors,
-                previewEffectId: effectId,
-                previewSpeed: speed,
-                forceOn: true,
-                brightness: 255,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
+                  return AnimatedRooflineOverlay(
+                    previewColors: overlayColors,
+                    previewEffectId: effectId,
+                    previewSpeed: speed,
+                    forceOn: true,
+                    brightness: 255,
+                    // Match dashboard BoxFit.cover parameters for correct roofline positioning
+                    targetAspectRatio: targetAspectRatio,
+                    imageAlignment: const Offset(0, 0.3), // Matches _imageAlignment
+                    useBoxFitCover: true,
+                  );
+                },
               ),
             ),
 
