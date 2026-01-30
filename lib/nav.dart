@@ -142,7 +142,9 @@ class AppRouter {
             final installationId = data['installation_id'] as String?;
 
             // Unlinked users go to link-account
-            if (role == null || role == 'unlinked') {
+            // DEV BYPASS: Skip link-account for testing (remove before production)
+            const devBypassLinkAccount = true;
+            if (!devBypassLinkAccount && (role == null || role == 'unlinked')) {
               return AppRoutes.linkAccount;
             }
 
@@ -152,7 +154,8 @@ class AppRouter {
             }
 
             // Primary and subUser need an installation
-            if (installationId == null) {
+            // DEV BYPASS: Skip installation check for testing
+            if (!devBypassLinkAccount && installationId == null) {
               return AppRoutes.linkAccount;
             }
           } else {
@@ -172,6 +175,12 @@ class AppRouter {
       }
 
       // For protected routes (dashboard, settings, etc.), verify installation access
+      // DEV BYPASS: Skip all installation checks for testing
+      const devBypassInstallation = true;
+      if (devBypassInstallation) {
+        return null; // Allow access to all routes
+      }
+
       try {
         final userDoc = await FirebaseFirestore.instance
             .collection('users')
