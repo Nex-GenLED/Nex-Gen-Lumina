@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class MySchedulePage extends ConsumerWidget {
   const MySchedulePage({super.key});
@@ -86,10 +87,55 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
   bool _loading = false;
   String? _error;
 
+  // Voice input
+  late final stt.SpeechToText _speech;
+  bool _listening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _speech = stt.SpeechToText();
+  }
+
   @override
   void dispose() {
+    _speech.stop();
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleVoice() async {
+    if (_listening) {
+      await _speech.stop();
+      setState(() => _listening = false);
+      return;
+    }
+    try {
+      final available = await _speech.initialize(
+        onStatus: (s) {},
+        onError: (e) => debugPrint('speech error: ${e.errorMsg}'),
+      );
+      if (!available) return;
+      setState(() => _listening = true);
+      await _speech.listen(
+        onResult: (res) {
+          if (!mounted) return;
+          final recognized = res.recognizedWords;
+          if (recognized.isNotEmpty) {
+            _controller.text = recognized;
+            _controller.selection = TextSelection.fromPosition(
+              TextPosition(offset: _controller.text.length),
+            );
+          }
+          if (res.finalResult) setState(() => _listening = false);
+        },
+        listenMode: stt.ListenMode.confirmation,
+        pauseFor: const Duration(seconds: 2),
+        partialResults: true,
+      );
+    } catch (e) {
+      debugPrint('Voice init failed: $e');
+    }
   }
 
   Future<void> _askLumina(BuildContext context) async {
@@ -388,7 +434,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     final autonomyLevel = ref.watch(autonomyLevelProvider);
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
@@ -400,21 +446,22 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
                   ? [NexGenPalette.cyan.withValues(alpha: 0.15), NexGenPalette.violet.withValues(alpha: 0.1)]
                   : [NexGenPalette.gunmetal90, NexGenPalette.gunmetal90],
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: autopilotEnabled ? NexGenPalette.cyan.withValues(alpha: 0.4) : NexGenPalette.line,
             ),
           ),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Header row with icon, title, and toggle
+              // Compact header row
               Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 32,
+                    height: 32,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [NexGenPalette.cyan, NexGenPalette.violet],
@@ -424,223 +471,201 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
                     child: const Icon(
                       Icons.auto_awesome_rounded,
                       color: Colors.white,
-                      size: 22,
+                      size: 18,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Lumina AI',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: NexGenPalette.textHigh,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Schedule assistant & autopilot',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: NexGenPalette.textMedium,
-                          ),
-                        ),
-                      ],
+                  const SizedBox(width: 10),
+                  Text(
+                    'Lumina AI',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: NexGenPalette.textHigh,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '• Schedule Assistant',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: NexGenPalette.textMedium,
                     ),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
 
-              // Autopilot toggle section
+              // Larger text input with voice button
               Container(
-                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: autopilotEnabled
-                      ? NexGenPalette.cyan.withValues(alpha: 0.1)
-                      : NexGenPalette.matteBlack.withValues(alpha: 0.3),
+                  color: NexGenPalette.matteBlack.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: autopilotEnabled ? NexGenPalette.cyan.withValues(alpha: 0.3) : NexGenPalette.line,
-                  ),
+                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.4), width: 1.5),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.smart_toy_rounded,
-                          color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Autopilot',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textHigh,
-                            ),
-                          ),
-                        ),
-                        CupertinoSwitch(
-                          value: autopilotEnabled,
-                          activeColor: NexGenPalette.cyan,
-                          onChanged: (value) async {
-                            if (value) {
-                              final confirmed = await _showAutopilotSetupDialog(context, ref);
-                              if (confirmed == true) {
-                                ref.read(autopilotSettingsServiceProvider).setEnabled(true);
-                              }
-                            } else {
-                              ref.read(autopilotSettingsServiceProvider).setEnabled(false);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                    if (!autopilotEnabled) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Auto-generate schedules based on your preferences, teams, and holidays.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: NexGenPalette.textMedium,
-                        ),
-                      ),
-                    ],
-                    if (autopilotEnabled) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          _AutopilotModeChip(
-                            label: 'Suggest',
-                            selected: autonomyLevel == 1,
-                            onTap: () async {
-                              await ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1);
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          _AutopilotModeChip(
-                            label: 'Proactive',
-                            selected: autonomyLevel == 2,
-                            onTap: () async {
-                              final service = ref.read(autopilotSettingsServiceProvider);
-                              await service.setAutonomyLevel(2);
-                              await service.generateAndPopulateSchedules();
-                            },
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => _showAutopilotSetupDialog(context, ref),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text('Settings', style: TextStyle(fontSize: 12)),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Quick presets
-              Text(
-                'Quick prompts',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: NexGenPalette.textMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 36,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemBuilder: (_, i) {
-                    final presets = autopilotEnabled
-                        ? <String>[
-                            'Prefer warm colors on weeknights',
-                            'No bright patterns after 10pm',
-                            'More festive on weekends',
-                          ]
-                        : <String>[
-                            'Weeknights 8-11 PM • Warm White',
-                            'Fri & Sat Dusk to Dawn • Festive',
-                            'Daily Sunrise • Turn Off',
-                          ];
-                    final label = presets[i];
-                    return ChoiceChip(
-                      label: Text(label, overflow: TextOverflow.ellipsis),
-                      selected: false,
-                      onSelected: (_) => _applyQuick(label),
-                      backgroundColor: NexGenPalette.matteBlack.withValues(alpha: 0.4),
-                      labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textHigh),
-                      shape: StadiumBorder(side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.25))),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    );
-                  },
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemCount: 3,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Text input
-              Container(
-                decoration: BoxDecoration(
-                  color: NexGenPalette.matteBlack.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.35), width: 1.2),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
-                    const Icon(Icons.chat_bubble_outline_rounded, color: NexGenPalette.violet, size: 20),
-                    const SizedBox(width: 8),
+                    // Voice button
+                    GestureDetector(
+                      onTap: _toggleVoice,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: _listening
+                              ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                              : NexGenPalette.gunmetal90,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _listening
+                                ? NexGenPalette.cyan
+                                : NexGenPalette.line,
+                          ),
+                        ),
+                        child: Icon(
+                          _listening ? Icons.mic : Icons.mic_none,
+                          color: _listening ? NexGenPalette.cyan : NexGenPalette.violet,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
                         controller: _controller,
                         minLines: 1,
-                        maxLines: 3,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: NexGenPalette.textHigh),
+                        maxLines: 2,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: NexGenPalette.textHigh,
+                          fontSize: 16,
+                        ),
                         decoration: InputDecoration(
                           hintText: autopilotEnabled
                               ? 'Tell Lumina your preferences...'
                               : 'Describe schedule changes...',
-                          hintStyle: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
+                          hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: NexGenPalette.textMedium,
+                            fontSize: 15,
+                          ),
                           border: InputBorder.none,
                           isDense: true,
-                          contentPadding: EdgeInsets.zero,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 4),
                         ),
                         onSubmitted: (_) => _askLumina(context),
                       ),
                     ),
                     const SizedBox(width: 8),
                     _loading
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan))
-                        : IconButton(
-                            onPressed: () => _askLumina(context),
-                            icon: const Icon(Icons.send_rounded),
-                            color: NexGenPalette.cyan,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        ? const SizedBox(
+                            width: 36,
+                            height: 36,
+                            child: Padding(
+                              padding: EdgeInsets.all(6),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
+                            ),
+                          )
+                        : Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.cyan,
+                              shape: BoxShape.circle,
+                            ),
+                            child: IconButton(
+                              onPressed: () => _askLumina(context),
+                              icon: const Icon(Icons.arrow_upward_rounded, size: 20),
+                              color: Colors.black,
+                              padding: EdgeInsets.zero,
+                            ),
                           ),
                   ],
                 ),
               ),
 
               if (_error != null) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(_error!, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.redAccent)),
               ],
+
+              const SizedBox(height: 10),
+
+              // Compact Autopilot toggle section (moved below text input)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: autopilotEnabled
+                      ? NexGenPalette.cyan.withValues(alpha: 0.1)
+                      : NexGenPalette.matteBlack.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: autopilotEnabled ? NexGenPalette.cyan.withValues(alpha: 0.3) : NexGenPalette.line,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.smart_toy_rounded,
+                      color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Autopilot',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: autopilotEnabled ? NexGenPalette.cyan : NexGenPalette.textHigh,
+                      ),
+                    ),
+                    if (autopilotEnabled) ...[
+                      const SizedBox(width: 12),
+                      _AutopilotModeChip(
+                        label: 'Suggest',
+                        selected: autonomyLevel == 1,
+                        onTap: () async {
+                          await ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1);
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _AutopilotModeChip(
+                        label: 'Proactive',
+                        selected: autonomyLevel == 2,
+                        onTap: () async {
+                          final service = ref.read(autopilotSettingsServiceProvider);
+                          await service.setAutonomyLevel(2);
+                          await service.generateAndPopulateSchedules();
+                        },
+                      ),
+                    ],
+                    const Spacer(),
+                    if (autopilotEnabled)
+                      GestureDetector(
+                        onTap: () => _showAutopilotSetupDialog(context, ref),
+                        child: Icon(
+                          Icons.settings_outlined,
+                          color: NexGenPalette.textMedium,
+                          size: 18,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: CupertinoSwitch(
+                        value: autopilotEnabled,
+                        activeColor: NexGenPalette.cyan,
+                        onChanged: (value) async {
+                          if (value) {
+                            final confirmed = await _showAutopilotSetupDialog(context, ref);
+                            if (confirmed == true) {
+                              ref.read(autopilotSettingsServiceProvider).setEnabled(true);
+                            }
+                          } else {
+                            ref.read(autopilotSettingsServiceProvider).setEnabled(false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
