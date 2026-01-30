@@ -120,6 +120,7 @@ enum EffectVibe {
   bold,
   gentle,
   dynamic,
+  magical,
 }
 
 /// Comprehensive metadata for a single WLED effect

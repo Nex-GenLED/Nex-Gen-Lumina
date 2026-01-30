@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 
 /// Represents a Nex-Gen LED system installation.
 ///

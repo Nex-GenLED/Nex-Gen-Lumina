@@ -193,7 +193,7 @@ final viewAsControllerProvider = Provider<ViewAsController>((ref) {
 final recentViewedCustomersProvider = StateProvider<List<String>>((ref) => []);
 
 /// Add a customer to the recent list
-void addToRecentCustomers(Ref ref, String customerId) {
+void addToRecentCustomers(WidgetRef ref, String customerId) {
   final recent = List<String>.from(ref.read(recentViewedCustomersProvider));
 
   // Remove if already exists to move to front
