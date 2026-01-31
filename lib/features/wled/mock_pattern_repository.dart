@@ -1019,9 +1019,10 @@ class MockPatternRepository {
       };
 
       // Add grouping and spacing for architectural patterns
+      // WLED JSON API uses 'grp' for grouping and 'spc' for spacing
       if (hasSpacingMetadata && grouping != null && spacing != null) {
-        segData['gp'] = grouping;
-        segData['sp'] = spacing;
+        segData['grp'] = grouping;
+        segData['spc'] = spacing;
       }
 
       items.add(PatternItem(
@@ -1078,8 +1079,8 @@ class MockPatternRepository {
               'col': col,
               'sx': effect.id == 0 ? 0 : 80,
               'ix': dimBrightness, // Use dim level for intensity
-              'gp': brightCount,
-              'sp': dimCount,
+              'grp': brightCount,
+              'spc': dimCount,
             }
           ]
         },
@@ -1101,8 +1102,8 @@ class MockPatternRepository {
             'col': col,
             'sx': 60,
             'ix': dimBrightness,
-            'gp': brightCount,
-            'sp': dimCount,
+            'grp': brightCount,
+            'spc': dimCount,
           }
         ]
       },
@@ -1143,8 +1144,8 @@ class MockPatternRepository {
               'col': col,
               'sx': effect.speed,
               'ix': effect.intensity,
-              'gp': brightCount,
-              'sp': dimCount,
+              'grp': brightCount,
+              'spc': dimCount,
             }
           ]
         },
@@ -1173,8 +1174,8 @@ class MockPatternRepository {
               'col': col,
               'sx': variation.speed,
               'ix': 180,
-              'gp': brightCount,
-              'sp': dimCount,
+              'grp': brightCount,
+              'spc': dimCount,
             }
           ]
         },

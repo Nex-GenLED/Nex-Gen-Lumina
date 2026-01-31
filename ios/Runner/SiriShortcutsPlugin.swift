@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import Intents
+import IntentsUI
 import CoreSpotlight
 import MobileCoreServices
 

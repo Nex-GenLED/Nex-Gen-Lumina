@@ -2235,13 +2235,13 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
         await repo.applyJson({
           'seg': [
             {
-              'gp': _current.grouping,
-              'sp': _current.spacing,
+              'grp': _current.grouping,
+              'spc': _current.spacing,
             }
           ]
         });
       } catch (e) {
-        debugPrint('Apply gp/sp failed: $e');
+        debugPrint('Apply grp/spc failed: $e');
       }
     });
   }
@@ -4945,8 +4945,9 @@ class _PatternCard extends ConsumerWidget {
         effectId = (firstSeg['fx'] as int?) ?? 0;
         speed = (firstSeg['sx'] as int?) ?? 128;
         intensity = (firstSeg['ix'] as int?) ?? 128;
-        grouping = (firstSeg['gp'] as int?) ?? 1;
-        spacing = (firstSeg['sp'] as int?) ?? 0;
+        // WLED uses 'grp' and 'spc', but check old keys 'gp'/'sp' as fallback
+        grouping = (firstSeg['grp'] as int?) ?? (firstSeg['gp'] as int?) ?? 1;
+        spacing = (firstSeg['spc'] as int?) ?? (firstSeg['sp'] as int?) ?? 0;
       }
     }
 
@@ -5184,7 +5185,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 divisions: 9,
                 onChanged: (v) {
                   setState(() => _grouping = v.round());
-                  _applyChange({'gp': _grouping});
+                  _applyChange({'grp': _grouping});
                 },
               ),
               const SizedBox(height: 8),
@@ -5198,7 +5199,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 divisions: 10,
                 onChanged: (v) {
                   setState(() => _spacing = v.round());
-                  _applyChange({'sp': _spacing});
+                  _applyChange({'spc': _spacing});
                 },
               ),
               const SizedBox(height: 16),
