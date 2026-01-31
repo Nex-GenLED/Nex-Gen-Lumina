@@ -87,6 +87,7 @@
         <string>com.nexgen.lumina.powerOn</string>
         <string>com.nexgen.lumina.powerOff</string>
         <string>com.nexgen.lumina.setBrightness</string>
+        <string>com.nexgen.lumina.setColor</string>
     </array>
 </dict>
 </plist>

@@ -54,6 +54,8 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   // === Preview preparation ===
   // Cached background image for real-time previews (user's house or placeholder)
   ImageProvider<Object>? _houseImageProvider;
+  // Track current URL to avoid redundant updates
+  String? _currentHouseImageUrl;
   // Controls visibility of the upcoming preview bar (static to persist)
   static bool showPreviewBar = false;
   // Colors currently previewed (updated when a new pattern is proposed, static to persist)
@@ -472,16 +474,19 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
   // If url is null or empty, fall back to a local placeholder asset.
   void _setHouseImageFromUrl(String? url) {
     try {
+      // Normalize URL for comparison (null and empty both mean "use placeholder")
+      final normalizedUrl = (url != null && url.isNotEmpty && url.startsWith('http')) ? url : null;
+
+      // Skip update if URL hasn't changed
+      if (normalizedUrl == _currentHouseImageUrl) return;
+      _currentHouseImageUrl = normalizedUrl;
+
       ImageProvider<Object> provider;
-      if (url != null && url.isNotEmpty) {
-        // Prefer network URL (as commonly stored in profile photoUrl)
-        if (url.startsWith('http')) {
-          provider = NetworkImage(url);
-        } else {
-          // Unsupported path for web or unknown scheme; use placeholder
-          provider = const AssetImage('assets/images/Demohomephoto.jpg');
-        }
+      if (normalizedUrl != null) {
+        // Use network URL from profile
+        provider = NetworkImage(normalizedUrl);
       } else {
+        // Fall back to placeholder
         provider = const AssetImage('assets/images/Demohomephoto.jpg');
       }
 
@@ -1397,6 +1402,11 @@ class _LuminaChatScreenState extends ConsumerState<LuminaChatScreen> with Ticker
       final url = next.maybeWhen(data: (u) => u?.housePhotoUrl, orElse: () => null);
       _setHouseImageFromUrl(url);
     });
+
+    // Also read the current profile value for initial load (ref.listen doesn't fire for initial value)
+    final profileAsync = ref.watch(currentUserProfileProvider);
+    final houseImageUrl = profileAsync.maybeWhen(data: (u) => u?.housePhotoUrl, orElse: () => null);
+    _setHouseImageFromUrl(houseImageUrl);
 
     // Listen for pending voice messages from long-press on Lumina nav button
     ref.listen(pendingVoiceMessageProvider, (previous, next) {

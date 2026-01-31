@@ -60,10 +60,20 @@ public class SiriShortcutsPlugin: NSObject, FlutterPlugin {
 
         let suggestedPhrase = args["suggestedPhrase"] as? String ?? sceneName
 
+        // Build userInfo with base fields
+        var userInfo: [String: Any] = ["sceneId": sceneId, "sceneName": sceneName]
+
+        // Merge any additional userInfo from Flutter (for color shortcuts, etc.)
+        if let additionalInfo = args["userInfo"] as? [String: Any] {
+            for (key, value) in additionalInfo {
+                userInfo[key] = value
+            }
+        }
+
         // Create user activity
         let activity = NSUserActivity(activityType: activityType)
         activity.title = sceneName
-        activity.userInfo = ["sceneId": sceneId, "sceneName": sceneName]
+        activity.userInfo = userInfo
         activity.isEligibleForSearch = true
         activity.isEligibleForPrediction = true
         activity.suggestedInvocationPhrase = suggestedPhrase
@@ -72,8 +82,8 @@ public class SiriShortcutsPlugin: NSObject, FlutterPlugin {
         // Add to Spotlight for search
         let attributes = CSSearchableItemAttributeSet(contentType: .item)
         attributes.title = sceneName
-        attributes.contentDescription = "Activate \(sceneName) lighting scene"
-        attributes.keywords = ["lights", "lighting", "scene", sceneName]
+        attributes.contentDescription = "Activate \(sceneName) lighting"
+        attributes.keywords = ["lights", "lighting", sceneName]
         activity.contentAttributeSet = attributes
 
         // Donate the activity
@@ -131,7 +141,8 @@ public class SiriShortcutsPlugin: NSObject, FlutterPlugin {
             "com.nexgen.lumina.applyScene",
             "com.nexgen.lumina.powerOn",
             "com.nexgen.lumina.powerOff",
-            "com.nexgen.lumina.setBrightness"
+            "com.nexgen.lumina.setBrightness",
+            "com.nexgen.lumina.setColor"
         ]
 
         guard supportedTypes.contains(userActivity.activityType) else {

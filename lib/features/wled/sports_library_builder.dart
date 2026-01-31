@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/golf_library_builder.dart';
 
 /// Builds the sports hierarchy from existing SportsTeamsDatabase.
 /// Bridges pro leagues and NCAA conferences into LibraryNode structure.
@@ -106,7 +106,7 @@ class SportsLibraryBuilder {
     return 'team_${league.toLowerCase()}_$sanitizedName';
   }
 
-  /// Build the complete sports hierarchy including pro leagues and NCAA
+  /// Build the complete sports hierarchy including pro leagues, NCAA, and golf
   static List<LibraryNode> buildFullSportsHierarchy() {
     final nodes = <LibraryNode>[];
 
@@ -119,6 +119,9 @@ class SportsLibraryBuilder {
     // NCAA folders and schools
     nodes.addAll(NcaaConferences.getNcaaFolders());
     nodes.addAll(NcaaConferences.getAllSchoolNodes());
+
+    // Golf folders and themes
+    nodes.addAll(GolfLibraryBuilder.buildFullGolfHierarchy());
 
     return nodes;
   }

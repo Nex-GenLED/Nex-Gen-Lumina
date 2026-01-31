@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/voice/deep_link_service.dart';
@@ -123,7 +124,7 @@ final autoRegisterVoiceShortcutProvider = Provider<Future<void> Function(Scene)>
   };
 });
 
-/// Donate system shortcuts (power on/off) on app startup
+/// Donate system shortcuts (power on/off, colors) on app startup
 final donateSystemShortcutsProvider = Provider<Future<void> Function()>((ref) {
   return () async {
     if (!Platform.isIOS) return;
@@ -134,6 +135,10 @@ final donateSystemShortcutsProvider = Provider<Future<void> Function()>((ref) {
     // Donate power shortcuts
     await siriService.donatePowerShortcut(on: true);
     await siriService.donatePowerShortcut(on: false);
+
+    // Donate color shortcuts
+    await siriService.donateAllColorShortcuts();
+
     debugPrint('Voice: Donated system shortcuts to Siri');
   };
 });
@@ -163,6 +168,10 @@ void _handleSiriShortcut(ProviderRef ref, String activityType, Map<String, dynam
       if (level != null) {
         _setBrightness(ref, level);
       }
+      break;
+
+    case SiriActivityTypes.setColor:
+      _setColor(ref, userInfo);
       break;
   }
 }
@@ -253,6 +262,33 @@ void _setBrightness(ProviderRef ref, int level) {
 
   final notifier = ref.read(wledStateProvider.notifier);
   notifier.setBrightness(level.clamp(0, 255));
+}
+
+/// Set color from Siri shortcut
+void _setColor(ProviderRef ref, Map<String, dynamic> userInfo) {
+  final r = (userInfo['r'] as num?)?.toInt() ?? 255;
+  final g = (userInfo['g'] as num?)?.toInt() ?? 255;
+  final b = (userInfo['b'] as num?)?.toInt() ?? 255;
+  final w = (userInfo['w'] as num?)?.toInt();
+  final colorName = userInfo['colorName'] as String? ?? 'Custom';
+
+  debugPrint('Voice: Setting color to $colorName: RGB($r, $g, $b) W:$w');
+
+  final notifier = ref.read(wledStateProvider.notifier);
+
+  // Ensure lights are on
+  notifier.togglePower(true);
+
+  // Set the color
+  notifier.setColor(Color.fromARGB(255, r, g, b));
+
+  // Set white channel if specified (for RGBW strips)
+  if (w != null && w > 0) {
+    notifier.setWarmWhite(w);
+  }
+
+  // Update the preset label
+  ref.read(activePresetLabelProvider.notifier).state = colorName;
 }
 
 /// Run the current schedule - applies whatever pattern/action should be active now

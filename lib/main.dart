@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/voice/voice_providers.dart';
 
 /// Main entry point for the application
 ///
@@ -53,10 +55,37 @@ class MyApp extends ConsumerStatefulWidget {
 }
 
 class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
+  bool _voiceServicesInitialized = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Voice services will be initialized after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeVoiceServices();
+    });
+  }
+
+  Future<void> _initializeVoiceServices() async {
+    if (_voiceServicesInitialized) return;
+    _voiceServicesInitialized = true;
+
+    // Initialize voice assistant services (Siri, deep links)
+    if (!kIsWeb) {
+      // Touch providers to initialize them
+      ref.read(deepLinkServiceProvider);
+
+      if (Platform.isIOS) {
+        ref.read(siriShortcutServiceProvider);
+        // Donate system shortcuts (power on/off)
+        final donateSystem = ref.read(donateSystemShortcutsProvider);
+        await donateSystem();
+        debugPrint('Siri: System shortcuts donated');
+      } else if (Platform.isAndroid) {
+        ref.read(androidShortcutServiceProvider);
+      }
+    }
   }
 
   @override

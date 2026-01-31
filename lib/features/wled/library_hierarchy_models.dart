@@ -174,6 +174,17 @@ class LeagueFolderIds {
   static const String wnba = 'league_wnba';
   static const String ncaaFootball = 'ncaa_football';
   static const String ncaaBasketball = 'ncaa_basketball';
+  static const String golf = 'league_golf';
+}
+
+/// Golf subfolder IDs
+class GolfFolderIds {
+  static const String masters = 'golf_masters';
+  static const String ryderCup = 'golf_ryder_cup';
+  static const String usOpen = 'golf_us_open';
+  static const String theOpen = 'golf_the_open';
+  static const String pga = 'golf_pga_championship';
+  static const String generalThemes = 'golf_general_themes';
 }
 
 /// Holiday folder IDs

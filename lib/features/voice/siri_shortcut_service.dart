@@ -66,6 +66,52 @@ class SiriShortcutService {
     }
   }
 
+  /// Donate a color shortcut
+  Future<bool> donateColorShortcut({
+    required String colorName,
+    required int r,
+    required int g,
+    required int b,
+    int? w,
+  }) async {
+    if (!isAvailable) return false;
+
+    try {
+      final result = await _channel.invokeMethod<bool>('donateShortcut', {
+        'sceneId': 'color_${colorName.toLowerCase().replaceAll(' ', '_')}',
+        'sceneName': colorName,
+        'activityType': SiriActivityTypes.setColor,
+        'suggestedPhrase': 'Set lights to $colorName',
+        'userInfo': {
+          'r': r,
+          'g': g,
+          'b': b,
+          'w': w ?? 0,
+          'colorName': colorName,
+        },
+      });
+      debugPrint('SiriShortcutService: Donated color shortcut for "$colorName"');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('SiriShortcutService: Failed to donate color shortcut: $e');
+      return false;
+    }
+  }
+
+  /// Donate all predefined color shortcuts
+  Future<void> donateAllColorShortcuts() async {
+    for (final entry in SiriColorPresets.colors.entries) {
+      await donateColorShortcut(
+        colorName: entry.key,
+        r: entry.value['r']!,
+        g: entry.value['g']!,
+        b: entry.value['b']!,
+        w: entry.value['w'],
+      );
+    }
+    debugPrint('SiriShortcutService: Donated all color presets');
+  }
+
   /// Present the "Add to Siri" UI for a scene.
   ///
   /// This shows iOS's native voice shortcut creation UI where the user
@@ -129,4 +175,22 @@ class SiriActivityTypes {
   static const String powerOn = 'com.nexgen.lumina.powerOn';
   static const String powerOff = 'com.nexgen.lumina.powerOff';
   static const String setBrightness = 'com.nexgen.lumina.setBrightness';
+  static const String setColor = 'com.nexgen.lumina.setColor';
+}
+
+/// Predefined color shortcuts for Siri
+class SiriColorPresets {
+  static const Map<String, Map<String, int>> colors = {
+    'Warm White': {'r': 255, 'g': 180, 'b': 100, 'w': 150},
+    'Cool White': {'r': 255, 'g': 255, 'b': 255, 'w': 255},
+    'Daylight': {'r': 255, 'g': 240, 'b': 220, 'w': 200},
+    'Red': {'r': 255, 'g': 0, 'b': 0, 'w': 0},
+    'Green': {'r': 0, 'g': 255, 'b': 0, 'w': 0},
+    'Blue': {'r': 0, 'g': 0, 'b': 255, 'w': 0},
+    'Purple': {'r': 128, 'g': 0, 'b': 255, 'w': 0},
+    'Orange': {'r': 255, 'g': 100, 'b': 0, 'w': 0},
+    'Pink': {'r': 255, 'g': 50, 'b': 150, 'w': 0},
+    'Cyan': {'r': 0, 'g': 255, 'b': 255, 'w': 0},
+    'Yellow': {'r': 255, 'g': 255, 'b': 0, 'w': 0},
+  };
 }
