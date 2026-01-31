@@ -508,6 +508,15 @@ class RooflineSegment {
   /// Whether this segment is visually prominent (for AI suggestions)
   final bool isProminent;
 
+  /// Whether this segment is physically connected to the previous segment.
+  /// When false, there's a discontinuity (jump to second story, detached area, etc.)
+  /// First segment is always considered connected (no previous to connect to).
+  final bool isConnectedToPrevious;
+
+  /// The level/story this segment is on (1 = ground level, 2 = second story, etc.)
+  /// Used for commands like "light up all second story segments"
+  final int level;
+
   const RooflineSegment({
     required this.id,
     required this.name,
@@ -526,6 +535,8 @@ class RooflineSegment {
     this.location,
     this.adjacentSegmentIds = const [],
     this.isProminent = false,
+    this.isConnectedToPrevious = true,
+    this.level = 1,
   });
 
   /// Global pixel index of the last LED in this segment (inclusive)
@@ -625,6 +636,8 @@ class RooflineSegment {
     String? location,
     List<String>? adjacentSegmentIds,
     bool? isProminent,
+    bool? isConnectedToPrevious,
+    int? level,
   }) {
     return RooflineSegment(
       id: id ?? this.id,
@@ -644,6 +657,8 @@ class RooflineSegment {
       location: location ?? this.location,
       adjacentSegmentIds: adjacentSegmentIds ?? this.adjacentSegmentIds,
       isProminent: isProminent ?? this.isProminent,
+      isConnectedToPrevious: isConnectedToPrevious ?? this.isConnectedToPrevious,
+      level: level ?? this.level,
     );
   }
 
@@ -674,6 +689,8 @@ class RooflineSegment {
       location: json['location'] as String?,
       adjacentSegmentIds: (json['adjacent_segment_ids'] as List<dynamic>?)?.cast<String>() ?? [],
       isProminent: json['is_prominent'] as bool? ?? false,
+      isConnectedToPrevious: json['is_connected_to_previous'] as bool? ?? true,
+      level: json['level'] as int? ?? 1,
     );
   }
 
@@ -697,6 +714,8 @@ class RooflineSegment {
       if (location != null) 'location': location,
       if (adjacentSegmentIds.isNotEmpty) 'adjacent_segment_ids': adjacentSegmentIds,
       'is_prominent': isProminent,
+      'is_connected_to_previous': isConnectedToPrevious,
+      'level': level,
     };
   }
 
@@ -705,7 +724,8 @@ class RooflineSegment {
     return 'RooflineSegment(id: $id, name: $name, pixelCount: $pixelCount, '
         'startPixel: $startPixel, type: ${type.name}, direction: ${direction.name}, '
         'anchors: $anchorPixels, anchorLedCount: $anchorLedCount, '
-        'architecturalRole: ${architecturalRole?.name}, location: $location)';
+        'architecturalRole: ${architecturalRole?.name}, location: $location, '
+        'isConnectedToPrevious: $isConnectedToPrevious, level: $level)';
   }
 
   @override
@@ -721,7 +741,9 @@ class RooflineSegment {
         other.anchorLedCount == anchorLedCount &&
         other.sortOrder == sortOrder &&
         other.direction == direction &&
-        other.isPrimary == isPrimary;
+        other.isPrimary == isPrimary &&
+        other.isConnectedToPrevious == isConnectedToPrevious &&
+        other.level == level;
   }
 
   @override
@@ -737,6 +759,8 @@ class RooflineSegment {
       sortOrder,
       direction,
       isPrimary,
+      isConnectedToPrevious,
+      level,
     );
   }
 }

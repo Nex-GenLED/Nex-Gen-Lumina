@@ -107,6 +107,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           architecturalRole: aiRole,
           location: draft.location.storageName,
           isProminent: draft.isProminent,
+          isConnectedToPrevious: draft.isConnectedToPrevious,
+          level: draft.level,
         ));
         currentStart += draft.ledCount;
       }
@@ -960,11 +962,14 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        segment.name,
-                        style: TextStyle(
-                          color: NexGenPalette.textHigh,
-                          fontWeight: FontWeight.w500,
+                      Flexible(
+                        child: Text(
+                          segment.name,
+                          style: TextStyle(
+                            color: NexGenPalette.textHigh,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (segment.isProminent) ...[
@@ -974,6 +979,33 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                       if (segment.isAiRelevantSegment) ...[
                         const SizedBox(width: 4),
                         Icon(Icons.auto_awesome, color: Colors.purple, size: 14),
+                      ],
+                      // Show disconnection indicator (not connected to previous)
+                      if (index > 0 && !segment.isConnectedToPrevious) ...[
+                        const SizedBox(width: 4),
+                        Tooltip(
+                          message: 'Not connected to previous segment',
+                          child: Icon(Icons.link_off, color: Colors.orange, size: 14),
+                        ),
+                      ],
+                      // Show level badge if not on level 1
+                      if (segment.level > 1) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'L${segment.level}',
+                            style: const TextStyle(
+                              color: Colors.blue,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ],
                     ],
                   ),
@@ -1792,6 +1824,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     var selectedDirection = InstallerLedDirection.leftToRight;
     var selectedLocation = SegmentLocation.front;
     bool isProminent = false;
+    // First segment is always connected (no previous to connect to)
+    bool isConnectedToPrevious = _segments.isEmpty ? true : true;
+    int selectedLevel = 1;
 
     showModalBottomSheet(
       context: context,
@@ -1993,6 +2028,69 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                       checkColor: Colors.black,
                       contentPadding: EdgeInsets.zero,
                     ),
+                    const SizedBox(height: 16),
+
+                    // Connected to Previous Segment (disabled for first segment)
+                    CheckboxListTile(
+                      value: isConnectedToPrevious,
+                      onChanged: _segments.isEmpty
+                          ? null // Disabled for first segment
+                          : (value) {
+                              setDialogState(() => isConnectedToPrevious = value ?? true);
+                            },
+                      title: Text(
+                        'Connected to Previous Segment',
+                        style: TextStyle(
+                          color: _segments.isEmpty
+                              ? NexGenPalette.textMedium.withValues(alpha: 0.5)
+                              : NexGenPalette.textHigh,
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: Text(
+                        _segments.isEmpty
+                            ? 'First segment - always starts a new run'
+                            : 'Uncheck if this segment jumps to a separate area (second story, detached structure)',
+                        style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                      ),
+                      activeColor: NexGenPalette.cyan,
+                      checkColor: Colors.black,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Level / Story
+                    Text(
+                      'Level / Story',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        for (int lvl = 1; lvl <= 3; lvl++)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text('Level $lvl'),
+                              selected: selectedLevel == lvl,
+                              selectedColor: NexGenPalette.cyan,
+                              backgroundColor: NexGenPalette.matteBlack,
+                              labelStyle: TextStyle(
+                                color: selectedLevel == lvl ? Colors.black : NexGenPalette.textMedium,
+                              ),
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setDialogState(() => selectedLevel = lvl);
+                                }
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                    Text(
+                      'Which story or level is this segment on?',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    ),
                     const SizedBox(height: 24),
 
                     // Buttons
@@ -2038,6 +2136,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                                   ledDirection: selectedDirection,
                                   location: selectedLocation,
                                   isProminent: isProminent,
+                                  isConnectedToPrevious: _segments.isEmpty ? true : isConnectedToPrevious,
+                                  level: selectedLevel,
                                 ));
                               });
                               Navigator.pop(context);
@@ -2070,6 +2170,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     var selectedDirection = segment.ledDirection;
     var selectedLocation = segment.location;
     var isProminent = segment.isProminent;
+    var isConnectedToPrevious = segment.isConnectedToPrevious;
+    var selectedLevel = segment.level;
 
     showModalBottomSheet(
       context: context,
@@ -2241,6 +2343,69 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                       checkColor: Colors.black,
                       contentPadding: EdgeInsets.zero,
                     ),
+                    const SizedBox(height: 16),
+
+                    // Connected to Previous Segment (disabled for first segment)
+                    CheckboxListTile(
+                      value: isConnectedToPrevious,
+                      onChanged: index == 0
+                          ? null // Disabled for first segment
+                          : (value) {
+                              setDialogState(() => isConnectedToPrevious = value ?? true);
+                            },
+                      title: Text(
+                        'Connected to Previous Segment',
+                        style: TextStyle(
+                          color: index == 0
+                              ? NexGenPalette.textMedium.withValues(alpha: 0.5)
+                              : NexGenPalette.textHigh,
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: Text(
+                        index == 0
+                            ? 'First segment - always starts a new run'
+                            : 'Uncheck if this segment jumps to a separate area (second story, detached structure)',
+                        style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                      ),
+                      activeColor: NexGenPalette.cyan,
+                      checkColor: Colors.black,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Level / Story
+                    Text(
+                      'Level / Story',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        for (int lvl = 1; lvl <= 3; lvl++)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text('Level $lvl'),
+                              selected: selectedLevel == lvl,
+                              selectedColor: NexGenPalette.cyan,
+                              backgroundColor: NexGenPalette.matteBlack,
+                              labelStyle: TextStyle(
+                                color: selectedLevel == lvl ? Colors.black : NexGenPalette.textMedium,
+                              ),
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setDialogState(() => selectedLevel = lvl);
+                                }
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                    Text(
+                      'Which story or level is this segment on?',
+                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                    ),
                     const SizedBox(height: 24),
 
                     Row(
@@ -2269,6 +2434,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                                   ledDirection: selectedDirection,
                                   location: selectedLocation,
                                   isProminent: isProminent,
+                                  isConnectedToPrevious: index == 0 ? true : isConnectedToPrevious,
+                                  level: selectedLevel,
                                   anchorIndices: segment.anchorIndices,
                                 );
                               });
@@ -2590,6 +2757,13 @@ class _SegmentDraft {
   bool isProminent;
   List<int> anchorIndices;
 
+  /// Whether this segment is physically connected to the previous segment.
+  /// When false, there's a discontinuity (jump to second story, detached area, etc.)
+  bool isConnectedToPrevious;
+
+  /// The level/story this segment is on (1 = ground level, 2 = second story, etc.)
+  int level;
+
   _SegmentDraft({
     required this.id,
     required this.name,
@@ -2598,6 +2772,8 @@ class _SegmentDraft {
     this.ledDirection = InstallerLedDirection.leftToRight,
     this.location = SegmentLocation.front,
     this.isProminent = false,
+    this.isConnectedToPrevious = true,
+    this.level = 1,
     List<int>? anchorIndices,
   }) : anchorIndices = anchorIndices ?? [];
 

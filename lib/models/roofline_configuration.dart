@@ -52,6 +52,53 @@ class RooflineConfiguration {
   int get totalAnchorCount =>
       segments.fold(0, (sum, seg) => sum + seg.anchorPixels.length);
 
+  /// Get indices of segments that are not connected to the previous segment
+  /// (i.e., segments that start a new physical LED run).
+  /// Note: First segment (index 0) is never included since it has no previous.
+  List<int> get disconnectedSegmentIndices {
+    final indices = <int>[];
+    for (int i = 1; i < segments.length; i++) {
+      if (!segments[i].isConnectedToPrevious) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }
+
+  /// Group segments into physically connected runs.
+  /// Each inner list contains segments that are physically connected to each other.
+  /// A new run starts when a segment has isConnectedToPrevious = false.
+  List<List<RooflineSegment>> get connectedRuns {
+    if (segments.isEmpty) return [];
+
+    final runs = <List<RooflineSegment>>[];
+    var currentRun = <RooflineSegment>[segments.first];
+
+    for (int i = 1; i < segments.length; i++) {
+      if (segments[i].isConnectedToPrevious) {
+        currentRun.add(segments[i]);
+      } else {
+        runs.add(currentRun);
+        currentRun = [segments[i]];
+      }
+    }
+    runs.add(currentRun);
+
+    return runs;
+  }
+
+  /// Get all segments on a specific level/story.
+  List<RooflineSegment> segmentsOnLevel(int level) {
+    return segments.where((s) => s.level == level).toList();
+  }
+
+  /// Get all unique levels/stories in this configuration, sorted.
+  List<int> get allLevels {
+    final levels = segments.map((s) => s.level).toSet().toList();
+    levels.sort();
+    return levels;
+  }
+
   /// Find the segment containing a given global pixel index.
   /// Returns null if the pixel is out of range.
   RooflineSegment? segmentForPixel(int globalPixel) {
