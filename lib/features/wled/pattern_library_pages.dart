@@ -85,6 +85,16 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
   // Track current query for display
   String _currentQuery = '';
 
+  @override
+  void initState() {
+    super.initState();
+    // Trigger big event refresh check on screen load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(bigEventRefreshTriggerProvider.future).catchError((e) {
+        debugPrint('ExplorePatternsScreen: Big event refresh check failed: $e');
+      });
+    });
+  }
 
   Future<void> _handleSearch(String raw) async {
     final query = raw.trim();

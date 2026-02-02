@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/ddp_service.dart';
@@ -379,36 +380,36 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
-  Future<void> togglePower(bool value) async {
-    debugPrint('🔌 togglePower called: $value');
+  Future<void> togglePower(bool value, {bool isManualChange = true}) async {
+    debugPrint('🔌 togglePower called: $value (manual: $isManualChange)');
     state = state.copyWith(isOn: value);
     // Only send power state - don't include brightness when turning off
-    await _postUpdate(on: value);
+    await _postUpdate(on: value, isManualChange: isManualChange);
   }
 
-  Future<void> setBrightness(int bri) async {
+  Future<void> setBrightness(int bri, {bool isManualChange = true}) async {
     state = state.copyWith(brightness: bri);
     // Always send power state with brightness to ensure WLED interprets correctly
-    await _postUpdate(on: state.isOn, brightness: bri);
+    await _postUpdate(on: state.isOn, brightness: bri, isManualChange: isManualChange);
   }
 
-  Future<void> setSpeed(int sx) async {
+  Future<void> setSpeed(int sx, {bool isManualChange = true}) async {
     state = state.copyWith(speed: sx);
-    await _postUpdate(speed: sx);
+    await _postUpdate(speed: sx, isManualChange: isManualChange);
   }
 
-  Future<void> setColor(Color color) async {
+  Future<void> setColor(Color color, {bool isManualChange = true}) async {
     state = state.copyWith(color: color);
     // For RGBW strips, explicitly set white to 0 for pure RGB color accuracy
     // This prevents WLED's auto-white from mixing in white LED and distorting colors
-    await _postUpdate(color: color, forceRgbwZeroWhite: state.supportsRgbw);
+    await _postUpdate(color: color, forceRgbwZeroWhite: state.supportsRgbw, isManualChange: isManualChange);
   }
 
-  Future<void> setWarmWhite(int white) async {
+  Future<void> setWarmWhite(int white, {bool isManualChange = true}) async {
     final clamped = white.clamp(0, 255);
     state = state.copyWith(warmWhite: clamped);
     // Send an update including current color and the updated white channel
-    await _postUpdate(color: state.color, white: state.supportsRgbw ? clamped : null);
+    await _postUpdate(color: state.color, white: state.supportsRgbw ? clamped : null, isManualChange: isManualChange);
   }
 
   /// Sets Lumina pattern metadata (colors, effect name) when a pattern is applied.
@@ -437,7 +438,15 @@ class WledNotifier extends Notifier<WledStateModel> {
     debugPrint('🗑️ Cleared Lumina pattern metadata');
   }
 
-  Future<void> _postUpdate({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite}) async {
+  Future<void> _postUpdate({
+    bool? on,
+    int? brightness,
+    int? speed,
+    Color? color,
+    int? white,
+    bool? forceRgbwZeroWhite,
+    bool isManualChange = false,
+  }) async {
     // If DDP streaming is active, avoid HTTP state updates to prevent conflicts.
     final ddpStreaming = ref.read(ddpStreamingProvider);
     if (ddpStreaming) {
@@ -446,6 +455,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
     final service = ref.read(wledRepositoryProvider);
     if (service == null) return;
+
+    // Record manual override for schedule enforcement
+    if (isManualChange) {
+      try {
+        ref.read(scheduleEnforcementServiceProvider).recordManualOverride();
+      } catch (e) {
+        // Ignore errors if enforcement service not available
+        debugPrint('Could not record manual override: $e');
+      }
+    }
+
     _posting = true;
     try {
       final ok = await service.setState(

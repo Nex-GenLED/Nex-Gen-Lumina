@@ -1,12 +1,27 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
+///
+/// **Schedule Preset Architecture:**
+/// - Presets 1-9: Reserved for system use (on, off, brightness levels)
+/// - Presets 10-25: Available for user schedules (up to 16 unique scheduled patterns)
+/// - Each schedule gets its own preset ID to avoid conflicts
+///
+/// When syncing schedules:
+/// 1. Save each schedule's WLED payload as a preset on the device
+/// 2. Create WLED timers that reference those preset IDs
+/// 3. Push the timer configuration to the device
 class ScheduleSyncService {
   const ScheduleSyncService();
+
+  /// First available preset ID for user schedules
+  static const int _firstSchedulePresetId = 10;
+
+  /// Last available preset ID for user schedules
+  static const int _lastSchedulePresetId = 25;
 
   /// Builds a WLED /json/cfg payload that sets the timer configuration.
   ///
@@ -35,11 +50,14 @@ class ScheduleSyncService {
 
       final dow = _computeDowMask(s.repeatDays);
 
+      // Determine preset ID: use assigned presetId if available, else fall back to legacy behavior
+      final presetId = s.presetId ?? _presetForAction(s.actionLabel);
+
       // ON timer
       final onTimer = _buildTimerEntry(
         timeLabel: s.timeLabel,
         dow: dow,
-        macro: _presetForAction(s.actionLabel),
+        macro: presetId,
       );
       if (onTimer != null) {
         timers.add(onTimer);
@@ -103,29 +121,102 @@ class ScheduleSyncService {
     };
   }
 
-  /// Pushes all schedules to the currently selected WLED device via /json/cfg.
-  Future<bool> syncAll(WidgetRef ref, List<ScheduleItem> schedules) async {
+  /// Pushes all schedules to the currently selected WLED device.
+  ///
+  /// This method performs two critical steps:
+  /// 1. **Save Presets**: For each schedule with a WLED payload, save that
+  ///    payload as a preset on the device. This ensures the timer has
+  ///    actual lighting state to load when it triggers.
+  /// 2. **Sync Timers**: Push the timer configuration to /json/cfg so
+  ///    the device knows when to trigger each preset.
+  ///
+  /// Returns a [ScheduleSyncResult] with details about the sync operation.
+  Future<ScheduleSyncResult> syncAll(WidgetRef ref, List<ScheduleItem> schedules) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
       debugPrint('ScheduleSync: No WLED device selected');
-      return false;
+      return ScheduleSyncResult(
+        success: false,
+        error: 'No WLED device selected',
+      );
     }
-    final payload = buildCfgPayload(schedules);
-    debugPrint('ScheduleSync: pushing ${schedules.length} schedules to device');
-    debugPrint('ScheduleSync: payload = $payload');
+
+    final enabled = schedules.where((s) => s.enabled).toList();
+    debugPrint('ScheduleSync: Syncing ${enabled.length} enabled schedules');
+
+    // Step 1: Assign preset IDs and save presets to device
+    final List<ScheduleItem> updatedSchedules = [];
+    final List<String> presetErrors = [];
+    int nextPresetId = _firstSchedulePresetId;
+
+    for (final schedule in enabled) {
+      if (nextPresetId > _lastSchedulePresetId) {
+        debugPrint('ScheduleSync: Maximum preset limit reached (${_lastSchedulePresetId - _firstSchedulePresetId + 1} schedules)');
+        break;
+      }
+
+      // Assign preset ID if schedule has a WLED payload
+      final presetId = schedule.presetId ?? nextPresetId;
+      if (schedule.presetId == null) nextPresetId++;
+
+      if (schedule.hasWledPayload) {
+        // Save the WLED payload as a preset on the device
+        debugPrint('ScheduleSync: Saving preset $presetId for "${schedule.actionLabel}"');
+        final saved = await repo.savePreset(
+          presetId: presetId,
+          state: schedule.wledPayload!,
+          presetName: schedule.actionLabel,
+        );
+
+        if (!saved) {
+          presetErrors.add('Failed to save preset for "${schedule.actionLabel}"');
+          debugPrint('ScheduleSync: ❌ Failed to save preset $presetId');
+        } else {
+          debugPrint('ScheduleSync: ✅ Saved preset $presetId');
+        }
+      }
+
+      updatedSchedules.add(schedule.copyWith(presetId: presetId));
+    }
+
+    // Step 2: Build and push timer configuration
+    final payload = buildCfgPayload(updatedSchedules);
+    debugPrint('ScheduleSync: Timer payload = $payload');
 
     try {
       final ok = await repo.applyConfig(payload);
       if (!ok) {
         debugPrint('ScheduleSync: applyConfig returned false');
-      } else {
-        debugPrint('ScheduleSync: Successfully synced schedules to device');
+        return ScheduleSyncResult(
+          success: false,
+          error: 'Failed to save timer configuration',
+          presetErrors: presetErrors,
+          schedulesWithPresets: updatedSchedules,
+        );
       }
-      return ok;
+
+      debugPrint('ScheduleSync: ✅ Successfully synced schedules to device');
+      return ScheduleSyncResult(
+        success: true,
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
+      );
     } catch (e) {
       debugPrint('ScheduleSync: Exception during sync: $e');
-      return false;
+      return ScheduleSyncResult(
+        success: false,
+        error: 'Exception: $e',
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
+      );
     }
+  }
+
+  /// Legacy sync method for backward compatibility.
+  /// Prefer using [syncAll] which returns detailed results.
+  Future<bool> syncAllLegacy(WidgetRef ref, List<ScheduleItem> schedules) async {
+    final result = await syncAll(ref, schedules);
+    return result.success;
   }
 
   // Helpers
@@ -257,3 +348,40 @@ class _ParsedTime {
 }
 
 final scheduleSyncServiceProvider = Provider<ScheduleSyncService>((ref) => const ScheduleSyncService());
+
+/// Result of a schedule sync operation.
+class ScheduleSyncResult {
+  /// Whether the overall sync was successful.
+  final bool success;
+
+  /// Error message if sync failed.
+  final String? error;
+
+  /// List of errors encountered while saving individual presets.
+  final List<String> presetErrors;
+
+  /// Schedules with their assigned preset IDs.
+  /// Can be used to update the stored schedules with their preset assignments.
+  final List<ScheduleItem> schedulesWithPresets;
+
+  const ScheduleSyncResult({
+    required this.success,
+    this.error,
+    this.presetErrors = const [],
+    this.schedulesWithPresets = const [],
+  });
+
+  /// Returns true if there were any preset-related errors.
+  bool get hasPresetErrors => presetErrors.isNotEmpty;
+
+  /// Returns a summary message suitable for user display.
+  String get summaryMessage {
+    if (!success) {
+      return error ?? 'Sync failed';
+    }
+    if (hasPresetErrors) {
+      return 'Synced with ${presetErrors.length} warning(s)';
+    }
+    return 'Successfully synced ${schedulesWithPresets.length} schedule(s)';
+  }
+}

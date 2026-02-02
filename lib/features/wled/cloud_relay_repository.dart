@@ -311,4 +311,28 @@ class CloudRelayRepository implements WledRepository {
     }
     return null;
   }
+
+  @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    if (presetId < 1 || presetId > 250) return false;
+    // Save preset via cloud relay by sending the state with psave field
+    final payload = <String, dynamic>{
+      ...state,
+      'psave': presetId,
+    };
+    if (presetName != null && presetName.isNotEmpty) {
+      payload['n'] = presetName;
+    }
+    return _executeBool('savePreset', payload);
+  }
+
+  @override
+  Future<bool> loadPreset(int presetId) async {
+    if (presetId < 1 || presetId > 250) return false;
+    return _executeBool('loadPreset', {'ps': presetId});
+  }
 }

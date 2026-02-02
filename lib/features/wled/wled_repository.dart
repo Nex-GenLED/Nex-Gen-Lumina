@@ -37,6 +37,21 @@ abstract class WledRepository {
   /// Returns null if unable to fetch.
   Future<int?> getTotalLedCount() async => null;
 
+  /// Saves the given state as a preset on the device.
+  /// [presetId] should be 1-250 (WLED supports up to 250 presets).
+  /// [state] is the WLED JSON state to save (on, bri, seg, fx, etc.).
+  /// [presetName] is optional human-readable name for the preset.
+  /// Returns true on success.
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async => false;
+
+  /// Loads a preset by ID, applying it immediately.
+  /// Returns true on success.
+  Future<bool> loadPreset(int presetId) async => false;
+
   /// Optional: presets for demo mode. Real implementations may return empty.
   List<WledPreset> getPresets() => const [];
 }

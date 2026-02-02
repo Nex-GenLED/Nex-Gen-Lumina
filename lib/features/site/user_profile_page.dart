@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/theme.dart';
@@ -202,6 +203,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  _ScheduleEnforcementCard(),
+                  const SizedBox(height: 16),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -323,6 +326,147 @@ class _SignedOutState extends StatelessWidget {
           const SizedBox(height: 16),
           OutlinedButton.icon(onPressed: onBack, icon: const Icon(Icons.arrow_back), label: const Text('Back')),
         ]),
+      ),
+    );
+  }
+}
+
+/// Card for configuring schedule enforcement behavior.
+/// Controls how aggressively the app maintains scheduled lighting states
+/// when users manually change lights.
+class _ScheduleEnforcementCard extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentMode = ref.watch(scheduleEnforcementModeProvider);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.schedule, color: NexGenPalette.cyan),
+              const SizedBox(width: 8),
+              Text('Schedule Priority', style: Theme.of(context).textTheme.titleMedium),
+            ]),
+            const SizedBox(height: 8),
+            Text(
+              'Control how the app handles manual light changes during scheduled times.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white60),
+            ),
+            const SizedBox(height: 16),
+
+            // Mode selection using segmented button
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<ScheduleEnforcementMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ScheduleEnforcementMode.disabled,
+                    label: Text('Off'),
+                    icon: Icon(Icons.block, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: ScheduleEnforcementMode.soft,
+                    label: Text('Soft'),
+                    icon: Icon(Icons.timer, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: ScheduleEnforcementMode.strict,
+                    label: Text('Strict'),
+                    icon: Icon(Icons.lock_clock, size: 18),
+                  ),
+                ],
+                selected: {currentMode},
+                onSelectionChanged: (selected) {
+                  ref.read(scheduleEnforcementModeProvider.notifier).state = selected.first;
+                },
+                style: ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return NexGenPalette.cyan.withValues(alpha: 0.2);
+                    }
+                    return Colors.transparent;
+                  }),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Description based on current mode
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _ModeDescription(key: ValueKey(currentMode), mode: currentMode),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeDescription extends StatelessWidget {
+  final ScheduleEnforcementMode mode;
+  const _ModeDescription({super.key, required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, title, description, color) = switch (mode) {
+      ScheduleEnforcementMode.disabled => (
+        Icons.block,
+        'Manual changes persist',
+        'If you manually change your lights, they will stay that way until the next scheduled event. This is the default WLED behavior.',
+        Colors.grey,
+      ),
+      ScheduleEnforcementMode.soft => (
+        Icons.timer,
+        'Auto-restore after 2 hours',
+        'Manual changes are allowed, but after 2 hours the schedule will automatically restore. Great for temporary adjustments that you might forget to undo.',
+        NexGenPalette.cyan,
+      ),
+      ScheduleEnforcementMode.strict => (
+        Icons.lock_clock,
+        'Schedule always wins',
+        'The schedule will be restored within 5 minutes of any manual change. Use this if you want your schedule to always take priority.',
+        NexGenPalette.violet,
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

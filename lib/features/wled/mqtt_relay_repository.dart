@@ -250,6 +250,32 @@ class MqttRelayRepository implements WledRepository {
     return null;
   }
 
+  @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    if (presetId < 1 || presetId > 250) return false;
+    // Save preset via MQTT relay by sending the state with psave field
+    final payload = <String, dynamic>{
+      ...state,
+      'psave': presetId,
+    };
+    if (presetName != null && presetName.isNotEmpty) {
+      payload['n'] = presetName;
+    }
+    debugPrint('🌐 MqttRelay: savePreset($presetId)');
+    return applyJson(payload);
+  }
+
+  @override
+  Future<bool> loadPreset(int presetId) async {
+    if (presetId < 1 || presetId > 250) return false;
+    debugPrint('🌐 MqttRelay: loadPreset($presetId)');
+    return applyJson({'ps': presetId});
+  }
+
   /// Update the local cache with sent state.
   void _updateCache(Map<String, dynamic> sentPayload) {
     _cachedState ??= {};

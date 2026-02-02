@@ -319,6 +319,92 @@ class WledService implements WledRepository {
   List<WledPreset> getPresets() => const [];
 
   @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    if (presetId < 1 || presetId > 250) {
+      debugPrint('savePreset: Invalid preset ID $presetId (must be 1-250)');
+      return false;
+    }
+
+    if (_simulate) {
+      debugPrint('📤 WLED savePreset (simulated): preset $presetId');
+      return true;
+    }
+
+    try {
+      // WLED saves presets via /json/state with "psave" field
+      // The "psave" field tells WLED to save the included state to that preset slot
+      final payload = <String, dynamic>{
+        ...state,
+        'psave': presetId,
+      };
+
+      // Add preset name if provided (WLED stores this in the preset)
+      if (presetName != null && presetName.isNotEmpty) {
+        payload['n'] = presetName;
+      }
+
+      debugPrint('📤 WLED savePreset: Saving to preset $presetId');
+      debugPrint('   Payload: ${jsonEncode(payload)}');
+
+      final response = await http.post(
+        _uri('/json/state'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 15));
+
+      debugPrint('📥 WLED savePreset response: ${response.statusCode}');
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('✅ WLED preset $presetId saved successfully');
+        return true;
+      }
+      debugPrint('❌ WLED savePreset error ${response.statusCode}: ${response.body}');
+    } catch (e) {
+      debugPrint('❌ WLED savePreset exception: $e');
+    }
+    return false;
+  }
+
+  @override
+  Future<bool> loadPreset(int presetId) async {
+    if (presetId < 1 || presetId > 250) {
+      debugPrint('loadPreset: Invalid preset ID $presetId (must be 1-250)');
+      return false;
+    }
+
+    if (_simulate) {
+      debugPrint('📤 WLED loadPreset (simulated): preset $presetId');
+      return true;
+    }
+
+    try {
+      // WLED loads presets via /json/state with "ps" field
+      final payload = {'ps': presetId};
+
+      debugPrint('📤 WLED loadPreset: Loading preset $presetId');
+
+      final response = await http.post(
+        _uri('/json/state'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('✅ WLED preset $presetId loaded successfully');
+        return true;
+      }
+      debugPrint('❌ WLED loadPreset error ${response.statusCode}: ${response.body}');
+    } catch (e) {
+      debugPrint('❌ WLED loadPreset exception: $e');
+    }
+    return false;
+  }
+
+  @override
   Future<bool> supportsRgbw() async {
     if (_supportsRgbwCache != null) return _supportsRgbwCache!;
     if (_simulate) {

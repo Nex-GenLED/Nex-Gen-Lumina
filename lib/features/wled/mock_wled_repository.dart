@@ -20,6 +20,9 @@ class MockWledRepository implements WledRepository {
   ];
   int _totalLedCount = 200;
 
+  // Simulated preset storage (preset ID -> saved state)
+  final Map<int, Map<String, dynamic>> _savedPresets = {};
+
   final List<WledPreset> _presets = const [
     WledPreset(name: 'Warm White Architectural', json: {
       'on': true,
@@ -237,5 +240,36 @@ class MockWledRepository implements WledRepository {
   @override
   Future<int?> getTotalLedCount() async {
     return _totalLedCount;
+  }
+
+  @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    if (presetId < 1 || presetId > 250) return false;
+    _savedPresets[presetId] = Map<String, dynamic>.from(state);
+    debugPrint('MockWLED savePreset: Saved preset $presetId${presetName != null ? ' ($presetName)' : ''}');
+    return true;
+  }
+
+  @override
+  Future<bool> loadPreset(int presetId) async {
+    if (presetId < 1 || presetId > 250) return false;
+    final saved = _savedPresets[presetId];
+    if (saved != null) {
+      await applyJson(saved);
+      debugPrint('MockWLED loadPreset: Loaded preset $presetId');
+      return true;
+    }
+    // If preset not in our saved map, check built-in presets
+    if (presetId <= _presets.length) {
+      await applyJson(_presets[presetId - 1].json);
+      debugPrint('MockWLED loadPreset: Loaded built-in preset $presetId');
+      return true;
+    }
+    debugPrint('MockWLED loadPreset: Preset $presetId not found');
+    return false;
   }
 }
