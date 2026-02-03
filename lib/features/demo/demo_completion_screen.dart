@@ -182,8 +182,8 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: Container(
-        decoration: BoxDecoration(
-          gradient: NexGenGradients.darkToMidnight,
+        decoration: const BoxDecoration(
+          gradient: NexGenPalette.atmosphere,
         ),
         child: SafeArea(
           child: _showingContactForm

@@ -21,8 +21,8 @@ class DemoWelcomeScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: Container(
-        decoration: BoxDecoration(
-          gradient: NexGenGradients.darkToMidnight,
+        decoration: const BoxDecoration(
+          gradient: NexGenPalette.atmosphere,
         ),
         child: SafeArea(
           child: Column(
