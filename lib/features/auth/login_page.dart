@@ -367,6 +367,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             )
                           ],
                         ),
+                        const SizedBox(height: 16),
+                        // Demo Experience link
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: _loading ? null : () => context.push(AppRoutes.demoWelcome),
+                            icon: Icon(
+                              Icons.play_circle_outline,
+                              size: 18,
+                              color: Colors.white.withValues(alpha: 0.6),
+                            ),
+                            label: Text(
+                              'Experience Nex-Gen Demo',
+                              style: GoogleFonts.montserrat(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
                       ]),
                     ),
                   ),
