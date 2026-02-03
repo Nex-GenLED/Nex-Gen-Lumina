@@ -5955,10 +5955,10 @@ class _PalettePatternGrid extends ConsumerWidget {
                   : GridView.builder(
                       padding: const EdgeInsets.all(16),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                        childAspectRatio: 1.0,
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 0.75,
                       ),
                       itemCount: patterns.length,
                       itemBuilder: (context, index) {
@@ -6325,7 +6325,7 @@ class _PatternCard extends ConsumerWidget {
       child: Container(
         decoration: BoxDecoration(
           color: NexGenPalette.gunmetal90,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: NexGenPalette.line),
         ),
         child: Column(
@@ -6344,8 +6344,8 @@ class _PatternCard extends ConsumerWidget {
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    topRight: Radius.circular(16),
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
                   ),
                 ),
                 child: Stack(
@@ -6354,25 +6354,25 @@ class _PatternCard extends ConsumerWidget {
                     Center(
                       child: Icon(
                         _iconForEffect(effectId),
-                        size: 40,
-                        color: Colors.white.withValues(alpha: 0.3),
+                        size: 28,
+                        color: Colors.white.withValues(alpha: 0.4),
                       ),
                     ),
                     // Color dots
                     Positioned(
-                      right: 8,
-                      top: 8,
+                      right: 6,
+                      top: 6,
                       child: Row(
                         children: [
                           for (var i = 0; i < (colors.length > 3 ? 3 : colors.length); i++)
                             Container(
-                              width: 14,
-                              height: 14,
+                              width: 10,
+                              height: 10,
                               margin: const EdgeInsets.only(left: 2),
                               decoration: BoxDecoration(
                                 color: colors[i],
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 1.5),
+                                border: Border.all(color: Colors.white, width: 1),
                               ),
                             ),
                         ],
@@ -6385,7 +6385,7 @@ class _PatternCard extends ConsumerWidget {
             // Pattern info
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -6394,10 +6394,10 @@ class _PatternCard extends ConsumerWidget {
                       pattern.name,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     if (effectName != null)
@@ -6405,7 +6405,7 @@ class _PatternCard extends ConsumerWidget {
                         effectName,
                         style: TextStyle(
                           color: NexGenPalette.textSecondary,
-                          fontSize: 10,
+                          fontSize: 9,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
