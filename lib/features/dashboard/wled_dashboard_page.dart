@@ -717,25 +717,96 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       child: _adjustmentPanelExpanded
           ? Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: NexGenPalette.gunmetal90,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: NexGenPalette.line),
+                border: Border.all(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              child: Column(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          NexGenPalette.gunmetal90.withValues(alpha: 0.85),
+                          NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                        ],
+                      ),
+                    ),
+                    child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Accent bar at top
+                  Container(
+                    height: 3,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          NexGenPalette.cyan,
+                          NexGenPalette.cyan.withValues(alpha: 0.0),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
                   Row(
                     children: [
-                      const Icon(Icons.tune, color: NexGenPalette.cyan, size: 18),
-                      const SizedBox(width: 8),
-                      Text('Adjust Pattern', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                      // Icon with gradient background
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              NexGenPalette.cyan,
+                              NexGenPalette.cyan.withValues(alpha: 0.6),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.tune, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('Adjust Pattern', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
                       const Spacer(),
-                      InkWell(
-                        onTap: () => setState(() => _adjustmentPanelExpanded = false),
-                        child: const Icon(Icons.close, color: Colors.white54, size: 20),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => setState(() => _adjustmentPanelExpanded = false),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.close, color: Colors.white70, size: 18),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -789,6 +860,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     );
                   }),
                 ],
+              ),
+                  ),
+                ),
               ),
             )
           : const SizedBox.shrink(),

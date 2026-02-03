@@ -136,9 +136,9 @@ class AutopilotGenerationService {
       double confidence;
 
       try {
-        // Use LuminaBrain to generate WLED JSON
-        wledPayload = await LuminaBrain.generateWledJson(
-          _ref as WidgetRef,
+        // Use LuminaBrain to generate WLED JSON (using Ref-compatible variant)
+        wledPayload = await LuminaBrain.generateWledJsonFromRef(
+          _ref,
           prompt,
         );
         patternName = event.name;

@@ -36,6 +36,7 @@ import 'package:nexgen_command/features/site/remote_access_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/design/design_studio_screen.dart';
+import 'package:nexgen_command/features/design_studio/screens/ai_design_studio_screen.dart';
 import 'package:nexgen_command/features/design/my_designs_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
@@ -415,7 +416,7 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.designStudio,
         name: 'design-studio',
-        pageBuilder: (context, state) => const NoTransitionPage(child: DesignStudioScreen()),
+        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
       ),
       GoRoute(
         path: AppRoutes.myDesigns,

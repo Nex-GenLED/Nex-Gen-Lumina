@@ -390,6 +390,14 @@ class LuminaBrain {
     return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
   }
 
+  /// Requests a strict WLED JSON payload using a plain Ref (for services).
+  /// This variant is used by background services like AutopilotGenerationService
+  /// that don't have access to a WidgetRef.
+  static Future<Map<String, dynamic>> generateWledJsonFromRef(Ref ref, String userPrompt) async {
+    final contextBlock = _buildContextBlockFromRef(ref);
+    return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
+  }
+
   /// Sends a refinement request that modifies an existing pattern.
   /// The [currentPattern] is the full pattern context including colors, effect, speed, etc.
   /// The [refinementPrompt] describes what to change (e.g., "Make it slower").
@@ -580,6 +588,66 @@ class LuminaBrain {
     return buffer.toString();
   }
 
+  /// Builds context block using a plain Ref (for background services).
+  static String _buildContextBlockFromRef(Ref ref) {
+    String location = 'Unknown';
+    String interests = 'None';
+    String avoid = '';
+    String rooflineContext = '';
+
+    try {
+      final profile = ref.read(currentUserProfileProvider).maybeWhen(
+            data: (u) => u,
+            orElse: () => null,
+          );
+      if (profile != null) {
+        if (profile.location != null && profile.location!.trim().isNotEmpty) {
+          location = profile.location!.trim();
+        }
+        if (profile.interestTags.isNotEmpty) {
+          interests = profile.interestTags.join(', ');
+        }
+        if (profile.dislikes.isNotEmpty) {
+          avoid = profile.dislikes.join(', ');
+        }
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain context profile read error: $e');
+    }
+
+    try {
+      final rooflineConfig = ref.read(currentRooflineConfigProvider).maybeWhen(
+            data: (config) => config,
+            orElse: () => null,
+          );
+      if (rooflineConfig != null && rooflineConfig.segments.isNotEmpty) {
+        rooflineContext = _buildRooflineContext(rooflineConfig);
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain roofline config read error: $e');
+    }
+
+    final now = DateTime.now();
+    final dateStr = _formatFullDate(now);
+    final tod = _timeOfDayLabel(now);
+
+    final buffer = StringBuffer('CONTEXT:\n'
+        '- User Location: $location\n'
+        '- Current Date: $dateStr\n'
+        '- Known Interests: $interests\n'
+        '- Time of Day: $tod');
+
+    if (avoid.isNotEmpty) {
+      buffer.write('\n- AVOID THESE: $avoid');
+    }
+
+    if (rooflineContext.isNotEmpty) {
+      buffer.write('\n\n$rooflineContext');
+    }
+
+    return buffer.toString();
+  }
+
   /// Builds a detailed roofline context string for AI to understand the user's
   /// specific LED installation and make segment-aware recommendations.
   static String _buildRooflineContext(RooflineConfiguration config) {
@@ -706,6 +774,92 @@ class LuminaBrain {
     final minute = dt.minute.toString().padLeft(2, '0');
     final ampm = dt.hour >= 12 ? 'PM' : 'AM';
     return '$weekday, $month $day, $year, $hour12:$minute $ampm';
+  }
+
+  /// Parse a design intent using AI when deterministic parsing has low confidence.
+  ///
+  /// This is a fallback for complex or ambiguous design requests that the
+  /// NLU service can't parse confidently. Returns structured JSON that can
+  /// be converted to a DesignIntent.
+  ///
+  /// Used by: AI Design Studio
+  static Future<Map<String, dynamic>?> parseDesignIntent(
+    WidgetRef ref,
+    String userPrompt,
+  ) async {
+    final rooflineConfig = ref.read(currentRooflineConfigProvider).maybeWhen(
+          data: (config) => config,
+          orElse: () => null,
+        );
+
+    // Build a specialized prompt for design intent parsing
+    final systemPrompt = '''
+You are a lighting design parser for permanent outdoor LED systems.
+Parse the user's natural language request into a structured design intent.
+
+${rooflineConfig != null ? _buildRooflineContext(rooflineConfig) : ''}
+
+Parse the request into this JSON structure:
+{
+  "layers": [
+    {
+      "name": "Layer name",
+      "zone": {
+        "type": "all|architectural|location|level",
+        "roles": ["peak", "corner", "run"] // for architectural type
+        "location": "front|back|left|right" // for location type
+      },
+      "colors": {
+        "primary": [R, G, B],
+        "secondary": [R, G, B], // optional
+        "accent": [R, G, B] // optional
+      },
+      "spacing": {
+        "type": "continuous|everyOther|oneOnTwoOff|equallySpaced|anchorsOnly",
+        "onCount": 1, // for pattern spacing
+        "offCount": 1 // for pattern spacing
+      },
+      "motion": {
+        "type": "none|chase|wave|pulse|twinkle",
+        "direction": "leftToRight|rightToLeft|inward|outward",
+        "speed": 128 // 0-255
+      }
+    }
+  ],
+  "globalBrightness": 200,
+  "ambiguities": ["description of anything unclear"]
+}
+
+Rules:
+- Colors should be in [R, G, B] format (0-255 each)
+- If something is ambiguous, note it in "ambiguities"
+- Use common color names: red=[255,0,0], green=[0,255,0], blue=[0,0,255], etc.
+- "dark green" = [0,100,0], "light green" = [144,238,144], "forest green" = [34,139,34]
+- "warm white" = [255,244,229], "cool white" = [240,255,255], "soft white" = [250,240,230]
+- Spacing "everyOther" means 1 on, 1 off. "oneOnTwoOff" means 1 on, 2 off.
+''';
+
+    try {
+      final response = await LuminaAI.chat(
+        'Parse this lighting design request: "$userPrompt"',
+        contextBlock: systemPrompt,
+        temperature: 0.3, // Low temperature for consistent parsing
+      );
+
+      // Extract JSON from response
+      final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(response);
+      if (jsonMatch != null) {
+        try {
+          return jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>;
+        } catch (e) {
+          debugPrint('Failed to parse AI response JSON: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('AI design intent parsing failed: $e');
+    }
+
+    return null;
   }
 }
 

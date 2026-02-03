@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
-import 'package:nexgen_command/models/autopilot_schedule_item.dart';
+import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// A card displaying pending autopilot suggestions.
@@ -67,15 +67,26 @@ class AutopilotSuggestionsCard extends ConsumerWidget {
             itemCount: pendingSuggestions.length.clamp(0, 3),
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
+              final suggestion = pendingSuggestions[index];
               return _SuggestionTile(
-                suggestion: pendingSuggestions[index],
-                onApply: () {
-                  ref.read(autopilotSuggestionsProvider.notifier)
-                      .markAsApplied(pendingSuggestions[index].id);
+                suggestion: suggestion,
+                onApply: () async {
+                  // Use scheduler to properly apply pattern and record feedback
+                  final scheduler = ref.read(autopilotSchedulerProvider);
+                  await scheduler.approveSuggestion(suggestion.id);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Applied "${suggestion.patternName}"'),
+                        backgroundColor: Colors.green.shade700,
+                      ),
+                    );
+                  }
                 },
-                onReject: () {
-                  ref.read(autopilotSuggestionsProvider.notifier)
-                      .markAsRejected(pendingSuggestions[index].id);
+                onReject: () async {
+                  // Use scheduler to record rejection feedback
+                  final scheduler = ref.read(autopilotSchedulerProvider);
+                  await scheduler.rejectSuggestion(suggestion.id);
                 },
               );
             },
@@ -104,10 +115,10 @@ class AutopilotSuggestionsCard extends ConsumerWidget {
 }
 
 /// Individual suggestion tile with swipe actions.
-class _SuggestionTile extends StatelessWidget {
+class _SuggestionTile extends StatefulWidget {
   final AutopilotSuggestion suggestion;
-  final VoidCallback onApply;
-  final VoidCallback onReject;
+  final Future<void> Function() onApply;
+  final Future<void> Function() onReject;
 
   const _SuggestionTile({
     required this.suggestion,
@@ -116,9 +127,16 @@ class _SuggestionTile extends StatelessWidget {
   });
 
   @override
+  State<_SuggestionTile> createState() => _SuggestionTileState();
+}
+
+class _SuggestionTileState extends State<_SuggestionTile> {
+  bool _isApplying = false;
+
+  @override
   Widget build(BuildContext context) {
     return Dismissible(
-      key: Key(suggestion.id),
+      key: Key(widget.suggestion.id),
       background: Container(
         color: Colors.green,
         alignment: Alignment.centerLeft,
@@ -131,25 +149,26 @@ class _SuggestionTile extends StatelessWidget {
         padding: const EdgeInsets.only(right: 16),
         child: const Icon(Icons.close, color: Colors.white),
       ),
-      onDismissed: (direction) {
+      confirmDismiss: (direction) async {
         if (direction == DismissDirection.startToEnd) {
-          onApply();
+          await widget.onApply();
         } else {
-          onReject();
+          await widget.onReject();
         }
+        return true;
       },
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: _buildPatternPreview(),
         title: Text(
-          suggestion.patternName,
+          widget.suggestion.patternName,
           style: const TextStyle(fontWeight: FontWeight.w500),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              suggestion.reason,
+              widget.suggestion.reason,
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 13,
@@ -165,7 +184,7 @@ class _SuggestionTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  _formatScheduledTime(suggestion.scheduledTime),
+                  _formatScheduledTime(widget.suggestion.scheduledTime),
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey[500],
@@ -177,28 +196,38 @@ class _SuggestionTile extends StatelessWidget {
             ),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.check_circle_outline, color: Colors.green),
-              onPressed: onApply,
-              tooltip: 'Apply',
-            ),
-            IconButton(
-              icon: const Icon(Icons.cancel_outlined, color: Colors.red),
-              onPressed: onReject,
-              tooltip: 'Skip',
-            ),
-          ],
-        ),
+        trailing: _isApplying
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.check_circle_outline, color: Colors.green),
+                    onPressed: () async {
+                      setState(() => _isApplying = true);
+                      await widget.onApply();
+                      if (mounted) setState(() => _isApplying = false);
+                    },
+                    tooltip: 'Apply',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.cancel_outlined, color: Colors.red),
+                    onPressed: () => widget.onReject(),
+                    tooltip: 'Skip',
+                  ),
+                ],
+              ),
       ),
     );
   }
 
   Widget _buildPatternPreview() {
     // Create a simple color preview from the pattern
-    final colors = suggestion.wledPayload['seg']?[0]?['col'] as List?;
+    final colors = widget.suggestion.wledPayload['seg']?[0]?['col'] as List?;
 
     if (colors == null || colors.isEmpty) {
       return Container(
@@ -242,7 +271,7 @@ class _SuggestionTile extends StatelessWidget {
   }
 
   Widget _buildConfidenceIndicator() {
-    final confidence = suggestion.confidenceScore;
+    final confidence = widget.suggestion.confidenceScore;
     final color = confidence >= 0.7
         ? Colors.green
         : confidence >= 0.4

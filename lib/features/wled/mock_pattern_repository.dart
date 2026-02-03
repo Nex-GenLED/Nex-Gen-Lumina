@@ -11,6 +11,8 @@ import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
 import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
+import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
+import 'package:nexgen_command/data/quick_picks_palettes.dart';
 import 'package:nexgen_command/services/big_event_service.dart';
 import 'package:flutter/material.dart';
 
@@ -21,6 +23,9 @@ class MockPatternRepository {
 
   /// Dynamic big event nodes that can be updated at runtime
   List<LibraryNode> _bigEventNodes = [];
+
+  /// Dynamic My Teams nodes based on user profile
+  List<LibraryNode> _myTeamsNodes = [];
 
   /// Update the big event nodes (called when events change)
   void updateBigEventNodes(List<BigEvent> events) {
@@ -33,6 +38,21 @@ class MockPatternRepository {
   /// Clear big event nodes (e.g., when no events are upcoming)
   void clearBigEventNodes() {
     _bigEventNodes = [];
+    _cachedNodes = null;
+  }
+
+  /// Update My Teams based on user's saved team preferences.
+  /// Call this when user profile loads or when sportsTeams changes.
+  void updateMyTeams(List<String> userTeamNames) {
+    _myTeamsNodes = SportsLibraryBuilder.getMyTeamsPalettes(userTeamNames);
+    // Clear cache to force rebuild with new teams
+    _cachedNodes = null;
+    debugPrint('MockPatternRepository: Updated My Teams with ${_myTeamsNodes.length} teams from ${userTeamNames.length} user preferences');
+  }
+
+  /// Clear My Teams (e.g., when user logs out)
+  void clearMyTeams() {
+    _myTeamsNodes = [];
     _cachedNodes = null;
   }
 
@@ -122,10 +142,10 @@ class MockPatternRepository {
   static String _effectName(int id) => WledEffectsCatalog.getName(id);
 
   /// Curated effects for colorway pattern generation (respects user colors).
-  /// These are selected to produce 20+ visually distinct variations.
-  /// Includes both WLED native effects and Lumina custom effects (1000+).
+  /// These are selected to produce 30 visually distinct variations.
+  /// Mix of classic effects and exotic/impressive effects for Nex-Gen brand.
   static const List<int> kColorwayEffectIds = [
-    // WLED Native Effects
+    // Classic Effects
     0,   // Solid
     2,   // Breathe
     3,   // Wipe
@@ -144,12 +164,19 @@ class MockPatternRepository {
     87,  // Glitter
     91,  // Bouncing Balls
     96,  // Drip
-    // Lumina Custom Effects (exclusive to Lumina app)
-    1001, // Rising Tide - lights fill progressively
-    1002, // Falling Tide - lights empty progressively
-    1003, // Pulse Burst - radiates from center outward
-    1005, // Grand Reveal - curtain opening from center
-    1007, // Ocean Swell - sinusoidal wave motion
+    // Exotic Effects - Forward-thinking, visually impressive
+    46,  // Twinklefox - magical fairy-dust sparkle
+    52,  // Ripple - expanding ripple waves
+    65,  // Colorwaves - flowing color waves
+    69,  // Aurora - northern lights simulation
+    70,  // Lake - shimmering water reflection
+    73,  // Pacifica - ocean-inspired flowing
+    82,  // Plasma - plasma ball effect
+    89,  // Fireworks Starburst - explosive celebration
+    100, // Heartbeat - pulsing life rhythm
+    107, // Flow - smooth flowing motion
+    111, // Chunchun - unique flowing pattern
+    112, // Dancing Shadows - dramatic shadow play
   ];
 
   /// Creative name templates for effects.
@@ -213,17 +240,31 @@ class MockPatternRepository {
         return 'Bouncing ${plural(baseName)}';
       case 96:  // Drip
         return '$baseName Drips';
-      // Lumina Custom Effects (1000+)
-      case 1001: // Rising Tide
-        return '$baseName Rising Tide';
-      case 1002: // Falling Tide
-        return '$baseName Falling Tide';
-      case 1003: // Pulse Burst
-        return '$baseName Pulse Burst';
-      case 1005: // Grand Reveal
-        return '$baseName Grand Reveal';
-      case 1007: // Ocean Swell
-        return '$baseName Ocean Swell';
+      // Exotic Effects
+      case 46:  // Twinklefox
+        return '$baseName Stardust';
+      case 52:  // Ripple
+        return '$baseName Ripples';
+      case 65:  // Colorwaves
+        return 'Flowing ${plural(baseName)}';
+      case 69:  // Aurora
+        return '$baseName Aurora';
+      case 70:  // Lake
+        return '$baseName Reflections';
+      case 73:  // Pacifica
+        return '$baseName Tides';
+      case 82:  // Plasma
+        return '$baseName Plasma';
+      case 89:  // Fireworks Starburst
+        return '$baseName Burst';
+      case 100: // Heartbeat
+        return '$baseName Pulse';
+      case 107: // Flow
+        return '$baseName Flow';
+      case 111: // Chunchun
+        return 'Dancing ${plural(baseName)}';
+      case 112: // Dancing Shadows
+        return '$baseName Shadows';
       default:
         // Fallback: check if it's a custom effect, otherwise use WLED name
         if (LuminaCustomEffectsCatalog.isCustomEffect(effectId)) {
@@ -273,6 +314,13 @@ class MockPatternRepository {
   }
 
   // Premium Categories
+  static const PatternCategory catQuickPicks = PatternCategory(
+    id: 'cat_quick_picks',
+    name: 'Quick Picks',
+    // Popular curated designs
+    imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
+  );
+
   static const PatternCategory catArchitectural = PatternCategory(
     id: 'cat_arch',
     name: 'Architectural Downlighting (White)',
@@ -322,7 +370,15 @@ class MockPatternRepository {
     imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1',
   );
 
+  static const PatternCategory catNature = PatternCategory(
+    id: 'cat_nature',
+    name: 'Nature & Outdoors',
+    // Stars / space / nature
+    imageUrl: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a',
+  );
+
   static const List<PatternCategory> _categories = [
+    catQuickPicks,
     catArchitectural,
     catHoliday,
     catSports,
@@ -330,6 +386,7 @@ class MockPatternRepository {
     catParty,
     catMovies,
     catSecurity,
+    catNature,
   ];
 
   // ================= Sub-Categories (3-tier navigation) =================
@@ -625,9 +682,19 @@ class MockPatternRepository {
     // Root categories
     nodes.addAll(_buildRootCategories());
 
+    // Quick Picks: curated popular patterns (always first)
+    nodes.addAll(QuickPicksPalettes.getAllQuickPicksFolders());
+    nodes.addAll(QuickPicksPalettes.getAllQuickPicksPaletteNodes());
+
     // Big Events (dynamic - appears first in Game Day Fan Zone if active)
     if (_bigEventNodes.isNotEmpty) {
       nodes.addAll(_bigEventNodes);
+    }
+
+    // My Teams folder (always present, palettes added dynamically based on user profile)
+    nodes.add(SportsLibraryBuilder.getMyTeamsFolder());
+    if (_myTeamsNodes.isNotEmpty) {
+      nodes.addAll(_myTeamsNodes);
     }
 
     // Sports: leagues + teams + NCAA
@@ -649,6 +716,10 @@ class MockPatternRepository {
     nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
     nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
 
+    // Nature & Outdoors: environments + palettes
+    nodes.addAll(NatureOutdoorsPalettes.getAllNatureFolders());
+    nodes.addAll(NatureOutdoorsPalettes.getAllNaturePaletteNodes());
+
     // Architectural & Security: direct palettes
     nodes.addAll(_buildArchitecturalPalettes());
     nodes.addAll(_buildSecurityPalettes());
@@ -659,6 +730,15 @@ class MockPatternRepository {
   /// Build root category nodes
   List<LibraryNode> _buildRootCategories() {
     return const [
+      LibraryNode(
+        id: 'cat_quick_picks',
+        name: 'Quick Picks',
+        description: 'Popular patterns to get you started',
+        nodeType: LibraryNodeType.category,
+        sortOrder: -1, // Always first
+        imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
+        metadata: {'icon': 'star', 'isQuickAccess': true},
+      ),
       LibraryNode(
         id: 'cat_sports',
         name: 'Game Day Fan Zone',
@@ -707,6 +787,13 @@ class MockPatternRepository {
         nodeType: LibraryNodeType.category,
         sortOrder: 6,
         imageUrl: 'https://images.unsplash.com/photo-1579403124614-197f69d8187b',
+      ),
+      LibraryNode(
+        id: 'cat_nature',
+        name: 'Nature & Outdoors',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 7,
+        imageUrl: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a',
       ),
     ];
   }

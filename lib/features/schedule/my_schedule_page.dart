@@ -10,10 +10,12 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/section_header.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class MySchedulePage extends ConsumerWidget {
@@ -56,6 +58,9 @@ class MySchedulePage extends ConsumerWidget {
           children: [
             // Lumina AI card with autopilot toggle and schedule prompt
             const _AutopilotQuickToggle(),
+            const SizedBox(height: 16),
+            // Autopilot suggestions card (visible when there are pending suggestions)
+            const AutopilotSuggestionsCard(),
             const SizedBox(height: 16),
             _WeeklyAgendaLarge(sunAsync: sunAsync),
           ],
@@ -1938,11 +1943,44 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
 
     List<ScheduleItem> itemsForDay(int weekdayIndex0Sun) => schedules.where((s) => s.enabled && appliesTo(s, weekdayIndex0Sun)).toList(growable: false);
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text('Weekly Schedule', style: Theme.of(context).textTheme.titleLarge),
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexGenPalette.line),
+        boxShadow: [
+          BoxShadow(
+            color: NexGenPalette.cyan.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  NexGenPalette.gunmetal90.withValues(alpha: 0.8),
+                  NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                ],
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // Enhanced section header
+      MajorSectionHeader(
+        title: 'Weekly Schedule',
+        subtitle: '${schedules.where((s) => s.enabled).length} active schedules',
+        icon: Icons.calendar_month,
+        iconColor: NexGenPalette.cyan,
+        padding: EdgeInsets.zero,
+      ),
+      const SizedBox(height: 16),
       // Time Axis Header: [ 50px spacer ] [ Sunset .... Sunrise ]
       Padding(
         padding: const EdgeInsets.only(bottom: 6),
@@ -2025,60 +2063,6 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
                   onTap: () => showScheduleEditor(context, ref, preselectedDayIndex: weekdayIndex0Sun),
                   child: NightTrackBar(label: barLabel, items: dayItems),
                 ),
-                const SizedBox(height: 8),
-                if (dayItems.isEmpty)
-                  Text('No schedule yet', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: NexGenPalette.textMedium))
-                else
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    for (final it in dayItems)
-                      _AgendaDetailChip(
-                        label: '${(() {
-                          // Format ON time
-                          String formatTime(String tl) {
-                            final lower = tl.trim().toLowerCase();
-                            if (lower != 'sunset' && lower != 'sunrise') return tl;
-                            return sunAsync.when(
-                              data: (s) => lower == 'sunset' ? (s?.sunsetLabel ?? 'Sunset (—)') : (s?.sunriseLabel ?? 'Sunrise (—)'),
-                              loading: () => lower == 'sunset' ? 'Sunset (…)': 'Sunrise (…)',
-                              error: (e, st) => lower == 'sunset' ? 'Sunset (—)' : 'Sunrise (—)',
-                            );
-                          }
-                          final onTime = formatTime(it.timeLabel.trim());
-                          if (it.hasOffTime && it.offTimeLabel != null) {
-                            final offTime = formatTime(it.offTimeLabel!.trim());
-                            return '$onTime → $offTime';
-                          }
-                          return onTime;
-                        }())} • ${it.actionLabel}',
-                        onTap: () => showScheduleEditor(context, ref, editing: it),
-                        onDelete: () async {
-                          final confirmed = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              backgroundColor: NexGenPalette.gunmetal90,
-                              title: const Text('Delete Schedule?'),
-                              content: Text('Delete "${_labelFromAction(it.actionLabel)}" schedule?\n\nThis will remove it from all selected days.'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(ctx).pop(false),
-                                  child: const Text('Cancel'),
-                                ),
-                                FilledButton(
-                                  onPressed: () => Navigator.of(ctx).pop(true),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.red.shade700,
-                                  ),
-                                  child: const Text('Delete'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirmed == true) {
-                            ref.read(schedulesProvider.notifier).remove(it.id);
-                          }
-                        },
-                      ),
-                  ]),
               ]),
             ),
             const SizedBox(width: 8),
@@ -2091,7 +2075,11 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
           ]),
         );
       }),
-    ]);
+    ]),
+          ),
+        ),
+      ),
+    );
   }
 
   String _labelFromAction(String actionLabel) {
@@ -2104,37 +2092,5 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
   }
 }
 
-class _AgendaDetailChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
-  const _AgendaDetailChip({required this.label, required this.onTap, required this.onDelete});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(border: Border.all(color: NexGenPalette.line), borderRadius: BorderRadius.circular(12), color: NexGenPalette.gunmetal90),
-          child: Text(label, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: NexGenPalette.textHigh)),
-        ),
-      ),
-      const SizedBox(width: 4),
-      InkWell(
-        onTap: onDelete,
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 28,
-          height: 28,
-          alignment: Alignment.center,
-          decoration: ShapeDecoration(shape: const CircleBorder(), color: NexGenPalette.matteBlack.withValues(alpha: 0.3)),
-          child: const Icon(Icons.close_rounded, size: 16, color: Colors.white70),
-        ),
-      ),
-    ]);
-  }
-}
 
 // NightTrackBar now shared in widgets/night_track_bar.dart

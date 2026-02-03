@@ -1,7 +1,9 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/premium_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
@@ -949,31 +951,22 @@ class _MyPropertiesCard extends ConsumerWidget {
     final propertyCount = propertiesAsync.whenOrNull(data: (p) => p.length) ?? 0;
     final propertyName = selectedProperty?.name ?? 'No properties';
 
-    return Card(
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [NexGenPalette.cyan, NexGenPalette.violet],
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.home_work, color: Colors.white, size: 20),
-        ),
-        title: const Text('My Properties'),
-        subtitle: Text(
-          propertyCount == 0
-              ? 'Add your first property'
-              : propertyCount == 1
-                  ? propertyName
-                  : '$propertyName (+${propertyCount - 1} more)',
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return PremiumIconCard(
+      icon: Icons.home_work,
+      title: 'My Properties',
+      subtitle: propertyCount == 0
+          ? 'Add your first property'
+          : propertyCount == 1
+              ? propertyName
+              : '$propertyName (+${propertyCount - 1} more)',
+      accentColor: NexGenPalette.cyan,
+      iconBackgroundGradient: const LinearGradient(
+        colors: [NexGenPalette.cyan, NexGenPalette.violet],
+      ),
+      badge: propertyCount > 0
+          ? CountBadge(count: propertyCount, color: NexGenPalette.cyan.withValues(alpha: 0.2))
+          : Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: NexGenPalette.cyan.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(999),
@@ -984,12 +977,7 @@ class _MyPropertiesCard extends ConsumerWidget {
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan),
               ),
             ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ],
-        ),
-        onTap: () => context.push(AppRoutes.myProperties),
-      ),
+      onTap: () => context.push(AppRoutes.myProperties),
     );
   }
 }
@@ -999,41 +987,27 @@ class _VoiceAssistantsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [NexGenPalette.violet, NexGenPalette.cyan],
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.mic, color: Colors.white, size: 20),
-        ),
-        title: const Text('Voice Assistants'),
-        subtitle: const Text('Set up Siri, Google, or Alexa control'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
-              ),
-              child: Text(
-                'New',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ],
-        ),
-        onTap: () => context.push(AppRoutes.voiceAssistants),
+    return PremiumIconCard(
+      icon: Icons.mic,
+      title: 'Voice Assistants',
+      subtitle: 'Set up Siri, Google, or Alexa control',
+      accentColor: NexGenPalette.violet,
+      iconBackgroundGradient: const LinearGradient(
+        colors: [NexGenPalette.violet, NexGenPalette.cyan],
       ),
+      badge: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: NexGenPalette.violet.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: NexGenPalette.violet.withValues(alpha: 0.6)),
+        ),
+        child: Text(
+          'New',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.violet),
+        ),
+      ),
+      onTap: () => context.push(AppRoutes.voiceAssistants),
     );
   }
 }
@@ -1043,32 +1017,146 @@ class _GrowthCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.trending_up, color: NexGenPalette.cyan),
-            const SizedBox(width: 8),
-            Expanded(child: Text("Let's Grow", style: Theme.of(context).textTheme.titleMedium)),
-          ]),
-          const SizedBox(height: 8),
-          ListTile(
-            leading: Icon(Icons.card_giftcard, color: NexGenPalette.cyan),
-            title: const Text('Refer a Friend'),
-            subtitle: const Text('Share Lumina and earn rewards.'),
-            trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            onTap: () => context.push(AppRoutes.referrals),
+    const accentColor = Color(0xFF4CAF50); // Growth green
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
           ),
-          const Divider(height: 1),
-          ListTile(
-            leading: Icon(Icons.shopping_bag_outlined, color: NexGenPalette.violet),
-            title: const Text('Shop Nex-Gen Store'),
-            subtitle: const Text('Design upgrades in the virtual showroom.'),
-            trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            onTap: () => context.push(AppRoutes.luminaStudio),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  NexGenPalette.gunmetal90.withValues(alpha: 0.85),
+                  NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                ],
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Accent bar
+              Container(
+                height: 3,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [accentColor, accentColor.withValues(alpha: 0.0)],
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [accentColor, accentColor.withValues(alpha: 0.6)],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accentColor.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.trending_up, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Text("Let's Grow", style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                )),
+              ]),
+              const SizedBox(height: 16),
+              _GrowthListTile(
+                icon: Icons.card_giftcard,
+                iconColor: NexGenPalette.cyan,
+                title: 'Refer a Friend',
+                subtitle: 'Share Lumina and earn rewards.',
+                onTap: () => context.push(AppRoutes.referrals),
+              ),
+              Container(
+                height: 1,
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                color: NexGenPalette.line,
+              ),
+              _GrowthListTile(
+                icon: Icons.shopping_bag_outlined,
+                iconColor: NexGenPalette.violet,
+                title: 'Shop Nex-Gen Store',
+                subtitle: 'Design upgrades in the virtual showroom.',
+                onTap: () => context.push(AppRoutes.luminaStudio),
+              ),
+            ]),
           ),
-        ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _GrowthListTile extends StatelessWidget {
+  const _GrowthListTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          child: Row(
+            children: [
+              Icon(icon, color: iconColor, size: 22),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    )),
+                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: NexGenPalette.textMedium,
+                    )),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: iconColor.withValues(alpha: 0.7), size: 22),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1080,59 +1168,115 @@ class _SimpleModeToggleCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isSimpleMode = ref.watch(simpleModeProvider);
+    final accentColor = isSimpleMode ? NexGenPalette.cyan : NexGenPalette.violet;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  NexGenPalette.gunmetal90.withValues(alpha: 0.85),
+                  NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                ],
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
+                // Accent bar with animation
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  height: 3,
+                  margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                    gradient: LinearGradient(
+                      colors: [accentColor, accentColor.withValues(alpha: 0.0)],
                     ),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Simple Mode',
-                        style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [accentColor, accentColor.withValues(alpha: 0.6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: accentColor.withValues(alpha: 0.4),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isSimpleMode ? 'Enabled' : 'Disabled',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: isSimpleMode ? NexGenPalette.cyan : Theme.of(context).colorScheme.onSurfaceVariant,
+                      child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Simple Mode',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
                             ),
+                          ),
+                          const SizedBox(height: 2),
+                          AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 200),
+                            style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                              color: isSimpleMode ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                              fontWeight: isSimpleMode ? FontWeight.w500 : FontWeight.normal,
+                            ),
+                            child: Text(isSimpleMode ? 'Enabled' : 'Disabled'),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    Switch(
+                      value: isSimpleMode,
+                      onChanged: (value) => _handleToggle(context, ref, value),
+                      activeColor: NexGenPalette.cyan,
+                      activeTrackColor: NexGenPalette.cyan.withValues(alpha: 0.3),
+                    ),
+                  ],
                 ),
-                Switch(
-                  value: isSimpleMode,
-                  onChanged: (value) => _handleToggle(context, ref, value),
-                  activeColor: NexGenPalette.cyan,
+                const SizedBox(height: 14),
+                Text(
+                  'A simplified interface with large buttons and essential features only. Perfect for easier, more straightforward control.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: NexGenPalette.textMedium,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              'A simplified interface with large buttons and essential features only. Perfect for easier, more straightforward control.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
+          ),
         ),
       ),
     );

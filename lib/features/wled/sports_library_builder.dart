@@ -150,4 +150,96 @@ class SportsLibraryBuilder {
              nickname.contains(lowercaseQuery);
     }).toList();
   }
+
+  /// Get the "My Teams" folder node
+  /// This folder appears first in Game Day Fan Zone and shows the user's favorite teams
+  static LibraryNode getMyTeamsFolder() {
+    return const LibraryNode(
+      id: PersonalizedFolderIds.myTeams,
+      name: 'My Teams',
+      description: 'Your favorite teams in one place',
+      nodeType: LibraryNodeType.folder,
+      parentId: LibraryCategoryIds.sports,
+      sortOrder: -1, // Appears first (before NFL at 0)
+      metadata: {'icon': 'favorite', 'isPersonalized': true},
+    );
+  }
+
+  /// Find teams that match the user's saved team names.
+  /// Matches against team name, city, nickname, and display name.
+  /// Returns LibraryNode palettes with parentId changed to My Teams folder.
+  static List<LibraryNode> getMyTeamsPalettes(List<String> userTeamNames) {
+    if (userTeamNames.isEmpty) return [];
+
+    final allTeams = getTeamPaletteNodes();
+    final ncaaTeams = NcaaConferences.getAllSchoolNodes();
+    final allSportsNodes = [...allTeams, ...ncaaTeams];
+    final matchedTeams = <LibraryNode>[];
+
+    for (var i = 0; i < userTeamNames.length; i++) {
+      final userTeam = userTeamNames[i].toLowerCase().trim();
+      if (userTeam.isEmpty) continue;
+
+      // Find best match for this user team
+      LibraryNode? bestMatch;
+      int bestScore = 0;
+
+      for (final node in allSportsNodes) {
+        if (!node.isPalette) continue;
+
+        final nodeName = node.name.toLowerCase();
+        final teamName = (node.metadata?['teamName'] as String?)?.toLowerCase() ?? '';
+        final city = (node.metadata?['city'] as String?)?.toLowerCase() ?? '';
+        final nickname = (node.metadata?['nickname'] as String?)?.toLowerCase() ?? '';
+        final schoolName = (node.metadata?['schoolName'] as String?)?.toLowerCase() ?? '';
+
+        int score = 0;
+
+        // Exact matches get highest score
+        if (nodeName == userTeam || teamName == userTeam || nickname == userTeam) {
+          score = 100;
+        } else if (schoolName == userTeam) {
+          score = 100;
+        }
+        // City + team name combo (e.g., "Kansas City Chiefs")
+        else if ('$city $teamName'.trim() == userTeam) {
+          score = 95;
+        }
+        // Partial matches
+        else if (nodeName.contains(userTeam) || userTeam.contains(nodeName)) {
+          score = 70;
+        } else if (teamName.contains(userTeam) || userTeam.contains(teamName)) {
+          score = 60;
+        } else if (city.contains(userTeam) || userTeam.contains(city)) {
+          score = 50;
+        } else if (nickname.contains(userTeam) || userTeam.contains(nickname)) {
+          score = 40;
+        } else if (schoolName.contains(userTeam) || userTeam.contains(schoolName)) {
+          score = 40;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = node;
+        }
+      }
+
+      // Only add if we found a reasonable match
+      if (bestMatch != null && bestScore >= 40) {
+        // Create a copy with parentId pointing to My Teams folder
+        // and sortOrder based on user's priority order
+        matchedTeams.add(bestMatch.copyWith(
+          parentId: PersonalizedFolderIds.myTeams,
+          sortOrder: i,
+        ));
+      }
+    }
+
+    return matchedTeams;
+  }
+
+  /// Check if any teams match the user's list (for determining if My Teams should show)
+  static bool hasMatchingTeams(List<String> userTeamNames) {
+    return getMyTeamsPalettes(userTeamNames).isNotEmpty;
+  }
 }

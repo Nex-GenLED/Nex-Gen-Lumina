@@ -19,13 +19,33 @@ class AddressSuggestion {
   final double lon;
   final String? type;
 
+  /// Parsed address components for auto-fill
+  final String? houseNumber;
+  final String? street;
+  final String? city;
+  final String? state;
+  final String? postcode;
+
   const AddressSuggestion({
     required this.displayName,
     required this.shortAddress,
     required this.lat,
     required this.lon,
     this.type,
+    this.houseNumber,
+    this.street,
+    this.city,
+    this.state,
+    this.postcode,
   });
+
+  /// Returns the street address (house number + street name)
+  String get streetAddress {
+    if (houseNumber != null && street != null) {
+      return '$houseNumber $street';
+    }
+    return street ?? '';
+  }
 }
 
 /// Lightweight geocoding via OpenStreetMap Nominatim (no API key required).
@@ -90,12 +110,24 @@ class GeocodingService {
               }
             }
 
+            // Extract individual address components
+            final houseNumber = addr?['house_number'] as String?;
+            final road = addr?['road'] as String?;
+            final cityVal = addr?['city'] ?? addr?['town'] ?? addr?['village'];
+            final stateVal = addr?['state'] as String?;
+            final postcodeVal = addr?['postcode'] as String?;
+
             return AddressSuggestion(
               displayName: displayName,
               shortAddress: shortAddr,
               lat: lat,
               lon: lon,
               type: type,
+              houseNumber: houseNumber,
+              street: road,
+              city: cityVal?.toString(),
+              state: stateVal,
+              postcode: postcodeVal,
             );
           }).toList();
         }

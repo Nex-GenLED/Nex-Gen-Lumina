@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
+import 'package:nexgen_command/services/autopilot_scheduler.dart';
 
 /// Global provider for the selected tab index
 final selectedTabIndexProvider = StateProvider<int>((ref) => 0);
@@ -69,6 +70,12 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       final notifier = ref.read(geofenceMonitorProvider.notifier);
       await notifier.ensurePermissionsWithDialog(context);
       await notifier.start();
+
+      // Initialize autopilot scheduler - reading the provider creates it and
+      // sets up the listener that will start/stop based on autopilotEnabledProvider.
+      // This is done here to ensure the scheduler is ready when the user
+      // enables autopilot from settings.
+      ref.read(autopilotSchedulerProvider);
 
       // Check if we should show the feature tour (only in full mode)
       final isSimpleMode = ref.read(simpleModeProvider);

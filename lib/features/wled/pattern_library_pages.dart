@@ -765,6 +765,12 @@ class _DesignLibraryBrowser extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final categoriesAsync = ref.watch(patternCategoriesProvider);
     final selectedMood = ref.watch(selectedMoodFilterProvider);
+    final designsAsync = ref.watch(designsStreamProvider);
+
+    // Check if user has saved designs
+    final hasSavedDesigns = designsAsync.whenOrNull(
+      data: (designs) => designs.isNotEmpty,
+    ) ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -799,21 +805,33 @@ class _DesignLibraryBrowser extends ConsumerWidget {
         const SizedBox(height: 16),
         // Category grid
         categoriesAsync.when(
-          data: (categories) => GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.6,
-            ),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              final category = categories[index];
-              return _DesignLibraryCategoryCard(category: category);
-            },
-          ),
+          data: (categories) {
+            // Calculate total items: add 1 for saved designs card if user has saved designs
+            final totalItems = hasSavedDesigns ? categories.length + 1 : categories.length;
+
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.6,
+              ),
+              itemCount: totalItems,
+              itemBuilder: (context, index) {
+                // If we have saved designs, show the saved designs card first
+                if (hasSavedDesigns && index == 0) {
+                  return const _SavedDesignsCategoryCard();
+                }
+
+                // Adjust index for regular categories if saved designs card is shown
+                final categoryIndex = hasSavedDesigns ? index - 1 : index;
+                final category = categories[categoryIndex];
+                return _DesignLibraryCategoryCard(category: category);
+              },
+            );
+          },
           loading: () => const Center(
             child: Padding(
               padding: EdgeInsets.all(24),
@@ -835,99 +853,293 @@ class _DesignLibraryBrowser extends ConsumerWidget {
   }
 }
 
+/// Special category card for "My Saved Designs" - appears first when user has saved designs
+class _SavedDesignsCategoryCard extends StatelessWidget {
+  const _SavedDesignsCategoryCard();
+
+  static const _icons = [
+    Icons.palette_outlined,
+    Icons.bookmark_outlined,
+    Icons.favorite_outline,
+    Icons.folder_special_outlined,
+    Icons.auto_awesome_outlined,
+    Icons.brush_outlined,
+  ];
+
+  static const _accentColor = NexGenPalette.cyan;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.push('/designs');
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            // Premium dark background with cyan accent gradient
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                _accentColor.withValues(alpha: 0.15),
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _accentColor.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _accentColor.withValues(alpha: 0.2),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              // Accent glow in corner
+              Positioned(
+                top: -20,
+                right: -20,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        _accentColor.withValues(alpha: 0.25),
+                        _accentColor.withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Icon grid
+                    Expanded(
+                      child: _buildIconGrid(),
+                    ),
+                    const SizedBox(height: 8),
+                    // Category name
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'My Saved Designs',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: _accentColor.withValues(alpha: 0.7),
+                          size: 12,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Star badge to indicate this is the user's custom content
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: _accentColor.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.star,
+                    color: _accentColor,
+                    size: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIconGrid() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final iconSize = (constraints.maxWidth - 16) / 3.5;
+
+        return Wrap(
+          spacing: 4,
+          runSpacing: 2,
+          alignment: WrapAlignment.center,
+          runAlignment: WrapAlignment.center,
+          children: _icons.asMap().entries.map((entry) {
+            final index = entry.key;
+            final icon = entry.value;
+
+            final isHighlighted = index % 2 == 0;
+            final iconColor = isHighlighted
+                ? _accentColor
+                : Colors.white.withValues(alpha: 0.5);
+
+            return SizedBox(
+              width: iconSize,
+              height: iconSize,
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: iconSize * 0.7,
+                shadows: isHighlighted
+                    ? [
+                        Shadow(
+                          color: _accentColor.withValues(alpha: 0.5),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
 /// Individual category card for the Design Library browser
 class _DesignLibraryCategoryCard extends ConsumerWidget {
   final PatternCategory category;
 
   const _DesignLibraryCategoryCard({required this.category});
 
-  /// Returns a list of themed icons that represent the category's content.
-  /// Each category gets 4-6 relevant icons to display in a grid.
-  List<IconData> _iconsForCategory(String categoryId) {
+  /// Returns a single hero icon that represents the category.
+  /// For seasonal category, returns dynamic icon based on current season.
+  IconData _heroIconForCategory(String categoryId) {
     switch (categoryId) {
+      case 'cat_quick_picks':
+        return Icons.auto_awesome;
       case 'cat_arch':
-        // Architectural / Downlighting
-        return const [
-          Icons.home_outlined,
-          Icons.villa_outlined,
-          Icons.apartment_outlined,
-          Icons.cottage_outlined,
-          Icons.deck_outlined,
-          Icons.fence_outlined,
-        ];
+        return Icons.villa;
       case 'cat_holiday':
-        // Holidays - themed icons for major holidays
-        return const [
-          Icons.park_outlined, // Christmas tree
-          Icons.ac_unit, // Winter/snowflake
-          Icons.egg_outlined, // Easter
-          Icons.favorite_outline, // Valentine's
-          Icons.flag_outlined, // 4th of July
-          Icons.local_florist_outlined, // St. Patrick's (clover-like)
-        ];
+        return Icons.celebration;
       case 'cat_sports':
-        // Game Day Fan Zone - sports icons
-        return const [
-          Icons.sports_football_outlined,
-          Icons.sports_baseball_outlined,
-          Icons.sports_basketball_outlined,
-          Icons.sports_hockey_outlined,
-          Icons.sports_soccer_outlined,
-          Icons.emoji_events_outlined, // Trophy
-        ];
+        return Icons.emoji_events;
       case 'cat_season':
-        // Seasonal Vibes
-        return const [
-          Icons.wb_sunny_outlined, // Summer
-          Icons.eco_outlined, // Spring
-          Icons.park_outlined, // Fall/Autumn
-          Icons.ac_unit, // Winter
-          Icons.cloud_outlined,
-          Icons.nights_stay_outlined,
-        ];
+        return _getSeasonalIcon();
       case 'cat_party':
-        // Parties & Events
-        return const [
-          Icons.cake_outlined, // Birthday
-          Icons.music_note_outlined,
-          Icons.celebration_outlined,
-          Icons.local_bar_outlined,
-          Icons.star_outline,
-          Icons.auto_awesome_outlined,
-        ];
+        return Icons.cake;
       case 'cat_security':
-        // Security & Alerts
-        return const [
-          Icons.security_outlined,
-          Icons.shield_outlined,
-          Icons.notifications_active_outlined,
-          Icons.visibility_outlined,
-          Icons.warning_amber_outlined,
-          Icons.lightbulb_outlined,
-        ];
+        return Icons.shield;
       case 'cat_movies':
-        // Movies & Superheroes
-        return const [
-          Icons.movie_outlined,
-          Icons.theaters_outlined,
-          Icons.bolt_outlined, // Superhero/power
-          Icons.local_movies_outlined,
-          Icons.star_outline,
-          Icons.flash_on_outlined,
-        ];
+        return Icons.movie_filter;
+      case 'cat_nature':
+        return Icons.forest;
       default:
-        return const [
-          Icons.palette_outlined,
-          Icons.color_lens_outlined,
-          Icons.gradient_outlined,
-          Icons.auto_awesome_outlined,
-        ];
+        return Icons.palette;
     }
+  }
+
+  /// Returns the appropriate seasonal icon based on current date.
+  IconData _getSeasonalIcon() {
+    final now = DateTime.now();
+    final month = now.month;
+    final day = now.day;
+
+    // Spring: March 20 - June 20
+    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
+      return Icons.local_florist; // Flower for spring
+    }
+    // Summer: June 21 - September 22
+    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
+      return Icons.wb_sunny; // Sun for summer
+    }
+    // Fall: September 23 - December 20
+    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
+      return Icons.park; // Tree/leaves for fall
+    }
+    // Winter: December 21 - March 19
+    return Icons.ac_unit; // Snowflake for winter
+  }
+
+  /// Returns gradient colors for each category background.
+  List<Color> _gradientForCategory(String categoryId) {
+    switch (categoryId) {
+      case 'cat_quick_picks':
+        // Electric cyan to purple gradient
+        return const [Color(0xFF00D4FF), Color(0xFF9C27B0)];
+      case 'cat_arch':
+        // Warm amber to burnt orange
+        return const [Color(0xFFFFB347), Color(0xFFFF7043)];
+      case 'cat_holiday':
+        // Festive red to deep magenta
+        return const [Color(0xFFFF4444), Color(0xFFC2185B)];
+      case 'cat_sports':
+        // Championship gold to orange
+        return const [Color(0xFFFFD700), Color(0xFFFF9800)];
+      case 'cat_season':
+        return _getSeasonalGradient();
+      case 'cat_party':
+        // Party pink to purple
+        return const [Color(0xFFFF69B4), Color(0xFF9C27B0)];
+      case 'cat_security':
+        // Alert blue to deep blue
+        return const [Color(0xFF4FC3F7), Color(0xFF1565C0)];
+      case 'cat_movies':
+        // Cinema purple to deep violet
+        return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
+      case 'cat_nature':
+        // Forest green to teal
+        return const [Color(0xFF4CAF50), Color(0xFF00897B)];
+      default:
+        return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
+    }
+  }
+
+  /// Returns seasonal gradient based on current date.
+  List<Color> _getSeasonalGradient() {
+    final now = DateTime.now();
+    final month = now.month;
+    final day = now.day;
+
+    // Spring: Fresh greens and pinks
+    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
+      return const [Color(0xFF81C784), Color(0xFFF8BBD9)];
+    }
+    // Summer: Sunny yellow to ocean blue
+    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
+      return const [Color(0xFFFFEB3B), Color(0xFF29B6F6)];
+    }
+    // Fall: Warm orange to burgundy
+    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
+      return const [Color(0xFFFF9800), Color(0xFF8D6E63)];
+    }
+    // Winter: Icy blue to deep purple
+    return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
   }
 
   /// Returns accent color for each category (used for icon highlights and glow).
   Color _accentForCategory(String categoryId) {
     switch (categoryId) {
+      case 'cat_quick_picks':
+        return const Color(0xFF00D4FF); // Electric cyan
       case 'cat_arch':
         return const Color(0xFFFFB347); // Warm amber
       case 'cat_holiday':
@@ -935,22 +1147,47 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
       case 'cat_sports':
         return const Color(0xFFFFD700); // Championship gold
       case 'cat_season':
-        return const Color(0xFF00E5FF); // Cyan
+        return _getSeasonalAccentColor();
       case 'cat_party':
         return const Color(0xFFFF69B4); // Party pink
       case 'cat_security':
         return const Color(0xFF4FC3F7); // Alert blue
       case 'cat_movies':
         return const Color(0xFFE040FB); // Cinema purple
+      case 'cat_nature':
+        return const Color(0xFF4CAF50); // Forest green
       default:
         return NexGenPalette.cyan;
     }
   }
 
+  /// Returns seasonal accent color based on current date.
+  Color _getSeasonalAccentColor() {
+    final now = DateTime.now();
+    final month = now.month;
+    final day = now.day;
+
+    // Spring: Fresh pink
+    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
+      return const Color(0xFFF8BBD9);
+    }
+    // Summer: Sunny yellow
+    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
+      return const Color(0xFFFFEB3B);
+    }
+    // Fall: Warm orange
+    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
+      return const Color(0xFFFF9800);
+    }
+    // Winter: Icy blue
+    return const Color(0xFF81D4FA);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final icons = _iconsForCategory(category.id);
+    final heroIcon = _heroIconForCategory(category.id);
     final accentColor = _accentForCategory(category.id);
+    final gradientColors = _gradientForCategory(category.id);
     final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
     final isPinned = pinnedIds.contains(category.id);
 
@@ -966,44 +1203,51 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
-            // Premium dark background with subtle gradient
+            // Category-specific gradient background
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                NexGenPalette.gunmetal90,
+                gradientColors[0].withValues(alpha: 0.25),
+                gradientColors[1].withValues(alpha: 0.15),
                 NexGenPalette.matteBlack.withValues(alpha: 0.95),
               ],
+              stops: const [0.0, 0.4, 1.0],
             ),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.3),
+              color: accentColor.withValues(alpha: 0.4),
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: accentColor.withValues(alpha: 0.15),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: accentColor.withValues(alpha: 0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: Stack(
             children: [
-              // Subtle accent glow in corner
+              // Large radial glow behind icon
               Positioned(
-                top: -20,
-                right: -20,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        accentColor.withValues(alpha: 0.15),
-                        accentColor.withValues(alpha: 0.0),
-                      ],
+                top: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          gradientColors[0].withValues(alpha: 0.3),
+                          gradientColors[1].withValues(alpha: 0.1),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.5, 1.0],
+                      ),
                     ),
                   ),
                 ),
@@ -1012,32 +1256,51 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Icon grid - display themed icons
+                    // Single hero icon - centered and prominent
                     Expanded(
-                      child: _buildIconGrid(icons, accentColor),
+                      child: Center(
+                        child: Icon(
+                          heroIcon,
+                          size: 52,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: accentColor.withValues(alpha: 0.8),
+                              blurRadius: 24,
+                            ),
+                            Shadow(
+                              color: gradientColors[0].withValues(alpha: 0.5),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    // Category name
+                    const SizedBox(height: 4),
+                    // Category name with arrow
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Expanded(
+                        Flexible(
                           child: Text(
                             category.name,
                             style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
-                              fontSize: 13,
+                              fontSize: 12,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
                           ),
                         ),
+                        const SizedBox(width: 4),
                         Icon(
                           Icons.arrow_forward_ios,
-                          color: accentColor.withValues(alpha: 0.7),
-                          size: 12,
+                          color: accentColor.withValues(alpha: 0.8),
+                          size: 10,
                         ),
                       ],
                     ),
@@ -1068,54 +1331,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
           ),
         ),
       ),
-    );
-  }
-
-  /// Builds a grid of themed icons with accent color highlights.
-  Widget _buildIconGrid(List<IconData> icons, Color accentColor) {
-    // Take up to 6 icons, arrange in 2 rows of 3
-    final displayIcons = icons.take(6).toList();
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Calculate icon size based on available space
-        final iconSize = (constraints.maxWidth - 16) / 3.5;
-
-        return Wrap(
-          spacing: 4,
-          runSpacing: 2,
-          alignment: WrapAlignment.center,
-          runAlignment: WrapAlignment.center,
-          children: displayIcons.asMap().entries.map((entry) {
-            final index = entry.key;
-            final icon = entry.value;
-
-            // Alternate between accent color and muted for visual interest
-            final isHighlighted = index % 2 == 0;
-            final iconColor = isHighlighted
-                ? accentColor
-                : Colors.white.withValues(alpha: 0.5);
-
-            return SizedBox(
-              width: iconSize,
-              height: iconSize,
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: iconSize * 0.7,
-                shadows: isHighlighted
-                    ? [
-                        Shadow(
-                          color: accentColor.withValues(alpha: 0.5),
-                          blurRadius: 8,
-                        ),
-                      ]
-                    : null,
-              ),
-            );
-          }).toList(),
-        );
-      },
     );
   }
 
@@ -2895,6 +3110,614 @@ class _PatternItemCard extends ConsumerWidget {
   }
 }
 
+/// Compact pattern item card for 4-column grid layout.
+/// Shows a smaller preview with effect name and color slot indicator.
+class _CompactPatternItemCard extends ConsumerWidget {
+  final PatternItem item;
+  final List<Color> themeColors;
+  const _CompactPatternItemCard({required this.item, required this.themeColors});
+
+  /// Get how many color slots this effect actually uses.
+  /// Returns 0 if the effect generates its own colors.
+  static int _getColorSlotsForEffect(int effectId) {
+    // Effects that only use 1 color (first slot)
+    const singleColorEffects = {
+      0,  // Solid
+      1,  // Blink
+      2,  // Breathe
+      10, // Scan
+      11, // Dual Scan
+      30, // Strobe
+      31, // Strobe Multi
+      32, // Strobe Rainbow
+      33, // Rainbow
+      34, // Multi Dynamic
+      35, // Android
+      40, // Colorful
+      45, // Mode
+    };
+
+    // Effects that use 2 colors
+    const twoColorEffects = {
+      3,  // Wipe
+      4,  // Wipe Random
+      9,  // Sweep
+      13, // Scanner
+      14, // Dual Scanner
+      16, // Rainbow Runner
+      22, // Running 2
+      23, // Chase
+      24, // Chase Rainbow
+      25, // Running Dual
+      41, // Running
+      42, // Running 2
+      43, // Theater Chase
+      44, // Theater Chase Rainbow
+      50, // Oscillate
+    };
+
+    // Effects that use all 3 colors
+    const threeColorEffects = {
+      6,  // Sweep Random
+      12, // Fade
+      15, // Lighthouse
+      18, // Dissolve
+      27, // Multi Strobe
+      37, // Fill Noise
+      38, // Noise 1
+      39, // Noise 2
+      46, // Twinklefox
+      47, // Twinklecat
+      51, // Gradient
+      52, // Loading
+      63, // Palette
+      65, // Colorwaves
+    };
+
+    // Effects that ignore user colors (generate own)
+    const autoColorEffects = {
+      5,  // Random Colors
+      7,  // Dynamic
+      8,  // Colorloop
+      19, // Dissolve Rnd
+      26, // Blink Rainbow
+      33, // Rainbow
+      44, // Theater Chase Rainbow
+      49, // Fire 2012
+      54, // Fire Flicker
+      66, // Sunset
+      67, // Ripple
+      68, // Twinklefox
+      69, // Aurora
+      70, // Lake
+      71, // Railway
+      72, // Ripple Rainbow
+      73, // Pacifica
+      74, // Candle
+      75, // Fire
+      76, // Fireworks
+      77, // Rain
+      78, // Meteor Rainbow
+      80, // Lissajous
+      81, // Frizzles
+      82, // Plasma Ball
+    };
+
+    if (autoColorEffects.contains(effectId)) return 0;
+    if (singleColorEffects.contains(effectId)) return 1;
+    if (twoColorEffects.contains(effectId)) return 2;
+    if (threeColorEffects.contains(effectId)) return 3;
+    return 3; // Default to 3 if unknown
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final effectId = MockPatternRepository.effectIdFromPayload(item.wledPayload) ?? 0;
+    final colorSlots = _getColorSlotsForEffect(effectId);
+    final extractedColors = _extractColorsFromItem(item);
+
+    // For preview, only show colors that will actually be used
+    final displayColors = colorSlots == 0
+        ? extractedColors // Show all for auto-color effects
+        : extractedColors.take(colorSlots.clamp(1, 3)).toList();
+
+    return InkWell(
+      onTap: () => _handleTap(context, ref, effectId, extractedColors),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Stack(children: [
+          // Animated gradient preview limited to used color slots
+          Positioned.fill(
+            child: _ItemLiveGradient(
+              colors: displayColors.isNotEmpty ? displayColors : [Colors.white],
+              speed: effectId == 0 ? 0 : 100, // No animation for Solid
+            ),
+          ),
+          // Overlay gradient for text readability
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    NexGenPalette.matteBlack.withValues(alpha: 0.7),
+                  ],
+                ),
+                border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.5)),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+            ),
+          ),
+          // Color slot indicator (top right)
+          if (colorSlots > 0)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.matteBlack.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    colorSlots.clamp(1, 3),
+                    (i) => Container(
+                      width: 6,
+                      height: 6,
+                      margin: EdgeInsets.only(left: i > 0 ? 2 : 0),
+                      decoration: BoxDecoration(
+                        color: i < extractedColors.length
+                            ? extractedColors[i]
+                            : Colors.grey,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          width: 0.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // Effect name at bottom
+          Positioned(
+            left: 4,
+            right: 4,
+            bottom: 4,
+            child: Text(
+              item.name,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+                shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _handleTap(BuildContext context, WidgetRef ref, int effectId, List<Color> extractedColors) async {
+    // Check for active neighborhood sync before changing lights
+    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+    if (!shouldProceed) return;
+
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
+      }
+      return;
+    }
+
+    // For Solid effect (ID 0), show color picker if multiple colors available
+    if (effectId == 0 && themeColors.length > 1) {
+      if (context.mounted) {
+        final selectedColor = await _showSolidColorPicker(context, themeColors);
+        if (selectedColor != null && context.mounted) {
+          await _applyPatternWithColor(context, ref, repo, selectedColor);
+        }
+      }
+      return;
+    }
+
+    // For effects using fewer colors than available, show color assignment dialog
+    final colorSlots = _getColorSlotsForEffect(effectId);
+    if (colorSlots > 0 && colorSlots < themeColors.length && themeColors.length > 1) {
+      if (context.mounted) {
+        final assignedColors = await _showColorAssignmentDialog(context, themeColors, colorSlots, effectId);
+        if (assignedColors != null && context.mounted) {
+          await _applyPatternWithColors(context, ref, repo, assignedColors, effectId);
+        }
+      }
+      return;
+    }
+
+    // Standard apply for effects that use all colors or generate own
+    try {
+      await repo.applyJson(item.wledPayload);
+      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      _updateLocalState(ref);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
+      }
+    } catch (e) {
+      debugPrint('Apply pattern failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
+      }
+    }
+  }
+
+  void _updateLocalState(WidgetRef ref) {
+    final notifier = ref.read(wledStateProvider.notifier);
+    final bri = item.wledPayload['bri'];
+    if (bri is int) notifier.setBrightness(bri);
+    final seg = item.wledPayload['seg'];
+    if (seg is List && seg.isNotEmpty && seg.first is Map) {
+      final s0 = seg.first as Map;
+      final sx = s0['sx'];
+      if (sx is int) notifier.setSpeed(sx);
+      final col = s0['col'];
+      if (col is List && col.isNotEmpty && col.first is List) {
+        final c = col.first as List;
+        if (c.length >= 3) {
+          notifier.setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
+        }
+      }
+    }
+  }
+
+  Future<Color?> _showSolidColorPicker(BuildContext context, List<Color> colors) async {
+    return showModalBottomSheet<Color>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _SolidColorPickerSheet(colors: colors),
+    );
+  }
+
+  Future<List<Color>?> _showColorAssignmentDialog(
+    BuildContext context,
+    List<Color> availableColors,
+    int slots,
+    int effectId,
+  ) async {
+    return showModalBottomSheet<List<Color>>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => _ColorAssignmentSheet(
+        availableColors: availableColors,
+        slots: slots,
+        effectId: effectId,
+      ),
+    );
+  }
+
+  Future<void> _applyPatternWithColor(BuildContext context, WidgetRef ref, WledRepository repo, Color color) async {
+    try {
+      // Create payload with selected color
+      final payload = Map<String, dynamic>.from(item.wledPayload);
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final s0 = Map<String, dynamic>.from(seg.first as Map);
+        s0['col'] = [[color.red, color.green, color.blue, 0]];
+        payload['seg'] = [s0];
+      }
+      await repo.applyJson(payload);
+      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
+      }
+    } catch (e) {
+      debugPrint('Apply pattern failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
+      }
+    }
+  }
+
+  Future<void> _applyPatternWithColors(BuildContext context, WidgetRef ref, WledRepository repo, List<Color> colors, int effectId) async {
+    try {
+      final payload = Map<String, dynamic>.from(item.wledPayload);
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final s0 = Map<String, dynamic>.from(seg.first as Map);
+        s0['col'] = colors.map((c) => [c.red, c.green, c.blue, 0]).toList();
+        payload['seg'] = [s0];
+      }
+      await repo.applyJson(payload);
+      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
+      }
+    } catch (e) {
+      debugPrint('Apply pattern failed: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
+      }
+    }
+  }
+}
+
+/// Bottom sheet for picking a solid color when using Solid effect.
+class _SolidColorPickerSheet extends StatelessWidget {
+  final List<Color> colors;
+  const _SolidColorPickerSheet({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.palette, color: NexGenPalette.cyan, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Choose Solid Color',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: NexGenPalette.textHigh,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Solid effect displays a single color. Select which color to use:',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: NexGenPalette.textMedium,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: colors.map((color) => _ColorPickerTile(
+              color: color,
+              onTap: () => Navigator.pop(context, color),
+            )).toList(),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bottom sheet for assigning colors to effect slots.
+class _ColorAssignmentSheet extends StatefulWidget {
+  final List<Color> availableColors;
+  final int slots;
+  final int effectId;
+  const _ColorAssignmentSheet({
+    required this.availableColors,
+    required this.slots,
+    required this.effectId,
+  });
+
+  @override
+  State<_ColorAssignmentSheet> createState() => _ColorAssignmentSheetState();
+}
+
+class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
+  late List<Color> _assignedColors;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill with first N colors
+    _assignedColors = widget.availableColors.take(widget.slots).toList();
+    // Pad if needed
+    while (_assignedColors.length < widget.slots) {
+      _assignedColors.add(widget.availableColors.first);
+    }
+  }
+
+  String _getSlotLabel(int index) {
+    switch (index) {
+      case 0: return 'Primary';
+      case 1: return 'Secondary';
+      case 2: return 'Accent';
+      default: return 'Color ${index + 1}';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final effectName = kEffectNames[widget.effectId] ?? 'Effect ${widget.effectId}';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tune, color: NexGenPalette.cyan, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Assign Colors for $effectName',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: NexGenPalette.textHigh,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This effect uses ${widget.slots} color${widget.slots > 1 ? 's' : ''}. Assign colors to each slot:',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: NexGenPalette.textMedium,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Slot assignment rows
+          ...List.generate(widget.slots, (slotIndex) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 80,
+                    child: Text(
+                      _getSlotLabel(slotIndex),
+                      style: const TextStyle(
+                        color: NexGenPalette.textMedium,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: widget.availableColors.map((color) {
+                          final isSelected = _assignedColors[slotIndex] == color;
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _assignedColors[slotIndex] = color;
+                              });
+                            },
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(
+                                color: color,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+                                  width: isSelected ? 3 : 1,
+                                ),
+                                boxShadow: isSelected ? [
+                                  BoxShadow(
+                                    color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
+                                  ),
+                                ] : null,
+                              ),
+                              child: isSelected
+                                  ? const Icon(Icons.check, color: Colors.white, size: 18)
+                                  : null,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
+          // Preview strip
+          Container(
+            height: 24,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              gradient: LinearGradient(colors: _assignedColors),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, _assignedColors),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                  ),
+                  child: const Text('Apply'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Color picker tile for the solid color picker.
+class _ColorPickerTile extends StatelessWidget {
+  final Color color;
+  final VoidCallback onTap;
+  const _ColorPickerTile({required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: NexGenPalette.line, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.4),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Icon(Icons.touch_app, color: Colors.white54, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
 /// Wrapper to keep LiveGradientStrip lightweight in item cards.
 class _ItemLiveGradient extends StatelessWidget {
   final List<Color> colors;
@@ -3012,13 +3835,13 @@ class ThemeSelectionScreen extends ConsumerWidget {
                       Expanded(
                         child: GridView.builder(
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            childAspectRatio: 1.1,
+                            crossAxisCount: 4,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            childAspectRatio: 0.85,
                           ),
                           itemCount: list.length,
-                          itemBuilder: (_, i) => _PatternItemCard(item: list[i]),
+                          itemBuilder: (_, i) => _CompactPatternItemCard(item: list[i], themeColors: colors),
                         ),
                       ),
                     ]);

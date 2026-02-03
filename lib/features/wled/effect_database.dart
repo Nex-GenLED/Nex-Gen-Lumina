@@ -1810,75 +1810,8 @@ class EffectDatabase {
       defaultIntensity: 150,
     ),
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // CUSTOM LUMINA EFFECTS (1000+ range)
-    // ═══════════════════════════════════════════════════════════════════════
-    1001: EffectMetadata(
-      id: 1001,
-      name: 'Rising Tide',
-      description: 'Lumina custom: colors rise up from bottom',
-      respectsColors: true,
-      moods: {EffectMoodCategory.magical, EffectMoodCategory.natural},
-      vibes: {EffectVibe.majestic, EffectVibe.dynamic},
-      motionType: MotionType.flowing,
-      energyLevel: EnergyLevel.medium,
-      defaultSpeed: 100,
-      defaultIntensity: 180,
-    ),
-
-    1002: EffectMetadata(
-      id: 1002,
-      name: 'Falling Tide',
-      description: 'Lumina custom: colors fall from top',
-      respectsColors: true,
-      moods: {EffectMoodCategory.magical, EffectMoodCategory.mysterious},
-      vibes: {EffectVibe.majestic, EffectVibe.dynamic},
-      motionType: MotionType.flowing,
-      energyLevel: EnergyLevel.medium,
-      defaultSpeed: 100,
-      defaultIntensity: 180,
-    ),
-
-    1003: EffectMetadata(
-      id: 1003,
-      name: 'Pulse Burst',
-      description: 'Lumina custom: explosive color pulses',
-      respectsColors: true,
-      moods: {EffectMoodCategory.festive, EffectMoodCategory.playful},
-      vibes: {EffectVibe.exciting, EffectVibe.bold},
-      motionType: MotionType.explosive,
-      energyLevel: EnergyLevel.high,
-      defaultSpeed: 150,
-      defaultIntensity: 220,
-    ),
-
-    1005: EffectMetadata(
-      id: 1005,
-      name: 'Grand Reveal',
-      description: 'Lumina custom: dramatic reveal effect',
-      respectsColors: true,
-      moods: {EffectMoodCategory.elegant, EffectMoodCategory.festive},
-      vibes: {EffectVibe.majestic, EffectVibe.luxurious},
-      motionType: MotionType.flowing,
-      energyLevel: EnergyLevel.medium,
-      defaultSpeed: 80,
-      defaultIntensity: 200,
-      bestForOccasions: {'reveal', 'special-moment', 'wedding'},
-    ),
-
-    1007: EffectMetadata(
-      id: 1007,
-      name: 'Ocean Swell',
-      description: 'Lumina custom: gentle ocean wave motion',
-      respectsColors: true,
-      moods: {EffectMoodCategory.natural, EffectMoodCategory.calm},
-      vibes: {EffectVibe.tranquil, EffectVibe.serene},
-      motionType: MotionType.flowing,
-      energyLevel: EnergyLevel.veryLow,
-      defaultSpeed: 50,
-      defaultIntensity: 128,
-      bestForOccasions: {'relaxation', 'ocean', 'sleep'},
-    ),
+    // Note: Custom Lumina effects (1000+ range) have been disabled
+    // pending re-engineering for improved reliability
   };
 
   /// Get effect by ID

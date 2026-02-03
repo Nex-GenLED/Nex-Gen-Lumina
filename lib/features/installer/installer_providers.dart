@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 
 /// Session timeout duration (30 minutes of inactivity)
 const Duration kInstallerSessionTimeout = Duration(minutes: 30);
+
+/// Warning threshold before session timeout (5 minutes)
+const Duration kSessionWarningThreshold = Duration(minutes: 5);
 
 /// Model representing a registered dealer
 class DealerInfo {
@@ -142,7 +147,11 @@ final installerModeActiveProvider = StateNotifierProvider<InstallerModeNotifier,
 class InstallerModeNotifier extends StateNotifier<bool> {
   final Ref _ref;
   Timer? _sessionTimer;
+  Timer? _warningTimer;
   DateTime? _lastActivity;
+
+  /// Callback invoked when session is about to expire (5 minutes remaining)
+  VoidCallback? onSessionWarning;
 
   InstallerModeNotifier(this._ref) : super(false);
 
@@ -266,6 +275,17 @@ class InstallerModeNotifier extends StateNotifier<bool> {
 
   void _resetSessionTimer() {
     _cancelSessionTimer();
+
+    // Schedule warning at 25 minutes (5 minutes before timeout)
+    _warningTimer = Timer(
+      kInstallerSessionTimeout - kSessionWarningThreshold,
+      () {
+        debugPrint('InstallerMode: Session warning - 5 minutes remaining');
+        onSessionWarning?.call();
+      },
+    );
+
+    // Schedule timeout at 30 minutes
     _sessionTimer = Timer(kInstallerSessionTimeout, () {
       debugPrint('InstallerMode: Session timed out due to inactivity');
       exitInstallerMode();
@@ -274,8 +294,24 @@ class InstallerModeNotifier extends StateNotifier<bool> {
   }
 
   void _cancelSessionTimer() {
+    _warningTimer?.cancel();
+    _warningTimer = null;
     _sessionTimer?.cancel();
     _sessionTimer = null;
+  }
+
+  /// Extend the session by resetting timers (called from warning dialog)
+  void extendSession() {
+    debugPrint('InstallerMode: Session extended');
+    recordActivity();
+  }
+
+  /// Get remaining session time in seconds
+  int get remainingSeconds {
+    if (_lastActivity == null) return 0;
+    final elapsed = DateTime.now().difference(_lastActivity!);
+    final remaining = kInstallerSessionTimeout - elapsed;
+    return remaining.inSeconds.clamp(0, kInstallerSessionTimeout.inSeconds);
   }
 
   @override
@@ -366,7 +402,6 @@ enum InstallerWizardStep {
   customerInfo,
   controllerSetup,
   zoneConfiguration,
-  scheduleSetup,
   handoff,
 }
 
@@ -437,4 +472,204 @@ class InstallationRecord {
     systemConfig: map['systemConfig'] as Map<String, dynamic>?,
     notes: map['notes'] as String?,
   );
+}
+
+// ============================================================================
+// INSTALLER WIZARD STATE PROVIDERS
+// ============================================================================
+
+/// Provider for site mode selection during installation
+final installerSiteModeProvider = StateProvider<SiteMode>((ref) => SiteMode.residential);
+
+/// Provider for selected controller IDs during installation setup
+final installerSelectedControllersProvider = StateProvider<Set<String>>((ref) => {});
+
+/// Provider for linked controller IDs (Residential mode)
+final installerLinkedControllersProvider = StateProvider<Set<String>>((ref) => {});
+
+/// Provider for installation photo URL
+final installerPhotoUrlProvider = StateProvider<String?>((ref) => null);
+
+/// Notifier for managing zones during Commercial mode setup
+class InstallerZonesNotifier extends StateNotifier<List<ZoneModel>> {
+  InstallerZonesNotifier() : super([]);
+
+  /// Add a new zone
+  void addZone(ZoneModel zone) {
+    state = [...state, zone];
+  }
+
+  /// Remove a zone by name
+  void removeZone(String name) {
+    state = state.where((z) => z.name != name).toList();
+  }
+
+  /// Update a zone
+  void updateZone(String name, ZoneModel updatedZone) {
+    state = state.map((z) => z.name == name ? updatedZone : z).toList();
+  }
+
+  /// Set primary controller for a zone
+  void setPrimary(String zoneName, String ip) {
+    state = state.map((z) {
+      if (z.name == zoneName) {
+        final members = z.members.contains(ip) ? z.members : [...z.members, ip];
+        return z.copyWith(primaryIp: ip, members: members);
+      }
+      return z;
+    }).toList();
+  }
+
+  /// Add a member to a zone
+  void addMember(String zoneName, String ip) {
+    state = state.map((z) {
+      if (z.name == zoneName && !z.members.contains(ip)) {
+        return z.copyWith(members: [...z.members, ip]);
+      }
+      return z;
+    }).toList();
+  }
+
+  /// Remove a member from a zone
+  void removeMember(String zoneName, String ip) {
+    state = state.map((z) {
+      if (z.name == zoneName) {
+        final members = z.members.where((m) => m != ip).toList();
+        final primaryIp = z.primaryIp == ip ? null : z.primaryIp;
+        return z.copyWith(members: members, primaryIp: primaryIp);
+      }
+      return z;
+    }).toList();
+  }
+
+  /// Toggle DDP sync for a zone
+  void setDdpEnabled(String zoneName, bool enabled) {
+    state = state.map((z) {
+      if (z.name == zoneName) {
+        return z.copyWith(ddpSyncEnabled: enabled);
+      }
+      return z;
+    }).toList();
+  }
+
+  /// Replace all zones (for loading from draft)
+  void setAll(List<ZoneModel> zones) {
+    state = zones;
+  }
+
+  /// Clear all zones
+  void clear() {
+    state = [];
+  }
+}
+
+/// Provider for zones during Commercial mode installation
+final installerZonesProvider = StateNotifierProvider<InstallerZonesNotifier, List<ZoneModel>>(
+  (ref) => InstallerZonesNotifier(),
+);
+
+// ============================================================================
+// INSTALLER DRAFT MODEL (for saving/resuming wizard progress)
+// ============================================================================
+
+/// Model representing a saved installer wizard draft
+class InstallerDraft {
+  final String? sessionPin;
+  final int currentStepIndex;
+  final CustomerInfo customerInfo;
+  final Set<String> selectedControllerIds;
+  final Set<String> linkedControllerIds;
+  final List<ZoneModel> zones;
+  final SiteMode siteMode;
+  final String? photoUrl;
+  final DateTime savedAt;
+
+  const InstallerDraft({
+    this.sessionPin,
+    required this.currentStepIndex,
+    required this.customerInfo,
+    required this.selectedControllerIds,
+    required this.linkedControllerIds,
+    required this.zones,
+    required this.siteMode,
+    this.photoUrl,
+    required this.savedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'sessionPin': sessionPin,
+        'currentStepIndex': currentStepIndex,
+        'customerInfo': customerInfo.toMap(),
+        'selectedControllerIds': selectedControllerIds.toList(),
+        'linkedControllerIds': linkedControllerIds.toList(),
+        'zones': zones.map(_zoneToJson).toList(),
+        'siteMode': siteMode.name,
+        'photoUrl': photoUrl,
+        'savedAt': savedAt.toIso8601String(),
+      };
+
+  factory InstallerDraft.fromJson(Map<String, dynamic> json) {
+    return InstallerDraft(
+      sessionPin: json['sessionPin'] as String?,
+      currentStepIndex: json['currentStepIndex'] as int? ?? 0,
+      customerInfo: CustomerInfo.fromMap(
+        json['customerInfo'] as Map<String, dynamic>? ?? {},
+      ),
+      selectedControllerIds: Set<String>.from(
+        json['selectedControllerIds'] as List? ?? [],
+      ),
+      linkedControllerIds: Set<String>.from(
+        json['linkedControllerIds'] as List? ?? [],
+      ),
+      zones: (json['zones'] as List? ?? [])
+          .map((z) => _zoneFromJson(z as Map<String, dynamic>))
+          .toList(),
+      siteMode: SiteMode.values.firstWhere(
+        (e) => e.name == json['siteMode'],
+        orElse: () => SiteMode.residential,
+      ),
+      photoUrl: json['photoUrl'] as String?,
+      savedAt: json['savedAt'] != null
+          ? DateTime.parse(json['savedAt'] as String)
+          : DateTime.now(),
+    );
+  }
+
+  String toJsonString() => jsonEncode(toJson());
+
+  factory InstallerDraft.fromJsonString(String jsonString) {
+    return InstallerDraft.fromJson(jsonDecode(jsonString) as Map<String, dynamic>);
+  }
+
+  /// Helper: Customer name for display in resume dialog
+  String get customerName => customerInfo.name.isNotEmpty ? customerInfo.name : 'Unknown Customer';
+}
+
+/// Helper to serialize ZoneModel to JSON
+Map<String, dynamic> _zoneToJson(ZoneModel zone) => {
+      'name': zone.name,
+      'primaryIp': zone.primaryIp,
+      'members': zone.members,
+      'ddpSyncEnabled': zone.ddpSyncEnabled,
+      'ddpPort': zone.ddpPort,
+    };
+
+/// Helper to deserialize ZoneModel from JSON
+ZoneModel _zoneFromJson(Map<String, dynamic> json) => ZoneModel(
+      name: json['name'] as String? ?? '',
+      primaryIp: json['primaryIp'] as String?,
+      members: List<String>.from(json['members'] as List? ?? []),
+      ddpSyncEnabled: json['ddpSyncEnabled'] as bool? ?? false,
+      ddpPort: json['ddpPort'] as int? ?? 4048,
+    );
+
+/// Reset all installer wizard state providers
+void resetInstallerWizardState(WidgetRef ref) {
+  ref.read(installerWizardStepProvider.notifier).state = InstallerWizardStep.customerInfo;
+  ref.read(installerCustomerInfoProvider.notifier).state = const CustomerInfo();
+  ref.read(installerSiteModeProvider.notifier).state = SiteMode.residential;
+  ref.read(installerSelectedControllersProvider.notifier).state = {};
+  ref.read(installerLinkedControllersProvider.notifier).state = {};
+  ref.read(installerZonesProvider.notifier).clear();
+  ref.read(installerPhotoUrlProvider.notifier).state = null;
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -7,9 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
+import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
+import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
-import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/models/installation_model.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -26,11 +29,234 @@ class InstallerSetupWizard extends ConsumerStatefulWidget {
 }
 
 class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
+  bool _hasCheckedDraft = false;
+  Timer? _countdownTimer;
+  int _warningSecondsRemaining = 300; // 5 minutes
+
   @override
   void initState() {
     super.initState();
     // Record activity on wizard entry
     ref.read(installerModeActiveProvider.notifier).recordActivity();
+
+    // Set up session warning callback
+    ref.read(installerModeActiveProvider.notifier).onSessionWarning = _showTimeoutWarning;
+
+    // Check for existing draft
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForDraft();
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    // Clear the warning callback
+    ref.read(installerModeActiveProvider.notifier).onSessionWarning = null;
+    super.dispose();
+  }
+
+  Future<void> _checkForDraft() async {
+    if (_hasCheckedDraft) return;
+    _hasCheckedDraft = true;
+
+    final metadata = await InstallerDraftService.getDraftMetadata();
+    if (metadata != null && mounted) {
+      _showResumeDraftDialog(metadata);
+    }
+  }
+
+  void _showResumeDraftDialog(DraftMetadata metadata) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Resume Previous Setup?', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You have an incomplete installation:',
+              style: const TextStyle(color: NexGenPalette.textMedium),
+            ),
+            const SizedBox(height: 16),
+            _buildDraftInfoRow(Icons.person_outline, 'Customer', metadata.customerName),
+            const SizedBox(height: 8),
+            _buildDraftInfoRow(Icons.timeline, 'Step', metadata.stepName),
+            const SizedBox(height: 8),
+            _buildDraftInfoRow(Icons.access_time, 'Saved', metadata.formattedDate),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await InstallerDraftService.clearDraft();
+              resetInstallerWizardState(ref);
+            },
+            child: const Text('Start Fresh', style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _loadDraft();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+            child: const Text('Resume Setup', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftInfoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: NexGenPalette.cyan, size: 20),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11)),
+            Text(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _loadDraft() async {
+    final draft = await InstallerDraftService.loadDraft();
+    if (draft == null) return;
+
+    // Restore state from draft
+    ref.read(installerCustomerInfoProvider.notifier).state = draft.customerInfo;
+    ref.read(installerSiteModeProvider.notifier).state = draft.siteMode;
+    ref.read(installerSelectedControllersProvider.notifier).state = draft.selectedControllerIds;
+    ref.read(installerLinkedControllersProvider.notifier).state = draft.linkedControllerIds;
+    ref.read(installerZonesProvider.notifier).setAll(draft.zones);
+    ref.read(installerPhotoUrlProvider.notifier).state = draft.photoUrl;
+
+    // Go to the saved step
+    final step = InstallerWizardStep.values[draft.currentStepIndex.clamp(0, InstallerWizardStep.values.length - 1)];
+    ref.read(installerWizardStepProvider.notifier).state = step;
+  }
+
+  Future<void> _saveDraft() async {
+    final currentStep = ref.read(installerWizardStepProvider);
+    final session = ref.read(installerSessionProvider);
+
+    final draft = InstallerDraft(
+      sessionPin: session?.pin,
+      currentStepIndex: InstallerWizardStep.values.indexOf(currentStep),
+      customerInfo: ref.read(installerCustomerInfoProvider),
+      selectedControllerIds: ref.read(installerSelectedControllersProvider),
+      linkedControllerIds: ref.read(installerLinkedControllersProvider),
+      zones: ref.read(installerZonesProvider),
+      siteMode: ref.read(installerSiteModeProvider),
+      photoUrl: ref.read(installerPhotoUrlProvider),
+      savedAt: DateTime.now(),
+    );
+
+    await InstallerDraftService.saveDraft(draft);
+  }
+
+  void _showTimeoutWarning() {
+    if (!mounted) return;
+
+    _warningSecondsRemaining = 300; // 5 minutes
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_warningSecondsRemaining > 0) {
+        setState(() => _warningSecondsRemaining--);
+      } else {
+        timer.cancel();
+      }
+    });
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Update the dialog state when countdown changes
+          Future.delayed(const Duration(seconds: 1), () {
+            if (context.mounted) setDialogState(() {});
+          });
+
+          final minutes = _warningSecondsRemaining ~/ 60;
+          final seconds = _warningSecondsRemaining % 60;
+
+          return AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            title: Row(
+              children: [
+                const Icon(Icons.timer_outlined, color: Colors.orange, size: 28),
+                const SizedBox(width: 12),
+                const Text('Session Expiring', style: TextStyle(color: Colors.white)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Your installer session will expire soon due to inactivity.',
+                  style: TextStyle(color: NexGenPalette.textMedium),
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.access_time, color: Colors.orange, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        '$minutes:${seconds.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                          color: Colors.orange,
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  _countdownTimer?.cancel();
+                  Navigator.pop(context);
+                  await _saveDraft();
+                  ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+                  if (mounted) this.context.go('/');
+                },
+                child: const Text('Save & Exit', style: TextStyle(color: NexGenPalette.textMedium)),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  _countdownTimer?.cancel();
+                  Navigator.pop(context);
+                  ref.read(installerModeActiveProvider.notifier).extendSession();
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+                child: const Text('Extend Session', style: TextStyle(color: Colors.black)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -209,133 +435,27 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           onNext: () => _goToStep(InstallerWizardStep.controllerSetup),
         );
       case InstallerWizardStep.controllerSetup:
-        return _buildPlaceholderStep(
-          'Controller Setup',
-          'Configure WLED controllers and network settings.',
-          Icons.router_outlined,
+        return ControllerSetupScreen(
           onBack: () => _goToStep(InstallerWizardStep.customerInfo),
           onNext: () => _goToStep(InstallerWizardStep.zoneConfiguration),
         );
       case InstallerWizardStep.zoneConfiguration:
-        return _buildPlaceholderStep(
-          'Zone Configuration',
-          'Define lighting zones and assign controllers.',
-          Icons.grid_view_outlined,
+        return ZoneConfigurationScreen(
           onBack: () => _goToStep(InstallerWizardStep.controllerSetup),
-          onNext: () => _goToStep(InstallerWizardStep.scheduleSetup),
-        );
-      case InstallerWizardStep.scheduleSetup:
-        return _buildPlaceholderStep(
-          'Schedule Setup',
-          'Configure default schedules and automations.',
-          Icons.schedule_outlined,
-          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
           onNext: () => _goToStep(InstallerWizardStep.handoff),
         );
       case InstallerWizardStep.handoff:
         return HandoffScreen(
-          onBack: () => _goToStep(InstallerWizardStep.scheduleSetup),
+          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
           onNext: _completeSetup,
         );
     }
   }
 
-  Widget _buildPlaceholderStep(
-    String title,
-    String description,
-    IconData icon, {
-    VoidCallback? onBack,
-    VoidCallback? onNext,
-    String nextLabel = 'Next',
-  }) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: NexGenPalette.gunmetal90,
-              border: Border.all(color: NexGenPalette.line),
-            ),
-            child: Icon(icon, size: 64, color: NexGenPalette.cyan),
-          ),
-          const SizedBox(height: 32),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.construction, color: Colors.orange, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Coming in Phase 2',
-                  style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
-          // Navigation buttons
-          Row(
-            children: [
-              if (onBack != null)
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: onBack,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      side: const BorderSide(color: NexGenPalette.line),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    child: const Text('Back', style: TextStyle(color: Colors.white)),
-                  ),
-                ),
-              if (onBack != null) const SizedBox(width: 16),
-              if (onNext != null)
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: onNext,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: NexGenPalette.cyan,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    child: Text(nextLabel, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   void _goToStep(InstallerWizardStep step) {
     ref.read(installerWizardStepProvider.notifier).state = step;
+    // Auto-save draft after each step transition
+    _saveDraft();
   }
 
   bool _isProcessing = false;
@@ -375,9 +495,36 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       );
       final userId = credential.user!.uid;
 
-      // 3. Determine site mode and max sub-users
-      final siteMode = ref.read(siteModeProvider);
+      // 3. Get installer-collected configuration
+      final siteMode = ref.read(installerSiteModeProvider);
+      final selectedControllers = ref.read(installerSelectedControllersProvider);
+      final linkedControllers = ref.read(installerLinkedControllersProvider);
+      final zones = ref.read(installerZonesProvider);
+      final photoUrl = ref.read(installerPhotoUrlProvider);
       final maxSubUsers = siteMode == SiteMode.commercial ? 20 : 5;
+
+      // Build system config based on site mode
+      Map<String, dynamic>? systemConfig;
+      if (siteMode == SiteMode.residential) {
+        systemConfig = {
+          'linkedControllerIds': linkedControllers.toList(),
+        };
+      } else {
+        systemConfig = {
+          'zones': zones.map((z) => {
+            'name': z.name,
+            'primaryIp': z.primaryIp,
+            'members': z.members,
+            'ddpSyncEnabled': z.ddpSyncEnabled,
+            'ddpPort': z.ddpPort,
+          }).toList(),
+        };
+      }
+
+      // Add photo URL if captured
+      if (photoUrl != null) {
+        systemConfig['installationPhotoUrl'] = photoUrl;
+      }
 
       // 4. Create Installation document
       final installationRef = FirebaseFirestore.instance.collection('installations').doc();
@@ -391,7 +538,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         dealerCompanyName: session.dealer.companyName,
         installedAt: DateTime.now(),
         warrantyExpires: DateTime.now().add(const Duration(days: 365 * 5)),
-        controllerSerials: [], // TODO: Get from controller setup step
+        controllerSerials: selectedControllers.toList(),
         address: customerInfo.address,
         city: customerInfo.city,
         state: customerInfo.state,
@@ -399,6 +546,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         maxSubUsers: maxSubUsers,
         siteMode: siteMode,
         isActive: true,
+        systemConfig: systemConfig,
         primaryUserName: customerInfo.name,
         primaryUserEmail: customerInfo.email,
         primaryUserPhone: customerInfo.phone,
@@ -434,7 +582,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         installerName: session.installer.name,
         dealerCompanyName: session.dealer.companyName,
         installedAt: DateTime.now(),
-        controllerIds: [],
+        controllerIds: selectedControllers.toList(),
+        systemConfig: systemConfig,
         notes: customerInfo.notes.isNotEmpty ? customerInfo.notes : null,
       );
 
@@ -595,13 +744,14 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             child: const Text('Copy All', style: TextStyle(color: NexGenPalette.textMedium)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(context).pop();
+              // Clear draft since setup is complete
+              await InstallerDraftService.clearDraft();
+              // Reset all wizard state
+              resetInstallerWizardState(ref);
               ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
-              // Reset wizard state
-              ref.read(installerWizardStepProvider.notifier).state = InstallerWizardStep.customerInfo;
-              ref.read(installerCustomerInfoProvider.notifier).state = const CustomerInfo();
-              this.context.go('/');
+              if (mounted) this.context.go('/');
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: NexGenPalette.cyan,
@@ -669,7 +819,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         backgroundColor: NexGenPalette.gunmetal90,
         title: const Text('Exit Installer Mode?', style: TextStyle(color: Colors.white)),
         content: const Text(
-          'Your progress will be saved, but you will need to re-enter the PIN to continue.',
+          'Your progress will be saved. You will need to re-enter the PIN to continue.',
           style: TextStyle(color: NexGenPalette.textMedium),
         ),
         actions: [
@@ -678,12 +828,25 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             child: const Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(context).pop();
+              // Save draft before exiting
+              await _saveDraft();
               ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
-              this.context.go('/');
+              if (mounted) this.context.go('/');
             },
-            child: const Text('Exit', style: TextStyle(color: Colors.red)),
+            child: const Text('Save & Exit', style: TextStyle(color: Colors.orange)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              // Clear draft and reset
+              await InstallerDraftService.clearDraft();
+              resetInstallerWizardState(ref);
+              ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+              if (mounted) this.context.go('/');
+            },
+            child: const Text('Exit Without Saving', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -695,11 +858,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       case InstallerWizardStep.customerInfo:
         return _StepInfo('Customer Info', 'Customer');
       case InstallerWizardStep.controllerSetup:
-        return _StepInfo('Controller Setup', 'Controller');
+        return _StepInfo('Controller Setup', 'Controllers');
       case InstallerWizardStep.zoneConfiguration:
         return _StepInfo('Zone Configuration', 'Zones');
-      case InstallerWizardStep.scheduleSetup:
-        return _StepInfo('Schedule Setup', 'Schedule');
       case InstallerWizardStep.handoff:
         return _StepInfo('Customer Handoff', 'Handoff');
     }

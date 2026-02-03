@@ -11,6 +11,8 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/premium_card.dart';
+import 'dart:ui';
 
 /// System Management hub: manage controllers, link devices, and configure hardware
 class SystemManagementScreen extends ConsumerWidget {
@@ -92,83 +94,23 @@ class _MyControllersTab extends ConsumerWidget {
                   final c = items[i];
                   final isActive = c.ip == selectedIp;
 
-                  return Card(
-                    child: ListTile(
-                      leading: Icon(
-                        Icons.router_outlined,
-                        color: isActive ? NexGenPalette.cyan : Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              c.name ?? 'Controller',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (isActive)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: NexGenPalette.cyan,
-                                borderRadius: BorderRadius.circular(12),
+                  return _ControllerTile(
+                    controller: c,
+                    isActive: isActive,
+                    onTap: isActive
+                        ? null
+                        : () {
+                            ref.read(selectedDeviceIpProvider.notifier).state = c.ip;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('${c.name ?? "Controller"} is now active'),
+                                backgroundColor: Colors.green,
+                                duration: const Duration(seconds: 2),
                               ),
-                              child: const Text(
-                                'Active',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 4),
-                          Text('IP: ${c.ip}', overflow: TextOverflow.ellipsis),
-                          if (c.wifiConfigured == true && c.ssid != null)
-                            Text(
-                              'Network: ${c.ssid}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                        ],
-                      ),
-                      isThreeLine: c.wifiConfigured == true && c.ssid != null,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: 'Details',
-                            onPressed: () => _showDetails(context, ref, c),
-                            icon: const Icon(Icons.info_outline),
-                          ),
-                          IconButton(
-                            tooltip: 'Remove',
-                            onPressed: () => _confirmDelete(context, c, deleteController),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
-                        ],
-                      ),
-                      onTap: isActive
-                          ? null
-                          : () {
-                              ref.read(selectedDeviceIpProvider.notifier).state = c.ip;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('${c.name ?? "Controller"} is now active'),
-                                  backgroundColor: Colors.green,
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                    ),
+                            );
+                          },
+                    onDetails: () => _showDetails(context, ref, c),
+                    onDelete: () => _confirmDelete(context, c, deleteController),
                   );
                 },
               ),
@@ -502,6 +444,265 @@ class _HardwareTab extends ConsumerWidget {
           ),
         ),
       ]),
+    );
+  }
+}
+
+/// Enhanced controller tile with status indicators and glassmorphic styling
+class _ControllerTile extends ConsumerWidget {
+  final ControllerInfo controller;
+  final bool isActive;
+  final VoidCallback? onTap;
+  final VoidCallback onDetails;
+  final VoidCallback onDelete;
+
+  const _ControllerTile({
+    required this.controller,
+    required this.isActive,
+    this.onTap,
+    required this.onDetails,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Check connectivity status for this controller
+    final connectionState = ref.watch(wledStateProvider);
+    final isConnected = isActive && connectionState.connected;
+
+    final accentColor = isActive ? NexGenPalette.cyan : NexGenPalette.violet;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isActive
+                  ? NexGenPalette.cyan.withValues(alpha: 0.4)
+                  : NexGenPalette.line,
+              width: isActive ? 1.5 : 1,
+            ),
+            boxShadow: isActive
+                ? [
+                    BoxShadow(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.15),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isActive
+                        ? [
+                            NexGenPalette.cyan.withValues(alpha: 0.1),
+                            NexGenPalette.gunmetal90.withValues(alpha: 0.9),
+                          ]
+                        : [
+                            NexGenPalette.gunmetal90.withValues(alpha: 0.85),
+                            NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                          ],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // Icon with gradient background and status indicator
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                accentColor,
+                                accentColor.withValues(alpha: 0.6),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: accentColor.withValues(alpha: 0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.router,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                        // Status dot
+                        Positioned(
+                          right: -4,
+                          bottom: -4,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.matteBlack,
+                              shape: BoxShape.circle,
+                            ),
+                            child: StatusDot(
+                              isOnline: isActive && isConnected,
+                              size: 10,
+                              animate: isActive && isConnected,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 14),
+
+                    // Controller info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  controller.name ?? 'Controller',
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (isActive) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.7)],
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'ACTIVE',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          // IP and network info
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.lan_outlined,
+                                size: 12,
+                                color: NexGenPalette.textMedium,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                controller.ip,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: NexGenPalette.textMedium,
+                                ),
+                              ),
+                              if (controller.wifiConfigured == true && controller.ssid != null) ...[
+                                const SizedBox(width: 12),
+                                Icon(
+                                  Icons.wifi,
+                                  size: 12,
+                                  color: isConnected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    controller.ssid!,
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: NexGenPalette.textMedium,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          // Connection status text
+                          if (isActive) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  isConnected ? Icons.check_circle : Icons.error_outline,
+                                  size: 12,
+                                  color: isConnected ? const Color(0xFF4CAF50) : Colors.orange,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isConnected ? 'Connected' : 'Connecting...',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: isConnected ? const Color(0xFF4CAF50) : Colors.orange,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    // Action buttons
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Details',
+                          onPressed: onDetails,
+                          icon: Icon(
+                            Icons.info_outline,
+                            color: NexGenPalette.textMedium,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Remove',
+                          onPressed: onDelete,
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: Colors.red.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

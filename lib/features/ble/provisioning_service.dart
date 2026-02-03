@@ -15,6 +15,22 @@ class ProvisionResult {
   const ProvisionResult({required this.ip, required this.serial});
 }
 
+/// Exception thrown during provisioning with additional context
+class ProvisioningException implements Exception {
+  final String message;
+  final bool requiresManualIp;
+  final bool canRetryManual;
+
+  const ProvisioningException(
+    this.message, {
+    this.requiresManualIp = false,
+    this.canRetryManual = false,
+  });
+
+  @override
+  String toString() => 'ProvisioningException: $message';
+}
+
 /// Implements Improv Standard provisioning over BLE and hands off to Wi‑Fi
 class ProvisioningService {
   static final Guid _improvUuid = Guid('00000000-0090-0016-0128-633215502390');
@@ -207,5 +223,191 @@ class ProvisioningService {
       return list.any((d) => d.address.address == ip);
     } catch (_) {}
     return false;
+  }
+
+  /// Streamlined hybrid provisioning that eliminates manual Wi-Fi reconnection.
+  ///
+  /// Flow:
+  /// 1) Send Wi-Fi credentials via BLE Improv RPC
+  /// 2) Disconnect BLE immediately (no waiting for response)
+  /// 3) Wait 45 seconds for controller to reboot and connect
+  /// 4) Auto-discover via mDNS (3 attempts, 10s each)
+  /// 5) If found → Verify and save
+  /// 6) If not found → Throw exception with requiresManualIp flag
+  ///
+  /// The caller should handle the ProvisioningException and offer:
+  /// - Manual IP entry (primary fallback)
+  /// - Full manual setup flow (secondary fallback)
+  Future<ProvisionResult> provisionDeviceHybrid({
+    required BluetoothDevice device,
+    required String ssid,
+    required String password,
+    void Function(String)? onStatusUpdate,
+  }) async {
+    // Simulation/Web shortcut
+    if (kIsWeb || kSimulationMode) {
+      onStatusUpdate?.call('Simulating provisioning...');
+      await Future.delayed(const Duration(seconds: 2));
+      final ip = '192.168.1.123';
+      final serial = device.remoteId.str;
+      await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
+      return ProvisionResult(ip: ip, serial: serial);
+    }
+
+    final serial = device.remoteId.str;
+
+    try {
+      // Step 1: Send credentials via BLE
+      onStatusUpdate?.call('Sending Wi-Fi credentials...');
+      await _sendCredentialsViaBle(device, ssid, password);
+
+      // Step 2: Disconnect BLE immediately
+      onStatusUpdate?.call('Disconnecting Bluetooth...');
+      try {
+        await device.disconnect();
+      } catch (e) {
+        debugPrint('ProvisioningService: disconnect warning: $e');
+      }
+
+      // Step 3: Wait for controller to reboot (45 seconds with countdown)
+      for (int i = 45; i > 0; i--) {
+        onStatusUpdate?.call('Waiting for controller to restart... ${i}s');
+        await Future.delayed(const Duration(seconds: 1));
+      }
+
+      // Step 4: Auto-discover via mDNS (3 attempts)
+      String? discoveredIp;
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        onStatusUpdate?.call('Searching for controller... (Attempt $attempt/3)');
+
+        try {
+          final devices = await DeviceDiscoveryService()
+              .discover(timeout: const Duration(seconds: 10));
+
+          // Look for WLED/Nex-Gen device
+          for (final d in devices) {
+            final name = d.name.toLowerCase();
+            if (name.contains('wled') || name.contains('nex-gen') || name.contains('nexgen')) {
+              discoveredIp = d.address.address;
+              break;
+            }
+          }
+
+          // If we found one, verify it's reachable
+          if (discoveredIp != null) {
+            onStatusUpdate?.call('Verifying controller at $discoveredIp...');
+            final reachable = await _verifyReachable(discoveredIp);
+            if (reachable) {
+              break;
+            } else {
+              discoveredIp = null; // Not reachable, try again
+            }
+          }
+        } catch (e) {
+          debugPrint('ProvisioningService: discovery attempt $attempt failed: $e');
+        }
+
+        if (attempt < 3 && discoveredIp == null) {
+          await Future.delayed(const Duration(seconds: 5));
+        }
+      }
+
+      // Step 5: If found, save and return
+      if (discoveredIp != null) {
+        onStatusUpdate?.call('Controller found at $discoveredIp!');
+        await _saveToRepository(ip: discoveredIp, serial: serial, ssid: ssid);
+        return ProvisionResult(ip: discoveredIp, serial: serial);
+      }
+
+      // Step 6: Not found - throw exception for manual IP fallback
+      throw const ProvisioningException(
+        'Controller not found on network after 3 attempts.',
+        requiresManualIp: true,
+        canRetryManual: true,
+      );
+    } catch (e) {
+      if (e is ProvisioningException) rethrow;
+      debugPrint('ProvisioningService: hybrid provision failed: $e');
+      throw ProvisioningException(
+        'Provisioning failed: $e',
+        requiresManualIp: true,
+        canRetryManual: true,
+      );
+    }
+  }
+
+  /// Send Wi-Fi credentials via BLE without waiting for full provisioning.
+  Future<void> _sendCredentialsViaBle(
+    BluetoothDevice device,
+    String ssid,
+    String password,
+  ) async {
+    BluetoothCharacteristic? writeChar;
+
+    try {
+      // Connect if needed
+      try {
+        await (device as dynamic).connect();
+      } catch (e) {
+        debugPrint('ProvisioningService: connect skipped/failed: $e');
+      }
+
+      // Discover services
+      final services = await device.discoverServices();
+      final improvService = services.firstWhere(
+        (s) => s.uuid == _improvUuid,
+        orElse: () => services.firstWhere(
+          (s) => s.characteristics.any((c) => c.uuid == _improvUuid),
+          orElse: () => services.isNotEmpty ? services.first : throw Exception('No services on device'),
+        ),
+      );
+
+      // Find write characteristic
+      for (final c in improvService.characteristics) {
+        if (c.uuid == _improvUuid && (c.properties.write || c.properties.writeWithoutResponse)) {
+          writeChar = c;
+          break;
+        }
+      }
+      writeChar ??= improvService.characteristics.firstWhere(
+        (c) => (c.properties.write || c.properties.writeWithoutResponse),
+        orElse: () => improvService.characteristics.first,
+      );
+
+      if (writeChar == null) {
+        throw Exception('Improv write characteristic not found');
+      }
+
+      // Build and send provision command
+      final packet = _buildImprovProvisionPacket(ssid, password);
+      debugPrint('ProvisioningService: writing ${packet.length} bytes (hybrid)');
+      await writeChar.write(packet, withoutResponse: writeChar.properties.writeWithoutResponse);
+
+      // Brief delay to ensure write completes
+      await Future.delayed(const Duration(milliseconds: 500));
+    } catch (e) {
+      debugPrint('ProvisioningService: send credentials failed: $e');
+      throw ProvisioningException('Failed to send Wi-Fi credentials: $e');
+    }
+  }
+
+  /// Save a manually-entered IP address after failed auto-discovery.
+  /// This is called by the UI when the user enters an IP manually.
+  Future<ProvisionResult> saveManualIp({
+    required String ip,
+    required String serial,
+    String? ssid,
+  }) async {
+    // Verify the IP is reachable first
+    final reachable = await _verifyReachable(ip);
+    if (!reachable) {
+      throw const ProvisioningException(
+        'Controller at this IP is not responding. Please check the IP address.',
+      );
+    }
+
+    // Save to repository
+    await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
+    return ProvisionResult(ip: ip, serial: serial);
   }
 }

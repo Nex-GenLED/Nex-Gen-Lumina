@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/address_autocomplete.dart';
 
 /// Phase 2.1: Customer Information collection screen
 class CustomerInfoScreen extends ConsumerStatefulWidget {
@@ -25,6 +29,12 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
   final _zipController = TextEditingController();
   final _notesController = TextEditingController();
 
+  // Email uniqueness validation state
+  String? _emailUniquenessError;
+  bool _isCheckingEmail = false;
+  bool _emailIsUnique = false;
+  Timer? _emailDebouncer;
+
   @override
   void initState() {
     super.initState();
@@ -38,10 +48,16 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
     _stateController.text = existingInfo.state;
     _zipController.text = existingInfo.zipCode;
     _notesController.text = existingInfo.notes;
+
+    // If email already exists, validate it
+    if (existingInfo.email.isNotEmpty) {
+      _validateEmailUniqueness(existingInfo.email);
+    }
   }
 
   @override
   void dispose() {
+    _emailDebouncer?.cancel();
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
@@ -53,7 +69,160 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
     super.dispose();
   }
 
+  /// Validate email uniqueness against Firebase Auth
+  /// Note: This attempts to check if an email is already registered
+  Future<void> _validateEmailUniqueness(String email) async {
+    // Basic format check first
+    if (email.isEmpty || !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      setState(() {
+        _emailUniquenessError = null;
+        _emailIsUnique = false;
+        _isCheckingEmail = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isCheckingEmail = true;
+      _emailUniquenessError = null;
+      _emailIsUnique = false;
+    });
+
+    try {
+      // Try to sign in with the email and a dummy password
+      // If the email exists, we'll get a specific error code
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email.trim().toLowerCase(),
+        password: '_check_email_exists_dummy_password_12345',
+      );
+
+      // If we somehow succeed (shouldn't happen), sign out
+      await FirebaseAuth.instance.signOut();
+
+      // Email exists (though this branch is unlikely)
+      if (mounted) {
+        setState(() {
+          _isCheckingEmail = false;
+          _emailUniquenessError = 'An account with this email already exists';
+          _emailIsUnique = false;
+        });
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isCheckingEmail = false;
+
+          if (e.code == 'user-not-found') {
+            // Email doesn't exist - this is what we want
+            _emailUniquenessError = null;
+            _emailIsUnique = true;
+          } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+            // Email exists but password is wrong
+            _emailUniquenessError = 'An account with this email already exists';
+            _emailIsUnique = false;
+          } else if (e.code == 'too-many-requests') {
+            // Too many attempts - can't verify, allow to proceed
+            _emailUniquenessError = null;
+            _emailIsUnique = true;
+          } else {
+            // Other errors - allow to proceed (will catch at account creation)
+            _emailUniquenessError = null;
+            _emailIsUnique = true;
+          }
+        });
+      }
+    } catch (e) {
+      // General error - allow to proceed
+      if (mounted) {
+        setState(() {
+          _isCheckingEmail = false;
+          _emailUniquenessError = null;
+          _emailIsUnique = true;
+        });
+      }
+    }
+  }
+
+  void _onEmailChanged(String value) {
+    // Cancel previous debounce timer
+    _emailDebouncer?.cancel();
+
+    // Reset state immediately
+    setState(() {
+      _emailUniquenessError = null;
+      _emailIsUnique = false;
+    });
+
+    // Debounce the uniqueness check
+    _emailDebouncer = Timer(const Duration(milliseconds: 500), () {
+      _validateEmailUniqueness(value);
+    });
+  }
+
+  /// Auto-fill city, state, and zip when an address is selected
+  void _onAddressSelected(AddressSuggestion suggestion) {
+    // Update address field with street address
+    _addressController.text = suggestion.streetAddress;
+
+    // Auto-fill city, state, zip if available
+    if (suggestion.city != null) {
+      _cityController.text = suggestion.city!;
+    }
+    if (suggestion.state != null) {
+      // Extract state abbreviation if full state name provided
+      final state = suggestion.state!;
+      _stateController.text = state.length > 2 ? _getStateAbbreviation(state) : state;
+    }
+    if (suggestion.postcode != null) {
+      // Take first 5 digits of zip code
+      final zip = suggestion.postcode!.replaceAll(RegExp(r'\D'), '');
+      _zipController.text = zip.length > 5 ? zip.substring(0, 5) : zip;
+    }
+  }
+
+  /// Convert full state name to abbreviation
+  String _getStateAbbreviation(String fullName) {
+    const stateAbbreviations = {
+      'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+      'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+      'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+      'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+      'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+      'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+      'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+      'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+      'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+      'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+      'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+      'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+      'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
+    };
+    return stateAbbreviations[fullName.toLowerCase()] ?? fullName;
+  }
+
   void _saveAndContinue() {
+    // Check for email uniqueness error first
+    if (_emailUniquenessError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please use a different email address'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Check if still checking email
+    if (_isCheckingEmail) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please wait while we verify the email address'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     if (_formKey.currentState?.validate() ?? false) {
       // Save customer info to provider
       ref.read(installerCustomerInfoProvider.notifier).state = CustomerInfo(
@@ -114,23 +283,8 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Email field
-            _buildTextField(
-              controller: _emailController,
-              label: 'Email Address',
-              hint: 'john@example.com',
-              icon: Icons.email_outlined,
-              keyboardType: TextInputType.emailAddress,
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Email is required';
-                }
-                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                  return 'Enter a valid email address';
-                }
-                return null;
-              },
-            ),
+            // Email field with uniqueness validation
+            _buildEmailField(),
             const SizedBox(height: 20),
 
             // Phone field
@@ -158,16 +312,17 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Street address
-            _buildTextField(
+            // Street address with autocomplete
+            AddressAutocomplete(
               controller: _addressController,
-              label: 'Street Address',
-              hint: '123 Main Street',
-              icon: Icons.home_outlined,
+              labelText: 'Street Address',
+              hintText: 'Start typing to search...',
+              maxLines: 1,
+              onAddressSelected: (suggestion) => _onAddressSelected(suggestion),
             ),
             const SizedBox(height: 20),
 
-            // City, State, Zip row
+            // City, State, Zip row (auto-populated from address selection)
             Row(
               children: [
                 Expanded(
@@ -175,7 +330,7 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
                   child: _buildTextField(
                     controller: _cityController,
                     label: 'City',
-                    hint: 'Springfield',
+                    hint: 'Auto-filled',
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -183,7 +338,7 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
                   child: _buildTextField(
                     controller: _stateController,
                     label: 'State',
-                    hint: 'IL',
+                    hint: 'ST',
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
@@ -196,7 +351,7 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
                   child: _buildTextField(
                     controller: _zipController,
                     label: 'ZIP',
-                    hint: '62701',
+                    hint: '00000',
                     keyboardType: TextInputType.number,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
@@ -269,6 +424,86 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmailField() {
+    Widget? suffixIcon;
+
+    if (_isCheckingEmail) {
+      suffixIcon = const SizedBox(
+        width: 20,
+        height: 20,
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
+        ),
+      );
+    } else if (_emailUniquenessError != null) {
+      suffixIcon = const Padding(
+        padding: EdgeInsets.all(12),
+        child: Icon(Icons.error_outline, color: Colors.red, size: 20),
+      );
+    } else if (_emailIsUnique && _emailController.text.isNotEmpty) {
+      suffixIcon = const Padding(
+        padding: EdgeInsets.all(12),
+        child: Icon(Icons.check_circle, color: Colors.green, size: 20),
+      );
+    }
+
+    return TextFormField(
+      controller: _emailController,
+      keyboardType: TextInputType.emailAddress,
+      textCapitalization: TextCapitalization.none,
+      onChanged: _onEmailChanged,
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
+          return 'Email is required';
+        }
+        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+          return 'Enter a valid email address';
+        }
+        if (_emailUniquenessError != null) {
+          return _emailUniquenessError;
+        }
+        return null;
+      },
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: 'Email Address',
+        labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+        hintText: 'john@example.com',
+        hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+        prefixIcon: const Icon(Icons.email_outlined, color: NexGenPalette.textMedium),
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: NexGenPalette.gunmetal90,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: NexGenPalette.line),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: _emailUniquenessError != null ? Colors.red : NexGenPalette.line,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: _emailUniquenessError != null ? Colors.red : NexGenPalette.cyan,
+          ),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        errorText: _emailUniquenessError,
       ),
     );
   }

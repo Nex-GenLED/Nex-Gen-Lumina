@@ -74,6 +74,9 @@ class Installation {
   /// Primary user's phone (for admin reference).
   final String? primaryUserPhone;
 
+  /// Photo URL of the completed installation (optional).
+  final String? photoUrl;
+
   const Installation({
     required this.id,
     required this.primaryUserId,
@@ -97,6 +100,7 @@ class Installation {
     this.primaryUserName,
     this.primaryUserEmail,
     this.primaryUserPhone,
+    this.photoUrl,
   });
 
   /// Full address as a single string.
@@ -135,6 +139,7 @@ class Installation {
         if (primaryUserName != null) 'primary_user_name': primaryUserName,
         if (primaryUserEmail != null) 'primary_user_email': primaryUserEmail,
         if (primaryUserPhone != null) 'primary_user_phone': primaryUserPhone,
+        if (photoUrl != null) 'photo_url': photoUrl,
       };
 
   factory Installation.fromJson(Map<String, dynamic> json) {
@@ -168,6 +173,7 @@ class Installation {
       primaryUserName: json['primary_user_name'] as String?,
       primaryUserEmail: json['primary_user_email'] as String?,
       primaryUserPhone: json['primary_user_phone'] as String?,
+      photoUrl: json['photo_url'] as String?,
     );
   }
 
@@ -199,6 +205,7 @@ class Installation {
     String? primaryUserName,
     String? primaryUserEmail,
     String? primaryUserPhone,
+    String? photoUrl,
   }) =>
       Installation(
         id: id ?? this.id,
@@ -223,5 +230,6 @@ class Installation {
         primaryUserName: primaryUserName ?? this.primaryUserName,
         primaryUserEmail: primaryUserEmail ?? this.primaryUserEmail,
         primaryUserPhone: primaryUserPhone ?? this.primaryUserPhone,
+        photoUrl: photoUrl ?? this.photoUrl,
       );
 }

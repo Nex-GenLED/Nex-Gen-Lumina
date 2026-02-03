@@ -303,41 +303,29 @@ class LuminaCustomEffectsCatalog {
     category: 'Wave',
   );
 
-  /// All custom effects
+  /// All custom effects - DISABLED: These effects had reliability issues
+  /// Keeping definitions for future re-implementation
   static const List<LuminaCustomEffect> allEffects = [
-    risingTide,
-    fallingTide,
-    pulseBurst,
-    pulseGather,
-    grandReveal,
-    curtainCall,
-    oceanSwell,
+    // Disabled - effects need re-engineering for reliability
   ];
 
   /// Get effect by ID
   static LuminaCustomEffect? getById(int id) {
-    try {
-      return allEffects.firstWhere((e) => e.id == id);
-    } catch (_) {
-      return null;
-    }
+    // All custom effects disabled
+    return null;
   }
 
   /// Get effect name by ID
   static String getName(int id) {
-    return getById(id)?.name ?? 'Custom Effect #$id';
+    return 'Custom Effect #$id';
   }
 
   /// Check if an effect ID is a custom Lumina effect
-  static bool isCustomEffect(int id) => id >= 1000;
+  /// Returns false - all custom effects currently disabled
+  static bool isCustomEffect(int id) => false;
 
-  /// IDs for pattern generation (most visually distinct custom effects)
-  static const List<int> patternEffectIds = [
-    1001, // Rising Tide
-    1003, // Pulse Burst
-    1005, // Grand Reveal
-    1007, // Ocean Swell
-  ];
+  /// IDs for pattern generation - EMPTY: custom effects disabled
+  static const List<int> patternEffectIds = <int>[];
 }
 
 /// Service for executing custom Lumina effects on WLED devices.

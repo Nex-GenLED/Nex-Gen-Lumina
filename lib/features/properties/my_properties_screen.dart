@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/properties/property_models.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
+import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -131,14 +132,24 @@ class MyPropertiesScreen extends ConsumerWidget {
             address: address,
             iconName: iconName,
           );
-          if (property != null && context.mounted) {
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Created "$name"'),
-                backgroundColor: Colors.green,
-              ),
-            );
+          if (context.mounted) {
+            if (property != null) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Created "$name"'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            } else {
+              // Show error message when save fails
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Failed to save property. Please check your internet connection and try again.'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           }
         },
       ),
@@ -501,7 +512,7 @@ class _PropertyCard extends StatelessWidget {
   }
 }
 
-class _PropertyDialog extends StatefulWidget {
+class _PropertyDialog extends ConsumerStatefulWidget {
   final String title;
   final String? initialName;
   final String? initialAddress;
@@ -517,10 +528,10 @@ class _PropertyDialog extends StatefulWidget {
   });
 
   @override
-  State<_PropertyDialog> createState() => _PropertyDialogState();
+  ConsumerState<_PropertyDialog> createState() => _PropertyDialogState();
 }
 
-class _PropertyDialogState extends State<_PropertyDialog> {
+class _PropertyDialogState extends ConsumerState<_PropertyDialog> {
   late TextEditingController _nameController;
   late TextEditingController _addressController;
   late String _selectedIcon;
@@ -598,25 +609,15 @@ class _PropertyDialogState extends State<_PropertyDialog> {
               textCapitalization: TextCapitalization.words,
             ),
             const SizedBox(height: 16),
-            // Address field
-            TextField(
+            // Address field with autocomplete
+            AddressAutocomplete(
               controller: _addressController,
-              decoration: InputDecoration(
-                labelText: 'Address (optional)',
-                hintText: '123 Main St, City, State',
-                labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
-                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexGenPalette.cyan),
-                ),
-              ),
-              style: const TextStyle(color: Colors.white),
-              textCapitalization: TextCapitalization.words,
+              labelText: 'Address (optional)',
+              hintText: 'Start typing to search...',
+              maxLines: 1,
+              onAddressSelected: (suggestion) {
+                _addressController.text = suggestion.shortAddress;
+              },
             ),
             const SizedBox(height: 20),
             // Icon selection

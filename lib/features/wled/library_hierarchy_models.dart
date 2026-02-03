@@ -155,6 +155,7 @@ class NamedPalette {
 
 /// Root category IDs (matching existing category IDs for compatibility)
 class LibraryCategoryIds {
+  static const String quickPicks = 'cat_quick_picks';
   static const String sports = 'cat_sports';
   static const String holidays = 'cat_holiday';
   static const String seasonal = 'cat_season';
@@ -162,6 +163,13 @@ class LibraryCategoryIds {
   static const String architectural = 'cat_arch';
   static const String security = 'cat_security';
   static const String movies = 'cat_movies';
+  static const String nature = 'cat_nature';
+}
+
+/// Special folder IDs for personalized content
+class PersonalizedFolderIds {
+  /// My Teams folder under Game Day - shows user's favorite teams
+  static const String myTeams = 'sports_my_teams';
 }
 
 /// League/folder IDs for Game Day Fan Zone
