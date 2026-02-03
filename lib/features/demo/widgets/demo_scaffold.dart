@@ -41,7 +41,7 @@ class DemoScaffold extends ConsumerWidget {
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: NexGenGradients.darkToMidnight,
         ),
         child: Column(
