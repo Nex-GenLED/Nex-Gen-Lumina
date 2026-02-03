@@ -15,14 +15,14 @@
 // 3. Find the firebaseConfig object
 
 // Your Firebase project's API key
-#define FIREBASE_API_KEY "YOUR_FIREBASE_API_KEY"
+#define FIREBASE_API_KEY "AIzaSyCWwqffD-ggRh5-IYwR2ldjaztd-Jgz0JY"
 
 // Your Firebase project ID (e.g., "lumina-12345")
-#define FIREBASE_PROJECT_ID "YOUR_FIREBASE_PROJECT_ID"
+#define FIREBASE_PROJECT_ID "icrt6menwsv2d8all8oijs021b06s5"
 
 // Firebase Auth - The user ID whose commands this bridge will execute
 // This is the UID from Firebase Authentication for the home owner
-#define FIREBASE_USER_UID "YOUR_USER_UID"
+#define FIREBASE_USER_UID "Empwc9bfLKVBTe3VcaHIE1mZw5y1"
 
 // ============================================================================
 // WiFi Configuration (optional - can use WiFiManager instead)
@@ -30,8 +30,8 @@
 // If you leave these empty, the bridge will start in AP mode
 // and let you configure WiFi via a web portal
 
-// #define WIFI_SSID "YourWiFiName"
-// #define WIFI_PASSWORD "YourWiFiPassword"
+#define WIFI_SSID "Nexgen"
+#define WIFI_PASSWORD "Nexgen365"
 
 // ============================================================================
 // Bridge Configuration

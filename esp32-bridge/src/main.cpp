@@ -6,25 +6,18 @@
  *
  * How it works:
  * 1. Connects to local WiFi network
- * 2. Authenticates with Firebase (anonymous auth)
- * 3. Polls Firestore for pending commands
- * 4. Executes commands by making HTTP requests to WLED devices
- * 5. Updates command status in Firestore
- *
- * This enables remote control of WLED devices without requiring
- * WLED to support MQTT+TLS or any port forwarding.
+ * 2. Polls Firestore for pending commands
+ * 3. Executes commands by making HTTP requests to WLED devices
+ * 4. Updates command status in Firestore
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <Firebase_ESP_Client.h>
 #include <WiFiManager.h>
-
-// Firebase helper includes
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
+#include <time.h>
 
 #include "config.h"
 
@@ -32,20 +25,16 @@
 // Global Variables
 // ============================================================================
 
-// Firebase objects
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
-
-// State
+WiFiClientSecure secureClient;
 bool firebaseReady = false;
 unsigned long lastPollTime = 0;
-int commandsProcessed = 0;
-int commandsFailed = 0;
-
-// LED blink state
 unsigned long lastBlinkTime = 0;
-bool ledState = false;
+
+// Firestore base URL
+String firestoreBaseUrl() {
+  return "https://firestore.googleapis.com/v1/projects/" + String(FIREBASE_PROJECT_ID) +
+         "/databases/(default)/documents/users/" + String(FIREBASE_USER_UID);
+}
 
 // ============================================================================
 // Function Declarations
@@ -54,13 +43,14 @@ bool ledState = false;
 void setupWiFi();
 void setupFirebase();
 void pollCommands();
-void executeCommand(const String& commandId, FirebaseJson& commandData);
+void executeCommand(const String& commandId, JsonObject& fields);
 String makeWledRequest(const String& ip, const String& method,
                        const String& endpoint, const String& body);
 void updateCommandStatus(const String& commandId, const String& status,
-                         const String& error = "", FirebaseJson* result = nullptr);
+                         const String& error = "");
 void blinkLed(int times, int delayMs);
 void statusBlink();
+String convertFirestorePayloadToJson(JsonObject& fields);
 
 // ============================================================================
 // Setup
@@ -72,21 +62,16 @@ void setup() {
 
   Serial.println();
   Serial.println("=========================================");
-  Serial.println("   Lumina ESP32 Bridge v1.0");
+  Serial.println("   Lumina ESP32 Bridge v1.1");
   Serial.println("=========================================");
   Serial.println();
 
-  // Initialize status LED
   pinMode(STATUS_LED_PIN, OUTPUT);
   digitalWrite(STATUS_LED_PIN, LOW);
 
-  // Rapid blink to indicate startup
   blinkLed(5, 100);
 
-  // Setup WiFi
   setupWiFi();
-
-  // Setup Firebase
   setupFirebase();
 
   Serial.println();
@@ -94,7 +79,6 @@ void setup() {
   Serial.println("Polling for commands...");
   Serial.println();
 
-  // Solid LED for 1 second to indicate ready
   digitalWrite(STATUS_LED_PIN, HIGH);
   delay(1000);
   digitalWrite(STATUS_LED_PIN, LOW);
@@ -105,21 +89,18 @@ void setup() {
 // ============================================================================
 
 void loop() {
-  // Status blink every 5 seconds to show we're alive
   statusBlink();
 
-  // Check if it's time to poll for commands
   if (millis() - lastPollTime >= POLL_INTERVAL_MS) {
     lastPollTime = millis();
 
-    if (firebaseReady && Firebase.ready()) {
+    if (firebaseReady && WiFi.status() == WL_CONNECTED) {
       pollCommands();
     } else {
-      DEBUG_PRINTLN("Firebase not ready, skipping poll");
+      DEBUG_PRINTLN("Not ready, skipping poll");
     }
   }
 
-  // Give WiFi/Firebase time to process
   delay(10);
 }
 
@@ -130,17 +111,20 @@ void loop() {
 void setupWiFi() {
   Serial.println("Setting up WiFi...");
 
-#if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
-  // Use hardcoded credentials if provided
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(1000);
+
   Serial.print("Connecting to ");
   Serial.println(WIFI_SSID);
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
     delay(500);
     Serial.print(".");
+    Serial.print(WiFi.status());
     attempts++;
   }
 
@@ -148,36 +132,14 @@ void setupWiFi() {
     Serial.println();
     Serial.print("Connected! IP: ");
     Serial.println(WiFi.localIP());
-    return;
-  }
-
-  Serial.println();
-  Serial.println("Failed to connect with hardcoded credentials");
-#endif
-
-  // Use WiFiManager for configuration
-  Serial.println("Starting WiFiManager...");
-  Serial.println("Connect to 'Lumina-Bridge' AP to configure WiFi");
-
-  WiFiManager wifiManager;
-
-  // Reset settings for testing (comment out in production)
-  // wifiManager.resetSettings();
-
-  // Set custom AP name
-  wifiManager.setConfigPortalTimeout(180); // 3 minute timeout
-
-  // Try to connect, or start AP for configuration
-  if (!wifiManager.autoConnect("Lumina-Bridge", "luminabridge")) {
-    Serial.println("Failed to connect and config portal timed out");
-    Serial.println("Restarting...");
-    delay(3000);
+  } else {
+    Serial.println();
+    Serial.print("Failed! WiFi status: ");
+    Serial.println(WiFi.status());
+    Serial.println("Restarting in 5 seconds...");
+    delay(5000);
     ESP.restart();
   }
-
-  Serial.println();
-  Serial.print("Connected! IP: ");
-  Serial.println(WiFi.localIP());
 }
 
 // ============================================================================
@@ -185,37 +147,42 @@ void setupWiFi() {
 // ============================================================================
 
 void setupFirebase() {
-  Serial.println("Setting up Firebase...");
+  Serial.println("Setting up Firebase connection...");
 
-  // Configure Firebase
-  config.api_key = FIREBASE_API_KEY;
+  // SSL configuration for ESP32
+  secureClient.setInsecure();
+  secureClient.setHandshakeTimeout(30);
+  secureClient.setTimeout(15);
 
-  // For Firestore, we use anonymous auth or a service account
-  // Anonymous auth is simpler for this use case
-  auth.user.email = "";
-  auth.user.password = "";
-
-  // Token status callback
-  config.token_status_callback = tokenStatusCallback;
-
-  // Initialize Firebase
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
-
-  // Wait for Firebase to be ready
-  Serial.print("Waiting for Firebase...");
-  unsigned long startTime = millis();
-  while (!Firebase.ready() && millis() - startTime < 30000) {
-    Serial.print(".");
+  // Sync time for timestamps
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Syncing time");
+  time_t now = time(nullptr);
+  while (now < 8 * 3600 * 2) {
     delay(500);
+    Serial.print(".");
+    now = time(nullptr);
   }
+  Serial.println(" Done!");
 
-  if (Firebase.ready()) {
-    Serial.println(" Ready!");
+  // Test connection by checking the commands collection
+  Serial.print("Free heap: ");
+  Serial.println(ESP.getFreeHeap());
+  Serial.print("Testing Firestore connection...");
+  HTTPClient http;
+  String testUrl = firestoreBaseUrl() + "/commands?key=" + String(FIREBASE_API_KEY) + "&pageSize=1";
+
+  http.begin(secureClient, testUrl);
+  int httpCode = http.GET();
+  http.end();
+
+  if (httpCode == 200 || httpCode == 404) {
+    Serial.println(" Connected!");
     firebaseReady = true;
   } else {
-    Serial.println(" Failed!");
-    Serial.println("Firebase initialization failed. Check your credentials.");
+    Serial.print(" Failed! HTTP ");
+    Serial.println(httpCode);
+    Serial.println("Check your Firebase project ID.");
   }
 }
 
@@ -224,74 +191,71 @@ void setupFirebase() {
 // ============================================================================
 
 void pollCommands() {
-  // Build the Firestore path
-  String documentPath = "users/" + String(FIREBASE_USER_UID) + "/commands";
-
   DEBUG_PRINTLN("Polling for commands...");
 
-  // Query for pending commands
-  // Firestore query: where status == "pending" order by createdAt limit 5
-  FirebaseJson queryJson;
-  queryJson.set("structuredQuery/from/[0]/collectionId", "commands");
-  queryJson.set("structuredQuery/where/fieldFilter/field/fieldPath", "status");
-  queryJson.set("structuredQuery/where/fieldFilter/op", "EQUAL");
-  queryJson.set("structuredQuery/where/fieldFilter/value/stringValue", "pending");
-  queryJson.set("structuredQuery/orderBy/[0]/field/fieldPath", "createdAt");
-  queryJson.set("structuredQuery/orderBy/[0]/direction", "ASCENDING");
-  queryJson.set("structuredQuery/limit", MAX_COMMANDS_PER_POLL);
+  HTTPClient http;
+  // Use structured query to only fetch pending commands
+  String url = firestoreBaseUrl() + ":runQuery?key=" + String(FIREBASE_API_KEY);
 
-  // Execute query
-  String projectId = FIREBASE_PROJECT_ID;
-  String parentPath = "projects/" + projectId + "/databases/(default)/documents/users/" + String(FIREBASE_USER_UID);
+  // Build query: SELECT * FROM commands WHERE status == "pending" LIMIT 5
+  JsonDocument queryDoc;
+  queryDoc["structuredQuery"]["from"][0]["collectionId"] = "commands";
+  queryDoc["structuredQuery"]["where"]["fieldFilter"]["field"]["fieldPath"] = "status";
+  queryDoc["structuredQuery"]["where"]["fieldFilter"]["op"] = "EQUAL";
+  queryDoc["structuredQuery"]["where"]["fieldFilter"]["value"]["stringValue"] = "pending";
+  queryDoc["structuredQuery"]["limit"] = MAX_COMMANDS_PER_POLL;
 
-  if (Firebase.Firestore.runQuery(&fbdo, projectId.c_str(), "",
-                                   queryJson.raw(), parentPath.c_str())) {
-    // Parse response
-    FirebaseJsonData jsonData;
-    FirebaseJsonArray arr;
+  String queryBody;
+  serializeJson(queryDoc, queryBody);
 
-    if (fbdo.jsonArray().get(jsonData, 0)) {
-      // Got results
-      int commandCount = fbdo.jsonArray().size();
-      if (commandCount > 0) {
-        DEBUG_PRINTF("Found %d pending command(s)\n", commandCount);
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
 
-        // LED on while processing
-        digitalWrite(STATUS_LED_PIN, HIGH);
+  int httpCode = http.POST(queryBody);
 
-        // Process each command
-        for (int i = 0; i < commandCount; i++) {
-          FirebaseJsonData item;
-          if (fbdo.jsonArray().get(item, i)) {
-            // Extract document name and fields
-            FirebaseJson docJson;
-            docJson.setJsonData(item.to<String>());
+  if (httpCode == 200) {
+    String response = http.getString();
+    http.end();
 
-            FirebaseJsonData docName;
-            if (docJson.get(docName, "document/name")) {
-              String fullPath = docName.to<String>();
-              // Extract command ID from path
-              int lastSlash = fullPath.lastIndexOf('/');
-              String commandId = fullPath.substring(lastSlash + 1);
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
 
-              FirebaseJsonData fieldsData;
-              if (docJson.get(fieldsData, "document/fields")) {
-                FirebaseJson fields;
-                fields.setJsonData(fieldsData.to<String>());
-                executeCommand(commandId, fields);
-              }
-            }
-          }
-        }
+    if (error) {
+      DEBUG_PRINT("JSON parse error: ");
+      DEBUG_PRINTLN(error.c_str());
+      return;
+    }
 
-        digitalWrite(STATUS_LED_PIN, LOW);
-      }
-    } else {
+    JsonArray results = doc.as<JsonArray>();
+    int pendingCount = 0;
+
+    for (JsonObject result : results) {
+      JsonObject document = result["document"];
+      if (document.isNull()) continue;
+
+      pendingCount++;
+      digitalWrite(STATUS_LED_PIN, HIGH);
+
+      const char* docName = document["name"];
+      String fullPath = String(docName);
+      int lastSlash = fullPath.lastIndexOf('/');
+      String commandId = fullPath.substring(lastSlash + 1);
+
+      JsonObject fields = document["fields"];
+      executeCommand(commandId, fields);
+
+      digitalWrite(STATUS_LED_PIN, LOW);
+    }
+
+    if (pendingCount == 0) {
       DEBUG_PRINTLN("No pending commands");
+    } else {
+      DEBUG_PRINTF("Processed %d command(s)\n", pendingCount);
     }
   } else {
-    DEBUG_PRINT("Query failed: ");
-    DEBUG_PRINTLN(fbdo.errorReason());
+    DEBUG_PRINT("HTTP error: ");
+    DEBUG_PRINTLN(httpCode);
+    http.end();
   }
 }
 
@@ -299,36 +263,21 @@ void pollCommands() {
 // Command Execution
 // ============================================================================
 
-void executeCommand(const String& commandId, FirebaseJson& fields) {
+void executeCommand(const String& commandId, JsonObject& fields) {
   Serial.println();
   Serial.print("Executing command: ");
   Serial.println(commandId);
 
-  // Extract command fields
-  FirebaseJsonData typeData, payloadData, controllerIpData;
+  // Extract command fields from Firestore format
   String commandType = "";
   String controllerIp = "";
-  String payload = "{}";
 
-  if (fields.get(typeData, "type/stringValue")) {
-    commandType = typeData.to<String>();
+  if (fields["type"]["stringValue"]) {
+    commandType = fields["type"]["stringValue"].as<String>();
   }
 
-  if (fields.get(controllerIpData, "controllerIp/stringValue")) {
-    controllerIp = controllerIpData.to<String>();
-  }
-
-  if (fields.get(payloadData, "payload/mapValue")) {
-    // Convert Firestore map to JSON
-    FirebaseJson payloadMap;
-    payloadMap.setJsonData(payloadData.to<String>());
-
-    // Parse the Firestore format and convert to plain JSON
-    DynamicJsonDocument doc(4096);
-
-    // TODO: Properly convert Firestore map format to JSON
-    // For now, use the payload directly if it's simple
-    payload = payloadData.to<String>();
+  if (fields["controllerIp"]["stringValue"]) {
+    controllerIp = fields["controllerIp"]["stringValue"].as<String>();
   }
 
   Serial.print("  Type: ");
@@ -336,15 +285,12 @@ void executeCommand(const String& commandId, FirebaseJson& fields) {
   Serial.print("  Controller IP: ");
   Serial.println(controllerIp);
 
-  // Validate we have what we need
   if (controllerIp.isEmpty()) {
     Serial.println("  ERROR: No controller IP specified");
     updateCommandStatus(commandId, "failed", "No controller IP specified");
-    commandsFailed++;
     return;
   }
 
-  // Mark as executing
   updateCommandStatus(commandId, "executing");
 
   // Build the WLED endpoint and method
@@ -358,19 +304,7 @@ void executeCommand(const String& commandId, FirebaseJson& fields) {
   } else if (commandType == "getInfo") {
     endpoint = "/json/info";
     method = "GET";
-  } else if (commandType == "setState" || commandType == "applyJson" ||
-             commandType == "renameSegment" || commandType == "applyToSegments") {
-    endpoint = "/json/state";
-    method = "POST";
-    // Extract payload - need to convert Firestore format to WLED JSON
-    body = convertFirestorePayloadToJson(fields);
-  } else if (commandType == "applyConfig" || commandType == "configureSyncReceiver" ||
-             commandType == "configureSyncSender") {
-    endpoint = "/json/cfg";
-    method = "POST";
-    body = convertFirestorePayloadToJson(fields);
   } else {
-    // Default to state update
     endpoint = "/json/state";
     method = "POST";
     body = convertFirestorePayloadToJson(fields);
@@ -382,75 +316,44 @@ void executeCommand(const String& commandId, FirebaseJson& fields) {
   Serial.print(controllerIp);
   Serial.println(endpoint);
 
-  // Execute the HTTP request
   String response = makeWledRequest(controllerIp, method, endpoint, body);
 
   if (response.startsWith("ERROR:")) {
     Serial.print("  ERROR: ");
     Serial.println(response);
     updateCommandStatus(commandId, "failed", response);
-    commandsFailed++;
   } else {
     Serial.println("  SUCCESS!");
-    // Parse response as JSON and include in result
-    FirebaseJson result;
-    result.setJsonData(response);
-    updateCommandStatus(commandId, "completed", "", &result);
-    commandsProcessed++;
+    updateCommandStatus(commandId, "completed");
   }
 }
 
 // ============================================================================
-// Helper: Convert Firestore Payload to WLED JSON
+// Convert Firestore Payload to WLED JSON
 // ============================================================================
 
-String convertFirestorePayloadToJson(FirebaseJson& fields) {
-  FirebaseJsonData payloadData;
-  if (!fields.get(payloadData, "payload/mapValue/fields")) {
+String convertFirestorePayloadToJson(JsonObject& fields) {
+  JsonObject payload = fields["payload"]["mapValue"]["fields"];
+  if (payload.isNull()) {
     return "{}";
   }
 
-  FirebaseJson payloadFields;
-  payloadFields.setJsonData(payloadData.to<String>());
+  JsonDocument doc;
 
-  // Convert Firestore format to plain JSON
-  DynamicJsonDocument doc(4096);
+  for (JsonPair kv : payload) {
+    const char* key = kv.key().c_str();
+    JsonObject val = kv.value().as<JsonObject>();
 
-  // Iterate through payload fields and convert
-  // Firestore stores values like: {"on": {"booleanValue": true}, "bri": {"integerValue": "128"}}
-  // We need: {"on": true, "bri": 128}
-
-  size_t count = payloadFields.iteratorBegin();
-  String key, value;
-  int type;
-
-  for (size_t i = 0; i < count; i++) {
-    payloadFields.iteratorGet(i, type, key, value);
-
-    if (type == FirebaseJson::JSON_OBJECT) {
-      FirebaseJson fieldValue;
-      fieldValue.setJsonData(value);
-
-      FirebaseJsonData v;
-      if (fieldValue.get(v, "booleanValue")) {
-        doc[key] = v.to<bool>();
-      } else if (fieldValue.get(v, "integerValue")) {
-        doc[key] = v.to<int>();
-      } else if (fieldValue.get(v, "doubleValue")) {
-        doc[key] = v.to<double>();
-      } else if (fieldValue.get(v, "stringValue")) {
-        doc[key] = v.to<String>();
-      } else if (fieldValue.get(v, "arrayValue")) {
-        // Handle arrays (like 'seg' array)
-        // This is complex - for now just pass through
-        doc[key] = serialized(v.to<String>());
-      } else if (fieldValue.get(v, "mapValue")) {
-        // Handle nested maps
-        doc[key] = serialized(v.to<String>());
-      }
+    if (val["booleanValue"]) {
+      doc[key] = val["booleanValue"].as<bool>();
+    } else if (val["integerValue"]) {
+      doc[key] = val["integerValue"].as<int>();
+    } else if (val["doubleValue"]) {
+      doc[key] = val["doubleValue"].as<double>();
+    } else if (val["stringValue"]) {
+      doc[key] = val["stringValue"].as<String>();
     }
   }
-  payloadFields.iteratorEnd();
 
   String result;
   serializeJson(doc, result);
@@ -474,7 +377,6 @@ String makeWledRequest(const String& ip, const String& method,
   http.begin(url);
   http.setTimeout(WLED_HTTP_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Accept", "application/json");
 
   int httpCode;
   if (method == "GET") {
@@ -488,19 +390,12 @@ String makeWledRequest(const String& ip, const String& method,
     return "ERROR: Unsupported method";
   }
 
-  if (httpCode > 0) {
-    if (httpCode == HTTP_CODE_OK || httpCode == 200) {
-      String response = http.getString();
-      http.end();
-      DEBUG_PRINTLN("Response received");
-      return response;
-    } else {
-      String error = "ERROR: HTTP " + String(httpCode);
-      http.end();
-      return error;
-    }
+  if (httpCode > 0 && (httpCode == 200 || httpCode == HTTP_CODE_OK)) {
+    String response = http.getString();
+    http.end();
+    return response;
   } else {
-    String error = "ERROR: " + http.errorToString(httpCode);
+    String error = "ERROR: HTTP " + String(httpCode);
     http.end();
     return error;
   }
@@ -511,39 +406,43 @@ String makeWledRequest(const String& ip, const String& method,
 // ============================================================================
 
 void updateCommandStatus(const String& commandId, const String& status,
-                         const String& error, FirebaseJson* result) {
-  String documentPath = "users/" + String(FIREBASE_USER_UID) + "/commands/" + commandId;
+                         const String& error) {
+  HTTPClient http;
+  String url = firestoreBaseUrl() + "/commands/" + commandId +
+               "?key=" + String(FIREBASE_API_KEY) + "&updateMask.fieldPaths=status";
 
-  FirebaseJson updateContent;
-  updateContent.set("fields/status/stringValue", status);
+  JsonDocument doc;
+  doc["fields"]["status"]["stringValue"] = status;
 
-  // Add completedAt timestamp for terminal states
-  if (status == "completed" || status == "failed" || status == "timeout") {
-    // Firestore timestamp format
+  if (status == "completed" || status == "failed") {
     time_t now = time(nullptr);
     char timestamp[30];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
-    updateContent.set("fields/completedAt/timestampValue", timestamp);
+    doc["fields"]["completedAt"]["timestampValue"] = timestamp;
+    url += "&updateMask.fieldPaths=completedAt";
   }
 
   if (!error.isEmpty()) {
-    updateContent.set("fields/error/stringValue", error);
+    doc["fields"]["error"]["stringValue"] = error;
+    url += "&updateMask.fieldPaths=error";
   }
 
-  if (result != nullptr) {
-    // Add result as a map
-    updateContent.set("fields/result/mapValue/fields", result->raw());
-  }
+  String body;
+  serializeJson(doc, body);
 
-  if (Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID,
-                                         "", documentPath.c_str(),
-                                         updateContent.raw(),
-                                         "status,completedAt,error,result")) {
-    DEBUG_PRINTLN("Status updated successfully");
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpCode = http.PATCH(body);
+
+  if (httpCode == 200) {
+    DEBUG_PRINTLN("Status updated");
   } else {
-    DEBUG_PRINT("Failed to update status: ");
-    DEBUG_PRINTLN(fbdo.errorReason());
+    DEBUG_PRINT("Status update failed: ");
+    DEBUG_PRINTLN(httpCode);
   }
+
+  http.end();
 }
 
 // ============================================================================
@@ -560,18 +459,14 @@ void blinkLed(int times, int delayMs) {
 }
 
 void statusBlink() {
-  // Heartbeat blink every 5 seconds
   if (millis() - lastBlinkTime >= 5000) {
     lastBlinkTime = millis();
 
     if (firebaseReady && WiFi.status() == WL_CONNECTED) {
-      // Single short blink = all good
       blinkLed(1, 50);
     } else if (WiFi.status() == WL_CONNECTED) {
-      // Two blinks = WiFi OK, Firebase issue
       blinkLed(2, 100);
     } else {
-      // Three blinks = WiFi issue
       blinkLed(3, 100);
     }
   }
