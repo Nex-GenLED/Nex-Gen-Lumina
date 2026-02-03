@@ -37,13 +37,13 @@ class MySchedulePage extends ConsumerWidget {
         actions: [
           TextButton.icon(
             onPressed: () async {
-              final ok = await ref.read(scheduleSyncServiceProvider).syncAll(ref, schedules);
+              final result = await ref.read(scheduleSyncServiceProvider).syncAll(ref, schedules);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(ok
+                  content: Text(result.success
                       ? 'Schedules synced to controller'
                       : 'Could not sync to controller (schedules saved to cloud)'),
-                  backgroundColor: ok ? Colors.green.shade700 : Colors.orange.shade700,
+                  backgroundColor: result.success ? Colors.green.shade700 : Colors.orange.shade700,
                 ));
               }
             },
@@ -2043,7 +2043,7 @@ class _WeeklyAgendaLarge extends ConsumerWidget {
         final isToday = i == 0;
         final int weekdayIndex0Sun = d.weekday % 7; // Sun=0..Sat=6
         final dayItems = itemsForDay(weekdayIndex0Sun);
-        final String barLabel = dayItems.isNotEmpty ? _labelFromAction(dayItems.first.actionLabel) : 'No schedule';
+        final String barLabel = dayItems.isNotEmpty ? _labelFromAction(dayItems.first.actionLabel) : 'No Schedule Set';
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),

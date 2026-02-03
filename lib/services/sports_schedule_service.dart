@@ -42,9 +42,13 @@ class SportsGame {
 /// This service provides sports game data for autopilot scheduling.
 /// It can use either:
 /// - A live sports API (when configured)
-/// - Simulated game data (for development/demo)
+/// - Simulated game data (for development/demo - DISABLED by default)
 ///
 /// Supported leagues: NFL, NBA, MLB, NHL, MLS, WNBA, NWSL, NCAA
+///
+/// IMPORTANT: Simulated data is disabled by default because it generates
+/// fake games that don't reflect real schedules. Only enable for explicit
+/// demo/testing purposes. In production, integrate a real sports API.
 class SportsScheduleService {
   final Ref _ref;
 
@@ -53,17 +57,30 @@ class SportsScheduleService {
   String? _apiKey;
 
   /// Whether to use simulated data instead of live API.
-  bool _useSimulatedData = true;
+  /// DISABLED by default - simulated games create misleading suggestions.
+  bool _useSimulatedData = false;
 
   SportsScheduleService(this._ref);
 
   /// Get upcoming games for the specified teams within a date range.
+  ///
+  /// Returns an empty list if:
+  /// - No teams are specified
+  /// - No API is configured and simulated mode is disabled
+  /// - Team's league is in off-season
   Future<List<SportsGame>> getGamesInRange(
     List<String> teamNames,
     DateTime start,
     DateTime end,
   ) async {
     if (teamNames.isEmpty) return [];
+
+    // If no API configured and simulation disabled, return empty
+    // This prevents showing fake game suggestions to users
+    if (_apiKey == null && !_useSimulatedData) {
+      debugPrint('SportsScheduleService: No API configured, sports suggestions disabled');
+      return [];
+    }
 
     // For now, use simulated data
     // In production, this would call a sports API
@@ -182,10 +199,87 @@ class SportsScheduleService {
     return 'Unknown';
   }
 
+  /// Check if a league is currently in season.
+  bool _isLeagueInSeason(String league, DateTime date) {
+    final month = date.month;
+
+    switch (league) {
+      case 'NFL':
+        // NFL: September through early February (Super Bowl)
+        // Regular season: Sept-Dec, Playoffs: Jan, Super Bowl: early Feb
+        return month >= 9 || month <= 2;
+      case 'NBA':
+        // NBA: October through June
+        return month >= 10 || month <= 6;
+      case 'MLB':
+        // MLB: Late March through October (World Series)
+        return month >= 3 && month <= 10;
+      case 'NHL':
+        // NHL: October through June
+        return month >= 10 || month <= 6;
+      case 'MLS':
+        // MLS: Late February through December
+        return month >= 2 && month <= 12;
+      case 'WNBA':
+        // WNBA: May through October
+        return month >= 5 && month <= 10;
+      case 'NWSL':
+        // NWSL: March through November
+        return month >= 3 && month <= 11;
+      case 'NCAA':
+        // NCAA varies by sport, most active Sept-March
+        return month >= 9 || month <= 3;
+      default:
+        return false;
+    }
+  }
+
+  /// Check if a league plays on a given day of week.
+  bool _leaguePlaysOnDay(String league, int weekday) {
+    switch (league) {
+      case 'NFL':
+        // NFL: Sunday (primary), Monday, Thursday, occasional Saturday
+        return weekday == DateTime.sunday ||
+               weekday == DateTime.monday ||
+               weekday == DateTime.thursday ||
+               weekday == DateTime.saturday;
+      case 'NBA':
+      case 'NHL':
+        // NBA/NHL play most days during season
+        return true;
+      case 'MLB':
+        // MLB plays almost every day during season
+        return true;
+      case 'MLS':
+      case 'NWSL':
+        // Soccer: primarily weekends, occasional weeknight
+        return weekday == DateTime.saturday ||
+               weekday == DateTime.sunday ||
+               weekday == DateTime.wednesday;
+      case 'WNBA':
+        // WNBA plays several days a week
+        return true;
+      case 'NCAA':
+        // College: weekends and some weeknights
+        return weekday == DateTime.saturday ||
+               weekday == DateTime.sunday ||
+               weekday == DateTime.thursday ||
+               weekday == DateTime.friday;
+      default:
+        return false;
+    }
+  }
+
   /// Generate simulated games for development/demo purposes.
   ///
   /// Creates realistic game schedules based on the current date and
   /// typical game patterns for each league.
+  ///
+  /// NOTE: This generates FAKE data and should only be used for testing.
+  /// Simulated games respect:
+  /// - League seasons (no NFL games in July, etc.)
+  /// - Typical game days (NFL on Sundays, etc.)
+  /// - Realistic game times
   List<SportsGame> _getSimulatedGames(
     List<String> teamNames,
     DateTime start,
@@ -197,28 +291,38 @@ class SportsScheduleService {
     for (final teamName in teamNames) {
       final league = _detectLeague(teamName);
 
-      // Generate 2-4 games per team in the range
-      final gameCount = 2 + (random + teamName.hashCode) % 3;
+      // Skip if league is not in season
+      if (!_isLeagueInSeason(league, start)) {
+        debugPrint('SportsScheduleService: $league not in season, skipping $teamName');
+        continue;
+      }
 
-      for (int i = 0; i < gameCount; i++) {
-        // Spread games across the date range
-        final daysInRange = end.difference(start).inDays;
-        if (daysInRange <= 0) continue;
+      // For NFL, limit games (teams play once per week max)
+      final maxGames = league == 'NFL' ? 1 : 3;
+      int gamesAdded = 0;
 
-        final dayOffset = ((random + teamName.hashCode + i * 1000) % daysInRange);
-        final gameDay = start.add(Duration(days: dayOffset));
+      // Try each day in the range
+      for (var day = start; day.isBefore(end) && gamesAdded < maxGames; day = day.add(const Duration(days: 1))) {
+        // Check if this league plays on this day of week
+        if (!_leaguePlaysOnDay(league, day.weekday)) continue;
 
-        // Set game time based on league
-        final gameTime = _getTypicalGameTime(gameDay, league);
+        // Use deterministic selection based on team + date (not truly random)
+        final shouldHaveGame = (teamName.hashCode + day.day) % 7 == 0;
+        if (!shouldHaveGame && league != 'NFL') continue;
+
+        // For NFL, only add game on first valid game day found
+        if (league == 'NFL' && gamesAdded > 0) continue;
+
+        final gameTime = _getTypicalGameTime(day, league);
 
         // Skip if outside range
         if (gameTime.isBefore(start) || gameTime.isAfter(end)) continue;
 
         // Generate opponent
-        final opponent = _getRandomOpponent(teamName, league, i);
+        final opponent = _getRandomOpponent(teamName, league, gamesAdded);
 
         // Determine home/away
-        final isHome = (random + i) % 2 == 0;
+        final isHome = (random + gamesAdded) % 2 == 0;
 
         games.add(SportsGame(
           teamName: teamName,
@@ -227,6 +331,7 @@ class SportsScheduleService {
           isHomeGame: isHome,
           league: league,
         ));
+        gamesAdded++;
       }
     }
 

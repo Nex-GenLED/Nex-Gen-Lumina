@@ -131,11 +131,9 @@ class NightTrackBar extends StatelessWidget {
     final hasItems = items.isNotEmpty;
     final segments = _buildSegments();
 
-    // For single item with full coverage, use simple centered label
-    final showCenteredLabel = segments.length <= 1;
-    final singleStyle = hasItems && segments.isNotEmpty
-        ? segments.first.style
-        : const _PatternStyle(color: NexGenPalette.trackDark, textColor: NexGenPalette.textHigh);
+    // Only show centered label when there are NO schedules
+    final showCenteredLabel = !hasItems;
+    final singleStyle = const _PatternStyle(color: NexGenPalette.trackDark, textColor: NexGenPalette.textHigh);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
@@ -206,7 +204,7 @@ class NightTrackBar extends StatelessWidget {
                           gradient: seg.style.gradient,
                           borderRadius: borderRadius,
                         ),
-                        child: segments.length > 1 && segWidth > 60
+                        child: segWidth > 60
                             ? Center(
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 4),

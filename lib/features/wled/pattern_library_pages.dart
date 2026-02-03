@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1971,9 +1972,71 @@ class _SubCategoryChip extends StatelessWidget {
     required this.categoryId,
   });
 
+  /// Returns a hero icon for each sub-category type.
+  IconData _heroIconForSubCategory(String subId) {
+    switch (subId) {
+      // Holidays
+      case 'sub_xmas':
+        return Icons.park; // Christmas tree
+      case 'sub_halloween':
+        return Icons.pest_control; // Spider/bug for spooky
+      case 'sub_july4':
+        return Icons.celebration; // Fireworks/celebration
+      case 'sub_easter':
+        return Icons.egg; // Easter egg
+      case 'sub_valentines':
+        return Icons.favorite; // Heart
+      case 'sub_st_patricks':
+        return Icons.local_florist; // Clover/flower
+      // Sports
+      case 'sub_kc':
+        return Icons.sports_football; // Football
+      case 'sub_seattle':
+        return Icons.sports_football;
+      case 'sub_rb_generic':
+      case 'sub_gy_generic':
+      case 'sub_ob_generic':
+        return Icons.emoji_events; // Trophy
+      // Seasonal
+      case 'sub_spring':
+        return Icons.local_florist; // Flowers
+      case 'sub_summer':
+        return Icons.wb_sunny; // Sun
+      case 'sub_autumn':
+        return Icons.park; // Falling leaves
+      case 'sub_winter':
+        return Icons.ac_unit; // Snowflake
+      // Architectural
+      case 'sub_warm_whites':
+        return Icons.wb_incandescent; // Warm bulb
+      case 'sub_cool_whites':
+        return Icons.light_mode; // Cool light
+      case 'sub_gold_accents':
+        return Icons.auto_awesome; // Sparkle/gold
+      case 'sub_security_floods':
+        return Icons.flashlight_on; // Flood light
+      // Party
+      case 'sub_birthday':
+        return Icons.cake; // Birthday cake
+      case 'sub_elegant_dinner':
+        return Icons.restaurant; // Dinner
+      case 'sub_rave':
+        return Icons.speaker; // Music/rave
+      case 'sub_baby_shower':
+        return Icons.child_friendly; // Baby
+      default:
+        return Icons.palette; // Default
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = subCategory.themeColors;
+    final gradientColors = colors.isEmpty
+        ? [NexGenPalette.violet, NexGenPalette.cyan]
+        : (colors.length == 1 ? [colors[0], colors[0]] : colors.take(2).toList());
+    final accentColor = gradientColors.first;
+    final heroIcon = _heroIconForSubCategory(subCategory.id);
 
     return GestureDetector(
       onTap: () {
@@ -1986,50 +2049,106 @@ class _SubCategoryChip extends StatelessWidget {
         );
       },
       child: Container(
-        width: 100,
+        width: 110,
         decoration: BoxDecoration(
+          // Premium gradient background matching main category cards
           gradient: LinearGradient(
-            colors: colors.isEmpty
-                ? [NexGenPalette.violet, NexGenPalette.cyan]
-                : (colors.length == 1 ? [colors[0], colors[0]] : colors),
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
+            colors: [
+              gradientColors[0].withValues(alpha: 0.3),
+              gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.2) : gradientColors[0].withValues(alpha: 0.2),
+              NexGenPalette.matteBlack.withValues(alpha: 0.95),
+            ],
+            stops: const [0.0, 0.4, 1.0],
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: accentColor.withValues(alpha: 0.4),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.25),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Stack(
           children: [
-            // Dark overlay
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.1),
-                      Colors.black.withValues(alpha: 0.5),
-                    ],
+            // Radial glow behind icon
+            Positioned(
+              top: 6,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        gradientColors[0].withValues(alpha: 0.35),
+                        gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.15) : Colors.transparent,
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
                   ),
                 ),
               ),
             ),
-            // Name
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  subCategory.name,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            // Content
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Hero icon
+                  Icon(
+                    heroIcon,
+                    size: 28,
                     color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                    shadows: [
+                      Shadow(
+                        color: accentColor.withValues(alpha: 0.8),
+                        blurRadius: 16,
+                      ),
+                      Shadow(
+                        color: gradientColors[0].withValues(alpha: 0.5),
+                        blurRadius: 10,
+                      ),
+                    ],
                   ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                  const SizedBox(height: 6),
+                  // Name with arrow
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          subCategory.name,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 10,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        color: accentColor.withValues(alpha: 0.8),
+                        size: 8,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -2987,28 +3106,186 @@ class _SubCategoryCard extends StatelessWidget {
   final SubCategory sub;
   const _SubCategoryCard({required this.categoryId, required this.sub});
 
+  /// Returns a hero icon for each sub-category type.
+  IconData _heroIconForSubCategory(String subId) {
+    switch (subId) {
+      // Holidays
+      case 'sub_xmas':
+        return Icons.park; // Christmas tree
+      case 'sub_halloween':
+        return Icons.pest_control; // Spider/bug for spooky
+      case 'sub_july4':
+        return Icons.celebration; // Fireworks/celebration
+      case 'sub_easter':
+        return Icons.egg; // Easter egg
+      case 'sub_valentines':
+        return Icons.favorite; // Heart
+      case 'sub_st_patricks':
+        return Icons.local_florist; // Clover/flower
+      // Sports
+      case 'sub_kc':
+        return Icons.sports_football; // Football
+      case 'sub_seattle':
+        return Icons.sports_football;
+      case 'sub_rb_generic':
+      case 'sub_gy_generic':
+      case 'sub_ob_generic':
+        return Icons.emoji_events; // Trophy
+      // Seasonal
+      case 'sub_spring':
+        return Icons.local_florist; // Flowers
+      case 'sub_summer':
+        return Icons.wb_sunny; // Sun
+      case 'sub_autumn':
+        return Icons.park; // Falling leaves
+      case 'sub_winter':
+        return Icons.ac_unit; // Snowflake
+      // Architectural
+      case 'sub_warm_whites':
+        return Icons.wb_incandescent; // Warm bulb
+      case 'sub_cool_whites':
+        return Icons.light_mode; // Cool light
+      case 'sub_gold_accents':
+        return Icons.auto_awesome; // Sparkle/gold
+      case 'sub_security_floods':
+        return Icons.flashlight_on; // Flood light
+      // Party
+      case 'sub_birthday':
+        return Icons.cake; // Birthday cake
+      case 'sub_elegant_dinner':
+        return Icons.restaurant; // Dinner
+      case 'sub_rave':
+        return Icons.speaker; // Music/rave
+      case 'sub_baby_shower':
+        return Icons.child_friendly; // Baby
+      default:
+        return Icons.palette; // Default
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: NexGenPalette.line),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Row(children: [
-          // Color swatch cluster
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: sub.themeColors.take(4).map((c) => _ColorDot(color: c)).toList(growable: false),
+    final colors = sub.themeColors;
+    final gradientColors = colors.isEmpty
+        ? [NexGenPalette.violet, NexGenPalette.cyan]
+        : (colors.length == 1 ? [colors[0], colors[0]] : colors.take(2).toList());
+    final accentColor = gradientColors.first;
+    final heroIcon = _heroIconForSubCategory(sub.id);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            // Premium gradient background matching main category cards
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                gradientColors[0].withValues(alpha: 0.25),
+                gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.15) : gradientColors[0].withValues(alpha: 0.15),
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
+              stops: const [0.0, 0.4, 1.0],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: accentColor.withValues(alpha: 0.4),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.2),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(child: Text(sub.name, style: Theme.of(context).textTheme.titleMedium, overflow: TextOverflow.ellipsis)),
-          const Icon(Icons.chevron_right, color: Colors.white),
-        ]),
+          child: Stack(
+            children: [
+              // Radial glow behind icon
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          gradientColors[0].withValues(alpha: 0.3),
+                          gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.1) : Colors.transparent,
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.5, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Hero icon - centered and prominent
+                    Expanded(
+                      child: Center(
+                        child: Icon(
+                          heroIcon,
+                          size: 42,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: accentColor.withValues(alpha: 0.8),
+                              blurRadius: 20,
+                            ),
+                            Shadow(
+                              color: gradientColors[0].withValues(alpha: 0.5),
+                              blurRadius: 14,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    // Category name with arrow
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            sub.name,
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: accentColor.withValues(alpha: 0.8),
+                          size: 10,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3221,91 +3498,142 @@ class _CompactPatternItemCard extends ConsumerWidget {
         ? extractedColors // Show all for auto-color effects
         : extractedColors.take(colorSlots.clamp(1, 3)).toList();
 
+    // Get effect name for display
+    final effectName = _getEffectDisplayName(effectId);
+
     return InkWell(
       onTap: () => _handleTap(context, ref, effectId, extractedColors),
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        child: Stack(children: [
-          // Animated gradient preview limited to used color slots
-          Positioned.fill(
-            child: _ItemLiveGradient(
-              colors: displayColors.isNotEmpty ? displayColors : [Colors.white],
-              speed: effectId == 0 ? 0 : 100, // No animation for Solid
-            ),
-          ),
-          // Overlay gradient for text readability
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    NexGenPalette.matteBlack.withValues(alpha: 0.7),
-                  ],
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: NexGenPalette.matteBlack,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.6)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Realistic effect preview strip (takes 60% of height)
+            Expanded(
+              flex: 3,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+                child: _EffectPreviewStrip(
+                  colors: displayColors.isNotEmpty ? displayColors : [Colors.white],
+                  effectId: effectId,
+                  speed: _getSpeedFromPayload(item.wledPayload),
                 ),
-                border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.5)),
-                borderRadius: BorderRadius.circular(AppRadius.md),
               ),
             ),
-          ),
-          // Color slot indicator (top right)
-          if (colorSlots > 0)
-            Positioned(
-              top: 4,
-              right: 4,
+            // Text section (takes 40% of height)
+            Expanded(
+              flex: 2,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 decoration: BoxDecoration(
-                  color: NexGenPalette.matteBlack.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(4),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      displayColors.isNotEmpty
+                          ? displayColors.first.withValues(alpha: 0.15)
+                          : NexGenPalette.cyan.withValues(alpha: 0.1),
+                      NexGenPalette.matteBlack,
+                    ],
+                  ),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(9)),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(
-                    colorSlots.clamp(1, 3),
-                    (i) => Container(
-                      width: 6,
-                      height: 6,
-                      margin: EdgeInsets.only(left: i > 0 ? 2 : 0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Pattern name
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        height: 1.1,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 2),
+                    // Effect type badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
-                        color: i < extractedColors.length
-                            ? extractedColors[i]
-                            : Colors.grey,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          width: 0.5,
+                        color: displayColors.isNotEmpty
+                            ? displayColors.first.withValues(alpha: 0.3)
+                            : NexGenPalette.cyan.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        effectName,
+                        style: TextStyle(
+                          fontSize: 7,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.9),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
-          // Effect name at bottom
-          Positioned(
-            left: 4,
-            right: 4,
-            bottom: 4,
-            child: Text(
-              item.name,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: Colors.white,
-                shadows: [Shadow(blurRadius: 2, color: Colors.black)],
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ]),
+          ],
+        ),
       ),
     );
+  }
+
+  /// Get a user-friendly effect name from the effect ID
+  static String _getEffectDisplayName(int effectId) {
+    const effectNames = {
+      0: 'Solid',
+      1: 'Blink',
+      2: 'Breathe',
+      3: 'Wipe',
+      6: 'Sweep',
+      10: 'Scan',
+      12: 'Fade',
+      22: 'Running',
+      23: 'Chase',
+      37: 'Fill Noise',
+      43: 'Theater',
+      46: 'Twinkle',
+      49: 'Fire',
+      51: 'Gradient',
+      52: 'Loading',
+      63: 'Palette',
+      65: 'Colorwave',
+      67: 'Ripple',
+      73: 'Pacifica',
+      76: 'Fireworks',
+      78: 'Meteor',
+      108: 'Meteor',
+      120: 'Sparkle',
+    };
+    return effectNames[effectId] ?? 'Effect';
+  }
+
+  /// Extract speed from WLED payload
+  static double _getSpeedFromPayload(Map<String, dynamic> payload) {
+    try {
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final first = seg.first;
+        if (first is Map) {
+          final sx = first['sx'];
+          if (sx is num) return sx.toDouble();
+        }
+      }
+    } catch (_) {}
+    return 128; // Default speed
   }
 
   Future<void> _handleTap(BuildContext context, WidgetRef ref, int effectId, List<Color> extractedColors) async {
@@ -3728,6 +4056,431 @@ class _ItemLiveGradient extends StatelessWidget {
   Widget build(BuildContext context) => LiveGradientStrip(colors: colors, speed: speed);
 }
 
+/// Realistic effect preview that animates based on the WLED effect type.
+/// Shows users what the effect will look like on their lighting system.
+class _EffectPreviewStrip extends StatefulWidget {
+  final List<Color> colors;
+  final int effectId;
+  final double speed;
+
+  const _EffectPreviewStrip({
+    required this.colors,
+    required this.effectId,
+    this.speed = 128,
+  });
+
+  @override
+  State<_EffectPreviewStrip> createState() => _EffectPreviewStripState();
+}
+
+class _EffectPreviewStripState extends State<_EffectPreviewStrip>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  final List<double> _twinkleOpacities = [];
+  final List<int> _twinkleColorIndices = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // Map speed (0-255) to animation duration
+    final durationMs = (3000 - (widget.speed / 255) * 2500).clamp(500, 5000).round();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: durationMs),
+    );
+
+    // Initialize twinkle state for popcorn/sparkle effects
+    for (int i = 0; i < 20; i++) {
+      _twinkleOpacities.add(0.0);
+      _twinkleColorIndices.add(i % widget.colors.length);
+    }
+
+    if (widget.effectId != 0) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          painter: _EffectPainter(
+            colors: widget.colors,
+            effectId: widget.effectId,
+            progress: _controller.value,
+          ),
+          size: Size.infinite,
+        );
+      },
+    );
+  }
+}
+
+/// Custom painter that draws realistic effect previews
+class _EffectPainter extends CustomPainter {
+  final List<Color> colors;
+  final int effectId;
+  final double progress;
+
+  _EffectPainter({
+    required this.colors,
+    required this.effectId,
+    required this.progress,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (colors.isEmpty) return;
+
+    final paint = Paint()..style = PaintingStyle.fill;
+    final ledCount = 30; // Simulated LED count for preview
+    final ledWidth = size.width / ledCount;
+    final ledHeight = size.height;
+
+    switch (_getEffectType(effectId)) {
+      case _EffectType.solid:
+        _paintSolid(canvas, size, paint);
+        break;
+      case _EffectType.breathing:
+        _paintBreathing(canvas, size, paint);
+        break;
+      case _EffectType.chase:
+        _paintChase(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.wipe:
+        _paintWipe(canvas, size, paint);
+        break;
+      case _EffectType.sparkle:
+        _paintSparkle(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.scan:
+        _paintScan(canvas, size, paint, ledWidth, ledHeight);
+        break;
+      case _EffectType.fade:
+        _paintFade(canvas, size, paint);
+        break;
+      case _EffectType.gradient:
+        _paintGradient(canvas, size, paint);
+        break;
+      case _EffectType.theater:
+        _paintTheater(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.running:
+        _paintRunning(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.twinkle:
+        _paintTwinkle(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.fire:
+        _paintFire(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.meteor:
+        _paintMeteor(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+      case _EffectType.wave:
+        _paintWave(canvas, size, paint, ledCount, ledWidth, ledHeight);
+        break;
+    }
+  }
+
+  _EffectType _getEffectType(int effectId) {
+    // Map WLED effect IDs to visual effect types
+    switch (effectId) {
+      case 0: return _EffectType.solid;
+      case 1: // Blink
+      case 2: // Breathe
+        return _EffectType.breathing;
+      case 3: // Wipe
+      case 4: // Wipe Random
+        return _EffectType.wipe;
+      case 6: // Sweep
+      case 10: // Scan
+      case 11: // Dual Scan
+      case 13: // Scanner
+      case 14: // Dual Scanner
+        return _EffectType.scan;
+      case 12: // Fade
+      case 18: // Dissolve
+        return _EffectType.fade;
+      case 22: // Running 2
+      case 23: // Chase
+      case 24: // Chase Rainbow
+      case 25: // Running Dual
+      case 41: // Running
+      case 42: // Running 2
+        return _EffectType.running;
+      case 43: // Theater Chase
+      case 44: // Theater Chase Rainbow
+        return _EffectType.theater;
+      case 37: // Fill Noise
+      case 46: // Twinklefox
+      case 47: // Twinklecat
+        return _EffectType.twinkle;
+      case 51: // Gradient
+      case 63: // Palette
+      case 65: // Colorwaves
+        return _EffectType.gradient;
+      case 49: // Fire 2012
+      case 54: // Fire Flicker
+      case 74: // Candle
+      case 75: // Fire
+        return _EffectType.fire;
+      case 78: // Meteor Rainbow
+      case 108: // Meteor
+      case 109: // Meteor Smooth
+        return _EffectType.meteor;
+      case 52: // Loading
+      case 67: // Ripple
+      case 70: // Lake
+      case 73: // Pacifica
+        return _EffectType.wave;
+      case 76: // Fireworks
+      case 77: // Rain
+      case 120: // Sparkle
+      case 121: // Sparkle+
+        return _EffectType.sparkle;
+      default:
+        return _EffectType.chase; // Default to chase for unknown effects
+    }
+  }
+
+  void _paintSolid(Canvas canvas, Size size, Paint paint) {
+    paint.color = colors.first;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+  }
+
+  void _paintBreathing(Canvas canvas, Size size, Paint paint) {
+    // Smooth sine wave breathing
+    final breathValue = (sin(progress * 2 * pi) + 1) / 2;
+    paint.color = colors.first.withValues(alpha: 0.3 + breathValue * 0.7);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+  }
+
+  void _paintChase(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    final chaseLength = 5;
+    final chasePos = (progress * ledCount).floor();
+
+    for (int i = 0; i < ledCount; i++) {
+      final distFromChase = (i - chasePos + ledCount) % ledCount;
+      if (distFromChase < chaseLength) {
+        final colorIdx = distFromChase % colors.length;
+        final brightness = 1.0 - (distFromChase / chaseLength);
+        paint.color = colors[colorIdx].withValues(alpha: brightness);
+      } else {
+        paint.color = colors.last.withValues(alpha: 0.1);
+      }
+      canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+    }
+  }
+
+  void _paintWipe(Canvas canvas, Size size, Paint paint) {
+    final wipePos = progress * size.width;
+    // First color (wiped area)
+    paint.color = colors.first;
+    canvas.drawRect(Rect.fromLTWH(0, 0, wipePos, size.height), paint);
+    // Second color (unwipped area)
+    paint.color = colors.length > 1 ? colors[1] : colors.first.withValues(alpha: 0.3);
+    canvas.drawRect(Rect.fromLTWH(wipePos, 0, size.width - wipePos, size.height), paint);
+  }
+
+  void _paintSparkle(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Background
+    paint.color = colors.last.withValues(alpha: 0.15);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+
+    // Sparkles - use progress to create pseudo-random positions
+    final sparkleCount = 8;
+    for (int i = 0; i < sparkleCount; i++) {
+      final seed = (progress * 1000 + i * 137).floor() % ledCount;
+      final colorIdx = i % colors.length;
+      final fadePhase = ((progress * 3 + i * 0.3) % 1.0);
+      final opacity = fadePhase < 0.5 ? fadePhase * 2 : (1 - fadePhase) * 2;
+
+      paint.color = colors[colorIdx].withValues(alpha: opacity.clamp(0.0, 1.0));
+      final x = seed * ledWidth;
+      // Draw as small circle for sparkle effect
+      canvas.drawCircle(Offset(x + ledWidth / 2, size.height / 2), ledWidth * 0.8, paint);
+    }
+  }
+
+  void _paintScan(Canvas canvas, Size size, Paint paint, double ledWidth, double ledHeight) {
+    // Background
+    paint.color = colors.last.withValues(alpha: 0.1);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+
+    // Scanning bar that bounces
+    final bounce = (sin(progress * 2 * pi) + 1) / 2;
+    final scanPos = bounce * (size.width - ledWidth * 3);
+    final scanWidth = ledWidth * 3;
+
+    // Glow behind scan bar
+    final glowGradient = LinearGradient(
+      colors: [
+        colors.first.withValues(alpha: 0.0),
+        colors.first.withValues(alpha: 0.5),
+        colors.first,
+        colors.first.withValues(alpha: 0.5),
+        colors.first.withValues(alpha: 0.0),
+      ],
+    );
+    paint.shader = glowGradient.createShader(Rect.fromLTWH(scanPos - scanWidth, 0, scanWidth * 3, ledHeight));
+    canvas.drawRect(Rect.fromLTWH(scanPos - scanWidth, 0, scanWidth * 3, ledHeight), paint);
+    paint.shader = null;
+  }
+
+  void _paintFade(Canvas canvas, Size size, Paint paint) {
+    // Smooth color fade between colors
+    final colorCount = colors.length;
+    final colorProgress = progress * colorCount;
+    final currentIdx = colorProgress.floor() % colorCount;
+    final nextIdx = (currentIdx + 1) % colorCount;
+    final blendFactor = colorProgress - colorProgress.floor();
+
+    final blendedColor = Color.lerp(colors[currentIdx], colors[nextIdx], blendFactor)!;
+    paint.color = blendedColor;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+  }
+
+  void _paintGradient(Canvas canvas, Size size, Paint paint) {
+    // Flowing gradient
+    final offset = progress * 2;
+    final extendedColors = [...colors, ...colors];
+    final stops = List.generate(extendedColors.length, (i) => (i / (extendedColors.length - 1) + offset) % 2 / 2);
+    stops.sort();
+
+    final gradient = LinearGradient(
+      colors: extendedColors,
+      stops: stops,
+    );
+    paint.shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+    paint.shader = null;
+  }
+
+  void _paintTheater(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Theater chase - every 3rd LED lit, shifting
+    final offset = (progress * 3).floor() % 3;
+
+    for (int i = 0; i < ledCount; i++) {
+      final isLit = (i + offset) % 3 == 0;
+      final colorIdx = ((i + offset) ~/ 3) % colors.length;
+      paint.color = isLit ? colors[colorIdx] : Colors.black.withValues(alpha: 0.3);
+      canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+    }
+  }
+
+  void _paintRunning(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Running lights - segments of color moving
+    final segmentLength = ledCount ~/ colors.length;
+    final offset = (progress * ledCount).floor();
+
+    for (int i = 0; i < ledCount; i++) {
+      final adjustedI = (i + offset) % ledCount;
+      final colorIdx = (adjustedI ~/ segmentLength) % colors.length;
+      paint.color = colors[colorIdx];
+      canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+    }
+  }
+
+  void _paintTwinkle(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Base gradient
+    final gradient = LinearGradient(colors: colors);
+    paint.shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+    paint.shader = null;
+
+    // Twinkle overlay - bright spots that fade in/out
+    final twinkleCount = 6;
+    for (int i = 0; i < twinkleCount; i++) {
+      final seed = (i * 17 + 7) % ledCount;
+      final phase = ((progress * 2 + i * 0.2) % 1.0);
+      final brightness = (sin(phase * 2 * pi) + 1) / 2;
+
+      paint.color = Colors.white.withValues(alpha: brightness * 0.7);
+      final x = seed * ledWidth + ledWidth / 2;
+      canvas.drawCircle(Offset(x, size.height / 2), ledWidth * 0.6, paint);
+    }
+  }
+
+  void _paintFire(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Fire effect with orange/red/yellow flickering
+    final fireColors = colors.isNotEmpty ? colors : [Colors.red, Colors.orange, Colors.yellow];
+
+    for (int i = 0; i < ledCount; i++) {
+      // Create pseudo-random flicker based on position and time
+      final flicker = (sin(progress * 10 + i * 0.5) + sin(progress * 7 + i * 0.3)) / 4 + 0.5;
+      final colorIdx = ((flicker * fireColors.length).floor()).clamp(0, fireColors.length - 1);
+      final brightness = 0.5 + flicker * 0.5;
+
+      paint.color = fireColors[colorIdx].withValues(alpha: brightness.clamp(0.0, 1.0));
+      canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+    }
+  }
+
+  void _paintMeteor(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Background
+    paint.color = Colors.black.withValues(alpha: 0.8);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+
+    // Meteor with tail
+    final meteorPos = (progress * (ledCount + 10)).floor() - 5;
+    final tailLength = 8;
+
+    for (int i = 0; i < tailLength; i++) {
+      final pos = meteorPos - i;
+      if (pos >= 0 && pos < ledCount) {
+        final brightness = 1.0 - (i / tailLength);
+        final colorIdx = i % colors.length;
+        paint.color = colors[colorIdx].withValues(alpha: brightness);
+        canvas.drawRect(Rect.fromLTWH(pos * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+      }
+    }
+  }
+
+  void _paintWave(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
+    // Smooth wave pattern
+    for (int i = 0; i < ledCount; i++) {
+      final waveOffset = sin(progress * 2 * pi + i * 0.3);
+      final brightness = (waveOffset + 1) / 2;
+      final colorIdx = (i * colors.length / ledCount).floor() % colors.length;
+      paint.color = colors[colorIdx].withValues(alpha: 0.3 + brightness * 0.7);
+      canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _EffectPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.effectId != effectId ||
+        oldDelegate.colors != colors;
+  }
+}
+
+enum _EffectType {
+  solid,
+  breathing,
+  chase,
+  wipe,
+  sparkle,
+  scan,
+  fade,
+  gradient,
+  theater,
+  running,
+  twinkle,
+  fire,
+  meteor,
+  wave,
+}
+
 List<Color> _extractColorsFromItem(PatternItem item) {
   try {
     final seg = item.wledPayload['seg'];
@@ -3835,10 +4588,10 @@ class ThemeSelectionScreen extends ConsumerWidget {
                       Expanded(
                         child: GridView.builder(
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                            childAspectRatio: 0.85,
+                            crossAxisCount: 3, // 3 columns for better readability
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            childAspectRatio: 1.1, // Wider cards, shorter height
                           ),
                           itemCount: list.length,
                           itemBuilder: (_, i) => _CompactPatternItemCard(item: list[i], themeColors: colors),
