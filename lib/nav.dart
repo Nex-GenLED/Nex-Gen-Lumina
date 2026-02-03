@@ -55,6 +55,7 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.da
 import 'package:nexgen_command/features/demo/demo_welcome_screen.dart';
 import 'package:nexgen_command/features/demo/demo_profile_screen.dart';
 import 'package:nexgen_command/features/demo/demo_photo_screen.dart';
+import 'package:nexgen_command/features/demo/demo_roofline_screen.dart';
 import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
@@ -283,6 +284,11 @@ class AppRouter {
         path: AppRoutes.demoPhoto,
         name: 'demo-photo',
         pageBuilder: (context, state) => const MaterialPage(child: DemoPhotoScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.demoRoofline,
+        name: 'demo-roofline',
+        pageBuilder: (context, state) => const MaterialPage(child: DemoRooflineScreen()),
       ),
       GoRoute(
         path: AppRoutes.demoComplete,
