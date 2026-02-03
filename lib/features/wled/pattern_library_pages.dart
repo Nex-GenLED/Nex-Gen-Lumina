@@ -23,6 +23,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:nexgen_command/widgets/color_behavior_badge.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -6331,55 +6332,13 @@ class _PatternCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Color preview
+            // Animated effect preview
             Expanded(
               flex: 2,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: colors.length >= 2
-                        ? [colors[0], colors[1]]
-                        : [colors.first, colors.first.withValues(alpha: 0.7)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    topRight: Radius.circular(12),
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    // Effect icon
-                    Center(
-                      child: Icon(
-                        _iconForEffect(effectId),
-                        size: 28,
-                        color: Colors.white.withValues(alpha: 0.4),
-                      ),
-                    ),
-                    // Color dots
-                    Positioned(
-                      right: 6,
-                      top: 6,
-                      child: Row(
-                        children: [
-                          for (var i = 0; i < (colors.length > 3 ? 3 : colors.length); i++)
-                            Container(
-                              width: 10,
-                              height: 10,
-                              margin: const EdgeInsets.only(left: 2),
-                              decoration: BoxDecoration(
-                                color: colors[i],
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 1),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+              child: EffectPreviewWidget(
+                effectId: effectId,
+                colors: colors,
+                borderRadius: 12,
               ),
             ),
             // Pattern info
@@ -6418,15 +6377,6 @@ class _PatternCard extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  IconData _iconForEffect(int effectId) {
-    if (effectId == 0) return Icons.circle; // Solid
-    if (effectId == 12) return Icons.theater_comedy; // Theater chase
-    if (effectId == 41) return Icons.moving; // Running
-    if (effectId == 38 || effectId == 39) return Icons.blur_on; // Fire effects
-    if (effectId >= 101 && effectId <= 110) return Icons.waves; // Gradient effects
-    return Icons.auto_awesome;
   }
 
   Future<void> _applyPattern(BuildContext context, WidgetRef ref) async {
