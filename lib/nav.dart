@@ -51,6 +51,11 @@ import 'package:nexgen_command/features/installer/media_access_code_screen.dart'
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+// Demo experience imports
+import 'package:nexgen_command/features/demo/demo_welcome_screen.dart';
+import 'package:nexgen_command/features/demo/demo_profile_screen.dart';
+import 'package:nexgen_command/features/demo/demo_photo_screen.dart';
+import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
 /// Used to trigger GoRouter redirect checks.
@@ -118,10 +123,13 @@ class AppRouter {
       final isInstallerRoute = state.matchedLocation.startsWith('/installer') ||
           state.matchedLocation.startsWith('/admin');
 
+      // Check if this is a demo route (allowed without auth)
+      final isDemoRoute = state.matchedLocation.startsWith('/demo');
+
       // If user is not logged in
       if (!isLoggedIn) {
-        // Allow auth routes and welcome wizard
-        if (isAuthRoute || state.matchedLocation == AppRoutes.welcome) {
+        // Allow auth routes, welcome wizard, and demo routes
+        if (isAuthRoute || state.matchedLocation == AppRoutes.welcome || isDemoRoute) {
           return null;
         }
         return AppRoutes.login;
@@ -259,6 +267,27 @@ class AppRouter {
           fullscreenDialog: true,
           child: JoinWithCodeScreen(),
         ),
+      ),
+      // Demo experience routes
+      GoRoute(
+        path: AppRoutes.demoWelcome,
+        name: 'demo-welcome',
+        pageBuilder: (context, state) => const NoTransitionPage(child: DemoWelcomeScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.demoProfile,
+        name: 'demo-profile',
+        pageBuilder: (context, state) => const MaterialPage(child: DemoProfileScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.demoPhoto,
+        name: 'demo-photo',
+        pageBuilder: (context, state) => const MaterialPage(child: DemoPhotoScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.demoComplete,
+        name: 'demo-complete',
+        pageBuilder: (context, state) => const MaterialPage(child: DemoCompletionScreen()),
       ),
       GoRoute(
         path: AppRoutes.discovery,
@@ -562,4 +591,14 @@ class AppRoutes {
   static const String joinWithCode = '/join-with-code';
   static const String systemDeactivated = '/system-deactivated';
   static const String subUsers = '/settings/users';
+  // Demo experience routes
+  static const String demoWelcome = '/demo';
+  static const String demoProfile = '/demo/profile';
+  static const String demoPhoto = '/demo/photo';
+  static const String demoRoofline = '/demo/roofline';
+  static const String demoPatterns = '/demo/patterns';
+  static const String demoSchedule = '/demo/schedule';
+  static const String demoExplore = '/demo/explore';
+  static const String demoLumina = '/demo/lumina';
+  static const String demoComplete = '/demo/complete';
 }
