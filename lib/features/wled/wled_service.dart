@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 /// Converts an RGB color to RGBW format with auto-calculated white channel.
@@ -194,7 +195,8 @@ class WledService implements WledRepository {
   }
 
   /// Public helper to send an arbitrary WLED JSON payload to /json
-  Future<bool> applyJson(Map<String, dynamic> payload) => _postJson(payload);
+  Future<bool> applyJson(Map<String, dynamic> payload) =>
+      _postJson(normalizeWledPayload(payload));
 
   Future<bool> _postConfig(Map<String, dynamic> data) async {
     if (_simulate) {
@@ -483,7 +485,7 @@ class WledService implements WledRepository {
       }
       segs.add(m);
     }
-    return _postJson({'seg': segs});
+    return _postJson(normalizeWledPayload({'seg': segs}));
   }
 
   @override

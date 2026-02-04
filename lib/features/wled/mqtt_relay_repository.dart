@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/services/lumina_backend_service.dart';
@@ -103,9 +104,10 @@ class MqttRelayRepository implements WledRepository {
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     debugPrint('🌐 MqttRelay: applyJson');
-    final result = await _backendService.sendWledState(deviceId, payload);
+    final normalized = normalizeWledPayload(payload);
+    final result = await _backendService.sendWledState(deviceId, normalized);
     if (result.success) {
-      _updateCache(payload);
+      _updateCache(normalized);
     }
     return result.success;
   }

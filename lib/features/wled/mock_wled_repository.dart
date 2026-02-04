@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 /// A mock repository that simulates a WLED device entirely in-memory.
@@ -127,6 +128,7 @@ class MockWledRepository implements WledRepository {
 
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
+    payload = normalizeWledPayload(payload);
     // Best-effort: adopt known keys to update local state
     try {
       final on = payload['on'];

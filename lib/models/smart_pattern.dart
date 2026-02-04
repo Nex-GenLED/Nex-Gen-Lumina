@@ -85,8 +85,8 @@ class SmartPattern {
       'sx': speed,
       'ix': intensity,
       'rev': reverse,
-      'gp': grouping,
-      'sp': spacing,
+      'grp': grouping,
+      'spc': spacing,
     };
     if (paletteId != null) seg['pal'] = paletteId;
     return {'seg': [seg]};

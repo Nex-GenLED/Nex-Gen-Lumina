@@ -333,6 +333,9 @@ class GradientPattern {
           'ix': intensity,
           'pal': 0,
           'col': cols,
+          'grp': 1,
+          'spc': 0,
+          'of': 0,
         }
       ]
     };

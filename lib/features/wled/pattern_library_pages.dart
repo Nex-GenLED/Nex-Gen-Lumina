@@ -2035,7 +2035,7 @@ class _SubCategoryChip extends StatelessWidget {
     final colors = subCategory.themeColors;
     final gradientColors = colors.isEmpty
         ? [NexGenPalette.violet, NexGenPalette.cyan]
-        : (colors.length == 1 ? [colors[0], colors[0]] : colors.take(2).toList());
+        : (colors.length == 1 ? [colors[0], colors[0]] : colors);
     final accentColor = gradientColors.first;
     final heroIcon = _heroIconForSubCategory(subCategory.id);
 
@@ -3510,96 +3510,84 @@ class _CompactPatternItemCard extends ConsumerWidget {
   const _CompactPatternItemCard({required this.item, required this.themeColors});
 
   /// Get how many color slots this effect actually uses.
-  /// Returns 0 if the effect generates its own colors.
+  /// Returns 0 if the effect generates its own colors / uses palette.
+  ///
+  /// Effect IDs aligned with WledEffectsCatalog (WLED 0.14+ firmware).
+  /// Effects that use selected colors all receive 3 slots so all palette
+  /// colors are sent — WLED ignores extras harmlessly.
   static int _getColorSlotsForEffect(int effectId) {
-    // Effects that only use 1 color (first slot)
-    const singleColorEffects = {
-      0,  // Solid
-      1,  // Blink
-      2,  // Breathe
-      10, // Scan
-      11, // Dual Scan
-      30, // Strobe
-      31, // Strobe Multi
-      32, // Strobe Rainbow
-      33, // Rainbow
-      34, // Multi Dynamic
-      35, // Android
-      40, // Colorful
-      45, // Mode
-    };
-
-    // Effects that use 2 colors
-    const twoColorEffects = {
-      3,  // Wipe
-      4,  // Wipe Random
-      9,  // Sweep
-      13, // Scanner
-      14, // Dual Scanner
-      16, // Rainbow Runner
-      22, // Running 2
-      23, // Chase
-      24, // Chase Rainbow
-      25, // Running Dual
-      41, // Running
-      42, // Running 2
-      43, // Theater Chase
-      44, // Theater Chase Rainbow
-      50, // Oscillate
-    };
-
-    // Effects that use all 3 colors
-    const threeColorEffects = {
-      6,  // Sweep Random
-      12, // Fade
-      15, // Lighthouse
-      18, // Dissolve
-      27, // Multi Strobe
-      37, // Fill Noise
-      38, // Noise 1
-      39, // Noise 2
-      46, // Twinklefox
-      47, // Twinklecat
-      51, // Gradient
-      52, // Loading
-      63, // Palette
-      65, // Colorwaves
-    };
-
-    // Effects that ignore user colors (generate own)
+    // Effects that ignore user colors entirely (generate own or use palette).
+    // Sourced from WledEffectsCatalog: generatesOwnColors + usesPalette.
     const autoColorEffects = {
-      5,  // Random Colors
-      7,  // Dynamic
-      8,  // Colorloop
-      19, // Dissolve Rnd
-      26, // Blink Rainbow
-      33, // Rainbow
-      44, // Theater Chase Rainbow
-      49, // Fire 2012
-      54, // Fire Flicker
-      66, // Sunset
-      67, // Ripple
-      68, // Twinklefox
-      69, // Aurora
-      70, // Lake
-      71, // Railway
-      72, // Ripple Rainbow
-      73, // Pacifica
-      74, // Candle
-      75, // Fire
-      76, // Fireworks
-      77, // Rain
-      78, // Meteor Rainbow
-      80, // Lissajous
-      81, // Frizzles
-      82, // Plasma Ball
+      // generatesOwnColors
+      4,   // Wipe Random
+      5,   // Random Colors
+      7,   // Dynamic
+      8,   // Colorloop
+      9,   // Rainbow
+      14,  // Theater Rainbow
+      19,  // Dissolve Rnd
+      24,  // Strobe Rainbow
+      26,  // Blink Rainbow
+      29,  // Chase Random
+      30,  // Chase Rainbow
+      32,  // Chase Flash Rnd
+      33,  // Rainbow Runner
+      34,  // Colorful
+      35,  // Traffic Light
+      36,  // Sweep Random
+      38,  // Aurora
+      45,  // Fire Flicker
+      63,  // Pride 2015
+      66,  // Fire 2012
+      88,  // Candle
+      94,  // Sinelon Rainbow
+      99,  // Ripple Rainbow
+      101, // Pacifica
+      104, // Sunrise
+      116, // TV Simulator
+      117, // Dynamic Smooth
+      // usesPalette
+      39,  // Stream
+      42,  // Fireworks
+      43,  // Rain
+      61,  // Stream 2
+      64,  // Juggle
+      65,  // Palette
+      67,  // Colorwaves
+      68,  // Bpm
+      69,  // Fill Noise
+      70,  // Noise 1
+      71,  // Noise 2
+      72,  // Noise 3
+      73,  // Noise 4
+      74,  // Colortwinkles
+      75,  // Lake
+      79,  // Ripple
+      80,  // Twinklefox
+      81,  // Twinklecat
+      89,  // Fireworks Starburst
+      90,  // Fireworks 1D
+      92,  // Sinelon
+      93,  // Sinelon Dual
+      97,  // Plasma
+      105, // Phased
+      106, // Twinkleup
+      107, // Noise Pal
+      108, // Sine
+      109, // Phased Noise
+      110, // Flow
+      115, // Blends
+      128, // Pixels
     };
 
     if (autoColorEffects.contains(effectId)) return 0;
-    if (singleColorEffects.contains(effectId)) return 1;
-    if (twoColorEffects.contains(effectId)) return 2;
-    if (threeColorEffects.contains(effectId)) return 3;
-    return 3; // Default to 3 if unknown
+
+    // All remaining effects that use/blend selected colors get 3 slots.
+    // WLED's col array supports up to 3 colors per segment and safely
+    // ignores slots an effect doesn't use, so sending all 3 is harmless
+    // and ensures multi-color palettes display correctly.
+    return 3;
   }
 
   @override
@@ -3608,10 +3596,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
     final colorSlots = _getColorSlotsForEffect(effectId);
     final extractedColors = _extractColorsFromItem(item);
 
-    // For preview, only show colors that will actually be used
-    final displayColors = colorSlots == 0
-        ? extractedColors // Show all for auto-color effects
-        : extractedColors.take(colorSlots.clamp(1, 3)).toList();
+    // Always show all palette colors in preview so users see the full colorway.
+    // Previously this limited to colorSlots which hid the 3rd color on 2-color effects.
+    final displayColors = extractedColors;
 
     // Get effect name for display
     final effectName = _getEffectDisplayName(effectId);
@@ -3775,19 +3762,12 @@ class _CompactPatternItemCard extends ConsumerWidget {
       return;
     }
 
-    // For effects using fewer colors than available, show color assignment dialog
-    final colorSlots = _getColorSlotsForEffect(effectId);
-    if (colorSlots > 0 && colorSlots < themeColors.length && themeColors.length > 1) {
-      if (context.mounted) {
-        final assignedColors = await _showColorAssignmentDialog(context, themeColors, colorSlots, effectId);
-        if (assignedColors != null && context.mounted) {
-          await _applyPatternWithColors(context, ref, repo, assignedColors, effectId);
-        }
-      }
-      return;
-    }
-
-    // Standard apply for effects that use all colors or generate own
+    // Send all palette colors to WLED. Previously this showed a color
+    // assignment dialog that forced users to drop colors when the effect
+    // used fewer slots than available, causing 3-color palettes to lose
+    // their 3rd color on 2-color effects. WLED safely ignores extra
+    // colors in the col array, so sending all is harmless and ensures
+    // the full colorway is applied.
     try {
       await repo.applyJson(item.wledPayload);
       ref.read(activePresetLabelProvider.notifier).state = item.name;
@@ -4952,6 +4932,15 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           return _PalettePatternGrid(node: node);
                         }
                         // Show children as navigation grid
+                        // For Architectural Downlighting, show Kelvin chart above the grid
+                        if (widget.nodeId == LibraryCategoryIds.architectural) {
+                          return Column(
+                            children: [
+                              const _KelvinReferenceChart(),
+                              Expanded(child: _LibraryNodeGrid(children: children)),
+                            ],
+                          );
+                        }
                         return _LibraryNodeGrid(children: children);
                       },
                       loading: () => const Center(child: CircularProgressIndicator()),
@@ -5115,6 +5104,154 @@ class _LibraryBreadcrumb extends StatelessWidget {
   }
 }
 
+/// Kelvin color temperature reference chart for Architectural Downlighting.
+/// Shows a gradient bar from 2000K (warm amber) to 6500K (cool blue-white)
+/// with labeled temperature stops so users can identify their preferred white.
+class _KelvinReferenceChart extends StatelessWidget {
+  const _KelvinReferenceChart();
+
+  /// Kelvin temperature → approximate RGB using Tanner Helland algorithm.
+  static Color _kelvinToColor(int kelvin) {
+    final temp = kelvin / 100.0;
+    double r, g, b;
+
+    // Red
+    if (temp <= 66) {
+      r = 255;
+    } else {
+      r = 329.698727446 * pow(temp - 60, -0.1332047592);
+      r = r.clamp(0, 255);
+    }
+
+    // Green
+    if (temp <= 66) {
+      g = 99.4708025861 * log(temp) - 161.1195681661;
+      g = g.clamp(0, 255);
+    } else {
+      g = 288.1221695283 * pow(temp - 60, -0.0755148492);
+      g = g.clamp(0, 255);
+    }
+
+    // Blue
+    if (temp >= 66) {
+      b = 255;
+    } else if (temp <= 19) {
+      b = 0;
+    } else {
+      b = 138.5177312231 * log(temp - 10) - 305.0447927307;
+      b = b.clamp(0, 255);
+    }
+
+    return Color.fromARGB(255, r.round(), g.round(), b.round());
+  }
+
+  static const _stops = [
+    (kelvin: 2000, label: '2000K', name: 'Candle'),
+    (kelvin: 2700, label: '2700K', name: 'Warm'),
+    (kelvin: 3000, label: '3000K', name: ''),
+    (kelvin: 3500, label: '3500K', name: 'Soft'),
+    (kelvin: 4000, label: '4000K', name: 'Neutral'),
+    (kelvin: 4500, label: '4500K', name: ''),
+    (kelvin: 5000, label: '5000K', name: 'Day'),
+    (kelvin: 5500, label: '5500K', name: ''),
+    (kelvin: 6500, label: '6500K', name: 'Moon'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    // Build fine-grained gradient colors across the full range
+    final gradientColors = <Color>[];
+    final gradientStops = <double>[];
+    const minK = 2000;
+    const maxK = 6500;
+    for (var k = minK; k <= maxK; k += 250) {
+      gradientColors.add(_kelvinToColor(k));
+      gradientStops.add((k - minK) / (maxK - minK));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title row
+          Row(
+            children: [
+              const Icon(Icons.thermostat, color: NexGenPalette.textSecondary, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                'Color Temperature Reference',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: NexGenPalette.textSecondary,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Gradient bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              height: 32,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradientColors,
+                  stops: gradientStops,
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: NexGenPalette.line, width: 0.5),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Labels row
+          SizedBox(
+            height: 32,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final totalWidth = constraints.maxWidth;
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: _stops.map((stop) {
+                    final fraction = (stop.kelvin - minK) / (maxK - minK);
+                    final left = fraction * totalWidth;
+                    return Positioned(
+                      left: left - 18, // center the label
+                      top: 0,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            stop.label,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (stop.name.isNotEmpty)
+                            Text(
+                              stop.name,
+                              style: TextStyle(
+                                color: NexGenPalette.textSecondary,
+                                fontSize: 7,
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Grid of library nodes (categories, folders, or palettes)
 class _LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
@@ -5138,7 +5275,7 @@ class _LibraryNodeGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.75,
+        childAspectRatio: 1.6,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
@@ -5637,6 +5774,10 @@ class _LibraryNodeCard extends StatelessWidget {
     if (id.startsWith('season_')) return Icons.nature_outlined;
     if (id.startsWith('event_')) return Icons.event_outlined;
 
+    // Architectural Kelvin folders
+    if (id.startsWith('arch_k')) return Icons.thermostat_outlined;
+    if (id == 'arch_galaxy') return Icons.auto_awesome_outlined;
+
     // Movie franchise folders
     if (id == 'franchise_disney') return Icons.castle_outlined;
     if (id == 'franchise_marvel') return Icons.shield_outlined;
@@ -5707,7 +5848,86 @@ class _LibraryNodeCard extends StatelessWidget {
     // NCAA parent folder colors
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const Color(0xFF1A237E);
 
+    // Architectural Kelvin folders — use the node's own theme color
+    if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.isNotEmpty) {
+      return node.themeColors!.first;
+    }
+
     return NexGenPalette.cyan;
+  }
+
+  /// Get gradient color pair for folder nodes, matching the visual style
+  /// used by _DesignLibraryCategoryCard and _SubCategoryCard.
+  List<Color> _getGradientForNode() {
+    final id = node.id;
+
+    // Category gradients (matching _DesignLibraryCategoryCard)
+    if (id == LibraryCategoryIds.architectural) return const [Color(0xFFFFB347), Color(0xFFFF7043)];
+    if (id == LibraryCategoryIds.holidays) return const [Color(0xFFFF4444), Color(0xFFC2185B)];
+    if (id == LibraryCategoryIds.sports) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
+    if (id == LibraryCategoryIds.seasonal) return const [Color(0xFFFF8F00), Color(0xFFE65100)];
+    if (id == LibraryCategoryIds.parties) return const [Color(0xFFFF69B4), Color(0xFF9C27B0)];
+    if (id == LibraryCategoryIds.security) return const [Color(0xFF4FC3F7), Color(0xFF1565C0)];
+    if (id == LibraryCategoryIds.movies) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
+
+    // Movie franchise gradients
+    if (id == 'franchise_disney') return const [Color(0xFF42A5F5), Color(0xFF1565C0)];
+    if (id == 'franchise_marvel') return const [Color(0xFFE53935), Color(0xFFB71C1C)];
+    if (id == 'franchise_starwars') return const [Color(0xFF546E7A), Color(0xFF212121)];
+    if (id == 'franchise_dc') return const [Color(0xFF1E88E5), Color(0xFF0D47A1)];
+    if (id == 'franchise_pixar') return const [Color(0xFF66BB6A), Color(0xFF2E7D32)];
+    if (id == 'franchise_dreamworks') return const [Color(0xFF26C6DA), Color(0xFF00695C)];
+    if (id == 'franchise_harrypotter') return const [Color(0xFF8D6E63), Color(0xFF3E2723)];
+    if (id == 'franchise_nintendo') return const [Color(0xFFEF5350), Color(0xFFB71C1C)];
+
+    // Sports league gradients
+    if (id == 'league_nfl') return const [Color(0xFF1565C0), Color(0xFF013369)];
+    if (id == 'league_nba') return const [Color(0xFFE53935), Color(0xFF880E4F)];
+    if (id == 'league_mlb') return const [Color(0xFF1976D2), Color(0xFF041E42)];
+    if (id == 'league_nhl') return const [Color(0xFF424242), Color(0xFF000000)];
+    if (id == 'league_mls') return const [Color(0xFF66BB6A), Color(0xFF2E7D32)];
+    if (id == 'league_wnba') return const [Color(0xFFFF8F00), Color(0xFFE65100)];
+    if (id == 'league_nwsl') return const [Color(0xFF42A5F5), Color(0xFF0D47A1)];
+
+    // Holiday gradients (matching _SubCategoryCard)
+    if (id == 'holiday_christmas') return const [Color(0xFF2E7D32), Color(0xFFC62828)];
+    if (id == 'holiday_halloween') return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)];
+    if (id == 'holiday_july4' || id == 'holiday_july4th') return const [Color(0xFFEF5350), Color(0xFF1565C0)];
+    if (id == 'holiday_valentines') return const [Color(0xFFE91E63), Color(0xFFAD1457)];
+    if (id == 'holiday_stpatricks') return const [Color(0xFF43A047), Color(0xFF00C853)];
+    if (id == 'holiday_easter') return const [Color(0xFFCE93D8), Color(0xFF7B1FA2)];
+    if (id == 'holiday_thanksgiving') return const [Color(0xFFFF9800), Color(0xFF8D6E63)];
+    if (id == 'holiday_newyears' || id == 'holiday_newyear') return const [Color(0xFFFFD700), Color(0xFFFF6F00)];
+
+    // Season gradients (matching _SubCategoryCard)
+    if (id == 'season_spring') return const [Color(0xFF81C784), Color(0xFFF48FB1)];
+    if (id == 'season_summer') return const [Color(0xFFFFEE58), Color(0xFF29B6F6)];
+    if (id == 'season_autumn') return const [Color(0xFFFF8F00), Color(0xFF6D4C41)];
+    if (id == 'season_winter') return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
+
+    // Party/event gradients
+    if (id == 'event_birthdays' || id == 'event_birthday') return const [Color(0xFF00E5FF), Color(0xFFFF4081)];
+    if (id == 'event_bday_boy') return const [Color(0xFF42A5F5), Color(0xFF1565C0)];
+    if (id == 'event_bday_girl') return const [Color(0xFFFF80AB), Color(0xFFAD1457)];
+    if (id == 'event_bday_adult') return const [Color(0xFFFFD54F), Color(0xFFFF6F00)];
+    if (id == 'event_weddings' || id == 'event_wedding') return const [Color(0xFFFFE0B2), Color(0xFFBCAAA4)];
+    if (id == 'event_babyshower') return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)];
+    if (id == 'event_graduation') return const [Color(0xFF212121), Color(0xFFFFD700)];
+    if (id == 'event_anniversary') return const [Color(0xFFFFD700), Color(0xFFE91E63)];
+
+    // NCAA / Conference folders
+    if (id.startsWith('ncaafb_')) return const [Color(0xFFB71C1C), Color(0xFF8B0000)];
+    if (id.startsWith('ncaabb_')) return const [Color(0xFFFF8F00), Color(0xFFE65100)];
+    if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const [Color(0xFF3949AB), Color(0xFF1A237E)];
+
+    // Architectural Kelvin folders — use the node's own theme colors
+    if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.length >= 2) {
+      return [node.themeColors![0], node.themeColors![1]];
+    }
+
+    // Default: derive from theme color
+    final c = _getFolderThemeColor();
+    return [c, c.withValues(alpha: 0.5)];
   }
 
   @override
@@ -5720,146 +5940,128 @@ class _LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a folder card with icon grid design matching main category cards
+  /// Build a folder card with single hero icon design matching main category cards
   Widget _buildFolderCard(BuildContext context) {
-    final themeColor = _getFolderThemeColor();
-    final icons = _iconsForNode();
+    final heroIcon = _iconForNode();
+    final accentColor = _getFolderThemeColor();
+    final gradientColors = _getGradientForNode();
 
-    return GestureDetector(
-      onTap: () {
-        context.push('/library/${node.id}', extra: {'name': node.name});
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          // Premium dark background with subtle gradient
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              NexGenPalette.gunmetal90,
-              NexGenPalette.matteBlack.withValues(alpha: 0.95),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.push('/library/${node.id}', extra: {'name': node.name});
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                gradientColors[0].withValues(alpha: 0.25),
+                gradientColors[1].withValues(alpha: 0.15),
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
+              stops: const [0.0, 0.4, 1.0],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: accentColor.withValues(alpha: 0.4),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
             ],
           ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: themeColor.withValues(alpha: 0.3),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: themeColor.withValues(alpha: 0.15),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // Subtle accent glow in corner
-            Positioned(
-              top: -20,
-              right: -20,
-              child: Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      themeColor.withValues(alpha: 0.15),
-                      themeColor.withValues(alpha: 0.0),
-                    ],
+          child: Stack(
+            children: [
+              // Centered radial glow behind icon
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          gradientColors[0].withValues(alpha: 0.3),
+                          gradientColors[1].withValues(alpha: 0.1),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.0, 0.5, 1.0],
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-            // Content
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Icon grid - display themed icons
-                  Expanded(
-                    child: _buildIconGrid(icons, themeColor),
-                  ),
-                  const SizedBox(height: 8),
-                  // Folder name
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          node.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Single hero icon - centered and prominent
+                    Expanded(
+                      child: Center(
+                        child: Icon(
+                          heroIcon,
+                          size: 52,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: accentColor.withValues(alpha: 0.8),
+                              blurRadius: 24,
+                            ),
+                            Shadow(
+                              color: gradientColors[0].withValues(alpha: 0.5),
+                              blurRadius: 16,
+                            ),
+                          ],
                         ),
                       ),
-                      Icon(
-                        Icons.arrow_forward_ios,
-                        color: themeColor.withValues(alpha: 0.7),
-                        size: 12,
-                      ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Folder name with arrow
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            node.name,
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_ios,
+                          color: accentColor.withValues(alpha: 0.8),
+                          size: 10,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    );
-  }
-
-  /// Builds a grid of themed icons with accent color highlights.
-  Widget _buildIconGrid(List<IconData> icons, Color accentColor) {
-    // Take up to 6 icons, arrange in 2 rows of 3
-    final displayIcons = icons.take(6).toList();
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Calculate icon size based on available space
-        final iconSize = (constraints.maxWidth - 16) / 3.5;
-
-        return Wrap(
-          spacing: 4,
-          runSpacing: 2,
-          alignment: WrapAlignment.center,
-          runAlignment: WrapAlignment.center,
-          children: displayIcons.asMap().entries.map((entry) {
-            final index = entry.key;
-            final icon = entry.value;
-
-            // Alternate between accent color and muted for visual interest
-            final isHighlighted = index % 2 == 0;
-            final iconColor = isHighlighted
-                ? accentColor
-                : Colors.white.withValues(alpha: 0.5);
-
-            return SizedBox(
-              width: iconSize,
-              height: iconSize,
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: iconSize * 0.7,
-                shadows: isHighlighted
-                    ? [
-                        Shadow(
-                          color: accentColor.withValues(alpha: 0.5),
-                          blurRadius: 8,
-                        ),
-                      ]
-                    : null,
-              ),
-            );
-          }).toList(),
-        );
-      },
     );
   }
 
@@ -5869,6 +6071,14 @@ class _LibraryNodeCard extends StatelessWidget {
     final gradient = colors.length >= 2
         ? [colors[0], colors[1]]
         : [colors.first, colors.first.withValues(alpha: 0.7)];
+    // Adaptive contrast — dark text on light cards, white on dark cards
+    final textColor = NexGenPalette.contrastTextFor(gradient);
+    final secondaryColor = NexGenPalette.contrastSecondaryFor(gradient);
+    final isLight = textColor == const Color(0xFF1A1A1A);
+    final dotBorder = isLight ? const Color(0xFF4A4A4A) : Colors.white;
+    final watermark = isLight
+        ? Colors.black.withValues(alpha: 0.06)
+        : Colors.white.withValues(alpha: 0.1);
 
     return GestureDetector(
       onTap: () {
@@ -5899,7 +6109,7 @@ class _LibraryNodeCard extends StatelessWidget {
               child: Icon(
                 Icons.palette,
                 size: 70,
-                color: Colors.white.withValues(alpha: 0.1),
+                color: watermark,
               ),
             ),
             // Content
@@ -5920,7 +6130,7 @@ class _LibraryNodeCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: colors[i],
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: dotBorder, width: 2),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.2),
@@ -5937,11 +6147,11 @@ class _LibraryNodeCard extends StatelessWidget {
                     children: [
                       Text(
                         node.name,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: textColor,
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          shadows: [Shadow(color: Colors.black26, blurRadius: 2)],
+                          shadows: [Shadow(color: isLight ? Colors.white38 : Colors.black26, blurRadius: 2)],
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -5950,7 +6160,7 @@ class _LibraryNodeCard extends StatelessWidget {
                         Text(
                           node.description!,
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.85),
+                            color: secondaryColor,
                             fontSize: 10,
                           ),
                           maxLines: 1,

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/models/remote_command.dart';
@@ -172,7 +173,7 @@ class CloudRelayRepository implements WledRepository {
 
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
-    return _executeBool('applyJson', payload);
+    return _executeBool('applyJson', normalizeWledPayload(payload));
   }
 
   @override

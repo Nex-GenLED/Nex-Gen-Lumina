@@ -798,14 +798,18 @@ class MockPatternRepository {
     ];
   }
 
-  /// Architectural white style definitions with colors
+  /// Architectural white style definitions — Kelvin color temperature ramp.
+  /// RGB values derived from the Tanner Helland algorithm for each Kelvin step.
   static const _archWhiteStyles = [
-    (id: 'warmwhite', name: 'Warm White', desc: 'Cozy amber glow', colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)]),
-    (id: 'coolwhite', name: 'Cool White', desc: 'Crisp moonlight', colors: [Color(0xFFFFFFFF), Color(0xFFE0E0E0)]),
-    (id: 'daylight', name: 'Daylight', desc: 'Natural sunlight', colors: [Color(0xFFFFFFFF), Color(0xFFFFFDD0)]),
-    (id: 'candlelight', name: 'Candlelight', desc: 'Flickering warm glow', colors: [Color(0xFFFF8C00), Color(0xFFFFB347)]),
-    (id: 'moonlight', name: 'Moonlight', desc: 'Soft blue night', colors: [Color(0xFF87CEEB), Color(0xFFFFFFFF)]),
-    (id: 'goldenhour', name: 'Golden Hour', desc: 'Sunset gold tones', colors: [Color(0xFFFFD700), Color(0xFFFF8C00), Color(0xFFFFB347)]),
+    (id: 'k2000', name: '2000K', desc: 'Candlelight', colors: [Color(0xFFFF890E), Color(0xFFFFAB47)]),
+    (id: 'k2700', name: '2700K', desc: 'Incandescent', colors: [Color(0xFFFFA757), Color(0xFFFFC78D)]),
+    (id: 'k3000', name: '3000K', desc: 'Warm White', colors: [Color(0xFFFFB16E), Color(0xFFFFCFA0)]),
+    (id: 'k3500', name: '3500K', desc: 'Soft White', colors: [Color(0xFFFFC18D), Color(0xFFFFDABB)]),
+    (id: 'k4000', name: '4000K', desc: 'Neutral White', colors: [Color(0xFFFFCEA6), Color(0xFFFFE2CA)]),
+    (id: 'k4500', name: '4500K', desc: 'Cool White', colors: [Color(0xFFFFDABB), Color(0xFFFFEAD8)]),
+    (id: 'k5000', name: '5000K', desc: 'Daylight', colors: [Color(0xFFFFE4CE), Color(0xFFFFF0E4)]),
+    (id: 'k5500', name: '5500K', desc: 'Bright Daylight', colors: [Color(0xFFFFEEDE), Color(0xFFFFF6EE)]),
+    (id: 'k6500', name: '6500K', desc: 'Moonlight', colors: [Color(0xFFFFFEFA), Color(0xFFEEF2FF)]),
   ];
 
   /// Galaxy & Starlight style definitions - combines with dim levels
@@ -834,8 +838,26 @@ class MockPatternRepository {
         sortOrder: i,
       ));
 
+      // "All On" solid pattern — every LED lit, no spacing
+      nodes.add(LibraryNode(
+        id: 'arch_${style.id}_all',
+        name: 'All ${style.name}',
+        description: 'All LEDs solid ${style.desc.toLowerCase()}',
+        nodeType: LibraryNodeType.palette,
+        parentId: 'arch_${style.id}',
+        themeColors: style.colors,
+        sortOrder: 0,
+        metadata: {
+          'suggestedEffects': [0], // Solid effect
+          'defaultSpeed': 0,
+          'defaultIntensity': 128,
+          'grouping': 1,
+          'spacing': 0,
+        },
+      ));
+
       // Generate spacing patterns: X on Y off (X: 1-4, Y: 1-4)
-      var patternIndex = 0;
+      var patternIndex = 1; // Start after "All On"
       for (var onCount = 1; onCount <= 4; onCount++) {
         for (var offCount = 1; offCount <= 4; offCount++) {
           final patternName = '$onCount On $offCount Off';
@@ -1106,9 +1128,10 @@ class MockPatternRepository {
     }
 
     // For architectural spacing patterns, generate fewer effects focused on solid/simple
-    // For regular palettes, use full kColorwayEffectIds for 23 creative pattern variations
+    // For regular palettes, use full kColorwayEffectIds for creative pattern variations
+    // Note: include 3-color effects (12, 6, 51, 46) so palettes with 3+ colors display properly
     final effectIds = hasSpacingMetadata
-        ? const [0, 2, 12, 15, 41] // Solid, Breathe, Fade, Running, Lighthouse - good for downlighting
+        ? const [0, 2, 12, 6, 15, 51, 46, 41] // Solid, Breathe, Fade, Sweep, Running, Gradient, Twinklefox, Lighthouse
         : kColorwayEffectIds;
 
     final items = <PatternItem>[];

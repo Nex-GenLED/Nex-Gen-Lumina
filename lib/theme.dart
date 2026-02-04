@@ -185,6 +185,21 @@ class NexGenPalette {
   static const line = Color(0xFF2A2A2A);
   // Card backgrounds
   static const cardBackground = gunmetal90; // Alias for gunmetal90
+
+  /// Returns dark or light text color based on average luminance of [colors].
+  /// Use on any card whose background is derived from theme/pattern colors.
+  static Color contrastTextFor(List<Color> colors) {
+    if (colors.isEmpty) return textHigh;
+    final avg = colors.map((c) => c.computeLuminance()).reduce((a, b) => a + b) / colors.length;
+    return avg > 0.45 ? const Color(0xFF1A1A1A) : textHigh;
+  }
+
+  /// Secondary (dimmed) variant of [contrastTextFor].
+  static Color contrastSecondaryFor(List<Color> colors) {
+    if (colors.isEmpty) return textSecondary;
+    final avg = colors.map((c) => c.computeLuminance()).reduce((a, b) => a + b) / colors.length;
+    return avg > 0.45 ? const Color(0xFF5A5A5A) : textSecondary;
+  }
 }
 
 /// Reusable gradients and tokens for brand moments (e.g., Login)

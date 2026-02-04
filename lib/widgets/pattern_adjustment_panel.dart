@@ -272,8 +272,8 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
         await repo.applyJson({
           'seg': [
             {
-              'gp': _grouping,
-              'sp': _spacing,
+              'grp': _grouping,
+              'spc': _spacing,
             }
           ]
         });

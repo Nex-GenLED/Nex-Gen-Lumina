@@ -326,8 +326,8 @@ class BigEventLibraryBuilder {
       themeColors: allUnique,
       sortOrder: 1,
       metadata: {
-        'suggestedEffects': [0, 41], // Solid stripes or Running
-        'defaultSpeed': 0,
+        'suggestedEffects': [12, 6, 51, 0], // Fade, Sweep, Gradient, Solid — prefer 3-color effects
+        'defaultSpeed': 80,
         'defaultIntensity': 128,
         'patternType': DualTeamPatternType.alternatingStripe.name,
         'grouping': 5, // 5 pixels per team
@@ -345,7 +345,7 @@ class BigEventLibraryBuilder {
       themeColors: distinctTrio,
       sortOrder: 2,
       metadata: {
-        'suggestedEffects': [43, 40], // Gradient or Oscillate
+        'suggestedEffects': [51, 12, 6, 18], // Gradient, Fade, Sweep, Dissolve — 3-color effects
         'defaultSpeed': 60,
         'defaultIntensity': 200,
         'patternType': DualTeamPatternType.teamWave.name,
@@ -362,7 +362,7 @@ class BigEventLibraryBuilder {
       themeColors: allUnique,
       sortOrder: 3,
       metadata: {
-        'suggestedEffects': [28, 9], // Chase 2, Colorful
+        'suggestedEffects': [12, 28, 6, 46], // Fade, Chase 2, Sweep, Twinklefox — 3-color effects
         'defaultSpeed': 100,
         'defaultIntensity': 200,
         'patternType': DualTeamPatternType.rivalryChase.name,
@@ -379,7 +379,7 @@ class BigEventLibraryBuilder {
       themeColors: allUnique,
       sortOrder: 4,
       metadata: {
-        'suggestedEffects': [12, 41], // Theater Chase, Running
+        'suggestedEffects': [12, 6, 51, 46], // Fade, Sweep, Gradient, Twinklefox — 3-color effects
         'defaultSpeed': 80,
         'defaultIntensity': 180,
         'patternType': DualTeamPatternType.colorRotation.name,
@@ -413,7 +413,7 @@ class BigEventLibraryBuilder {
       themeColors: distinctTrio,
       sortOrder: 6,
       metadata: {
-        'suggestedEffects': [43, 110], // Gradient, Flow
+        'suggestedEffects': [51, 12, 46, 6], // Gradient, Fade, Twinklefox, Sweep — 3-color effects
         'defaultSpeed': 50,
         'defaultIntensity': 200,
         'patternType': DualTeamPatternType.harmonyBlend.name,
