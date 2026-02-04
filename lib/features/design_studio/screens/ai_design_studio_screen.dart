@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design_studio/design_studio_providers.dart';
 import 'package:nexgen_command/features/design_studio/services/design_studio_orchestrator.dart';
 import 'package:nexgen_command/features/design_studio/widgets/ai_understanding_panel.dart';
@@ -336,12 +337,46 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     );
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
 
-    // Trigger processing
-    ref.read(processInputProvider(text));
+    // Set state to processing
+    ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.processing;
+    ref.read(designStudioInputProvider.notifier).state = text;
+
+    try {
+      final orchestrator = ref.read(designStudioOrchestratorProvider);
+      final configAsync = ref.read(currentRooflineConfigProvider);
+      final config = configAsync.valueOrNull;
+
+      final result = await orchestrator.processUserInput(
+        prompt: text,
+        config: config,
+      );
+
+      if (!mounted) return;
+
+      // Update state based on result
+      ref.read(designStudioStateProvider.notifier).state = result.status;
+
+      if (result.intent != null) {
+        ref.read(currentDesignIntentProvider.notifier).setIntent(result.intent!);
+      }
+
+      if (result.needsClarification && result.pendingQuestions != null) {
+        ref.read(pendingClarificationsProvider.notifier).state = result.pendingQuestions!;
+        ref.read(currentQuestionIndexProvider.notifier).state = 0;
+        ref.read(clarificationChoicesProvider.notifier).state = {};
+      }
+
+      if (result.isReady && result.pattern != null) {
+        ref.read(composedPatternProvider.notifier).state = result.pattern;
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.error;
+    }
   }
 
   void _useQuickIdea(String idea) {

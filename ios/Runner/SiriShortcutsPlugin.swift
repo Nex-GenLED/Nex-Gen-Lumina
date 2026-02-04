@@ -3,7 +3,7 @@ import UIKit
 import Intents
 import IntentsUI
 import CoreSpotlight
-import MobileCoreServices
+import UniformTypeIdentifiers
 
 /// Flutter plugin for Siri Shortcuts integration.
 ///
@@ -134,7 +134,7 @@ public class SiriShortcutsPlugin: NSObject, FlutterPlugin {
     public func application(
         _ application: UIApplication,
         continue userActivity: NSUserActivity,
-        restorationHandler: @escaping ([Any]) -> Void
+        restorationHandler: @escaping ([UIUserActivityRestoring]) -> Void
     ) -> Bool {
         // Check if this is one of our activity types
         let supportedTypes = [

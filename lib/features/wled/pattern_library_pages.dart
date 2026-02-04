@@ -3070,7 +3070,7 @@ class CategoryDetailScreen extends ConsumerWidget {
                   crossAxisCount: 2,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  childAspectRatio: 2.0,
+                  childAspectRatio: 1.6,
                 ),
                 itemCount: subs.length,
                 itemBuilder: (_, i) => _SubCategoryCard(categoryId: categoryId, sub: subs[i]),
@@ -3112,66 +3112,181 @@ class _SubCategoryCard extends StatelessWidget {
     switch (subId) {
       // Holidays
       case 'sub_xmas':
-        return Icons.park; // Christmas tree
+        return Icons.park;
       case 'sub_halloween':
-        return Icons.pest_control; // Spider/bug for spooky
+        return Icons.pest_control;
       case 'sub_july4':
-        return Icons.celebration; // Fireworks/celebration
+        return Icons.celebration;
       case 'sub_easter':
-        return Icons.egg; // Easter egg
+        return Icons.egg;
       case 'sub_valentines':
-        return Icons.favorite; // Heart
+        return Icons.favorite;
       case 'sub_st_patricks':
-        return Icons.local_florist; // Clover/flower
+        return Icons.local_florist;
       // Sports
       case 'sub_kc':
-        return Icons.sports_football; // Football
+        return Icons.sports_football;
       case 'sub_seattle':
         return Icons.sports_football;
       case 'sub_rb_generic':
       case 'sub_gy_generic':
       case 'sub_ob_generic':
-        return Icons.emoji_events; // Trophy
+        return Icons.emoji_events;
       // Seasonal
       case 'sub_spring':
-        return Icons.local_florist; // Flowers
+        return Icons.local_florist;
       case 'sub_summer':
-        return Icons.wb_sunny; // Sun
+        return Icons.wb_sunny;
       case 'sub_autumn':
-        return Icons.park; // Falling leaves
+        return Icons.park;
       case 'sub_winter':
-        return Icons.ac_unit; // Snowflake
+        return Icons.ac_unit;
       // Architectural
       case 'sub_warm_whites':
-        return Icons.wb_incandescent; // Warm bulb
+        return Icons.wb_incandescent;
       case 'sub_cool_whites':
-        return Icons.light_mode; // Cool light
+        return Icons.light_mode;
       case 'sub_gold_accents':
-        return Icons.auto_awesome; // Sparkle/gold
+        return Icons.auto_awesome;
       case 'sub_security_floods':
-        return Icons.flashlight_on; // Flood light
+        return Icons.flashlight_on;
       // Party
       case 'sub_birthday':
-        return Icons.cake; // Birthday cake
+        return Icons.cake;
       case 'sub_elegant_dinner':
-        return Icons.restaurant; // Dinner
+        return Icons.restaurant;
       case 'sub_rave':
-        return Icons.speaker; // Music/rave
+        return Icons.speaker;
       case 'sub_baby_shower':
-        return Icons.child_friendly; // Baby
+        return Icons.child_friendly;
       default:
-        return Icons.palette; // Default
+        return Icons.palette;
+    }
+  }
+
+  /// Handpicked gradient pairs for each subcategory — curated for card aesthetics.
+  List<Color> _gradientForSubCategory(String subId) {
+    switch (subId) {
+      // Holidays
+      case 'sub_xmas':
+        return const [Color(0xFF2E7D32), Color(0xFFC62828)]; // Deep green → deep red
+      case 'sub_halloween':
+        return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)]; // Vivid orange → purple
+      case 'sub_july4':
+        return const [Color(0xFFEF5350), Color(0xFF1565C0)]; // Red → blue
+      case 'sub_easter':
+        return const [Color(0xFFF8BBD0), Color(0xFFB39DDB)]; // Soft pink → lavender
+      case 'sub_valentines':
+        return const [Color(0xFFE91E63), Color(0xFFAD1457)]; // Hot pink → deep rose
+      case 'sub_st_patricks':
+        return const [Color(0xFF43A047), Color(0xFF00C853)]; // Forest green → bright green
+      // Sports
+      case 'sub_kc':
+        return const [Color(0xFFD32F2F), Color(0xFFFFB300)]; // Red → gold
+      case 'sub_seattle':
+        return const [Color(0xFF1B5E20), Color(0xFF1565C0)]; // Green → blue
+      case 'sub_rb_generic':
+        return const [Color(0xFFD32F2F), Color(0xFF1565C0)]; // Red → blue
+      case 'sub_gy_generic':
+        return const [Color(0xFF2E7D32), Color(0xFFF9A825)]; // Green → yellow
+      case 'sub_ob_generic':
+        return const [Color(0xFFEF6C00), Color(0xFF1565C0)]; // Orange → blue
+      // Seasonal
+      case 'sub_spring':
+        return const [Color(0xFF81C784), Color(0xFFF48FB1)]; // Fresh green → pink
+      case 'sub_summer':
+        return const [Color(0xFFFFEE58), Color(0xFF29B6F6)]; // Sunny yellow → sky blue
+      case 'sub_autumn':
+        return const [Color(0xFFFF8F00), Color(0xFF6D4C41)]; // Amber → brown
+      case 'sub_winter':
+        return const [Color(0xFF81D4FA), Color(0xFF7E57C2)]; // Icy blue → purple
+      // Architectural
+      case 'sub_warm_whites':
+        return const [Color(0xFFFFB74D), Color(0xFFFF8A65)]; // Warm amber → peach
+      case 'sub_cool_whites':
+        return const [Color(0xFF90A4AE), Color(0xFFE0E0E0)]; // Steel → silver
+      case 'sub_gold_accents':
+        return const [Color(0xFFFFD54F), Color(0xFFFFA000)]; // Light gold → deep gold
+      case 'sub_security_floods':
+        return const [Color(0xFFE0E0E0), Color(0xFF4FC3F7)]; // White → alert blue
+      // Party
+      case 'sub_birthday':
+        return const [Color(0xFF00E5FF), Color(0xFFFF4081)]; // Cyan → pink
+      case 'sub_elegant_dinner':
+        return const [Color(0xFFFFB74D), Color(0xFF5D4037)]; // Amber → espresso
+      case 'sub_rave':
+        return const [Color(0xFFAA00FF), Color(0xFF00E5FF)]; // Electric purple → cyan
+      case 'sub_baby_shower':
+        return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)]; // Baby blue → baby pink
+      default:
+        return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
+    }
+  }
+
+  /// Handpicked accent color for each subcategory.
+  Color _accentForSubCategory(String subId) {
+    switch (subId) {
+      // Holidays
+      case 'sub_xmas':
+        return const Color(0xFF4CAF50); // Christmas green
+      case 'sub_halloween':
+        return const Color(0xFFFF6D00); // Pumpkin orange
+      case 'sub_july4':
+        return const Color(0xFFEF5350); // Patriot red
+      case 'sub_easter':
+        return const Color(0xFFF8BBD0); // Pastel pink
+      case 'sub_valentines':
+        return const Color(0xFFE91E63); // Hot pink
+      case 'sub_st_patricks':
+        return const Color(0xFF00C853); // Bright green
+      // Sports
+      case 'sub_kc':
+        return const Color(0xFFD32F2F); // KC red
+      case 'sub_seattle':
+        return const Color(0xFF43A047); // Seattle green
+      case 'sub_rb_generic':
+        return const Color(0xFFEF5350); // Red
+      case 'sub_gy_generic':
+        return const Color(0xFF66BB6A); // Green
+      case 'sub_ob_generic':
+        return const Color(0xFFEF6C00); // Orange
+      // Seasonal
+      case 'sub_spring':
+        return const Color(0xFFF48FB1); // Spring pink
+      case 'sub_summer':
+        return const Color(0xFFFFEE58); // Sunny yellow
+      case 'sub_autumn':
+        return const Color(0xFFFF8F00); // Autumn amber
+      case 'sub_winter':
+        return const Color(0xFF81D4FA); // Icy blue
+      // Architectural
+      case 'sub_warm_whites':
+        return const Color(0xFFFFB74D); // Warm amber
+      case 'sub_cool_whites':
+        return const Color(0xFF90A4AE); // Cool steel
+      case 'sub_gold_accents':
+        return const Color(0xFFFFD54F); // Gold
+      case 'sub_security_floods':
+        return const Color(0xFF4FC3F7); // Alert blue
+      // Party
+      case 'sub_birthday':
+        return const Color(0xFF00E5FF); // Electric cyan
+      case 'sub_elegant_dinner':
+        return const Color(0xFFFFB74D); // Warm amber
+      case 'sub_rave':
+        return const Color(0xFFAA00FF); // Electric purple
+      case 'sub_baby_shower':
+        return const Color(0xFF80DEEA); // Baby blue
+      default:
+        return NexGenPalette.cyan;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = sub.themeColors;
-    final gradientColors = colors.isEmpty
-        ? [NexGenPalette.violet, NexGenPalette.cyan]
-        : (colors.length == 1 ? [colors[0], colors[0]] : colors.take(2).toList());
-    final accentColor = gradientColors.first;
     final heroIcon = _heroIconForSubCategory(sub.id);
+    final accentColor = _accentForSubCategory(sub.id);
+    final gradientColors = _gradientForSubCategory(sub.id);
 
     return Material(
       color: Colors.transparent,
@@ -3180,13 +3295,12 @@ class _SubCategoryCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
-            // Premium gradient background matching main category cards
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
                 gradientColors[0].withValues(alpha: 0.25),
-                gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.15) : gradientColors[0].withValues(alpha: 0.15),
+                gradientColors[1].withValues(alpha: 0.15),
                 NexGenPalette.matteBlack.withValues(alpha: 0.95),
               ],
               stops: const [0.0, 0.4, 1.0],
@@ -3199,28 +3313,28 @@ class _SubCategoryCard extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: accentColor.withValues(alpha: 0.2),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: Stack(
             children: [
-              // Radial glow behind icon
+              // Large radial glow behind icon
               Positioned(
-                top: 8,
+                top: 10,
                 left: 0,
                 right: 0,
                 child: Center(
                   child: Container(
-                    width: 70,
-                    height: 70,
+                    width: 90,
+                    height: 90,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: RadialGradient(
                         colors: [
                           gradientColors[0].withValues(alpha: 0.3),
-                          gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.1) : Colors.transparent,
+                          gradientColors[1].withValues(alpha: 0.1),
                           Colors.transparent,
                         ],
                         stops: const [0.0, 0.5, 1.0],
@@ -3235,28 +3349,28 @@ class _SubCategoryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Hero icon - centered and prominent
+                    // Single hero icon - centered and prominent
                     Expanded(
                       child: Center(
                         child: Icon(
                           heroIcon,
-                          size: 42,
+                          size: 52,
                           color: Colors.white,
                           shadows: [
                             Shadow(
                               color: accentColor.withValues(alpha: 0.8),
-                              blurRadius: 20,
+                              blurRadius: 24,
                             ),
                             Shadow(
                               color: gradientColors[0].withValues(alpha: 0.5),
-                              blurRadius: 14,
+                              blurRadius: 16,
                             ),
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 4),
-                    // Category name with arrow
+                    // Subcategory name with arrow
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
