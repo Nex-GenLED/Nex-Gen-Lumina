@@ -5138,7 +5138,7 @@ class _LibraryNodeGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.4,
+        childAspectRatio: 1.75,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
@@ -6073,7 +6073,7 @@ class _PalettePatternGrid extends ConsumerWidget {
                         crossAxisCount: 3,
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
-                        childAspectRatio: 0.75,
+                        childAspectRatio: 0.88,
                       ),
                       itemCount: patterns.length,
                       itemBuilder: (context, index) {

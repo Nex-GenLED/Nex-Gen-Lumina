@@ -240,12 +240,12 @@ class BigEventLibraryBuilder {
     String parentId,
     int sortOrder,
   ) {
-    final mergedColors = [
+    final mergedColors = _deduplicateColors([
       event.team1.colors.first,
       event.team2.colors.first,
       if (event.team1.colors.length > 1) event.team1.colors[1],
       if (event.team2.colors.length > 1) event.team2.colors[1],
-    ];
+    ]);
 
     return LibraryNode(
       id: BigEventFolderIds.mergedFolder(event.id),
@@ -277,14 +277,33 @@ class BigEventLibraryBuilder {
         ? event.team2.colors[1]
         : _lightenColor(team2Primary);
 
+    final samePrimary = team1Primary.value == team2Primary.value;
+
+    // When both teams share a primary color (e.g. Seahawks & Patriots both
+    // use Navy 0xFF002244), we must reorder so each team's distinctive
+    // secondary color appears within WLED's 3-color limit.
+    //
+    // distinctPair  – 2 visually different colors for pulse / comet effects
+    // distinctTrio  – 3 unique colors for wave / gradient / harmony effects
+    // allUnique     – all unique colors for chase / fireworks effects
+    final distinctPair = samePrimary
+        ? [team1Secondary, team2Secondary]
+        : [team1Primary, team2Primary];
+    final distinctTrio = samePrimary
+        ? [team1Primary, team1Secondary, team2Secondary]
+        : [team1Primary, team2Primary, team1Secondary];
+    final allUnique = _deduplicateColors(
+        [team1Primary, team1Secondary, team2Primary, team2Secondary]);
+
     // 50/50 House Split
+    // (actual WLED payload uses segment split from metadata team colors)
     nodes.add(LibraryNode(
       id: '${parentId}_house_split',
       name: 'House Divided',
       description: 'Half ${event.team1.name}, half ${event.team2.name}',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary],
+      themeColors: distinctTrio,
       sortOrder: 0,
       metadata: {
         'suggestedEffects': [0], // Solid with segment split
@@ -304,7 +323,7 @@ class BigEventLibraryBuilder {
       description: 'Alternating ${event.team1.name} and ${event.team2.name}',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary, team1Secondary, team2Secondary],
+      themeColors: allUnique,
       sortOrder: 1,
       metadata: {
         'suggestedEffects': [0, 41], // Solid stripes or Running
@@ -323,7 +342,7 @@ class BigEventLibraryBuilder {
       description: '${event.team1.name} flows to ${event.team2.name} and back',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary],
+      themeColors: distinctTrio,
       sortOrder: 2,
       metadata: {
         'suggestedEffects': [43, 40], // Gradient or Oscillate
@@ -340,7 +359,7 @@ class BigEventLibraryBuilder {
       description: 'Team colors chase each other',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary, team1Secondary, team2Secondary],
+      themeColors: allUnique,
       sortOrder: 3,
       metadata: {
         'suggestedEffects': [28, 9], // Chase 2, Colorful
@@ -357,7 +376,7 @@ class BigEventLibraryBuilder {
       description: 'Both teams\' colors in rotation',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team1Secondary, team2Primary, team2Secondary],
+      themeColors: allUnique,
       sortOrder: 4,
       metadata: {
         'suggestedEffects': [12, 41], // Theater Chase, Running
@@ -374,7 +393,7 @@ class BigEventLibraryBuilder {
       description: 'Breathe between both teams',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary],
+      themeColors: distinctPair,
       sortOrder: 5,
       metadata: {
         'suggestedEffects': [2], // Breathe
@@ -391,7 +410,7 @@ class BigEventLibraryBuilder {
       description: 'Smooth blend of both teams',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary],
+      themeColors: distinctTrio,
       sortOrder: 6,
       metadata: {
         'suggestedEffects': [43, 110], // Gradient, Flow
@@ -408,7 +427,7 @@ class BigEventLibraryBuilder {
       description: 'Celebratory fireworks in both colors',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary, team1Secondary, team2Secondary],
+      themeColors: allUnique,
       sortOrder: 7,
       metadata: {
         'suggestedEffects': [66, 89], // Fireworks, Fireworks 1D
@@ -424,7 +443,7 @@ class BigEventLibraryBuilder {
       description: 'Comet trails in team colors',
       nodeType: LibraryNodeType.palette,
       parentId: parentId,
-      themeColors: [team1Primary, team2Primary],
+      themeColors: distinctPair,
       sortOrder: 8,
       metadata: {
         'suggestedEffects': [65], // Comet
@@ -461,6 +480,15 @@ class BigEventLibraryBuilder {
   static Color _lightenColor(Color color) {
     final hsl = HSLColor.fromColor(color);
     return hsl.withLightness((hsl.lightness + 0.2).clamp(0.0, 1.0)).toColor();
+  }
+
+  /// Remove duplicate colors (by ARGB value) while preserving order.
+  static List<Color> _deduplicateColors(List<Color> colors) {
+    final seen = <int>{};
+    return [
+      for (final c in colors)
+        if (seen.add(c.value)) c,
+    ];
   }
 }
 
