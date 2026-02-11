@@ -8,6 +8,10 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/favorite_heart_button.dart';
+import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
+import 'package:nexgen_command/nav.dart' show AppRoutes;
+import 'package:go_router/go_router.dart';
 
 /// Helper to convert RGB to RGBW format for WLED.
 List<int> _rgbToRgbw(int r, int g, int b) => [r, g, b, 0];
@@ -182,6 +186,41 @@ class _ColorwayEffectSelectorPageState
                         ),
                       ),
                   ],
+                ),
+              ),
+              // Heart / favorite button
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FavoriteHeartButton(
+                  patternId: widget.paletteNode.id,
+                  patternName: widget.paletteNode.name,
+                  patternData: {
+                    'colors': _paletteColors.map((c) => c.value).toList(),
+                    'nodeType': 'palette',
+                  },
+                  size: 24,
+                ),
+              ),
+              // Open in full pattern editor
+              IconButton(
+                onPressed: () {
+                  final effectId = ref.read(selectorEffectIdProvider);
+                  final speed = ref.read(selectorSpeedProvider);
+                  final intensity = ref.read(selectorIntensityProvider);
+                  final pattern = EditablePattern.fromGradientColors(
+                    id: widget.paletteNode.id,
+                    name: widget.paletteNode.name,
+                    colors: _paletteColors,
+                    effectId: effectId,
+                    speed: speed,
+                    intensity: intensity,
+                  );
+                  context.push(AppRoutes.editPattern, extra: pattern);
+                },
+                icon: const Icon(Icons.tune, size: 20),
+                tooltip: 'Open in Pattern Editor',
+                style: IconButton.styleFrom(
+                  foregroundColor: NexGenPalette.textMedium,
                 ),
               ),
               // Apply button

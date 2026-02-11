@@ -117,6 +117,15 @@ class RooflineEditorState extends State<RooflineEditor> {
   /// Check if there are enough points for a valid roofline
   bool get hasValidRoofline => _points.length >= 2;
 
+  /// Set points programmatically (e.g. from auto-detect).
+  void setPoints(List<Offset> points) {
+    setState(() => _points = List.from(points));
+    _notifyChange();
+  }
+
+  /// Get the image provider for external use (e.g. auto-detect).
+  ImageProvider get currentImageProvider => widget.imageProvider;
+
   void _notifyChange() {
     widget.onChanged?.call(getMask());
   }

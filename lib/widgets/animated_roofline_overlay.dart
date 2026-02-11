@@ -41,6 +41,12 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Set to true when the overlay is used with a cover-fitted image.
   final bool useBoxFitCover;
 
+  /// Background color for non-active pixels (default black/off).
+  final Color backgroundColor;
+
+  /// Number of consecutive LEDs per color group in repeating patterns.
+  final int colorGroupSize;
+
   const AnimatedRooflineOverlay({
     super.key,
     this.previewColors,
@@ -52,6 +58,8 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
     this.targetAspectRatio,
     this.imageAlignment = Offset.zero,
     this.useBoxFitCover = false,
+    this.backgroundColor = const Color(0xFF000000),
+    this.colorGroupSize = 1,
   });
 
   @override
@@ -86,8 +94,6 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     final arPreview = ref.watch(arPreviewProvider);
 
     // Determine effective values (preview overrides live state)
-    final isPreviewMode = widget.previewColors != null || arPreview.isActive;
-
     List<Color> effectiveColors;
     int effectiveEffectId;
     int effectiveSpeed;
@@ -157,6 +163,8 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             targetAspectRatio: widget.targetAspectRatio,
             imageAlignment: widget.imageAlignment,
             useBoxFitCover: widget.useBoxFitCover,
+            backgroundColor: widget.backgroundColor,
+            colorGroupSize: widget.colorGroupSize,
           ),
           size: Size.infinite,
         );
@@ -170,12 +178,16 @@ class StaticRooflineOverlay extends StatelessWidget {
   final List<Color> colors;
   final RooflineMask? mask;
   final int brightness;
+  final Color backgroundColor;
+  final int colorGroupSize;
 
   const StaticRooflineOverlay({
     super.key,
     required this.colors,
     this.mask,
     this.brightness = 255,
+    this.backgroundColor = const Color(0xFF000000),
+    this.colorGroupSize = 1,
   });
 
   @override
@@ -188,6 +200,8 @@ class StaticRooflineOverlay extends StatelessWidget {
         mask: mask,
         isOn: true,
         brightness: brightness,
+        backgroundColor: backgroundColor,
+        colorGroupSize: colorGroupSize,
       ),
       size: Size.infinite,
     );

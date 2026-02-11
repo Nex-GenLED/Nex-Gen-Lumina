@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/widgets/navigation/navigation.dart';
 
 // Feature imports
 import 'package:nexgen_command/features/auth/login_page.dart';
@@ -36,6 +38,8 @@ import 'package:nexgen_command/features/site/remote_access_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/design/design_studio_screen.dart';
+import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
+import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/design_studio/screens/ai_design_studio_screen.dart';
 import 'package:nexgen_command/features/design/my_designs_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
@@ -332,7 +336,7 @@ class AppRouter {
           } else if (extra is PatternCategory) {
             name = extra.name;
           }
-          return NoTransitionPage(child: CategoryDetailScreen(categoryId: id, categoryName: name));
+          return NoTransitionPage(child: _PersistentNavBar(child: CategoryDetailScreen(categoryId: id, categoryName: name)));
         },
       ),
       GoRoute(
@@ -344,14 +348,14 @@ class AppRouter {
           String? displayName;
           final extra = state.extra;
           if (extra is Map && extra['name'] is String) displayName = extra['name'] as String;
-          return NoTransitionPage(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
+          return NoTransitionPage(child: _PersistentNavBar(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName)));
         },
       ),
       // Library hierarchy routes
       GoRoute(
         path: AppRoutes.libraryRoot,
         name: 'library-root',
-        pageBuilder: (context, state) => const NoTransitionPage(child: LibraryBrowserScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const LibraryBrowserScreen())),
       ),
       GoRoute(
         path: AppRoutes.libraryNode,
@@ -365,113 +369,121 @@ class AppRouter {
           } else if (extra is LibraryNode) {
             nodeName = extra.name;
           }
-          return NoTransitionPage(child: LibraryBrowserScreen(nodeId: nodeId, nodeName: nodeName));
+          return NoTransitionPage(child: _PersistentNavBar(child: LibraryBrowserScreen(nodeId: nodeId, nodeName: nodeName)));
         },
       ),
       GoRoute(
         path: AppRoutes.settings,
         name: 'settings',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SettingsPage()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const SettingsPage())),
       ),
       GoRoute(
         path: AppRoutes.settingsSystem,
         name: 'settings-system',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SystemManagementScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const SystemManagementScreen())),
       ),
       GoRoute(
         path: AppRoutes.neighborhoodSync,
         name: 'neighborhood-sync',
-        pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const NeighborhoodSyncScreen())),
       ),
       GoRoute(
         path: AppRoutes.controllersSettings,
         name: 'controllers-settings',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ManageControllersPage()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const ManageControllersPage())),
       ),
       GoRoute(
         path: AppRoutes.profile,
         name: 'profile',
-        pageBuilder: (context, state) => const NoTransitionPage(child: UserProfileScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const UserProfileScreen())),
       ),
       GoRoute(
         path: AppRoutes.profileEdit,
         name: 'profile-edit',
-        pageBuilder: (context, state) => const NoTransitionPage(child: EditProfileScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const EditProfileScreen())),
       ),
       GoRoute(
         path: AppRoutes.security,
         name: 'security',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SecuritySettingsScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const SecuritySettingsScreen())),
       ),
       GoRoute(
         path: AppRoutes.subUsers,
         name: 'sub-users',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const SubUsersScreen())),
       ),
       GoRoute(
         path: AppRoutes.deviceSetup,
         name: 'device-setup',
-        pageBuilder: (context, state) => const NoTransitionPage(child: DeviceSetupPage()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const DeviceSetupPage())),
       ),
       GoRoute(
         path: AppRoutes.wledZones,
         name: 'wled-zones',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ZoneConfigurationPage()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const ZoneConfigurationPage())),
       ),
       GoRoute(
         path: AppRoutes.hardwareConfig,
         name: 'hardware-config',
-        pageBuilder: (context, state) => const NoTransitionPage(child: HardwareConfigScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const HardwareConfigScreen())),
       ),
       GoRoute(
         path: AppRoutes.helpCenter,
         name: 'help-center',
-        pageBuilder: (context, state) => const NoTransitionPage(child: HelpCenterScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const HelpCenterScreen())),
       ),
       GoRoute(
         path: AppRoutes.referrals,
         name: 'referrals',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ReferralProgramScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const ReferralProgramScreen())),
       ),
       GoRoute(
         path: AppRoutes.luminaStudio,
         name: 'lumina-studio',
-        pageBuilder: (context, state) => const NoTransitionPage(child: LuminaStudioScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const LuminaStudioScreen())),
       ),
       GoRoute(
         path: AppRoutes.geofenceSetup,
         name: 'geofence-setup',
-        pageBuilder: (context, state) => const NoTransitionPage(child: GeofenceSetupScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const GeofenceSetupScreen())),
       ),
       GoRoute(
         path: AppRoutes.remoteAccess,
         name: 'remote-access',
-        pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const RemoteAccessScreen())),
       ),
       GoRoute(
         path: AppRoutes.designStudio,
         name: 'design-studio',
-        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const AIDesignStudioScreen())),
+      ),
+      GoRoute(
+        path: AppRoutes.editPattern,
+        name: 'edit-pattern',
+        pageBuilder: (context, state) {
+          final pattern = state.extra as EditablePattern?;
+          return MaterialPage(child: EditPatternScreen(initialPattern: pattern));
+        },
       ),
       GoRoute(
         path: AppRoutes.myDesigns,
         name: 'my-designs',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyDesignsScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const MyDesignsScreen())),
       ),
       GoRoute(
         path: AppRoutes.myScenes,
         name: 'my-scenes',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const MyScenesScreen())),
       ),
       GoRoute(
         path: AppRoutes.voiceAssistants,
         name: 'voice-assistants',
-        pageBuilder: (context, state) => const NoTransitionPage(child: VoiceAssistantGuideScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const VoiceAssistantGuideScreen())),
       ),
       GoRoute(
         path: AppRoutes.myProperties,
         name: 'my-properties',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const MyPropertiesScreen())),
       ),
       GoRoute(
         path: AppRoutes.rooflineEditor,
@@ -491,7 +503,7 @@ class AppRouter {
       GoRoute(
         path: AppRoutes.currentColors,
         name: 'current-colors',
-        pageBuilder: (context, state) => const NoTransitionPage(child: CurrentColorsEditorScreen()),
+        pageBuilder: (context, state) => NoTransitionPage(child: _PersistentNavBar(child: const CurrentColorsEditorScreen())),
       ),
       // Installer mode routes
       GoRoute(
@@ -540,6 +552,35 @@ class AppRouter {
   );
 }
 
+/// Wrapper that overlays the GlassDockNavBar on pushed sub-pages so the
+/// bottom navigation remains visible throughout the app.
+class _PersistentNavBar extends ConsumerWidget {
+  final Widget child;
+  const _PersistentNavBar({required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tabIndex = ref.watch(selectedTabIndexProvider);
+    return Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: GlassDockNavBar(
+            index: tabIndex,
+            onTap: (i) {
+              ref.read(selectedTabIndexProvider.notifier).state = i;
+              context.go(AppRoutes.dashboard);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Route path constants
 /// Use these instead of hard-coding route strings
 class AppRoutes {
@@ -568,6 +609,7 @@ class AppRoutes {
   static const String geofenceSetup = '/settings/geofence';
   static const String remoteAccess = '/settings/remote-access';
   static const String designStudio = '/design-studio';
+  static const String editPattern = '/edit-pattern';
   static const String myDesigns = '/my-designs';
   static const String myScenes = '/my-scenes';
   static const String voiceAssistants = '/settings/voice-assistants';

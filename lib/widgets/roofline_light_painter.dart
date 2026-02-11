@@ -34,6 +34,14 @@ class RooflineLightPainter extends CustomPainter {
   /// Whether the image is displayed with BoxFit.cover (true) or BoxFit.contain (false).
   final bool useBoxFitCover;
 
+  /// Background color for non-active pixels (default black/off).
+  /// Used in effects like Star/Twinkle where background pixels are visible.
+  final Color backgroundColor;
+
+  /// Number of consecutive LEDs per color in the repeating pattern.
+  /// With colorGroupSize=2 and 3 colors: AABBCCAABBCC...
+  final int colorGroupSize;
+
   RooflineLightPainter({
     required this.colors,
     this.animationPhase = 0.0,
@@ -47,6 +55,8 @@ class RooflineLightPainter extends CustomPainter {
     this.targetAspectRatio,
     this.imageAlignment = Offset.zero,
     this.useBoxFitCover = false,
+    this.backgroundColor = const Color(0xFF000000),
+    this.colorGroupSize = 1,
   });
 
   @override
@@ -208,143 +218,122 @@ class RooflineLightPainter extends CustomPainter {
     return positions;
   }
 
-  /// Paint solid color along the roofline path
+  /// Get the color for a specific LED index based on the action colors and group size.
+  Color _getColorForLed(int ledIndex, List<Color> colors) {
+    final groupSize = colorGroupSize.clamp(1, 10);
+    final colorIndex = (ledIndex ~/ groupSize) % colors.length;
+    return colors[colorIndex];
+  }
+
+  /// Draw a single crisp LED dot with optional glow halo.
+  void _drawLedDot(Canvas canvas, Offset pos, Color color, double brightness, {double radius = 3.0, bool showHalo = true}) {
+    // Skip fully transparent LEDs
+    if (brightness <= 0.01) return;
+
+    final adjustedColor = color.withValues(alpha: brightness);
+
+    if (showHalo) {
+      // Subtle glow halo around the dot (larger, transparent ring)
+      final haloPaint = Paint()
+        ..color = adjustedColor.withValues(alpha: 0.3 * brightness)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+      canvas.drawCircle(pos, radius + 2, haloPaint);
+    }
+
+    // Crisp filled LED dot - no blur, no BlendMode.screen
+    final dotPaint = Paint()
+      ..color = adjustedColor
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(pos, radius, dotPaint);
+
+    // Bright center highlight for "lit bulb" look
+    final highlightPaint = Paint()
+      ..color = Color.lerp(color, Colors.white, 0.4)!.withValues(alpha: 0.7 * brightness)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(pos, radius * 0.4, highlightPaint);
+  }
+
+  /// Paint solid color along the roofline path - crisp discrete dots.
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
-    // Draw subtle outer glow along the path (reduced height)
-    final glowPaint = Paint()
-      ..color = colors.first.withValues(alpha: 0.5 * brightness)
-      ..strokeWidth = 10
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..blendMode = BlendMode.screen
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-    canvas.drawPath(path, glowPaint);
-
-    // Draw main light line (tighter, more defined)
-    final mainPaint = Paint()
-      ..color = colors.first.withValues(alpha: 0.9 * brightness)
-      ..strokeWidth = 5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..blendMode = BlendMode.screen
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-    canvas.drawPath(path, mainPaint);
-
-    // Draw LED points for texture (smaller, brighter)
     for (int i = 0; i < positions.length; i++) {
-      final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
-      final color = colors[colorIndex];
-      final ledPaint = Paint()
-        ..color = color.withValues(alpha: 1.0 * brightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5);
-      canvas.drawCircle(positions[i], 2.5, ledPaint);
+      final color = _getColorForLed(i, colors);
+      _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
 
-  /// Paint breathing effect along path
+  /// Paint breathing effect along path - crisp dots with pulsing opacity.
   void _paintBreathePath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final breathePhase = math.sin(animationPhase * math.pi * 2);
-    final breatheIntensity = 0.4 + (breathePhase + 1) / 2 * 0.6;
+    final breatheIntensity = 0.3 + (breathePhase + 1) / 2 * 0.7;
     final effectiveBrightness = brightness * breatheIntensity;
 
-    // Tighter glow with higher opacity
-    final glowPaint = Paint()
-      ..color = colors.first.withValues(alpha: 0.8 * effectiveBrightness)
-      ..strokeWidth = 8 + breathePhase * 4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..blendMode = BlendMode.screen
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4 + breathePhase * 2);
-    canvas.drawPath(path, glowPaint);
-
-    // Core bright line
-    final corePaint = Paint()
-      ..color = colors.first.withValues(alpha: 1.0 * effectiveBrightness)
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..blendMode = BlendMode.screen;
-    canvas.drawPath(path, corePaint);
+    for (int i = 0; i < positions.length; i++) {
+      final color = _getColorForLed(i, colors);
+      _drawLedDot(canvas, positions[i], color, effectiveBrightness);
+    }
   }
 
-  /// Paint chase effect along path
+  /// Paint chase effect along path - crisp dots with trailing fade.
   void _paintChasePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
-    // Longer chase segment for smoother visual flow (40% of total length)
     final chaseLength = effectiveLedCount * 2 ~/ 5;
-    // Use smooth interpolation for chase position instead of floor()
     final chasePosition = animationPhase * effectiveLedCount;
+    final hasBgColor = backgroundColor != const Color(0xFF000000);
 
     for (int i = 0; i < positions.length; i++) {
-      // Calculate distance from chase head with smooth interpolation
       double distance = (i - chasePosition) % effectiveLedCount;
       if (distance < 0) distance += effectiveLedCount;
 
       if (distance < chaseLength) {
-        // Smooth fade using cosine curve for elegant transition
         final normalizedDist = distance / chaseLength;
         final trailFade = math.cos(normalizedDist * math.pi / 2);
-        final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
-        final color = colors[colorIndex];
-
-        // Brighter, tighter LED points
-        final ledPaint = Paint()
-          ..color = color.withValues(alpha: 1.0 * brightness * trailFade)
-          ..blendMode = BlendMode.screen
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2 + 2 * trailFade);
-        canvas.drawCircle(positions[i], 3 + 2 * trailFade, ledPaint);
+        final color = _getColorForLed(i, colors);
+        _drawLedDot(canvas, positions[i], color, brightness * trailFade, showHalo: trailFade > 0.5);
+      } else if (hasBgColor) {
+        // Show background color for non-active pixels
+        _drawLedDot(canvas, positions[i], backgroundColor, brightness * 0.6, showHalo: false);
       }
     }
   }
 
-  /// Paint rainbow/gradient effect along path
-  /// If colors has multiple entries, cycles through those colors instead of generating rainbow
+  /// Paint rainbow/gradient effect along path - crisp dots cycling through colors.
   void _paintRainbowPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    // Use provided colors if multiple are available, otherwise generate rainbow
     final usePatternColors = colors.length > 1;
 
     for (int i = 0; i < positions.length; i++) {
       Color color;
       if (usePatternColors) {
-        // Cycle through the pattern colors with animation
         final colorProgress = (i / positions.length + animationPhase) % 1.0;
         final colorIndex = (colorProgress * colors.length).floor() % colors.length;
         final nextIndex = (colorIndex + 1) % colors.length;
         final blend = (colorProgress * colors.length) % 1.0;
-
-        // Smooth interpolation between adjacent colors
         color = Color.lerp(colors[colorIndex], colors[nextIndex], blend) ?? colors[colorIndex];
       } else {
-        // Fall back to rainbow hue generation
         final hue = ((i / positions.length + animationPhase) % 1.0) * 360;
         color = HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor();
       }
 
-      // Brighter, tighter LED points
-      final ledPaint = Paint()
-        ..color = color.withValues(alpha: 1.0 * brightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      canvas.drawCircle(positions[i], 3.5, ledPaint);
+      _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
 
-  /// Paint twinkle effect along path
+  /// Paint twinkle/star effect along path - background color base + sparkling action colors.
   void _paintTwinklePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
-    // Much slower sparkle change rate for smooth, elegant animation
     final sparkleSet = (animationPhase * 10).floor();
     final random = math.Random(sparkleSet);
+    final hasBgColor = backgroundColor != const Color(0xFF000000);
 
-    // Base glow - tighter, brighter for consistent appearance
-    for (final pos in positions) {
-      final basePaint = Paint()
-        ..color = colors.first.withValues(alpha: 0.5 * brightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1);
-      canvas.drawCircle(pos, 2, basePaint);
+    // Base layer: show all LEDs at background color (or dim action color)
+    for (int i = 0; i < positions.length; i++) {
+      if (hasBgColor) {
+        _drawLedDot(canvas, positions[i], backgroundColor, brightness * 0.7, showHalo: false);
+      } else {
+        // Dim base dots when no BG color
+        final color = _getColorForLed(i, colors);
+        _drawLedDot(canvas, positions[i], color, brightness * 0.2, showHalo: false);
+      }
     }
 
-    // Calculate sparkle transition for smooth fade in/out
+    // Sparkle transition for smooth fade
     final sparklePhase = (animationPhase * 10) % 1.0;
     final fadeMultiplier = sparklePhase < 0.3
         ? sparklePhase / 0.3
@@ -352,48 +341,32 @@ class RooflineLightPainter extends CustomPainter {
             ? (1.0 - sparklePhase) / 0.3
             : 1.0;
 
-    // Reduced sparkle count based on display size for elegant effect
-    final maxSparkles = (effectiveLedCount / 15).ceil().clamp(3, 12);
-    final sparkleCount = (intensity / 40).ceil().clamp(2, maxSparkles);
+    final maxSparkles = (effectiveLedCount / 10).ceil().clamp(3, 15);
+    final sparkleCount = (intensity / 35).ceil().clamp(2, maxSparkles);
 
     for (int i = 0; i < sparkleCount; i++) {
       final posIndex = random.nextInt(positions.length);
       final pos = positions[posIndex];
       final sparkleOpacity = (0.7 + random.nextDouble() * 0.3) * fadeMultiplier;
-      final sparkleSize = 3.0 + random.nextDouble() * 3.0;
       final colorIndex = random.nextInt(colors.length);
-
-      // Brighter sparkles with tighter blur
-      final sparklePaint = Paint()
-        ..color = colors[colorIndex].withValues(alpha: sparkleOpacity * brightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      canvas.drawCircle(pos, sparkleSize, sparklePaint);
-    }
-  }
-
-  /// Paint wave effect along path
-  void _paintWavePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    for (int i = 0; i < positions.length; i++) {
-      // Lower wave frequency (1.5 cycles) for smoother, more elegant motion
-      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 1.5);
-      // Higher minimum brightness for more consistent appearance
-      final ledBrightness = 0.5 + (waveValue + 1) / 2 * 0.5;
-      final colorIndex = (i * colors.length ~/ positions.length) % colors.length;
       final color = colors[colorIndex];
 
-      // Tighter, brighter LED points
-      final ledPaint = Paint()
-        ..color = color.withValues(alpha: 1.0 * brightness * ledBrightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 1 + 1.5 * ledBrightness);
-      canvas.drawCircle(positions[i], 2.5 + 1.5 * ledBrightness, ledPaint);
+      _drawLedDot(canvas, pos, color, sparkleOpacity * brightness, radius: 3.5);
     }
   }
 
-  /// Paint fire effect along path
+  /// Paint wave effect along path - crisp dots with brightness oscillation.
+  void _paintWavePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
+    for (int i = 0; i < positions.length; i++) {
+      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 1.5);
+      final ledBrightness = 0.4 + (waveValue + 1) / 2 * 0.6;
+      final color = _getColorForLed(i, colors);
+      _drawLedDot(canvas, positions[i], color, brightness * ledBrightness, showHalo: ledBrightness > 0.7);
+    }
+  }
+
+  /// Paint fire effect along path - crisp dots with flickering fire colors.
   void _paintFirePath(Canvas canvas, List<Offset> positions, double brightness) {
-    // Slower flicker rate for more realistic fire effect
     final flickerSet = (animationPhase * 15).floor();
     final fireColors = [
       const Color(0xFFFF4500),
@@ -402,7 +375,6 @@ class RooflineLightPainter extends CustomPainter {
       const Color(0xFFFFAA00),
     ];
 
-    // Calculate flicker transition for smooth changes
     final flickerPhase = (animationPhase * 15) % 1.0;
     final transitionBlend = flickerPhase < 0.2
         ? flickerPhase / 0.2
@@ -411,19 +383,10 @@ class RooflineLightPainter extends CustomPainter {
             : 1.0;
 
     for (int i = 0; i < positions.length; i++) {
-      final pos = positions[i];
-      // Use position index in random seed for spatial consistency
       final posRandom = math.Random(flickerSet + i);
       final flicker = (0.6 + posRandom.nextDouble() * 0.4) * (0.7 + transitionBlend * 0.3);
       final colorIndex = posRandom.nextInt(fireColors.length);
-      final fireColor = fireColors[colorIndex];
-
-      // Tighter, brighter fire effect
-      final firePaint = Paint()
-        ..color = fireColor.withValues(alpha: 0.95 * brightness * flicker)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      canvas.drawCircle(pos, 3 + posRandom.nextDouble() * 1.5, firePaint);
+      _drawLedDot(canvas, positions[i], fireColors[colorIndex], brightness * flicker);
     }
   }
 
@@ -705,6 +668,8 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.mask != mask ||
         oldDelegate.targetAspectRatio != targetAspectRatio ||
         oldDelegate.imageAlignment != imageAlignment ||
-        oldDelegate.useBoxFitCover != useBoxFitCover;
+        oldDelegate.useBoxFitCover != useBoxFitCover ||
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.colorGroupSize != colorGroupSize;
   }
 }

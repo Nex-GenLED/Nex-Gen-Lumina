@@ -31,6 +31,7 @@ import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
+import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 
 /// Helper to execute custom Lumina effects (ID >= 1000).
 /// Returns true if the effect was a custom effect and was executed.
@@ -5556,6 +5557,19 @@ class _LibraryNodeCard extends StatelessWidget {
                   ),
                 ),
               ),
+              // Heart / favorite button
+              Positioned(
+                top: 6,
+                right: 6,
+                child: FavoriteHeartButton(
+                  patternId: node.id,
+                  patternName: node.name,
+                  patternData: {
+                    'nodeType': 'folder',
+                  },
+                  size: 18,
+                ),
+              ),
               // Content
               Padding(
                 padding: const EdgeInsets.all(12),
@@ -5663,6 +5677,23 @@ class _LibraryNodeCard extends StatelessWidget {
                 Icons.palette,
                 size: 70,
                 color: watermark,
+              ),
+            ),
+            // Heart / favorite button
+            Positioned(
+              top: 6,
+              right: 6,
+              child: FavoriteHeartButton(
+                patternId: node.id,
+                patternName: node.name,
+                patternData: {
+                  'colors': colors.map((c) => c.value).toList(),
+                  'nodeType': 'palette',
+                },
+                size: 20,
+                activeColor: isLight
+                    ? const Color(0xFFE91E63)
+                    : const Color(0xFFFF4081),
               ),
             ),
             // Content

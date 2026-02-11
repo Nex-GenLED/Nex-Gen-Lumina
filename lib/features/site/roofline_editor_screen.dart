@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/services/roofline_auto_detect_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/roofline_editor.dart';
 
@@ -21,6 +22,7 @@ class RooflineEditorScreen extends ConsumerStatefulWidget {
 class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
   final GlobalKey<RooflineEditorState> _editorKey = GlobalKey();
   bool _isSaving = false;
+  bool _isDetecting = false;
   RooflineMask _currentMask = RooflineMask.defaultMask;
 
   @override
@@ -187,7 +189,54 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
               ),
             ),
 
-            // Skip option
+            // Auto-detect and template options
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  // Auto-detect button
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isSaving || _isDetecting
+                          ? null
+                          : _autoDetectRoofline,
+                      icon: _isDetecting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: NexGenPalette.cyan,
+                              ),
+                            )
+                          : const Icon(Icons.auto_fix_high, size: 18),
+                      label: Text(_isDetecting ? 'Detecting...' : 'Auto-Detect'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: NexGenPalette.cyan,
+                        side: const BorderSide(color: NexGenPalette.cyan),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Templates button
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isSaving ? null : _showTemplates,
+                      icon: const Icon(Icons.dashboard_customize, size: 18),
+                      label: const Text('Templates'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: const BorderSide(color: NexGenPalette.line),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Default fallback
             TextButton(
               onPressed: _isSaving ? null : () => _useDefaultMask(),
               child: Text(
@@ -196,6 +245,103 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
               ),
             ),
             const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _autoDetectRoofline() async {
+    final editorState = _editorKey.currentState;
+    if (editorState == null) return;
+
+    setState(() => _isDetecting = true);
+
+    try {
+      final imageProvider = editorState.currentImageProvider;
+      final result = await RooflineAutoDetectService.detectFromImage(imageProvider);
+
+      if (!mounted) return;
+
+      if (result != null && result.points.length >= 2) {
+        editorState.setPoints(result.points);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Detected ${result.points.length} roofline points. Adjust if needed, then save.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Detection failed - offer templates
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not detect roofline. Try a template or draw manually.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Auto-detect failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Auto-detection failed. Try drawing manually.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDetecting = false);
+      }
+    }
+  }
+
+  void _showTemplates() {
+    final templates = RooflineAutoDetectService.templates;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Choose a Roofline Template',
+              style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Select the shape closest to your roofline, then adjust points manually.',
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                color: NexGenPalette.textMedium,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...templates.map((template) => ListTile(
+              leading: Icon(template.icon, color: NexGenPalette.cyan),
+              title: Text(template.name, style: const TextStyle(color: Colors.white)),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: NexGenPalette.textMedium),
+              onTap: () {
+                Navigator.pop(ctx);
+                _editorKey.currentState?.setPoints(template.points);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Applied "${template.name}" template. Adjust points, then save.'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            )),
           ],
         ),
       ),

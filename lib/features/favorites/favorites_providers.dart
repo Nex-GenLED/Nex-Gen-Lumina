@@ -3,7 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 
-/// Model representing a favorite pattern with usage metadata
+/// Model representing a favorite pattern with usage metadata.
+///
+/// Stores the full pattern state so it can be restored exactly:
+/// action colors, background color, effect, direction, speed, etc.
 class FavoritePattern {
   final String patternId;
   final String name;
@@ -12,6 +15,16 @@ class FavoritePattern {
   final Map<String, dynamic> wledPayload;
   final bool autoAdded;
 
+  // Rich pattern state for full restore
+  final List<int>? actionColorValues;
+  final int? backgroundColorValue;
+  final int? effectId;
+  final int? speed;
+  final int? intensity;
+  final int? brightness;
+  final int? colorGroupSize;
+  final String? direction;
+
   FavoritePattern({
     required this.patternId,
     required this.name,
@@ -19,6 +32,14 @@ class FavoritePattern {
     required this.lastUsed,
     required this.wledPayload,
     this.autoAdded = false,
+    this.actionColorValues,
+    this.backgroundColorValue,
+    this.effectId,
+    this.speed,
+    this.intensity,
+    this.brightness,
+    this.colorGroupSize,
+    this.direction,
   });
 
   factory FavoritePattern.fromFirestore(DocumentSnapshot doc) {
@@ -30,6 +51,14 @@ class FavoritePattern {
       lastUsed: (data['lastUsed'] as Timestamp?)?.toDate() ?? DateTime.now(),
       wledPayload: data['wledPayload'] as Map<String, dynamic>? ?? {},
       autoAdded: data['autoAdded'] as bool? ?? false,
+      actionColorValues: (data['actionColorValues'] as List?)?.cast<int>(),
+      backgroundColorValue: data['backgroundColorValue'] as int?,
+      effectId: data['effectId'] as int?,
+      speed: data['speed'] as int?,
+      intensity: data['intensity'] as int?,
+      brightness: data['brightness'] as int?,
+      colorGroupSize: data['colorGroupSize'] as int?,
+      direction: data['direction'] as String?,
     );
   }
 
@@ -40,6 +69,14 @@ class FavoritePattern {
       'lastUsed': Timestamp.fromDate(lastUsed),
       'wledPayload': wledPayload,
       'autoAdded': autoAdded,
+      if (actionColorValues != null) 'actionColorValues': actionColorValues,
+      if (backgroundColorValue != null) 'backgroundColorValue': backgroundColorValue,
+      if (effectId != null) 'effectId': effectId,
+      if (speed != null) 'speed': speed,
+      if (intensity != null) 'intensity': intensity,
+      if (brightness != null) 'brightness': brightness,
+      if (colorGroupSize != null) 'colorGroupSize': colorGroupSize,
+      if (direction != null) 'direction': direction,
     };
   }
 }
@@ -204,3 +241,16 @@ class FavoritesNotifier extends Notifier<void> {
 final favoritesNotifierProvider = NotifierProvider<FavoritesNotifier, void>(
   FavoritesNotifier.new,
 );
+
+/// Streams the set of all favorited pattern IDs for efficient lookup.
+/// Used by FavoriteHeartButton to show filled/outlined state without
+/// individual async calls per card.
+final favoritedPatternIdsProvider = StreamProvider<Set<String>>((ref) {
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) return Stream.value(<String>{});
+
+  return FirebaseFirestore.instance
+      .collection('users/${user.uid}/favorites')
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => d.id).toSet());
+});
