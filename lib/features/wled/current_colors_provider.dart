@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart';
-import 'package:nexgen_command/features/wled/pattern_models.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 /// Model representing the current colors being used by the WLED system
@@ -216,44 +215,63 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
   }
 
   /// Saves current colors as a custom pattern in Firestore
-  /// Patterns are saved to the user's designs collection and will appear in "My Designs"
-  Future<bool> saveAsCustomPattern(String patternName) async {
+  /// Uses the proper CustomDesign format so it appears in "My Designs"
+  Future<bool> saveAsCustomPattern(String patternName, WidgetRef ref) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
+      if (user == null) {
+        debugPrint('Error saving custom pattern: No user logged in');
+        return false;
+      }
 
-      // Create GradientPattern from current state
-      final pattern = GradientPattern(
-        name: patternName,
-        colors: state.colors,
+      // Convert current colors to LedColorGroup format
+      // Each color becomes a color group that can be applied to LEDs
+      final colorGroups = <LedColorGroup>[];
+      for (var i = 0; i < state.colors.length && i < 3; i++) {
+        final color = state.colors[i];
+        colorGroups.add(LedColorGroup(
+          startLed: i,
+          endLed: i,
+          color: [
+            (color.r * 255.0).round().clamp(0, 255),
+            (color.g * 255.0).round().clamp(0, 255),
+            (color.b * 255.0).round().clamp(0, 255),
+            0, // W=0 for saturated colors
+          ],
+        ));
+      }
+
+      // Create a single channel design with the current colors
+      final channel = ChannelDesign(
+        channelId: 0,
+        channelName: 'Main',
+        included: true,
+        colorGroups: colorGroups,
         effectId: state.effectId,
         speed: state.speed,
         intensity: state.intensity,
-        brightness: state.brightness,
+        reverse: false,
       );
 
-      // Save to Firestore under user's designs collection
-      // This will make it appear in "My Designs" section
-      final doc = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('designs')
-          .doc();
+      // Create the CustomDesign
+      final now = DateTime.now();
+      final design = CustomDesign(
+        id: '', // Empty = new design
+        name: patternName,
+        description: 'Created from color editor',
+        createdAt: now,
+        updatedAt: now,
+        ownerId: user.uid,
+        channels: [channel],
+        brightness: state.brightness,
+        tags: ['custom', 'color-editor'],
+      );
 
-      await doc.set({
-        'name': pattern.name,
-        'type': 'custom_color_pattern', // Mark as user-created color pattern
-        'colors': pattern.colors.map((c) => c.toARGB32()).toList(),
-        'effectId': pattern.effectId,
-        'effectName': _getEffectName(pattern.effectId),
-        'speed': pattern.speed,
-        'intensity': pattern.intensity,
-        'brightness': pattern.brightness,
-        'isStatic': pattern.effectId == 0,
-        'wledPayload': pattern.toWledPayload(), // Store the full WLED payload
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Save using the DesignService for consistency
+      final designService = ref.read(designServiceProvider);
+      await designService.saveDesign(user.uid, design);
+
+      debugPrint('Saved custom pattern "$patternName" successfully');
 
       // Apply the pattern immediately
       await applyTemporaryColors();
@@ -265,13 +283,9 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
     }
   }
 
-  /// Get effect name from effect ID
-  String _getEffectName(int effectId) {
-    return kEffectNames[effectId] ?? 'Effect #$effectId';
-  }
-
   /// Builds WLED JSON payload from current state
   /// Applies to ALL segments for consistent multi-segment control
+  /// Uses 'pal': 5 ("Colors Only") to ensure effects use segment colors
   Map<String, dynamic> _buildWledPayload() {
     // Convert colors to RGBW format
     final colArray = state.colors.take(3).map((c) {
@@ -290,6 +304,7 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
           'fx': state.effectId,
           'sx': state.speed,
           'ix': state.intensity,
+          'pal': 5, // "Colors Only" - prevents rainbow palette blending
           'col': colArray,
         }
       ],

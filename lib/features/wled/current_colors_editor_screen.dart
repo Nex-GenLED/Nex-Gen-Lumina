@@ -409,7 +409,7 @@ class CurrentColorsEditorScreen extends ConsumerWidget {
         builder: (context) => const Center(child: CircularProgressIndicator()),
       );
 
-      final success = await ref.read(currentColorsProvider.notifier).saveAsCustomPattern(patternName);
+      final success = await ref.read(currentColorsProvider.notifier).saveAsCustomPattern(patternName, ref);
 
       if (context.mounted) {
         Navigator.of(context).pop(); // Close loading dialog

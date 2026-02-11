@@ -319,7 +319,7 @@ class _ZonesChannelsTab extends ConsumerWidget {
               ]),
               const SizedBox(height: 12),
               Text(
-                '• Channels: Physical LED ports on your controller (up to 8 on Dig-Octa)\n'
+                '• Channels: Physical LED ports on your controller\n'
                 '• Segments: Logical groups of pixels within channels\n'
                 '• Zones: Named areas combining multiple segments (e.g., "Front Peak", "Garage")\n'
                 '• Roofline: The overall layout defining how your house is outlined',
@@ -354,7 +354,7 @@ class _HardwareTab extends ConsumerWidget {
                 Text('Hardware Configuration', style: Theme.of(context).textTheme.titleLarge),
               ]),
               const SizedBox(height: 8),
-              Text('Configure Dig‑Octa ports, LED counts, power limits, and LED type. Apply and reboot to take effect.', style: Theme.of(context).textTheme.bodyMedium),
+              Text('Configure controller ports, LED counts, power limits, and LED type. Apply and reboot to take effect.', style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: () => context.push(AppRoutes.hardwareConfig),

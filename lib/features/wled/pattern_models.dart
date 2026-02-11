@@ -318,6 +318,10 @@ class GradientPattern {
 
   /// Generate WLED payload from this pattern
   /// Forces W=0 for saturated colors to maintain color accuracy
+  /// CRITICAL: Uses 'pal': 5 ("Colors Only" palette) to ensure effects use
+  /// only the segment colors in 'col', not the rainbow default palette.
+  /// This fixes issues with effects like Spots Fade, Twinkle Fox, Chunchun, etc.
+  /// showing rainbow colors instead of the selected theme colors.
   Map<String, dynamic> toWledPayload() {
     // Force W=0 for pattern colors to prevent white LED from washing out saturated colors
     final cols = colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList();
@@ -331,7 +335,7 @@ class GradientPattern {
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
-          'pal': 0,
+          'pal': 5, // "Colors Only" - prevents rainbow palette blending
           'col': cols,
           'grp': 1,
           'spc': 0,

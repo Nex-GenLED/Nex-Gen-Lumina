@@ -115,7 +115,10 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
       debugPrint('✅ Controller is reachable!');
 
       final info = jsonDecode(response.body);
-      final deviceName = info['name'] ?? (_nameCtrl.text.isEmpty ? 'Controller $ip' : _nameCtrl.text);
+      // Prioritize user-provided name over WLED device name
+      final deviceName = _nameCtrl.text.trim().isNotEmpty
+          ? _nameCtrl.text.trim()
+          : 'My Controller';
 
       debugPrint('📝 Controller name: $deviceName');
 
@@ -376,7 +379,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           const SizedBox(height: 16),
           const Text(
             'Controller not found automatically.\n\n'
-            'Check your router\'s connected devices for "Dig-Octa" or "WLED" and enter its IP address below.',
+            'Check your router\'s connected devices list for your WLED controller and enter its IP address below.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70),
           ),

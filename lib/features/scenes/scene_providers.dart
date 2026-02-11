@@ -1,3 +1,4 @@
+import 'dart:ui' show Color;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -140,18 +141,41 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
       debugPrint('🎬 Applying scene "${scene.name}": $payload');
       final success = await repo.applyJson(payload);
 
-      // Log usage for learning
+      // Immediately update local state with scene colors and preset label
+      // This prevents the UI from showing stale colors during the polling delay
       if (success) {
+        // Update the active preset label
+        ref.read(activePresetLabelProvider.notifier).state = scene.name;
+
+        // Convert preview colors to Color objects for the color sequence
+        final colorSequence = scene.previewColors
+            .where((c) => c.length >= 3 && (c[0] > 0 || c[1] > 0 || c[2] > 0))
+            .map((c) => Color.fromARGB(255, c[0], c[1], c[2]))
+            .toList();
+
+        // Extract color names for display
+        final colorNames = scene.previewColors
+            .map((c) => _colorToName(c))
+            .toSet()
+            .toList();
+
+        // Update the wled state with scene colors immediately
+        final notifier = ref.read(wledStateProvider.notifier);
+        notifier.setLuminaPatternMetadata(
+          colorSequence: colorSequence,
+          colorNames: colorNames,
+          effectName: scene.name,
+        );
+
+        // Also update brightness if specified
+        if (scene.brightness > 0) {
+          notifier.setBrightness(scene.brightness);
+        }
+
+        // Log usage for learning
         final user = ref.read(authStateProvider).valueOrNull;
         if (user != null) {
           final userService = ref.read(userServiceProvider);
-
-          // Extract color names from preview colors
-          final colorNames = scene.previewColors
-              .map((c) => _colorToName(c))
-              .toSet()
-              .toList();
-
           await userService.logPatternUsage(
             userId: user.uid,
             colorNames: colorNames,

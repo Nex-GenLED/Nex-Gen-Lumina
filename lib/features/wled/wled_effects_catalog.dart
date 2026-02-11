@@ -19,6 +19,71 @@ enum ColorBehavior {
   usesPalette,
 }
 
+/// User-friendly effect mood categories for the effect selector UI.
+/// Named SelectorMood to avoid conflict with EffectMood in effect_mood_system.dart.
+enum SelectorMood {
+  calm,
+  magical,
+  party,
+  flowing,
+  dramatic,
+  colorful,
+}
+
+/// Extension to provide display strings for SelectorMood
+extension SelectorMoodDisplay on SelectorMood {
+  String get displayName {
+    switch (this) {
+      case SelectorMood.calm:
+        return 'Calm';
+      case SelectorMood.magical:
+        return 'Magical';
+      case SelectorMood.party:
+        return 'Party';
+      case SelectorMood.flowing:
+        return 'Flowing';
+      case SelectorMood.dramatic:
+        return 'Dramatic';
+      case SelectorMood.colorful:
+        return 'Colorful';
+    }
+  }
+
+  String get icon {
+    switch (this) {
+      case SelectorMood.calm:
+        return '〰';
+      case SelectorMood.magical:
+        return '✦';
+      case SelectorMood.party:
+        return '🎉';
+      case SelectorMood.flowing:
+        return '→';
+      case SelectorMood.dramatic:
+        return '☄';
+      case SelectorMood.colorful:
+        return '🌈';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case SelectorMood.calm:
+        return 'Relaxing, ambient effects';
+      case SelectorMood.magical:
+        return 'Twinkling, sparkling effects for celebrations';
+      case SelectorMood.party:
+        return 'High-energy, dynamic effects';
+      case SelectorMood.flowing:
+        return 'Smooth, sweeping motion';
+      case SelectorMood.dramatic:
+        return 'Bold, statement effects';
+      case SelectorMood.colorful:
+        return 'Auto-generated rainbow and color effects';
+    }
+  }
+}
+
 /// Extension to provide display strings for ColorBehavior
 extension ColorBehaviorDisplay on ColorBehavior {
   String get displayName {
@@ -69,6 +134,7 @@ class WledEffect {
   final bool requires2D;
   final bool requiresAudio;
   final ColorBehavior colorBehavior;
+  final bool usesColorLayout;
 
   const WledEffect({
     required this.id,
@@ -77,6 +143,7 @@ class WledEffect {
     this.requires2D = false,
     this.requiresAudio = false,
     this.colorBehavior = ColorBehavior.usesSelectedColors,
+    this.usesColorLayout = false,
   });
 
   /// Whether this effect respects the user's color selection
@@ -88,6 +155,9 @@ class WledEffect {
   bool get overridesColors =>
       colorBehavior == ColorBehavior.generatesOwnColors ||
       colorBehavior == ColorBehavior.usesPalette;
+
+  /// Get the user-friendly mood category for this effect (for selector UI)
+  SelectorMood get selectorMood => WledEffectsCatalog.getSelectorMood(category);
 }
 
 /// Effect category definitions for UI organization.
@@ -150,16 +220,16 @@ class WledEffectsCatalog {
     WledEffect(id: 26, name: 'Blink Rainbow', category: 'Basic', colorBehavior: ColorBehavior.generatesOwnColors),
     WledEffect(id: 34, name: 'Colorful', category: 'Basic', colorBehavior: ColorBehavior.generatesOwnColors),
     WledEffect(id: 35, name: 'Traffic Light', category: 'Basic', colorBehavior: ColorBehavior.generatesOwnColors),
-    WledEffect(id: 46, name: 'Gradient', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors),
+    WledEffect(id: 46, name: 'Gradient', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors, usesColorLayout: true),
     WledEffect(id: 47, name: 'Loading', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 56, name: 'Tri Fade', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors),
     WledEffect(id: 62, name: 'Oscillate', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 65, name: 'Palette', category: 'Basic', colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 68, name: 'Bpm', category: 'Basic', colorBehavior: ColorBehavior.usesPalette),
-    WledEffect(id: 83, name: 'Solid Pattern', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 84, name: 'Solid Pattern Tri', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 85, name: 'Spots', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 86, name: 'Spots Fade', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors),
+    WledEffect(id: 83, name: 'Solid Pattern', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 84, name: 'Solid Pattern Tri', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 85, name: 'Spots', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 86, name: 'Spots Fade', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors, usesColorLayout: true),
     WledEffect(id: 98, name: 'Percent', category: 'Basic', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 100, name: 'Heartbeat', category: 'Basic', colorBehavior: ColorBehavior.blendsSelectedColors),
     WledEffect(id: 108, name: 'Sine', category: 'Basic', colorBehavior: ColorBehavior.usesPalette),
@@ -205,17 +275,17 @@ class WledEffectsCatalog {
     WledEffect(id: 60, name: 'Scanner Dual', category: 'Scanner', colorBehavior: ColorBehavior.usesSelectedColors),
 
     // Sparkle effects
-    WledEffect(id: 17, name: 'Twinkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 20, name: 'Sparkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 21, name: 'Sparkle Dark', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 22, name: 'Sparkle+', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 49, name: 'Fairy', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 51, name: 'Fairytwinkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 74, name: 'Colortwinkles', category: 'Sparkle', colorBehavior: ColorBehavior.usesPalette),
+    WledEffect(id: 17, name: 'Twinkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 20, name: 'Sparkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 21, name: 'Sparkle Dark', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 22, name: 'Sparkle+', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 49, name: 'Fairy', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 51, name: 'Fairytwinkle', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 74, name: 'Colortwinkles', category: 'Sparkle', colorBehavior: ColorBehavior.usesPalette, usesColorLayout: true),
     WledEffect(id: 80, name: 'Twinklefox', category: 'Sparkle', colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 81, name: 'Twinklecat', category: 'Sparkle', colorBehavior: ColorBehavior.usesPalette),
-    WledEffect(id: 87, name: 'Glitter', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
-    WledEffect(id: 103, name: 'Solid Glitter', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors),
+    WledEffect(id: 87, name: 'Glitter', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
+    WledEffect(id: 103, name: 'Solid Glitter', category: 'Sparkle', colorBehavior: ColorBehavior.usesSelectedColors, usesColorLayout: true),
     WledEffect(id: 106, name: 'Twinkleup', category: 'Sparkle', colorBehavior: ColorBehavior.usesPalette),
 
     // Meteor effects
@@ -598,4 +668,61 @@ class WledEffectsCatalog {
     }
     return result;
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Effect Selector Mood Categories
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Map WLED category to user-friendly selector mood.
+  static SelectorMood getSelectorMood(String wledCategory) {
+    switch (wledCategory) {
+      case 'Basic':
+      case 'Ambient':
+        return SelectorMood.calm;
+      case 'Sparkle':
+      case 'Holiday':
+        return SelectorMood.magical;
+      case 'Chase':
+      case 'Strobe':
+      case 'Fireworks':
+      case 'Game':
+        return SelectorMood.party;
+      case 'Wipe':
+      case 'Scanner':
+        return SelectorMood.flowing;
+      case 'Meteor':
+      case 'Fire':
+        return SelectorMood.dramatic;
+      case 'Rainbow':
+      case 'Noise':
+      case 'Ripple':
+        return SelectorMood.colorful;
+      default:
+        return SelectorMood.calm;
+    }
+  }
+
+  /// Get standard effects grouped by selector mood, sorted alphabetically within each.
+  static Map<SelectorMood, List<WledEffect>> get effectsBySelectorMood {
+    final result = <SelectorMood, List<WledEffect>>{};
+    for (final mood in SelectorMood.values) {
+      final effects = standardEffects
+          .where((e) => getSelectorMood(e.category) == mood)
+          .toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      if (effects.isNotEmpty) {
+        result[mood] = effects;
+      }
+    }
+    return result;
+  }
+
+  /// Get selector mood for an effect ID.
+  static SelectorMood? getSelectorMoodById(int id) {
+    final effect = _effectsById[id];
+    return effect != null ? getSelectorMood(effect.category) : null;
+  }
+
+  /// Check if an effect uses color layout (LED grouping).
+  static bool effectUsesColorLayout(int id) => _effectsById[id]?.usesColorLayout ?? false;
 }

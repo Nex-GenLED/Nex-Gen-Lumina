@@ -541,6 +541,7 @@ extension DualTeamPatternPayload on LibraryNode {
     }
 
     // Default single-segment payload
+    // CRITICAL: Use 'pal': 5 ("Colors Only") to prevent rainbow palette blending
     final effects = suggestedEffects;
     final colors = themeColors ?? [];
 
@@ -552,7 +553,7 @@ extension DualTeamPatternPayload on LibraryNode {
           'fx': effects.isNotEmpty ? effects.first : 0,
           'sx': defaultSpeed,
           'ix': defaultIntensity,
-          'pal': 0,
+          'pal': 5, // "Colors Only" - use segment colors only
           'col': colors.take(3).map((c) => [c.red, c.green, c.blue, 0]).toList(),
         },
       ],

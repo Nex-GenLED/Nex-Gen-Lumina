@@ -28,6 +28,7 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 
@@ -4929,7 +4930,8 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                               setState(() => _isPaletteView = true);
                             }
                           });
-                          return _PalettePatternGrid(node: node);
+                          // Use the new simplified effect selector
+                          return ColorwayEffectSelectorPage(paletteNode: node);
                         }
                         // Show children as navigation grid
                         // For Architectural Downlighting, show Kelvin chart above the grid
@@ -5829,12 +5831,12 @@ class _PalettePatternGrid extends ConsumerWidget {
                       ),
                     )
                   : GridView.builder(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(12),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        childAspectRatio: 0.88,
+                        crossAxisCount: 4, // Match "Recommended for You" layout
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                        childAspectRatio: 0.85, // Slightly wider cards
                       ),
                       itemCount: patterns.length,
                       itemBuilder: (context, index) {
@@ -6201,51 +6203,34 @@ class _PatternCard extends ConsumerWidget {
       child: Container(
         decoration: BoxDecoration(
           color: NexGenPalette.gunmetal90,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: NexGenPalette.line),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Animated effect preview
+            // Animated effect preview - more prominent for compact cards
             Expanded(
-              flex: 2,
+              flex: 3,
               child: EffectPreviewWidget(
                 effectId: effectId,
                 colors: colors,
-                borderRadius: 12,
+                borderRadius: 10,
               ),
             ),
-            // Pattern info
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      pattern.name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (effectName != null)
-                      Text(
-                        effectName,
-                        style: TextStyle(
-                          color: NexGenPalette.textSecondary,
-                          fontSize: 9,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
+            // Pattern info - compact for 4-column layout
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Text(
+                pattern.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ),
           ],

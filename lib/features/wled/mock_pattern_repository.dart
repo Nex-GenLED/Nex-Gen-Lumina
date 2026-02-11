@@ -299,6 +299,7 @@ class MockPatternRepository {
             'col': col,
             'sx': adjustedSpeed,
             'ix': 128,
+            'pal': 5, // "Colors Only" - use segment colors only, no rainbow blending
           }
         ]
       };
@@ -1145,11 +1146,16 @@ class MockPatternRepository {
       final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
 
       // Build segment data
+      // CRITICAL: Set 'pal': 5 ("Colors Only" palette) to ensure effects use
+      // only the segment colors in 'col', not the rainbow default palette.
+      // This fixes issues with effects like Spots Fade, Twinkle Fox, etc.
+      // showing rainbow colors instead of the selected theme colors.
       final segData = <String, dynamic>{
         'fx': fxId,
         'col': col,
         'sx': adjustedSpeed,
         'ix': node.defaultIntensity,
+        'pal': 5, // "Colors Only" - prevents rainbow palette blending
       };
 
       // Add grouping and spacing for architectural patterns
@@ -1215,6 +1221,7 @@ class MockPatternRepository {
               'ix': dimBrightness, // Use dim level for intensity
               'grp': brightCount,
               'spc': dimCount,
+              'pal': 5, // "Colors Only" - use segment colors only
             }
           ]
         },
@@ -1238,6 +1245,7 @@ class MockPatternRepository {
             'ix': dimBrightness,
             'grp': brightCount,
             'spc': dimCount,
+            'pal': 5, // "Colors Only" - use segment colors only
           }
         ]
       },
@@ -1280,6 +1288,7 @@ class MockPatternRepository {
               'ix': effect.intensity,
               'grp': brightCount,
               'spc': dimCount,
+              'pal': 5, // "Colors Only" - use segment colors only
             }
           ]
         },
@@ -1310,6 +1319,7 @@ class MockPatternRepository {
               'ix': 180,
               'grp': brightCount,
               'spc': dimCount,
+              'pal': 5, // "Colors Only" - use segment colors only
             }
           ]
         },

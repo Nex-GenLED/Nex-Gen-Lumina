@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/sports_schedule_service.dart';
 import 'package:nexgen_command/services/big_event_service.dart';
@@ -1113,3 +1114,22 @@ final nodeMoodCountsProvider = FutureProvider.family<Map<EffectMood, int>, Strin
 
   return counts;
 });
+
+// ============================================================================
+// COLORWAY EFFECT SELECTOR PROVIDERS
+// ============================================================================
+
+/// Currently selected effect ID in the effect selector.
+final selectorEffectIdProvider = StateProvider<int>((ref) => 0);
+
+/// Speed value (0-255) in the effect selector.
+final selectorSpeedProvider = StateProvider<int>((ref) => 128);
+
+/// Intensity value (0-255) in the effect selector.
+final selectorIntensityProvider = StateProvider<int>((ref) => 128);
+
+/// Color layout (LEDs per color, 1-5) in the effect selector.
+final selectorColorGroupProvider = StateProvider<int>((ref) => 1);
+
+/// Which mood categories are expanded in the effect list.
+final selectorExpandedMoodsProvider = StateProvider<Set<SelectorMood>>((ref) => {SelectorMood.calm});
