@@ -104,6 +104,12 @@ class _ColorwayEffectSelectorPageState
     final intensity = ref.read(selectorIntensityProvider);
     final colorGroup = ref.read(selectorColorGroupProvider);
 
+    final effectName = WledEffectsCatalog.getName(effectId);
+    final notifier = ref.read(wledStateProvider.notifier);
+    final currentState = ref.read(wledStateProvider);
+    bool appliedToDevice = false;
+
+    // Try to send to device
     final repo = ref.read(wledRepositoryProvider);
     if (repo != null) {
       final cols = _paletteColors
@@ -129,23 +135,36 @@ class _ColorwayEffectSelectorPageState
         ]
       };
 
-      await repo.applyJson(payload);
+      try {
+        await repo.applyJson(payload);
+        appliedToDevice = currentState.connected;
+      } catch (e) {
+        debugPrint('Pattern apply failed (device offline?): $e');
+      }
     }
 
-    // Set pattern metadata for display on home screen
-    final effectName = WledEffectsCatalog.getName(effectId);
-    ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-      colorSequence: _paletteColors,
+    // Always update local preview state so roofline shows on house image
+    notifier.applyLocalPreview(
+      colors: _paletteColors,
+      effectId: effectId,
+      speed: speed,
+      intensity: intensity,
       effectName: '${widget.paletteNode.name} - $effectName',
     );
 
-    // Show a snackbar to confirm pattern was applied
+    // Show feedback with offline awareness
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Applied: ${WledEffectsCatalog.getName(effectId)}'),
+          content: Text(
+            appliedToDevice
+                ? 'Applied: $effectName'
+                : 'Preview: $effectName (device offline)',
+          ),
           duration: const Duration(seconds: 2),
-          backgroundColor: NexGenPalette.gunmetal,
+          backgroundColor: appliedToDevice
+              ? NexGenPalette.gunmetal
+              : Colors.orange.shade800,
         ),
       );
     }

@@ -428,6 +428,31 @@ class WledNotifier extends Notifier<WledStateModel> {
     debugPrint('🎨 Set Lumina pattern metadata: ${colorSequence?.length ?? 0} colors, effect: $effectName');
   }
 
+  /// Applies a pattern to the local preview state without requiring device connection.
+  /// This allows users to see the roofline LED preview on the house image even when
+  /// the WLED controller is offline. The next successful device poll will sync with
+  /// actual device state.
+  void applyLocalPreview({
+    required List<Color> colors,
+    required int effectId,
+    int speed = 128,
+    int intensity = 128,
+    int brightness = 255,
+    String? effectName,
+  }) {
+    state = state.copyWith(
+      isOn: true,
+      colorSequence: colors,
+      color: colors.isNotEmpty ? colors.first : Colors.white,
+      effectId: effectId,
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      customEffectName: effectName,
+    );
+    debugPrint('🎨 Applied local preview: ${colors.length} colors, effect: $effectName (offline OK)');
+  }
+
   /// Clears custom Lumina pattern metadata (e.g., when user manually adjusts pattern).
   /// The next poll will restore device-reported values.
   void clearLuminaPatternMetadata() {

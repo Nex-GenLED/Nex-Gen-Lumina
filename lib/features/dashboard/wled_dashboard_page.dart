@@ -463,7 +463,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             else if (!profileAsync.isLoading)
               Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.3)),
             // AR Roofline overlay - shows animated LED effects on the house
-            if (state.isOn && state.connected)
+            // Show preview when lights are on OR when local preview state is active
+            // (allows offline pattern preview without device connection)
+            if (state.isOn)
               Positioned.fill(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
