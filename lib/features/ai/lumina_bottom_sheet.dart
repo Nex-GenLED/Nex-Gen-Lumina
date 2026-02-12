@@ -12,7 +12,9 @@ import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_waveform_painter.dart';
-import 'package:nexgen_command/features/ai/light_preview_strip.dart';
+import 'package:nexgen_command/features/ai/lumina_response_card.dart';
+import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
+import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart' show selectedTabIndexProvider;
 import 'package:go_router/go_router.dart';
@@ -318,6 +320,17 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         preview: preview,
         wledPayload: result.wledPayload,
       );
+
+      // Sync voice refinement results to the adjustment panel if active
+      final adjState = ref.read(adjustmentStateProvider);
+      if (adjState != null && adjState.isExpanded && preview != null) {
+        final updated = LuminaLightingSuggestion.fromPreview(
+          responseText: result.responseText,
+          preview: preview,
+          wledPayload: result.wledPayload,
+        );
+        ref.read(adjustmentStateProvider.notifier).applyFromVoice(updated);
+      }
     } catch (e) {
       debugPrint('Lumina sheet send error: $e');
       controller.addAssistantMessage('I hit a snag: $e');
@@ -1047,6 +1060,10 @@ class _AssistantBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // If there's a lighting preview, render the full response card
+    final hasLightingSuggestion =
+        preview != null && preview!.colors.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -1069,133 +1086,60 @@ class _AssistantBubble extends StatelessWidget {
             ),
           ),
           Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Text response
-                Container(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: NexGenPalette.gunmetal,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(4),
-                      topRight: Radius.circular(16),
-                      bottomLeft: Radius.circular(16),
-                      bottomRight: Radius.circular(16),
-                    ),
-                    border: Border.all(
-                      color: NexGenPalette.line,
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Text(
-                    text,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: NexGenPalette.textHigh,
-                        ),
-                  ),
-                ),
-
-                // LED preview strip
-                if (preview != null && preview!.colors.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  LightPreviewStrip(
-                    colors: preview!.colors,
-                    ledCount: 20,
-                    ledSize: 8,
-                  ),
-                ],
-
-                // Action buttons
-                if (wledPayload != null) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      if (onApply != null)
-                        _ActionChip(
-                          label: 'Apply',
-                          icon: Icons.bolt_rounded,
-                          onTap: onApply!,
-                          primary: true,
-                        ),
-                      _ActionChip(
-                        label: 'Adjust',
-                        icon: Icons.tune_rounded,
-                        onTap: () {
-                          // Focus input for refinement
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+            child: hasLightingSuggestion
+                ? _buildResponseCard(context)
+                : _buildPlainBubble(context),
           ),
         ],
       ),
     );
   }
-}
 
-class _ActionChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool primary;
+  /// Full response card with preview, parameter summary, and actions.
+  Widget _buildResponseCard(BuildContext context) {
+    final suggestion = LuminaLightingSuggestion.fromPreview(
+      responseText: text,
+      preview: preview!,
+      wledPayload: wledPayload,
+    );
 
-  const _ActionChip({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.primary = false,
-  });
+    return LuminaResponseCard(
+      suggestion: suggestion,
+      onApply: onApply,
+      onAdjust: () {
+        // Placeholder for expanding inline adjustment panel
+      },
+      onSaveFavorite: wledPayload != null
+          ? () {
+              // Placeholder for save-as-favorite flow
+            }
+          : null,
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: primary
-                ? NexGenPalette.cyan.withValues(alpha: 0.15)
-                : NexGenPalette.gunmetal,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: primary
-                  ? NexGenPalette.cyan.withValues(alpha: 0.5)
-                  : NexGenPalette.line,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: primary ? NexGenPalette.cyan : NexGenPalette.textMedium,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: primary
-                      ? NexGenPalette.cyan
-                      : NexGenPalette.textHigh,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
+  /// Simple text-only bubble for conversational responses without lighting data.
+  Widget _buildPlainBubble(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 520),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(4),
+          topRight: Radius.circular(16),
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
         ),
+        border: Border.all(
+          color: NexGenPalette.line,
+          width: 0.5,
+        ),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: NexGenPalette.textHigh,
+            ),
       ),
     );
   }

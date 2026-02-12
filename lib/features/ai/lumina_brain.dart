@@ -9,6 +9,7 @@ import 'package:nexgen_command/openai/openai_config.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
+import 'package:nexgen_command/features/ai/command_intent_classifier.dart';
 import 'package:nexgen_command/services/pattern_analytics_service.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'dart:convert';
@@ -110,6 +111,17 @@ class LuminaBrain {
       }
     } catch (e) {
       debugPrint('Failed to inject global learning context: $e');
+    }
+
+    // Inject intent classification context so the AI knows whether to
+    // adjust the current scene or start fresh.
+    final classification = ref.read(latestClassificationProvider);
+    if (classification != null) {
+      final classHint =
+          CommandIntentClassifier.buildAIContextHint(classification);
+      contextBlock = '$contextBlock\n\n$classHint';
+      debugPrint('🏷️ Injected classification context: '
+          '${classification.classification.name}');
     }
 
     // Use higher temperature for open-ended queries to increase creativity

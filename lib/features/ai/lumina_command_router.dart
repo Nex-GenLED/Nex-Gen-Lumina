@@ -5,8 +5,17 @@ import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/local_command_parser.dart';
 import 'package:nexgen_command/features/ai/cloud_ai_processor.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
+import 'package:nexgen_command/features/ai/lumina_defaults_engine.dart';
+import 'package:nexgen_command/features/ai/command_intent_classifier.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
+
+/// The most recent enriched suggestion produced by [LuminaDefaultsEngine].
+///
+/// Read by `LuminaResponseCard` to show per-parameter confidence indicators.
+/// `null` when no enrichment has been performed yet.
+final latestEnrichedSuggestionProvider =
+    StateProvider<EnrichedSuggestion?>((ref) => null);
 
 /// Two-tier command router for the Lumina voice assistant.
 ///
@@ -31,6 +40,12 @@ class LuminaCommandRouter {
     final stopwatch = Stopwatch()..start();
 
     // ------------------------------------------------------------------
+    // CLASSIFY — Determine intent (adjustment vs new scene) before routing
+    // ------------------------------------------------------------------
+    final classification = CommandIntentClassifier.classify(ref, text);
+    ref.read(latestClassificationProvider.notifier).state = classification;
+
+    // ------------------------------------------------------------------
     // TIER 1 — Local keyword parser (instant)
     // ------------------------------------------------------------------
     final localParser = ref.read(localCommandParserProvider);
@@ -39,10 +54,11 @@ class LuminaCommandRouter {
         '⚡ Tier 1 parse: ${localCmd.type} (confidence: ${localCmd.confidence.toStringAsFixed(2)}) [${stopwatch.elapsedMilliseconds}ms]');
 
     if (localCmd.isHighConfidence) {
+      final localResult = await _executeLocal(ref, localCmd);
       stopwatch.stop();
       debugPrint(
           '✅ Tier 1 executing locally [${stopwatch.elapsedMilliseconds}ms total]');
-      return _executeLocal(ref, localCmd);
+      return _enrich(ref, localCmd, localResult, text);
     }
 
     // ------------------------------------------------------------------
@@ -60,7 +76,7 @@ class LuminaCommandRouter {
       stopwatch.stop();
       debugPrint(
           '✅ Tier 2 result: ${cloudResult.command?.type ?? "text-only"} [${stopwatch.elapsedMilliseconds}ms total]');
-      return cloudResult;
+      return _enrich(ref, cloudResult.command, cloudResult, text);
     } catch (e) {
       stopwatch.stop();
       debugPrint('❌ Tier 2 failed: $e [${stopwatch.elapsedMilliseconds}ms]');
@@ -69,6 +85,47 @@ class LuminaCommandRouter {
       // FALLBACK — Offer best-effort suggestions from partial Tier 1 parsing
       // ------------------------------------------------------------------
       return _buildFallback(localCmd, text);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Defaults enrichment
+  // ---------------------------------------------------------------------------
+
+  /// Enrich a command result with intelligent defaults via [LuminaDefaultsEngine].
+  ///
+  /// Navigation and power-off commands are passed through without enrichment.
+  /// The enriched suggestion is published to [latestEnrichedSuggestionProvider]
+  /// so that the UI (response card, adjustment panel) can display per-parameter
+  /// confidence indicators.
+  static Future<LuminaCommandResult> _enrich(
+    WidgetRef ref,
+    LuminaCommand? command,
+    LuminaCommandResult result,
+    String rawQuery,
+  ) async {
+    // Skip enrichment for navigation, power-off, and text-only results
+    if (command == null ||
+        command.type == LuminaCommandType.navigate ||
+        (command.type == LuminaCommandType.power &&
+            command.parameters['on'] == false)) {
+      return result;
+    }
+
+    try {
+      final enriched = await LuminaDefaultsEngine.fillDefaults(
+        command: command,
+        commandResult: result,
+        rawQuery: rawQuery,
+        ref: ref,
+      );
+      ref.read(latestEnrichedSuggestionProvider.notifier).state = enriched;
+      debugPrint(
+          '🎯 Defaults enriched: confidence=${enriched.confidence.overallConfidence.toStringAsFixed(2)}');
+      return result;
+    } catch (e) {
+      debugPrint('⚠️ Defaults enrichment failed (non-fatal): $e');
+      return result;
     }
   }
 
