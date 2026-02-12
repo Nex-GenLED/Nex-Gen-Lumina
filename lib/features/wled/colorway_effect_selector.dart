@@ -8,7 +8,6 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
@@ -17,7 +16,7 @@ import 'package:go_router/go_router.dart';
 List<int> _rgbToRgbw(int r, int g, int b) => [r, g, b, 0];
 
 /// Effect selector page that replaces the pattern grid.
-/// Shows a large live preview with categorized effect list.
+/// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final LibraryNode paletteNode;
 
@@ -47,6 +46,8 @@ class _ColorwayEffectSelectorPageState
       ref.read(selectorSpeedProvider.notifier).state = 128;
       ref.read(selectorIntensityProvider.notifier).state = 128;
       ref.read(selectorColorGroupProvider.notifier).state = 1;
+      ref.read(selectorMotionTypeProvider.notifier).state = null;
+      ref.read(selectorColorBehaviorProvider.notifier).state = null;
     });
   }
 
@@ -176,10 +177,20 @@ class _ColorwayEffectSelectorPageState
     final speed = ref.watch(selectorSpeedProvider);
     final intensity = ref.watch(selectorIntensityProvider);
     final colorGroup = ref.watch(selectorColorGroupProvider);
-    final expandedMoods = ref.watch(selectorExpandedMoodsProvider);
+    final motionFilter = ref.watch(selectorMotionTypeProvider);
+    final colorFilter = ref.watch(selectorColorBehaviorProvider);
 
     final effect = WledEffectsCatalog.getById(effectId);
     final showColorLayout = effect?.usesColorLayout ?? false;
+
+    // Build filtered effect list
+    final bool showingTopPicks = motionFilter == null && colorFilter == null;
+    final List<WledEffect> displayEffects = showingTopPicks
+        ? WledEffectsCatalog.topPicks
+        : WledEffectsCatalog.filterEffects(
+            motionType: motionFilter,
+            colorBehavior: colorFilter,
+          );
 
     // This widget is embedded in the library browser, so no Scaffold needed
     return Column(
@@ -205,19 +216,6 @@ class _ColorwayEffectSelectorPageState
                         ),
                       ),
                   ],
-                ),
-              ),
-              // Heart / favorite button
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: FavoriteHeartButton(
-                  patternId: widget.paletteNode.id,
-                  patternName: widget.paletteNode.name,
-                  patternData: {
-                    'colors': _paletteColors.map((c) => c.value).toList(),
-                    'nodeType': 'palette',
-                  },
-                  size: 24,
                 ),
               ),
               // Open in full pattern editor
@@ -259,7 +257,7 @@ class _ColorwayEffectSelectorPageState
 
         // Large preview
         Container(
-          height: 160,
+          height: 140,
           margin: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
@@ -274,7 +272,7 @@ class _ColorwayEffectSelectorPageState
           ),
         ),
 
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
 
         // Color layout selector (conditional)
         if (showColorLayout) _buildColorLayoutSelector(colorGroup),
@@ -301,13 +299,296 @@ class _ColorwayEffectSelectorPageState
 
         const SizedBox(height: 8),
 
-        // Effect list
+        // Motion type filter chips
+        _buildMotionFilterRow(motionFilter),
+
+        const SizedBox(height: 6),
+
+        // Color behavior filter chips
+        _buildColorFilterRow(colorFilter),
+
+        const SizedBox(height: 8),
+
+        // Section header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Text(
+                showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
+                style: TextStyle(
+                  color: NexGenPalette.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              if (!showingTopPicks) ...[
+                const Spacer(),
+                GestureDetector(
+                  onTap: () {
+                    ref.read(selectorMotionTypeProvider.notifier).state = null;
+                    ref.read(selectorColorBehaviorProvider.notifier).state = null;
+                  },
+                  child: Text(
+                    'Clear filters',
+                    style: TextStyle(
+                      color: NexGenPalette.cyan,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 6),
+
+        // Effect grid
         Expanded(
-          child: _buildEffectList(effectId, expandedMoods),
+          child: _buildEffectGrid(displayEffects, effectId),
         ),
       ],
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Filter Chip Rows
+  // ---------------------------------------------------------------------------
+
+  Widget _buildMotionFilterRow(MotionType? selected) {
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _buildFilterChip(
+            label: 'All',
+            icon: '⭐',
+            isSelected: selected == null,
+            onTap: () => ref.read(selectorMotionTypeProvider.notifier).state = null,
+          ),
+          for (final type in MotionType.values) ...[
+            const SizedBox(width: 6),
+            _buildFilterChip(
+              label: type.displayName,
+              icon: type.icon,
+              isSelected: selected == type,
+              onTap: () => ref.read(selectorMotionTypeProvider.notifier).state =
+                  selected == type ? null : type,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildColorFilterRow(ColorBehavior? selected) {
+    // Simplified color behavior options - merge usesSelected + blends into "My Colors"
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _buildFilterChip(
+            label: 'Any Color',
+            isSelected: selected == null,
+            onTap: () => ref.read(selectorColorBehaviorProvider.notifier).state = null,
+            subtle: true,
+          ),
+          const SizedBox(width: 6),
+          _buildFilterChip(
+            label: 'My Colors',
+            isSelected: selected == ColorBehavior.usesSelectedColors,
+            onTap: () => ref.read(selectorColorBehaviorProvider.notifier).state =
+                selected == ColorBehavior.usesSelectedColors ? null : ColorBehavior.usesSelectedColors,
+            subtle: true,
+          ),
+          const SizedBox(width: 6),
+          _buildFilterChip(
+            label: 'Blended',
+            isSelected: selected == ColorBehavior.blendsSelectedColors,
+            onTap: () => ref.read(selectorColorBehaviorProvider.notifier).state =
+                selected == ColorBehavior.blendsSelectedColors ? null : ColorBehavior.blendsSelectedColors,
+            subtle: true,
+          ),
+          const SizedBox(width: 6),
+          _buildFilterChip(
+            label: 'Auto Colors',
+            isSelected: selected == ColorBehavior.generatesOwnColors,
+            onTap: () => ref.read(selectorColorBehaviorProvider.notifier).state =
+                selected == ColorBehavior.generatesOwnColors ? null : ColorBehavior.generatesOwnColors,
+            subtle: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    String? icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+    bool subtle = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (subtle ? NexGenPalette.cyan.withValues(alpha: 0.15) : NexGenPalette.cyan.withValues(alpha: 0.2))
+              : NexGenPalette.gunmetal90,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Text(icon, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Effect Grid
+  // ---------------------------------------------------------------------------
+
+  Widget _buildEffectGrid(List<WledEffect> effects, int selectedEffectId) {
+    if (effects.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'No effects match these filters',
+            style: TextStyle(color: NexGenPalette.textSecondary),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: effects.length,
+      itemBuilder: (context, index) {
+        final effect = effects[index];
+        final isSelected = effect.id == selectedEffectId;
+        return _buildEffectTile(effect, isSelected);
+      },
+    );
+  }
+
+  Widget _buildEffectTile(WledEffect effect, bool isSelected) {
+    // Color behavior badge text
+    final badgeText = effect.colorBehavior.shortName;
+    final badgeColor = switch (effect.colorBehavior) {
+      ColorBehavior.usesSelectedColors => NexGenPalette.cyan,
+      ColorBehavior.blendsSelectedColors => Colors.purpleAccent,
+      ColorBehavior.generatesOwnColors => Colors.orange,
+      ColorBehavior.usesPalette => Colors.tealAccent,
+    };
+
+    return InkWell(
+      onTap: () {
+        ref.read(selectorEffectIdProvider.notifier).state = effect.id;
+        _sendToWled();
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? NexGenPalette.cyan.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: isSelected
+              ? Border.all(color: NexGenPalette.cyan, width: 1.5)
+              : null,
+        ),
+        child: Row(
+          children: [
+            // Mini preview
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: NexGenPalette.line),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: EffectPreviewWidget(
+                  effectId: effect.id,
+                  colors: _paletteColors,
+                  borderRadius: 8,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Effect name + color behavior badge
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    effect.name,
+                    style: TextStyle(
+                      color: isSelected
+                          ? NexGenPalette.cyan
+                          : NexGenPalette.textHigh,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    badgeText,
+                    style: TextStyle(
+                      color: badgeColor.withValues(alpha: 0.8),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Checkmark if selected
+            if (isSelected)
+              Icon(
+                Icons.check,
+                color: NexGenPalette.cyan,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Color Layout & Sliders (unchanged)
+  // ---------------------------------------------------------------------------
 
   Widget _buildColorLayoutSelector(int colorGroup) {
     return Container(
@@ -371,7 +652,6 @@ class _ColorwayEffectSelectorPageState
             }),
           ),
           const SizedBox(height: 8),
-          // Visual preview of pattern
           _buildColorLayoutPreview(colorGroup),
         ],
       ),
@@ -382,7 +662,6 @@ class _ColorwayEffectSelectorPageState
     final colors = _paletteColors.take(3).toList();
     if (colors.isEmpty) colors.add(Colors.white);
 
-    // Generate pattern preview dots
     final dots = <Widget>[];
     for (int i = 0; i < 18; i++) {
       final colorIndex = (i ~/ colorGroup) % colors.length;
@@ -469,151 +748,6 @@ class _ColorwayEffectSelectorPageState
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildEffectList(int selectedEffectId, Set<SelectorMood> expandedMoods) {
-    final effectsByMood = WledEffectsCatalog.effectsBySelectorMood;
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: SelectorMood.values.length,
-      itemBuilder: (context, index) {
-        final mood = SelectorMood.values[index];
-        final effects = effectsByMood[mood] ?? [];
-        if (effects.isEmpty) return const SizedBox.shrink();
-
-        final isExpanded = expandedMoods.contains(mood);
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: NexGenPalette.line),
-          ),
-          child: Column(
-            children: [
-              // Category header
-              InkWell(
-                onTap: () {
-                  final newSet = Set<SelectorMood>.from(expandedMoods);
-                  if (isExpanded) {
-                    newSet.remove(mood);
-                  } else {
-                    newSet.add(mood);
-                  }
-                  ref.read(selectorExpandedMoodsProvider.notifier).state =
-                      newSet;
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Text(
-                        mood.icon,
-                        style: const TextStyle(fontSize: 18),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${mood.displayName} (${effects.length})',
-                          style: const TextStyle(
-                            color: NexGenPalette.textHigh,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        color: NexGenPalette.textSecondary,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Effect tiles
-              if (isExpanded)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: Column(
-                    children: effects.map((effect) {
-                      final isSelected = effect.id == selectedEffectId;
-                      return _buildEffectTile(effect, isSelected);
-                    }).toList(),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEffectTile(WledEffect effect, bool isSelected) {
-    return InkWell(
-      onTap: () {
-        ref.read(selectorEffectIdProvider.notifier).state = effect.id;
-        _sendToWled();
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? NexGenPalette.cyan.withValues(alpha: 0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: isSelected
-              ? Border.all(color: NexGenPalette.cyan, width: 1.5)
-              : null,
-        ),
-        child: Row(
-          children: [
-            // Mini preview
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: NexGenPalette.line),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: EffectPreviewWidget(
-                  effectId: effect.id,
-                  colors: _paletteColors,
-                  borderRadius: 8,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Effect name
-            Expanded(
-              child: Text(
-                effect.name,
-                style: TextStyle(
-                  color: isSelected
-                      ? NexGenPalette.cyan
-                      : NexGenPalette.textHigh,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ),
-            // Checkmark if selected
-            if (isSelected)
-              Icon(
-                Icons.check,
-                color: NexGenPalette.cyan,
-                size: 20,
-              ),
-          ],
-        ),
       ),
     );
   }

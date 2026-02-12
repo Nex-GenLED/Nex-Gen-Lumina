@@ -5,6 +5,10 @@ const admin = require("firebase-admin");
 
 admin.initializeApp();
 
+// Import TypeScript-compiled Lumina AI command processor
+const { processLuminaCommand } = require("./lib/processLuminaCommand");
+exports.processLuminaCommand = processLuminaCommand;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

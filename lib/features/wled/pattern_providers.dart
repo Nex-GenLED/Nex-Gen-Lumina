@@ -1133,3 +1133,9 @@ final selectorColorGroupProvider = StateProvider<int>((ref) => 1);
 
 /// Which mood categories are expanded in the effect list.
 final selectorExpandedMoodsProvider = StateProvider<Set<SelectorMood>>((ref) => {SelectorMood.calm});
+
+/// Selected motion type filter (null = show top picks / all).
+final selectorMotionTypeProvider = StateProvider<MotionType?>((ref) => null);
+
+/// Selected color behavior filter (null = all).
+final selectorColorBehaviorProvider = StateProvider<ColorBehavior?>((ref) => null);

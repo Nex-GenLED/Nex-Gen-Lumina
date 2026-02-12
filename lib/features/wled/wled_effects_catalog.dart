@@ -30,6 +30,59 @@ enum SelectorMood {
   colorful,
 }
 
+/// Motion-based effect categories for the filter chip UI.
+/// Groups effects by what they visually DO rather than mood.
+enum MotionType {
+  solid,
+  twinkle,
+  chase,
+  sweep,
+  pulse,
+  fire,
+  rainbow,
+}
+
+/// Extension to provide display strings for MotionType
+extension MotionTypeDisplay on MotionType {
+  String get displayName {
+    switch (this) {
+      case MotionType.solid:
+        return 'Static';
+      case MotionType.twinkle:
+        return 'Twinkle';
+      case MotionType.chase:
+        return 'Chase';
+      case MotionType.sweep:
+        return 'Sweep';
+      case MotionType.pulse:
+        return 'Pulse';
+      case MotionType.fire:
+        return 'Fire';
+      case MotionType.rainbow:
+        return 'Rainbow';
+    }
+  }
+
+  String get icon {
+    switch (this) {
+      case MotionType.solid:
+        return '●';
+      case MotionType.twinkle:
+        return '✦';
+      case MotionType.chase:
+        return '»';
+      case MotionType.sweep:
+        return '→';
+      case MotionType.pulse:
+        return '〰';
+      case MotionType.fire:
+        return '🔥';
+      case MotionType.rainbow:
+        return '🌈';
+    }
+  }
+}
+
 /// Extension to provide display strings for SelectorMood
 extension SelectorMoodDisplay on SelectorMood {
   String get displayName {
@@ -725,4 +778,102 @@ class WledEffectsCatalog {
 
   /// Check if an effect uses color layout (LED grouping).
   static bool effectUsesColorLayout(int id) => _effectsById[id]?.usesColorLayout ?? false;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Motion Type Filtering
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Map WLED category to motion type.
+  static MotionType getMotionType(String wledCategory) {
+    switch (wledCategory) {
+      case 'Basic':
+        return MotionType.solid;
+      case 'Sparkle':
+      case 'Holiday':
+        return MotionType.twinkle;
+      case 'Chase':
+      case 'Game':
+        return MotionType.chase;
+      case 'Wipe':
+      case 'Scanner':
+      case 'Strobe':
+        return MotionType.sweep;
+      case 'Ambient':
+      case 'Fireworks':
+      case 'Ripple':
+      case 'Noise':
+        return MotionType.pulse;
+      case 'Meteor':
+      case 'Fire':
+        return MotionType.fire;
+      case 'Rainbow':
+        return MotionType.rainbow;
+      default:
+        return MotionType.solid;
+    }
+  }
+
+  /// Get motion type for an effect ID.
+  static MotionType getMotionTypeById(int id) {
+    final effect = _effectsById[id];
+    return effect != null ? getMotionType(effect.category) : MotionType.solid;
+  }
+
+  /// Get standard effects grouped by motion type.
+  static Map<MotionType, List<WledEffect>> get effectsByMotionType {
+    final result = <MotionType, List<WledEffect>>{};
+    for (final type in MotionType.values) {
+      final effects = standardEffects
+          .where((e) => getMotionType(e.category) == type)
+          .toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      if (effects.isNotEmpty) {
+        result[type] = effects;
+      }
+    }
+    return result;
+  }
+
+  /// Filter standard effects by motion type and/or color behavior.
+  static List<WledEffect> filterEffects({
+    MotionType? motionType,
+    ColorBehavior? colorBehavior,
+  }) {
+    var effects = standardEffects;
+    if (motionType != null) {
+      effects = effects.where((e) => getMotionType(e.category) == motionType).toList();
+    }
+    if (colorBehavior != null) {
+      effects = effects.where((e) => e.colorBehavior == colorBehavior).toList();
+    }
+    effects.sort((a, b) => a.name.compareTo(b.name));
+    return effects;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Top Picks - Curated effects for quick selection
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Hand-picked top effects that cover the most common use cases.
+  /// Ordered by visual appeal and popularity.
+  static const List<int> topPickIds = [
+    0,   // Solid
+    2,   // Breathe
+    17,  // Twinkle
+    28,  // Chase
+    3,   // Wipe
+    49,  // Fairy
+    76,  // Meteor
+    66,  // Fire 2012
+    9,   // Rainbow
+    87,  // Glitter
+  ];
+
+  /// Get the top pick effects as WledEffect objects.
+  static List<WledEffect> get topPicks {
+    return topPickIds
+        .map((id) => _effectsById[id])
+        .whereType<WledEffect>()
+        .toList();
+  }
 }
