@@ -9,7 +9,7 @@ import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/ddp_service.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
-import 'package:nexgen_command/features/wled/mock_wled_repository.dart';
+import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/mqtt_relay_repository.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -49,12 +49,12 @@ final isRemoteModeProvider = Provider<bool>((ref) {
 /// Provides a WledRepository based on Demo Mode, network location, and selected device.
 ///
 /// Priority:
-/// 1. Demo Mode → MockWledRepository
+/// 1. Demo Mode → DemoWledRepository
 /// 2. Local network (on home WiFi) → WledService (direct HTTP)
 /// 3. Remote network (away from home) → CloudRelayRepository (via Firestore/webhook)
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   final isDemo = ref.watch(demoModeProvider);
-  if (isDemo) return MockWledRepository();
+  if (isDemo) return DemoWledRepository();
 
   final ip = ref.watch(selectedDeviceIpProvider);
   if (ip == null) return null;

@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
-import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/theme.dart';
@@ -1346,7 +1346,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final effectId = MockPatternRepository.effectIdFromPayload(item.wledPayload) ?? 0;
+    final effectId = PatternRepository.effectIdFromPayload(item.wledPayload) ?? 0;
     final colorSlots = _getColorSlotsForEffect(effectId);
     final extractedColors = _extractColorsFromItem(item);
 

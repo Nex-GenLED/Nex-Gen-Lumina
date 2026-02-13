@@ -15,10 +15,10 @@ import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
 import 'package:nexgen_command/services/big_event_service.dart';
 import 'package:flutter/material.dart';
 
-/// In-memory mock data source for the Pattern Library.
-/// Provides a consistent set of categories and items for demos and tests.
-class MockPatternRepository {
-  MockPatternRepository();
+/// In-memory data source for the Pattern Library.
+/// Provides categories, sub-categories, and procedurally generated patterns.
+class PatternRepository {
+  PatternRepository();
 
   /// Dynamic big event nodes that can be updated at runtime
   List<LibraryNode> _bigEventNodes = [];
@@ -31,7 +31,7 @@ class MockPatternRepository {
     _bigEventNodes = BigEventLibraryBuilder.buildBigEventHierarchy(events);
     // Clear cache to force rebuild with new events
     _cachedNodes = null;
-    debugPrint('MockPatternRepository: Updated big event nodes with ${events.length} events');
+    debugPrint('PatternRepository: Updated big event nodes with ${events.length} events');
   }
 
   /// Clear big event nodes (e.g., when no events are upcoming)
@@ -46,7 +46,7 @@ class MockPatternRepository {
     _myTeamsNodes = SportsLibraryBuilder.getMyTeamsPalettes(userTeamNames);
     // Clear cache to force rebuild with new teams
     _cachedNodes = null;
-    debugPrint('MockPatternRepository: Updated My Teams with ${_myTeamsNodes.length} teams from ${userTeamNames.length} user preferences');
+    debugPrint('PatternRepository: Updated My Teams with ${_myTeamsNodes.length} teams from ${userTeamNames.length} user preferences');
   }
 
   /// Clear My Teams (e.g., when user logs out)
@@ -618,22 +618,22 @@ class MockPatternRepository {
   ];
 
   Future<List<PatternCategory>> getCategories() async {
-    debugPrint('MockPatternRepository.getCategories');
+    debugPrint('PatternRepository.getCategories');
     return _categories;
   }
 
   Future<List<PatternItem>> getItemsByCategory(String categoryId) async {
-    debugPrint('MockPatternRepository.getItemsByCategory($categoryId)');
+    debugPrint('PatternRepository.getItemsByCategory($categoryId)');
     return _items.where((e) => e.categoryId == categoryId).toList(growable: false);
   }
 
   Future<List<PatternItem>> getAllItems() async {
-    debugPrint('MockPatternRepository.getAllItems');
+    debugPrint('PatternRepository.getAllItems');
     return _items;
   }
 
   Future<PatternItem?> getItem(String id) async {
-    debugPrint('MockPatternRepository.getItem($id)');
+    debugPrint('PatternRepository.getItem($id)');
     try {
       return _items.firstWhere((e) => e.id == id);
     } catch (_) {
@@ -643,12 +643,12 @@ class MockPatternRepository {
 
   // ================= Sub-Category Queries =================
   Future<List<SubCategory>> getSubCategoriesByCategory(String categoryId) async {
-    debugPrint('MockPatternRepository.getSubCategoriesByCategory($categoryId)');
+    debugPrint('PatternRepository.getSubCategoriesByCategory($categoryId)');
     return _subCategories.where((e) => e.parentCategoryId == categoryId).toList(growable: false);
   }
 
   Future<SubCategory?> getSubCategoryById(String subCategoryId) async {
-    debugPrint('MockPatternRepository.getSubCategoryById($subCategoryId)');
+    debugPrint('PatternRepository.getSubCategoryById($subCategoryId)');
     try {
       return _subCategories.firstWhere((e) => e.id == subCategoryId);
     } catch (_) {

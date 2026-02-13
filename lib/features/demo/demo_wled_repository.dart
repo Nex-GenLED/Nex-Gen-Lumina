@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
-/// A mock repository that simulates a WLED device entirely in-memory.
-class MockWledRepository implements WledRepository {
+/// In-memory repository that simulates a WLED device for demo/offline mode.
+class DemoWledRepository implements WledRepository {
   bool _on = true;
   int _bri = 180; // 0-255
   int _speed = 128; // 0-255
@@ -95,7 +95,6 @@ class MockWledRepository implements WledRepository {
 
   @override
   Future<Map<String, dynamic>?> getState() async {
-    // Simulate fast local update
     return {
       'on': _on,
       'bri': _bri,
@@ -104,7 +103,6 @@ class MockWledRepository implements WledRepository {
             'n': _segNames[i],
             'sx': _speed,
             'col': [
-              // Expose 4-tuple to mirror RGBW-capable device in demo
               [_color.red, _color.green, _color.blue, _white]
             ]
           })
@@ -117,7 +115,6 @@ class MockWledRepository implements WledRepository {
     if (brightness != null) _bri = brightness.clamp(0, 255);
     if (speed != null) _speed = speed.clamp(0, 255);
     if (color != null) _color = color;
-    // If forceRgbwZeroWhite is true, set white to 0 for pure RGB colors
     if (forceRgbwZeroWhite == true) {
       _white = 0;
     } else if (white != null) {
@@ -129,13 +126,11 @@ class MockWledRepository implements WledRepository {
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     payload = normalizeWledPayload(payload);
-    // Best-effort: adopt known keys to update local state
     try {
       final on = payload['on'];
       if (on is bool) _on = on;
       final bri = payload['bri'];
       if (bri is int) _bri = bri.clamp(0, 255);
-      // segments
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         for (final s in seg) {
@@ -162,14 +157,13 @@ class MockWledRepository implements WledRepository {
       }
       return true;
     } catch (_) {
-      return true; // still succeed visually
+      return true;
     }
   }
 
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
-    // Accept any config in mock. In a real device this hits /json/cfg.
-    debugPrint('MockWLED applyConfig: ${cfg.keys.join(', ')}');
+    debugPrint('DemoWLED applyConfig: ${cfg.keys.join(', ')}');
     return true;
   }
 
@@ -214,7 +208,6 @@ class MockWledRepository implements WledRepository {
     if (color != null) _color = color;
     if (white != null) _white = white.clamp(0, 255);
     if (speed != null) _speed = speed.clamp(0, 255);
-    // ignore fx/intensity in mock
     return true;
   }
 
@@ -232,10 +225,9 @@ class MockWledRepository implements WledRepository {
       stop: stop ?? current.stop,
     );
 
-    // Update total LED count based on highest stop value
     _totalLedCount = _segConfig.fold(0, (max, seg) => seg.stop > max ? seg.stop : max);
 
-    debugPrint('MockWLED updateSegmentConfig: seg=$segmentId start=$start stop=$stop, totalLeds=$_totalLedCount');
+    debugPrint('DemoWLED updateSegmentConfig: seg=$segmentId start=$start stop=$stop, totalLeds=$_totalLedCount');
     return true;
   }
 
@@ -252,7 +244,7 @@ class MockWledRepository implements WledRepository {
   }) async {
     if (presetId < 1 || presetId > 250) return false;
     _savedPresets[presetId] = Map<String, dynamic>.from(state);
-    debugPrint('MockWLED savePreset: Saved preset $presetId${presetName != null ? ' ($presetName)' : ''}');
+    debugPrint('DemoWLED savePreset: Saved preset $presetId${presetName != null ? ' ($presetName)' : ''}');
     return true;
   }
 
@@ -262,16 +254,15 @@ class MockWledRepository implements WledRepository {
     final saved = _savedPresets[presetId];
     if (saved != null) {
       await applyJson(saved);
-      debugPrint('MockWLED loadPreset: Loaded preset $presetId');
+      debugPrint('DemoWLED loadPreset: Loaded preset $presetId');
       return true;
     }
-    // If preset not in our saved map, check built-in presets
     if (presetId <= _presets.length) {
       await applyJson(_presets[presetId - 1].json);
-      debugPrint('MockWLED loadPreset: Loaded built-in preset $presetId');
+      debugPrint('DemoWLED loadPreset: Loaded built-in preset $presetId');
       return true;
     }
-    debugPrint('MockWLED loadPreset: Preset $presetId not found');
+    debugPrint('DemoWLED loadPreset: Preset $presetId not found');
     return false;
   }
 }

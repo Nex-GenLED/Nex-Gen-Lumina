@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/data/us_federal_holidays.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
-import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
@@ -16,8 +16,8 @@ import 'package:nexgen_command/models/usage_analytics_models.dart';
 
 /// Repository provider for the Pattern Library.
 /// For now we use an in-memory mock; can be swapped to Firestore later.
-final patternRepositoryProvider = Provider<MockPatternRepository>((ref) {
-  final repo = MockPatternRepository();
+final patternRepositoryProvider = Provider<PatternRepository>((ref) {
+  final repo = PatternRepository();
 
   // Watch big events and update repository when they change
   ref.listen(upcomingBigEventsProvider, (previous, next) {
@@ -1204,7 +1204,7 @@ final filteredLibraryNodePatternsProvider = FutureProvider.family<List<PatternIt
   // Filter patterns to only those matching the selected mood
   final moodEffectIds = EffectMoodSystem.getEffectIdsForMood(selectedMood);
   return allPatterns.where((pattern) {
-    final effectId = MockPatternRepository.effectIdFromPayload(pattern.wledPayload);
+    final effectId = PatternRepository.effectIdFromPayload(pattern.wledPayload);
     return effectId != null && moodEffectIds.contains(effectId);
   }).toList();
 });
@@ -1220,7 +1220,7 @@ final nodeMoodCountsProvider = FutureProvider.family<Map<EffectMood, int>, Strin
   }
 
   for (final pattern in allPatterns) {
-    final effectId = MockPatternRepository.effectIdFromPayload(pattern.wledPayload);
+    final effectId = PatternRepository.effectIdFromPayload(pattern.wledPayload);
     if (effectId != null) {
       final mood = EffectMoodSystem.getMood(effectId);
       if (mood != null) {

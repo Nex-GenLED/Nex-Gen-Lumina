@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
-import 'package:nexgen_command/features/wled/mock_pattern_repository.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/theme.dart';
@@ -86,9 +86,9 @@ class ThemeSelectionScreen extends ConsumerWidget {
                   List<PatternItem> filterBy(String vibe) {
                     if (vibe == 'All') return items;
                     return items.where((it) {
-                      final fx = MockPatternRepository.effectIdFromPayload(it.wledPayload);
+                      final fx = PatternRepository.effectIdFromPayload(it.wledPayload);
                       if (fx == null) return false;
-                      final v = MockPatternRepository.vibeForFx(fx);
+                      final v = PatternRepository.vibeForFx(fx);
                       return v == vibe;
                     }).toList(growable: false);
                   }
