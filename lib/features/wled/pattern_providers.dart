@@ -100,10 +100,6 @@ final patternGeneratedItemsBySubCategoryProvider = FutureProvider.family<List<Pa
 final recommendedPatternsProvider = Provider<List<GradientPattern>>((ref) {
   // We no longer gate recommendations on a connected device.
   // If no device is selected, we still produce suggestions; play actions will guard for device nulls.
-  // final ip = ref.watch(selectedDeviceIpProvider);
-  // if (ip == null || ip.isEmpty) {
-  //   return const <GradientPattern>[];
-  // }
 
   final now = DateTime.now();
   final month = now.month; // 1..12

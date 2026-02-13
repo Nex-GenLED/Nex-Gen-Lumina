@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/patterns/sports_team_palettes.dart';
-import 'package:nexgen_command/features/patterns/sports_team_palettes_nhl.dart';
-import 'package:nexgen_command/features/patterns/sports_team_palettes_mlb.dart';
-import 'package:nexgen_command/features/patterns/sports_team_palettes_soccer.dart';
-import 'package:nexgen_command/features/patterns/sports_team_palettes_other.dart';
-import 'package:nexgen_command/features/patterns/sports_team_palettes_ncaa.dart';
 
 /// Canonical theme palettes for consistent, deterministic lighting recommendations.
 ///
@@ -639,35 +634,9 @@ class CanonicalPalettes {
     ),
   };
 
-  /// All sports team themes from dedicated files
-  static Map<String, CanonicalTheme>? _sportsTeamsCache;
-
-  static Map<String, CanonicalTheme> get _allSportsTeams {
-    if (_sportsTeamsCache != null) return _sportsTeamsCache!;
-
-    _sportsTeamsCache = {
-      // NFL Teams
-      ...SportsTeamPalettes.nflTeams,
-      // NBA Teams
-      ...SportsTeamPalettes.nbaTeams,
-      // NHL Teams
-      ...NhlTeamPalettes.nhlTeams,
-      // MLB Teams
-      ...MlbTeamPalettes.mlbTeams,
-      // MLS Teams
-      ...SoccerTeamPalettes.mlsTeams,
-      // NWSL Teams
-      ...SoccerTeamPalettes.nwslTeams,
-      // UFL Teams
-      ...OtherLeaguesPalettes.uflTeams,
-      // WNBA Teams
-      ...OtherLeaguesPalettes.wnbaTeams,
-      // NCAA Football Teams
-      ...NcaaTeamPalettes.ncaaFootballTeams,
-    };
-
-    return _sportsTeamsCache!;
-  }
+  /// All sports team themes derived from the unified [TeamColorDatabase].
+  static Map<String, CanonicalTheme> get _allSportsTeams =>
+      SportsTeamPalettes.allSportsTeams;
 
   /// Combined themes map (base + sports)
   static Map<String, CanonicalTheme>? _allThemesCache;

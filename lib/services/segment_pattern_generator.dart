@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
+import 'package:nexgen_command/models/segment_aware_pattern.dart';
+
+/// Riverpod provider for the segment pattern generator.
+final segmentPatternGeneratorProvider = Provider<SegmentPatternGenerator>(
+  (ref) => const SegmentPatternGenerator(),
+);
 
 /// Service for generating intelligent segment-aware patterns.
 ///
@@ -11,6 +19,58 @@ import 'package:nexgen_command/models/roofline_segment.dart';
 /// - Highlight prominent features
 class SegmentPatternGenerator {
   const SegmentPatternGenerator();
+
+  /// Generates LED color groups from a segment-aware pattern template.
+  ///
+  /// Bridges the [SegmentAwarePattern] model to the underlying generators,
+  /// producing a flat list of [LedColorGroup] ready for design preview.
+  List<LedColorGroup> generate({
+    required RooflineConfiguration config,
+    required SegmentAwarePattern pattern,
+  }) {
+    final totalPixels = config.totalPixelCount;
+    if (totalPixels <= 0) return [];
+
+    final anchorRgb = [pattern.anchorColor.red, pattern.anchorColor.green, pattern.anchorColor.blue];
+    final spacedRgb = [pattern.spacedColor.red, pattern.spacedColor.green, pattern.spacedColor.blue];
+
+    final groups = <LedColorGroup>[];
+
+    // Assign anchor LEDs at segment boundaries
+    for (final seg in config.segments) {
+      if (pattern.anchorAlwaysOn) {
+        for (final localAnchor in seg.anchorPixels) {
+          final globalStart = seg.startPixel + localAnchor;
+          for (int i = 0; i < seg.anchorLedCount; i++) {
+            final idx = globalStart + i;
+            if (idx < totalPixels) {
+              groups.add(LedColorGroup(startLed: idx, endLed: idx, color: anchorRgb));
+            }
+          }
+        }
+      }
+    }
+
+    // Fill remaining LEDs with spaced color
+    final anchorSet = groups.map((g) => g.startLed).toSet();
+    int runStart = -1;
+    for (int i = 0; i < totalPixels; i++) {
+      if (!anchorSet.contains(i)) {
+        if (runStart < 0) runStart = i;
+      } else {
+        if (runStart >= 0) {
+          groups.add(LedColorGroup(startLed: runStart, endLed: i - 1, color: spacedRgb));
+          runStart = -1;
+        }
+      }
+    }
+    if (runStart >= 0) {
+      groups.add(LedColorGroup(startLed: runStart, endLed: totalPixels - 1, color: spacedRgb));
+    }
+
+    groups.sort((a, b) => a.startLed.compareTo(b.startLed));
+    return groups;
+  }
 
   /// Generates a symmetrical pattern mirrored across the main peak.
   ///

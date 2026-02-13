@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
-import 'package:nexgen_command/features/design/segment_pattern_generator.dart';
+import 'package:nexgen_command/services/segment_pattern_generator.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 import 'package:nexgen_command/theme.dart';
 
