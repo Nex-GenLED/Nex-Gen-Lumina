@@ -89,38 +89,11 @@ class RooflineLightPainter extends CustomPainter {
       return;
     }
 
-    // Fall back to rectangle-based rendering
+    // No custom mask — generate a default gentle-arc roofline path
+    // and render discrete circular pixels along it.
     final maskHeight = mask?.maskHeight ?? 0.25;
-    final rooflineRect = Rect.fromLTWH(
-      0,
-      0,
-      size.width,
-      size.height * maskHeight,
-    );
-
-    switch (category) {
-      case EffectCategory.solid:
-        _paintSolid(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.breathe:
-        _paintBreathe(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.chase:
-        _paintChase(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.rainbow:
-        _paintRainbow(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.twinkle:
-        _paintTwinkle(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.wave:
-        _paintWave(canvas, rooflineRect, effectiveColors, brightnessFactor);
-        break;
-      case EffectCategory.fire:
-        _paintFire(canvas, rooflineRect, brightnessFactor);
-        break;
-    }
+    final arcPoints = _defaultRooflineArc(size, maskHeight);
+    _paintAlongPath(canvas, size, arcPoints, effectiveColors, brightnessFactor, category);
   }
 
   /// Paint light effects along a custom roofline path
@@ -251,6 +224,24 @@ class RooflineLightPainter extends CustomPainter {
       ..color = Color.lerp(color, Colors.white, 0.4)!.withValues(alpha: 0.7 * brightness)
       ..style = PaintingStyle.fill;
     canvas.drawCircle(pos, radius * 0.4, highlightPaint);
+  }
+
+  /// Generate a default gentle-arc roofline path when no custom mask exists.
+  ///
+  /// Creates a peaked roofline shape typical of a residential home,
+  /// positioned within the [maskHeight] fraction of the canvas.
+  List<Offset> _defaultRooflineArc(Size size, double maskHeight) {
+    const points = 12;
+    return List.generate(points, (i) {
+      final t = i / (points - 1);
+      // Horizontal: 8% padding on each side
+      final x = (0.08 + t * 0.84) * size.width;
+      // Vertical: parabolic peak centered in the mask area
+      final centerY = maskHeight * size.height * 0.5;
+      final peakOffset = maskHeight * size.height * 0.25;
+      final y = centerY + peakOffset - (peakOffset * 2) * 4 * t * (1 - t);
+      return Offset(x, y);
+    });
   }
 
   /// Paint solid color along the roofline path - crisp discrete dots.
@@ -388,272 +379,6 @@ class RooflineLightPainter extends CustomPainter {
       final colorIndex = posRandom.nextInt(fireColors.length);
       _drawLedDot(canvas, positions[i], fireColors[colorIndex], brightness * flicker);
     }
-  }
-
-  /// Paint solid color gradient across roofline
-  void _paintSolid(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    final gradientColors = colors.length == 1
-        ? [colors.first, colors.first]
-        : colors;
-
-    final paint = Paint()
-      ..shader = LinearGradient(
-        colors: gradientColors.map((c) => c.withValues(alpha: 0.9 * brightness)).toList(),
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-      ).createShader(rect)
-      ..blendMode = BlendMode.screen;
-
-    // Draw main glow
-    canvas.drawRect(rect, paint);
-
-    // Add subtle glow effect at the bottom edge (light spill)
-    _paintGlowEdge(canvas, rect, colors.first, brightness * 0.5);
-  }
-
-  /// Paint breathing/pulsing effect
-  void _paintBreathe(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    // Use sine wave for smooth breathing
-    final breathePhase = math.sin(animationPhase * math.pi * 2);
-    final breatheIntensity = 0.4 + (breathePhase + 1) / 2 * 0.6;
-
-    final color = colors.first;
-    final paint = Paint()
-      ..color = color.withValues(alpha: 0.9 * brightness * breatheIntensity)
-      ..blendMode = BlendMode.screen;
-
-    canvas.drawRect(rect, paint);
-    _paintGlowEdge(canvas, rect, color, brightness * breatheIntensity * 0.4);
-  }
-
-  /// Paint chase/running light effect
-  void _paintChase(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    // Calculate LED count based on rect width for rect-based effects
-    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
-    final ledWidth = rect.width / effectiveLedCount;
-    // Longer chase segment for smoother visual flow (40% of total length)
-    final chaseLength = effectiveLedCount * 2 ~/ 5;
-
-    // Calculate chase position with smooth interpolation
-    final chasePosition = animationPhase * effectiveLedCount;
-
-    for (int i = 0; i < effectiveLedCount; i++) {
-      // Calculate distance from chase head with smooth interpolation
-      double distance = (i - chasePosition) % effectiveLedCount;
-      if (distance < 0) distance += effectiveLedCount;
-
-      double ledBrightness = 0.0;
-      Color ledColor = colors.first;
-
-      if (distance < chaseLength) {
-        // Smooth fade using cosine curve for elegant transition
-        final normalizedDist = distance / chaseLength;
-        final trailFade = math.cos(normalizedDist * math.pi / 2);
-        ledBrightness = trailFade;
-        // Cycle through colors
-        final colorIndex = (i ~/ (effectiveLedCount / colors.length)).clamp(0, colors.length - 1);
-        ledColor = colors[colorIndex];
-      }
-
-      if (ledBrightness > 0) {
-        final ledRect = Rect.fromLTWH(
-          rect.left + i * ledWidth,
-          rect.top,
-          ledWidth + 2, // Slight overlap for seamless look
-          rect.height,
-        );
-
-        // Brighter chase effect
-        final paint = Paint()
-          ..color = ledColor.withValues(alpha: 1.0 * brightness * ledBrightness)
-          ..blendMode = BlendMode.screen;
-
-        canvas.drawRect(ledRect, paint);
-      }
-    }
-  }
-
-  /// Paint rainbow/gradient cycling effect
-  /// If colors has multiple entries, cycles through those colors instead of generating rainbow
-  void _paintRainbow(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    List<Color> gradientColors;
-
-    if (colors.length > 1) {
-      // Use provided pattern colors, cycling with animation
-      // Create a smooth cycling gradient by repeating the colors
-      gradientColors = <Color>[];
-      final colorCount = colors.length;
-      for (int i = 0; i < colorCount * 2; i++) {
-        final progress = (i / (colorCount * 2) + animationPhase) % 1.0;
-        final colorIndex = (progress * colorCount).floor() % colorCount;
-        gradientColors.add(colors[colorIndex]);
-      }
-    } else {
-      // Fall back to rainbow hue generation
-      gradientColors = <Color>[];
-      for (int i = 0; i < 7; i++) {
-        final hue = ((i / 7 + animationPhase) % 1.0) * 360;
-        gradientColors.add(HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor());
-      }
-    }
-
-    final paint = Paint()
-      ..shader = LinearGradient(
-        colors: gradientColors.map((c) => c.withValues(alpha: 0.85 * brightness)).toList(),
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-      ).createShader(rect)
-      ..blendMode = BlendMode.screen;
-
-    canvas.drawRect(rect, paint);
-  }
-
-  /// Paint twinkle/sparkle effect
-  void _paintTwinkle(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    // Base layer with higher opacity
-    final basePaint = Paint()
-      ..color = colors.first.withValues(alpha: 0.5 * brightness)
-      ..blendMode = BlendMode.screen;
-    canvas.drawRect(rect, basePaint);
-
-    // Much slower sparkle change rate (about 10 changes per full cycle)
-    final sparkleSet = (animationPhase * 10).floor();
-    final random = math.Random(sparkleSet);
-
-    // Calculate sparkle transition for smooth fade in/out
-    final sparklePhase = (animationPhase * 10) % 1.0;
-    final fadeMultiplier = sparklePhase < 0.3
-        ? sparklePhase / 0.3
-        : sparklePhase > 0.7
-            ? (1.0 - sparklePhase) / 0.3
-            : 1.0;
-
-    // Reduced sparkle count for elegant effect
-    final sparkleCount = (intensity / 40).ceil().clamp(3, 8);
-
-    for (int i = 0; i < sparkleCount; i++) {
-      final x = rect.left + random.nextDouble() * rect.width;
-      final y = rect.top + random.nextDouble() * rect.height;
-      final sparkleSize = 3.0 + random.nextDouble() * 4.0;
-      final sparkleOpacity = (0.6 + random.nextDouble() * 0.4) * fadeMultiplier;
-
-      final colorIndex = random.nextInt(colors.length);
-      final sparkleColor = colors[colorIndex];
-
-      // Brighter, tighter sparkles
-      final sparklePaint = Paint()
-        ..color = sparkleColor.withValues(alpha: sparkleOpacity * brightness)
-        ..blendMode = BlendMode.screen
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-
-      canvas.drawCircle(Offset(x, y), sparkleSize, sparklePaint);
-    }
-  }
-
-  /// Paint wave effect
-  void _paintWave(Canvas canvas, Rect rect, List<Color> colors, double brightness) {
-    // Calculate LED count based on rect width
-    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
-    final ledWidth = rect.width / effectiveLedCount;
-
-    for (int i = 0; i < effectiveLedCount; i++) {
-      // Lower wave frequency (1.5 cycles) for smoother, more elegant motion
-      final waveValue = math.sin((i / effectiveLedCount + animationPhase) * math.pi * 1.5);
-      // Higher minimum brightness for consistent appearance
-      final ledBrightness = 0.5 + (waveValue + 1) / 2 * 0.5;
-
-      // Cycle through colors
-      final colorIndex = (i ~/ (effectiveLedCount / colors.length)).clamp(0, colors.length - 1);
-      final ledColor = colors[colorIndex];
-
-      final ledRect = Rect.fromLTWH(
-        rect.left + i * ledWidth,
-        rect.top,
-        ledWidth + 1,
-        rect.height,
-      );
-
-      // Brighter wave effect
-      final paint = Paint()
-        ..color = ledColor.withValues(alpha: 0.95 * brightness * ledBrightness)
-        ..blendMode = BlendMode.screen;
-
-      canvas.drawRect(ledRect, paint);
-    }
-  }
-
-  /// Paint fire-like flickering effect
-  void _paintFire(Canvas canvas, Rect rect, double brightness) {
-    // Calculate LED count based on rect width
-    final effectiveLedCount = ledCount ?? (rect.width / 4).round().clamp(30, 120);
-
-    // Slower flicker rate (about 15 changes per full cycle)
-    final flickerSet = (animationPhase * 15).floor();
-
-    // Fire colors: red, orange, yellow
-    final fireColors = [
-      const Color(0xFFFF4500), // Red-orange
-      const Color(0xFFFF6600), // Orange
-      const Color(0xFFFF8800), // Light orange
-      const Color(0xFFFFAA00), // Yellow-orange
-    ];
-
-    // Calculate flicker transition for smooth changes
-    final flickerPhase = (animationPhase * 15) % 1.0;
-    final transitionBlend = flickerPhase < 0.2
-        ? flickerPhase / 0.2
-        : flickerPhase > 0.8
-            ? (1.0 - flickerPhase) / 0.2
-            : 1.0;
-
-    final ledWidth = rect.width / effectiveLedCount;
-
-    for (int i = 0; i < effectiveLedCount; i++) {
-      // Use position index in random seed for spatial consistency
-      final posRandom = math.Random(flickerSet + i);
-      final flicker = (0.6 + posRandom.nextDouble() * 0.4) * (0.7 + transitionBlend * 0.3);
-      final colorIndex = posRandom.nextInt(fireColors.length);
-      final fireColor = fireColors[colorIndex];
-
-      final ledRect = Rect.fromLTWH(
-        rect.left + i * ledWidth,
-        rect.top,
-        ledWidth + 1,
-        rect.height,
-      );
-
-      // Brighter fire effect
-      final paint = Paint()
-        ..color = fireColor.withValues(alpha: 0.95 * brightness * flicker)
-        ..blendMode = BlendMode.screen;
-
-      canvas.drawRect(ledRect, paint);
-    }
-  }
-
-  /// Paint glow effect at the bottom edge of the roofline (reduced height)
-  void _paintGlowEdge(Canvas canvas, Rect rect, Color color, double brightness) {
-    final glowHeight = rect.height * 0.3; // Reduced from 0.5 to 0.3
-    final glowRect = Rect.fromLTWH(
-      rect.left,
-      rect.bottom - glowHeight / 2,
-      rect.width,
-      glowHeight,
-    );
-
-    final glowPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          color.withValues(alpha: 0.3 * brightness), // Reduced from 0.4
-          color.withValues(alpha: 0.0),
-        ],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(glowRect)
-      ..blendMode = BlendMode.screen
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-
-    canvas.drawRect(glowRect, glowPaint);
   }
 
   @override

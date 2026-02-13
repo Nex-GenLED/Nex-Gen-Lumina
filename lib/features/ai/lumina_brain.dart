@@ -11,7 +11,9 @@ import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
 import 'package:nexgen_command/features/ai/command_intent_classifier.dart';
 import 'package:nexgen_command/services/pattern_analytics_service.dart';
-import 'package:nexgen_command/data/sports_teams.dart';
+import 'package:nexgen_command/data/team_color_database.dart';
+import 'package:nexgen_command/data/team_color_resolver.dart';
+import 'package:nexgen_command/data/holiday_color_database.dart';
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
@@ -35,15 +37,59 @@ class LuminaBrain {
       debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
     }
 
-    // TIER 0: Check for sports teams FIRST (highest priority)
-    // This prevents generic keywords like "party" from overshadowing team names
-    final sportsTeam = SportsTeamsDatabase.findTeamInQuery(userPrompt);
-    if (sportsTeam != null && !isOpenEnded) {
-      debugPrint('🏈 TIER 0: Found sports team: ${sportsTeam.displayName} (${sportsTeam.league})');
-      final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
-      debugPrint('   Context modifier: $context');
-      final response = _buildSportsTeamResponse(sportsTeam, context);
-      return response;
+    // TIER 0: Smart team resolution with fuzzy matching + user context
+    // Replaces basic SportsTeamsDatabase.findTeamInQuery with multi-phase resolver
+    if (!isOpenEnded) {
+      // Read user context for "My Teams" boost and location disambiguation
+      List<String>? userTeams;
+      String? userLocation;
+      try {
+        final profile = ref.read(currentUserProfileProvider).maybeWhen(
+              data: (u) => u,
+              orElse: () => null,
+            );
+        if (profile != null) {
+          userTeams = profile.sportsTeams;
+          userLocation = profile.location;
+        }
+      } catch (_) {}
+
+      final teamResult = TeamColorResolver.resolve(
+        userPrompt,
+        userTeams: userTeams,
+        userLocation: userLocation,
+      );
+
+      if (teamResult != null && teamResult.isHighConfidence) {
+        debugPrint('🏈 TIER 0: Resolved team: ${teamResult.team.officialName} '
+            '(${teamResult.team.league}) confidence=${teamResult.confidence.toStringAsFixed(2)} '
+            'via ${teamResult.matchType.name}');
+        if (teamResult.alternatives.isNotEmpty) {
+          debugPrint('   Alternatives: ${teamResult.alternatives.map((a) => '${a.team.officialName}(${a.confidence})').join(', ')}');
+        }
+        final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
+        debugPrint('   Context modifier: $context');
+        final response = _buildCanonicalTeamResponse(teamResult.team, context);
+        return response;
+      } else if (teamResult != null) {
+        // Low confidence - still use it but log the ambiguity
+        debugPrint('🏈 TIER 0: Low-confidence team match: ${teamResult.team.officialName} '
+            '(${teamResult.confidence.toStringAsFixed(2)}) - using anyway');
+        final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
+        final response = _buildCanonicalTeamResponse(teamResult.team, context);
+        return response;
+      }
+    }
+
+    // TIER 0.5: Holiday / season / cultural event resolution
+    if (!isOpenEnded) {
+      final holidayResult = HolidayColorDatabase.resolve(userPrompt);
+      if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
+        debugPrint('🎄 TIER 0.5: Resolved holiday: ${holidayResult.holiday!.name} '
+            'confidence=${holidayResult.confidence.toStringAsFixed(2)}');
+        final response = _buildHolidayResponse(holidayResult.holiday!);
+        return response;
+      }
     }
 
     // TIER 1: Try to match against deterministic event theme library
@@ -237,9 +283,13 @@ class LuminaBrain {
     return '$verbal ${jsonEncode(jsonObject)}';
   }
 
-  /// Builds a response for a sports team with the appropriate effect based on context.
-  static String _buildSportsTeamResponse(SportsTeam team, EventContext context) {
-    // Determine effect based on context
+  /// Builds a response for a [UnifiedTeamEntry] using LED-optimized colors
+  /// from the canonical theme when available, falling back to raw RGB.
+  static String _buildCanonicalTeamResponse(
+    UnifiedTeamEntry team,
+    EventContext context,
+  ) {
+    // Determine effect based on context (same logic as _buildSportsTeamResponse)
     int effectId;
     String effectName;
     int speed;
@@ -248,32 +298,28 @@ class LuminaBrain {
 
     switch (context) {
       case EventContext.party:
-        // High energy for party context - chase/running effect
-        effectId = 41; // Running
+        effectId = 41;
         effectName = 'Running';
         speed = 180;
         intensity = 220;
         isStatic = false;
         break;
       case EventContext.celebration:
-        // Medium energy - twinkle/sparkle
-        effectId = 43; // Twinkle
+        effectId = 43;
         effectName = 'Twinkle';
         speed = 120;
         intensity = 180;
         isStatic = false;
         break;
       case EventContext.elegant:
-        // Slow, sophisticated - breathe
-        effectId = 2; // Breathe
+        effectId = 2;
         effectName = 'Breathe';
         speed = 50;
         intensity = 140;
         isStatic = false;
         break;
       case EventContext.staticSimple:
-        // No movement
-        effectId = 0; // Solid
+        effectId = 0;
         effectName = 'Solid';
         speed = 128;
         intensity = 128;
@@ -281,57 +327,67 @@ class LuminaBrain {
         break;
       case EventContext.romantic:
       case EventContext.neutral:
-        // Default: gentle breathe
-        effectId = 2; // Breathe
-        effectName = 'Breathe';
-        speed = 70;
-        intensity = 150;
-        isStatic = false;
+        // Use the team's suggested defaults when available
+        effectId = team.suggestedEffects.isNotEmpty
+            ? team.suggestedEffects.first
+            : 2;
+        effectName = _effectIdToName(effectId);
+        speed = team.defaultSpeed;
+        intensity = team.defaultIntensity;
+        isStatic = effectId == 0;
         break;
     }
 
-    // Build pattern name based on context
+    // Use LED-optimized RGB if a canonical theme is attached
+    final ledRgb = team.ledOptimizedRgb;
+
+    // Build pattern name and subtitle
+    final shortName = team.officialName.split(' ').last;
     String patternName;
     String subtitle;
     switch (context) {
       case EventContext.party:
-        patternName = '${team.displayName} Party';
-        subtitle = 'High-energy ${team.name} colors chase';
+        patternName = '${team.officialName} Party';
+        subtitle = 'High-energy $shortName colors chase';
         break;
       case EventContext.celebration:
-        patternName = '${team.displayName} Celebration';
-        subtitle = 'Festive ${team.name} sparkle';
+        patternName = '${team.officialName} Celebration';
+        subtitle = 'Festive $shortName sparkle';
         break;
       case EventContext.elegant:
-        patternName = '${team.displayName} Elegance';
-        subtitle = 'Sophisticated ${team.name} glow';
+        patternName = '${team.officialName} Elegance';
+        subtitle = 'Sophisticated $shortName glow';
         break;
       case EventContext.staticSimple:
-        patternName = '${team.displayName} Colors';
-        subtitle = 'Pure ${team.name} team colors';
+        patternName = '${team.officialName} Colors';
+        subtitle = 'Pure $shortName team colors';
         break;
       case EventContext.romantic:
       case EventContext.neutral:
-        patternName = '${team.displayName} Spirit';
-        subtitle = '${team.name} team pride';
+        patternName = '${team.officialName} Spirit';
+        subtitle = '$shortName team pride';
         break;
     }
 
-    // Build colors array from team colors
-    final colorsArray = team.colors.map((color) {
-      return {
-        'name': _colorToName(color),
-        'rgb': [color.red, color.green, color.blue, 0], // Force W=0 for saturated colors
-      };
-    }).toList();
-
-    // Build WLED segment colors
-    final segColors = <int>[];
-    for (final color in team.colors) {
-      segColors.addAll([color.red, color.green, color.blue]);
+    // Colors array for response JSON
+    final colorsArray = <Map<String, dynamic>>[];
+    for (var i = 0; i < team.colors.length; i++) {
+      final tc = team.colors[i];
+      // Prefer LED-optimized values when available
+      final rgb = i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b];
+      colorsArray.add({
+        'name': tc.name,
+        'rgb': [...rgb, 0], // append W=0 for RGBW
+      });
     }
 
-    // Build WLED payload
+    // WLED segment colors
+    final segCol = <List<int>>[];
+    for (var i = 0; i < team.colors.length; i++) {
+      final rgb = i < ledRgb.length ? ledRgb[i] : [team.colors[i].r, team.colors[i].g, team.colors[i].b];
+      segCol.add(rgb);
+    }
+
     final wledPayload = {
       'on': true,
       'bri': 255,
@@ -340,11 +396,7 @@ class LuminaBrain {
           'id': 0,
           'on': true,
           'bri': 255,
-          'col': segColors.isEmpty
-              ? [[255, 255, 255]]
-              : [
-                  for (final color in team.colors) [color.red, color.green, color.blue]
-                ],
+          'col': segCol.isEmpty ? [[255, 255, 255]] : segCol,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
@@ -352,7 +404,6 @@ class LuminaBrain {
       ],
     };
 
-    // Build JSON object
     final jsonObject = {
       'patternName': patternName,
       'thought': subtitle,
@@ -368,10 +419,77 @@ class LuminaBrain {
       'wled': wledPayload,
     };
 
-    // Format as a friendly message with embedded JSON
-    final verbal = 'Go ${team.name}! $subtitle - here we go!';
-
+    final verbal = 'Go ${team.officialName}! $subtitle - here we go!';
     return '$verbal ${jsonEncode(jsonObject)}';
+  }
+
+  /// Builds a response for a holiday / season / cultural event.
+  static String _buildHolidayResponse(HolidayColorEntry holiday) {
+    final effectId =
+        holiday.suggestedEffects.isNotEmpty ? holiday.suggestedEffects.first : 0;
+    final effectName = _effectIdToName(effectId);
+    final speed = holiday.defaultSpeed;
+    final intensity = holiday.defaultIntensity;
+    final isStatic = effectId == 0;
+
+    final colorsArray = holiday.colors.map((c) {
+      return {
+        'name': c.name,
+        'rgb': [c.r, c.g, c.b, 0],
+      };
+    }).toList();
+
+    final segCol = holiday.colors.map((c) => [c.r, c.g, c.b]).toList();
+
+    final wledPayload = {
+      'on': true,
+      'bri': 255,
+      'seg': [
+        {
+          'id': 0,
+          'on': true,
+          'bri': 255,
+          'col': segCol.isEmpty ? [[255, 255, 255]] : segCol,
+          'fx': effectId,
+          'sx': speed,
+          'ix': intensity,
+        }
+      ],
+    };
+
+    final jsonObject = {
+      'patternName': '${holiday.name} Theme',
+      'thought': 'Beautiful ${holiday.name} colors for your roofline!',
+      'colors': colorsArray,
+      'effect': {
+        'name': effectName,
+        'id': effectId,
+        'direction': 'none',
+        'isStatic': isStatic,
+      },
+      'speed': speed,
+      'intensity': intensity,
+      'wled': wledPayload,
+    };
+
+    final verbal =
+        'Here are your ${holiday.name} colors! ${jsonObject['thought']}';
+    return '$verbal ${jsonEncode(jsonObject)}';
+  }
+
+  /// Maps a WLED effect ID to a human-readable name for the most common effects.
+  static String _effectIdToName(int id) {
+    const names = <int, String>{
+      0: 'Solid',
+      2: 'Breathe',
+      12: 'Theater Chase',
+      41: 'Running',
+      43: 'Twinkle',
+      52: 'Fireworks',
+      63: 'Candle',
+      65: 'Fire',
+    };
+    return names[id] ?? 'Effect $id';
   }
 
   /// Simple color name heuristic

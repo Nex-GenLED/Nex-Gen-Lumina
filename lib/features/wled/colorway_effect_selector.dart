@@ -9,6 +9,8 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 
@@ -255,22 +257,8 @@ class _ColorwayEffectSelectorPageState
           ),
         ),
 
-        // Large preview
-        Container(
-          height: 140,
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.line),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: EffectPreviewWidget(
-              effectId: effectId,
-              colors: _paletteColors,
-            ),
-          ),
-        ),
+        // Roofline preview (house image + LED pixel overlay)
+        _buildRooflinePreview(effectId, speed),
 
         const SizedBox(height: 8),
 
@@ -350,6 +338,77 @@ class _ColorwayEffectSelectorPageState
           child: _buildEffectGrid(displayEffects, effectId),
         ),
       ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Roofline Preview
+  // ---------------------------------------------------------------------------
+
+  Widget _buildRooflinePreview(int effectId, int speed) {
+    final houseImageUrl = ref.watch(currentUserProfileProvider).maybeWhen(
+      data: (u) => u?.housePhotoUrl,
+      orElse: () => null,
+    );
+    final hasCustomImage = houseImageUrl != null && houseImageUrl.isNotEmpty;
+
+    return Container(
+      height: 140,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexGenPalette.line),
+        color: NexGenPalette.matteBlack,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // House image
+            if (hasCustomImage)
+              Image.network(houseImageUrl, fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Image.asset(
+                  'assets/images/Demohomephoto.jpg', fit: BoxFit.cover,
+                ),
+              )
+            else
+              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover),
+
+            // Gradient overlay for legibility
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.4),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Animated roofline overlay with current pattern
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return AnimatedRooflineOverlay(
+                    previewColors: _paletteColors,
+                    previewEffectId: effectId,
+                    previewSpeed: speed,
+                    forceOn: true,
+                    targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
+                    useBoxFitCover: true,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

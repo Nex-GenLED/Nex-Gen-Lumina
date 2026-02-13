@@ -330,8 +330,8 @@ final recommendedPatternsProvider = Provider<List<GradientPattern>>((ref) {
     ));
   }
 
-  if (recs.length < 3) addFallbacks();
-  if (recs.length > 5) return recs.sublist(0, 5);
+  if (recs.length < 4) addFallbacks();
+  if (recs.length > 4) return recs.sublist(0, 4);
   return recs;
 });
 
@@ -527,11 +527,13 @@ final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {
   );
 });
 
-/// Smart recommendations provider that combines:
-/// 1. Upcoming holidays (within 2 weeks, Christmas all December)
-/// 2. Sports teams with games within 7 days
-/// 3. Architectural patterns from learning system
-/// 4. Time-of-day and seasonal context
+/// Smart recommendations provider — "Your Quick Picks".
+///
+/// Returns exactly 4 personalized designs based on the user's profile:
+/// 1. Architectural downlighting (time-of-day aware + learned preference)
+/// 2. Holiday/Seasonal (custom holidays > favorite holidays > any upcoming)
+/// 3. Sports team with upcoming game (respects sportsTeamPriority)
+/// 4. Context fill (additional holiday/sport/seasonal as available)
 final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((ref) async {
   final now = DateTime.now();
   final recs = <GradientPattern>[];
@@ -543,38 +545,149 @@ final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((
     addedNames.add(p.name);
   }
 
-  // ================== 1. UPCOMING HOLIDAYS (2 weeks, Christmas all December) ==================
-  final holidayStart = now;
-  // Christmas exception: show all December
-  final isDecember = now.month == 12;
-  final holidayEnd = isDecember
-      ? DateTime(now.year, 12, 31, 23, 59, 59)
-      : now.add(const Duration(days: 14));
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
 
-  final holidays = USFederalHolidays.getHolidaysInRange(holidayStart, holidayEnd);
+  // ================== 1. ARCHITECTURAL DOWNLIGHTING ==================
+  // Always include one architectural recommendation — it's the everyday default
+  try {
+    final frequency = await ref.read(patternFrequencyProvider(30).future).catchError((_) => <String, int>{});
 
-  for (final holiday in holidays.take(2)) { // Max 2 holiday recommendations
-    // Create a pattern from the holiday colors
-    final effectId = holiday.suggestedEffectId;
-    final effectName = _effectNameFromId(effectId);
+    final archPatternNames = ['warm white', 'cool white', 'moonlight', 'golden', 'candle', 'elegance', 'glow'];
+    String? preferredArch;
+    int maxCount = 0;
 
-    addOnce(GradientPattern(
-      name: holiday.name,
-      subtitle: _holidaySubtitle(holiday.name),
-      colors: holiday.suggestedColors,
-      effectId: effectId,
-      effectName: effectName,
-      isStatic: effectId == 0,
-      speed: effectId == 0 ? 0 : 80,
-      intensity: effectId == 0 ? 0 : 150,
+    for (final entry in frequency.entries) {
+      final lowerName = entry.key.toLowerCase();
+      if (archPatternNames.any((arch) => lowerName.contains(arch)) && entry.value > maxCount) {
+        preferredArch = entry.key;
+        maxCount = entry.value;
+      }
+    }
+
+    if (preferredArch != null && maxCount >= 3) {
+      addOnce(GradientPattern(
+        name: 'Architectural: $preferredArch',
+        subtitle: 'Based on your preferences',
+        colors: const [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+        effectId: 0,
+        effectName: 'Solid',
+        isStatic: true,
+        brightness: 220,
+      ));
+    } else {
+      final hour = now.hour;
+      if (hour >= 18 || hour < 6) {
+        addOnce(const GradientPattern(
+          name: 'Evening Elegance',
+          subtitle: 'Warm architectural glow',
+          colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+          effectId: 0,
+          effectName: 'Solid',
+          isStatic: true,
+          brightness: 200,
+        ));
+      } else {
+        addOnce(const GradientPattern(
+          name: 'Daylight Accent',
+          subtitle: 'Clean architectural lighting',
+          colors: [Color(0xFF87CEFA), Colors.white],
+          effectId: 0,
+          effectName: 'Solid',
+          isStatic: true,
+          brightness: 180,
+        ));
+      }
+    }
+  } catch (e) {
+    debugPrint('smartRecommendedPatternsProvider: Architectural preference check failed: $e');
+    addOnce(const GradientPattern(
+      name: 'Classic Elegance',
+      subtitle: 'Timeless architectural lighting',
+      colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
+      effectId: 0,
+      effectName: 'Solid',
+      isStatic: true,
       brightness: 200,
     ));
   }
 
-  // ================== 2. SPORTS TEAMS WITH UPCOMING GAMES (7 days) ==================
-  final profileAsync = ref.watch(currentUserProfileProvider);
-  final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
+  // ================== 2. HOLIDAY / SEASONAL (profile-aware) ==================
+  // Priority: (a) user's custom holidays today/upcoming, (b) user's favorite
+  // holidays within 2 weeks, (c) any federal/popular holiday within 2 weeks
+  bool addedHoliday = false;
 
+  // 2a. Check user's custom holidays (birthdays, anniversaries, etc.)
+  if (profile != null && profile.customHolidays.isNotEmpty) {
+    final upcomingWindow = now.add(const Duration(days: 14));
+    for (final custom in profile.customHolidays) {
+      // Check if this custom holiday falls within the next 2 weeks
+      final nextOccurrence = custom.getNextOccurrence(now.subtract(const Duration(days: 1)));
+      if (nextOccurrence.isBefore(upcomingWindow)) {
+        final effectId = custom.suggestedEffectId ?? 2; // Default: Breathe
+        final colors = custom.suggestedColors ?? const [Color(0xFFFF69B4), Color(0xFFFFD700)];
+        addOnce(GradientPattern(
+          name: custom.name,
+          subtitle: _holidaySubtitle(custom.name),
+          colors: colors,
+          effectId: effectId,
+          effectName: _effectNameFromId(effectId),
+          isStatic: effectId == 0,
+          speed: effectId == 0 ? 0 : 80,
+          intensity: effectId == 0 ? 0 : 150,
+          brightness: 200,
+        ));
+        addedHoliday = true;
+        break; // Take 1 custom holiday
+      }
+    }
+  }
+
+  // 2b. Check federal/popular holidays — prefer user's favorites
+  if (!addedHoliday) {
+    final holidayStart = now;
+    final isDecember = now.month == 12;
+    final holidayEnd = isDecember
+        ? DateTime(now.year, 12, 31, 23, 59, 59)
+        : now.add(const Duration(days: 14));
+
+    final holidays = USFederalHolidays.getHolidaysInRange(holidayStart, holidayEnd);
+
+    // Sort: user's favorite holidays first, then by date
+    final favoriteNames = profile?.favoriteHolidays
+        .map((h) => h.toLowerCase())
+        .toSet() ?? <String>{};
+
+    final sortedHolidays = List<Holiday>.from(holidays);
+    if (favoriteNames.isNotEmpty) {
+      sortedHolidays.sort((a, b) {
+        final aFav = favoriteNames.any((f) => a.name.toLowerCase().contains(f)) ? 0 : 1;
+        final bFav = favoriteNames.any((f) => b.name.toLowerCase().contains(f)) ? 0 : 1;
+        if (aFav != bFav) return aFav.compareTo(bFav);
+        return a.date.compareTo(b.date);
+      });
+    }
+
+    for (final holiday in sortedHolidays.take(1)) {
+      final effectId = holiday.suggestedEffectId;
+      final effectName = _effectNameFromId(effectId);
+      addOnce(GradientPattern(
+        name: holiday.name,
+        subtitle: _holidaySubtitle(holiday.name),
+        colors: holiday.suggestedColors,
+        effectId: effectId,
+        effectName: effectName,
+        isStatic: effectId == 0,
+        speed: effectId == 0 ? 0 : 80,
+        intensity: effectId == 0 ? 0 : 150,
+        brightness: 200,
+      ));
+      addedHoliday = true;
+    }
+  }
+
+  // ================== 3. SPORTS TEAM WITH UPCOMING GAME ==================
+  // Uses real game times from sportsScheduleService, respects sportsTeamPriority
   if (profile != null && profile.sportsTeams.isNotEmpty) {
     try {
       final sportsService = ref.read(sportsScheduleServiceProvider);
@@ -585,19 +698,27 @@ final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((
         gameEnd,
       );
 
-      // Get unique teams with upcoming games
-      final teamsWithGames = <String>{};
-      for (final game in games) {
-        if (teamsWithGames.length >= 2) break; // Max 2 sports recommendations
-        teamsWithGames.add(game.teamName);
-      }
+      if (games.isNotEmpty) {
+        // Sort games by user's sportsTeamPriority (lower index = higher priority)
+        final priority = profile.sportsTeamPriority;
+        final sortedGames = List.from(games);
+        if (priority.isNotEmpty) {
+          sortedGames.sort((a, b) {
+            final aIdx = priority.indexWhere((t) => t.toLowerCase() == a.teamName.toLowerCase());
+            final bIdx = priority.indexWhere((t) => t.toLowerCase() == b.teamName.toLowerCase());
+            // Teams in priority list come first; -1 (not found) sorts to end
+            final aPri = aIdx == -1 ? 999 : aIdx;
+            final bPri = bIdx == -1 ? 999 : bIdx;
+            if (aPri != bPri) return aPri.compareTo(bPri);
+            // Same priority: earlier game first
+            return a.gameTime.compareTo(b.gameTime);
+          });
+        }
 
-      // Add pattern for each team with an upcoming game
-      for (final teamName in teamsWithGames) {
-        final teamColors = _getTeamColorsForPattern(teamName);
+        // Take the highest-priority team with an upcoming game
+        final game = sortedGames.first;
+        final teamColors = _getTeamColorsForPattern(game.teamName);
         if (teamColors != null && teamColors.isNotEmpty) {
-          // Find the game for context
-          final game = games.firstWhere((g) => g.teamName == teamName);
           final daysUntil = game.gameTime.difference(now).inDays;
           final gameContext = daysUntil == 0
               ? 'Game Day!'
@@ -606,7 +727,7 @@ final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((
                   : 'Game in $daysUntil days';
 
           addOnce(GradientPattern(
-            name: '$teamName - $gameContext',
+            name: '${game.teamName} - $gameContext',
             subtitle: 'vs ${game.opponent}',
             colors: teamColors,
             effectId: 12, // Theater Chase
@@ -624,86 +745,86 @@ final smartRecommendedPatternsProvider = FutureProvider<List<GradientPattern>>((
     }
   }
 
-  // ================== 3. ARCHITECTURAL PATTERN FROM LEARNING SYSTEM ==================
-  // Check user's pattern preferences and add an architectural recommendation
-  try {
-    final frequency = await ref.read(patternFrequencyProvider(30).future).catchError((_) => <String, int>{});
+  // ================== 4. CONTEXT FILL (to reach 4 picks) ==================
+  // Fill remaining slots with: additional holiday, additional sport, or base recs
 
-    // Look for frequently used architectural-style patterns
-    final archPatternNames = ['warm white', 'cool white', 'moonlight', 'golden', 'candle', 'elegance', 'glow'];
-    String? preferredArch;
-    int maxCount = 0;
-
-    for (final entry in frequency.entries) {
-      final lowerName = entry.key.toLowerCase();
-      if (archPatternNames.any((arch) => lowerName.contains(arch)) && entry.value > maxCount) {
-        preferredArch = entry.key;
-        maxCount = entry.value;
-      }
-    }
-
-    // Add recommended architectural pattern based on preference or time of day
-    if (preferredArch != null && maxCount >= 3) {
-      // User has a clear architectural preference - recommend similar
+  // Try a second holiday if we still have room and holidays are available
+  if (recs.length < 4) {
+    final holidayStart = now;
+    final isDecember = now.month == 12;
+    final holidayEnd = isDecember
+        ? DateTime(now.year, 12, 31, 23, 59, 59)
+        : now.add(const Duration(days: 14));
+    final holidays = USFederalHolidays.getHolidaysInRange(holidayStart, holidayEnd);
+    for (final holiday in holidays) {
+      if (recs.length >= 4) break;
+      final effectId = holiday.suggestedEffectId;
       addOnce(GradientPattern(
-        name: 'Architectural: $preferredArch',
-        subtitle: 'Based on your preferences',
-        colors: const [Color(0xFFFFB347), Color(0xFFFFE4B5)],
-        effectId: 0,
-        effectName: 'Solid',
-        isStatic: true,
-        brightness: 220,
+        name: holiday.name,
+        subtitle: _holidaySubtitle(holiday.name),
+        colors: holiday.suggestedColors,
+        effectId: effectId,
+        effectName: _effectNameFromId(effectId),
+        isStatic: effectId == 0,
+        speed: effectId == 0 ? 0 : 80,
+        intensity: effectId == 0 ? 0 : 150,
+        brightness: 200,
       ));
-    } else {
-      // Default architectural recommendation based on time of day
-      final hour = now.hour;
-      if (hour >= 18 || hour < 6) {
-        // Evening/night: warm white
-        addOnce(const GradientPattern(
-          name: 'Evening Elegance',
-          subtitle: 'Warm architectural glow',
-          colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
-          effectId: 0,
-          effectName: 'Solid',
-          isStatic: true,
-          brightness: 200,
-        ));
-      } else {
-        // Daytime: cool white
-        addOnce(const GradientPattern(
-          name: 'Daylight Accent',
-          subtitle: 'Clean architectural lighting',
-          colors: [Color(0xFF87CEFA), Colors.white],
-          effectId: 0,
-          effectName: 'Solid',
-          isStatic: true,
-          brightness: 180,
+    }
+  }
+
+  // Try a second sport if we still have room
+  if (recs.length < 4 && profile != null && profile.sportsTeams.isNotEmpty) {
+    try {
+      final sportsService = ref.read(sportsScheduleServiceProvider);
+      final gameEnd = now.add(const Duration(days: 7));
+      final games = await sportsService.getGamesInRange(
+        profile.sportsTeams,
+        now,
+        gameEnd,
+      );
+      // Skip the first team (already added) — find a different team
+      final addedTeams = addedNames.where((n) => n.contains(' - Game')).toSet();
+      for (final game in games) {
+        if (recs.length >= 4) break;
+        final teamColors = _getTeamColorsForPattern(game.teamName);
+        if (teamColors == null || teamColors.isEmpty) continue;
+        final daysUntil = game.gameTime.difference(now).inDays;
+        final gameContext = daysUntil == 0
+            ? 'Game Day!'
+            : daysUntil == 1
+                ? 'Game Tomorrow'
+                : 'Game in $daysUntil days';
+        final name = '${game.teamName} - $gameContext';
+        if (addedTeams.any((n) => n.startsWith(game.teamName))) continue;
+        addOnce(GradientPattern(
+          name: name,
+          subtitle: 'vs ${game.opponent}',
+          colors: teamColors,
+          effectId: 12,
+          effectName: 'Theater Chase',
+          direction: 'right',
+          isStatic: false,
+          speed: 85,
+          intensity: 180,
+          brightness: 220,
         ));
       }
+    } catch (e) {
+      // Already logged above
     }
-  } catch (e) {
-    debugPrint('smartRecommendedPatternsProvider: Architectural preference check failed: $e');
-    // Fallback architectural pattern
-    addOnce(const GradientPattern(
-      name: 'Classic Elegance',
-      subtitle: 'Timeless architectural lighting',
-      colors: [Color(0xFFFFB347), Color(0xFFFFE4B5)],
-      effectId: 0,
-      effectName: 'Solid',
-      isStatic: true,
-      brightness: 200,
-    ));
   }
 
-  // ================== 4. FILL WITH BASE RECOMMENDATIONS IF NEEDED ==================
-  // Add base seasonal/contextual recommendations if we have room
-  final baseRecs = ref.read(recommendedPatternsProvider);
-  for (final rec in baseRecs) {
-    if (recs.length >= 5) break;
-    addOnce(rec);
+  // Fill any remaining with base sync recommendations
+  if (recs.length < 4) {
+    final baseRecs = ref.read(recommendedPatternsProvider);
+    for (final rec in baseRecs) {
+      if (recs.length >= 4) break;
+      addOnce(rec);
+    }
   }
 
-  return recs.take(5).toList();
+  return recs.take(4).toList();
 });
 
 /// Helper to get effect name from WLED effect ID

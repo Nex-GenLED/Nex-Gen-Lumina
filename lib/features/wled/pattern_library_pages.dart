@@ -159,7 +159,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
     final profileAsync = ref.watch(currentUserProfileProvider);
     String _greetingTitle() {
       // Default title
-      const fallback = 'Recommended for You';
+      const fallback = 'Your Quick Picks';
       final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
       if (profile == null) return fallback;
       final name = profile.displayName.trim();
@@ -231,7 +231,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                   // 1. My Saved Designs section (at top)
                   _pagePadding(child: const _MySavedDesignsSection()),
 
-                  // 2. Recommended for You section
+                  // 2. Your Quick Picks section
                   _pagePadding(
                     child: PatternCategoryRow(title: _greetingTitle(), patterns: recs, query: '', isFeatured: true),
                   ),
@@ -1037,8 +1037,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
   /// For seasonal category, returns dynamic icon based on current season.
   IconData _heroIconForCategory(String categoryId) {
     switch (categoryId) {
-      case 'cat_quick_picks':
-        return Icons.auto_awesome;
       case 'cat_arch':
         return Icons.villa;
       case 'cat_holiday':
@@ -1085,9 +1083,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
   /// Returns gradient colors for each category background.
   List<Color> _gradientForCategory(String categoryId) {
     switch (categoryId) {
-      case 'cat_quick_picks':
-        // Electric cyan to purple gradient
-        return const [Color(0xFF00D4FF), Color(0xFF9C27B0)];
       case 'cat_arch':
         // Warm amber to burnt orange
         return const [Color(0xFFFFB347), Color(0xFFFF7043)];
@@ -1141,8 +1136,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
   /// Returns accent color for each category (used for icon highlights and glow).
   Color _accentForCategory(String categoryId) {
     switch (categoryId) {
-      case 'cat_quick_picks':
-        return const Color(0xFF00D4FF); // Electric cyan
       case 'cat_arch':
         return const Color(0xFFFFB347); // Warm amber
       case 'cat_holiday':
@@ -5833,7 +5826,7 @@ class _PalettePatternGrid extends ConsumerWidget {
                   : GridView.builder(
                       padding: const EdgeInsets.all(12),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 4, // Match "Recommended for You" layout
+                        crossAxisCount: 4, // Match "Your Quick Picks" layout
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
                         childAspectRatio: 0.85, // Slightly wider cards

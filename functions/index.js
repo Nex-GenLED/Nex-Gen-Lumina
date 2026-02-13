@@ -9,6 +9,10 @@ admin.initializeApp();
 const { processLuminaCommand } = require("./lib/processLuminaCommand");
 exports.processLuminaCommand = processLuminaCommand;
 
+// Import TypeScript-compiled Lumina AI schedule command processor
+const { processScheduleCommand } = require("./lib/processScheduleCommand");
+exports.processScheduleCommand = processScheduleCommand;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

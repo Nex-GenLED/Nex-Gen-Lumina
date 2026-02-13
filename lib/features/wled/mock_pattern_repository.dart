@@ -12,7 +12,6 @@ import 'package:nexgen_command/data/party_event_palettes.dart';
 import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
-import 'package:nexgen_command/data/quick_picks_palettes.dart';
 import 'package:nexgen_command/services/big_event_service.dart';
 import 'package:flutter/material.dart';
 
@@ -315,13 +314,6 @@ class MockPatternRepository {
   }
 
   // Premium Categories
-  static const PatternCategory catQuickPicks = PatternCategory(
-    id: 'cat_quick_picks',
-    name: 'Quick Picks',
-    // Popular curated designs
-    imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
-  );
-
   static const PatternCategory catArchitectural = PatternCategory(
     id: 'cat_arch',
     name: 'Architectural Downlighting (White)',
@@ -379,7 +371,6 @@ class MockPatternRepository {
   );
 
   static const List<PatternCategory> _categories = [
-    catQuickPicks,
     catArchitectural,
     catHoliday,
     catSports,
@@ -683,10 +674,6 @@ class MockPatternRepository {
     // Root categories
     nodes.addAll(_buildRootCategories());
 
-    // Quick Picks: curated popular patterns (always first)
-    nodes.addAll(QuickPicksPalettes.getAllQuickPicksFolders());
-    nodes.addAll(QuickPicksPalettes.getAllQuickPicksPaletteNodes());
-
     // Big Events (dynamic - appears first in Game Day Fan Zone if active)
     if (_bigEventNodes.isNotEmpty) {
       nodes.addAll(_bigEventNodes);
@@ -731,15 +718,6 @@ class MockPatternRepository {
   /// Build root category nodes
   List<LibraryNode> _buildRootCategories() {
     return const [
-      LibraryNode(
-        id: 'cat_quick_picks',
-        name: 'Quick Picks',
-        description: 'Popular patterns to get you started',
-        nodeType: LibraryNodeType.category,
-        sortOrder: -1, // Always first
-        imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
-        metadata: {'icon': 'star', 'isQuickAccess': true},
-      ),
       LibraryNode(
         id: 'cat_sports',
         name: 'Game Day Fan Zone',
