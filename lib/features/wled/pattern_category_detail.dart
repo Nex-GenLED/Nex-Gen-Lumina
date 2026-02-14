@@ -20,6 +20,7 @@ import 'package:nexgen_command/widgets/color_behavior_badge.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/pattern_library_pages.dart' show LiveGradientStrip;
+import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 
 /// Netflix-style horizontal row of gradient cards
 class PatternCategoryRow extends ConsumerWidget {
@@ -788,7 +789,8 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
-/// Detail screen for a single Pattern Category now shows Sub-Category folders
+/// Detail screen for a single Pattern Category showing Sub-Category folders
+/// with a featured card, Lumina AI search bar, and contextual color previews.
 class CategoryDetailScreen extends ConsumerWidget {
   final String categoryId;
   final String? categoryName;
@@ -814,26 +816,129 @@ class CategoryDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: asyncSubs.when(
-            data: (subs) {
-              if (subs.isEmpty) return const _CenteredText('No sub-categories yet');
-              return GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.6,
+      body: asyncSubs.when(
+        data: (subs) {
+          if (subs.isEmpty) return const _CenteredText('No sub-categories yet');
+
+          final featured = _pickFeaturedSub(subs, categoryId);
+          final remaining = subs.where((s) => s.id != featured?.id).toList();
+
+          return CustomScrollView(
+            slivers: [
+              // Lumina AI contextual search bar
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: _LuminaCategorySearchBar(categoryName: title),
                 ),
-                itemCount: subs.length,
-                itemBuilder: (_, i) => _SubCategoryCard(categoryId: categoryId, sub: subs[i]),
-              );
-            },
-            error: (e, st) => _ErrorState(error: '$e'),
-            loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2))),
+              ),
+
+              // Featured card
+              if (featured != null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                    child: _FeaturedSubCategoryCard(categoryId: categoryId, sub: featured),
+                  ),
+                ),
+
+              // Section header
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: Text(
+                    'All $title Themes',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+
+              // Sub-folder grid
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.95,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) => _SubCategoryCard(categoryId: categoryId, sub: remaining[i]),
+                    childCount: remaining.length,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+        error: (e, st) => _ErrorState(error: '$e'),
+        loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       ),
     );
+  }
+
+  /// Pick the most seasonally relevant sub-folder as the featured card.
+  static SubCategory? _pickFeaturedSub(List<SubCategory> subs, String categoryId) {
+    if (subs.isEmpty) return null;
+    final now = DateTime.now();
+    final month = now.month;
+    final day = now.day;
+
+    String? targetId;
+
+    switch (categoryId) {
+      case 'cat_holiday':
+        // Pick the nearest upcoming holiday (within 2-week relevance window)
+        targetId = _nearestHolidaySubId(month, day);
+        break;
+      case 'cat_season':
+        // Current season
+        if (month >= 3 && month <= 5) {
+          targetId = 'sub_spring';
+        } else if (month >= 6 && month <= 8) {
+          targetId = 'sub_summer';
+        } else if (month >= 9 && month <= 11) {
+          targetId = 'sub_autumn';
+        } else {
+          targetId = 'sub_winter';
+        }
+        break;
+      case 'cat_sports':
+        targetId = 'sub_kc'; // Default featured sports
+        break;
+      case 'cat_party':
+        targetId = 'sub_birthday'; // Most popular party type
+        break;
+      case 'cat_arch':
+        targetId = 'sub_warm_whites'; // Everyday default
+        break;
+    }
+
+    if (targetId != null) {
+      final match = subs.where((s) => s.id == targetId).firstOrNull;
+      if (match != null) return match;
+    }
+    return subs.first;
+  }
+
+  /// Determine the nearest upcoming holiday sub-category ID.
+  static String? _nearestHolidaySubId(int month, int day) {
+    // Ordered by calendar date with 2-week pre-windows
+    if (month == 2 && day <= 28) return 'sub_valentines';
+    if (month == 3 && day <= 17) return 'sub_st_patricks';
+    if ((month == 3 && day >= 15) || (month == 4 && day <= 25)) return 'sub_easter';
+    if ((month == 6 && day >= 20) || (month == 7 && day <= 4)) return 'sub_july4';
+    if ((month == 10 && day >= 1) || (month == 10 && day <= 31)) return 'sub_halloween';
+    if (month == 12 || (month == 11 && day >= 20)) return 'sub_xmas';
+    // Default: next upcoming
+    if (month >= 1 && month <= 2) return 'sub_valentines';
+    if (month >= 5 && month <= 6) return 'sub_july4';
+    if (month >= 8 && month <= 9) return 'sub_halloween';
+    return 'sub_xmas';
   }
 
   Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
@@ -856,191 +961,356 @@ class CategoryDetailScreen extends ConsumerWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Lumina AI contextual search bar
+// ---------------------------------------------------------------------------
+class _LuminaCategorySearchBar extends StatelessWidget {
+  final String categoryName;
+  const _LuminaCategorySearchBar({required this.categoryName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          // Navigate to Lumina tab with category context pre-filled
+          // For now just show snackbar indicating the feature
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ask Lumina about $categoryName...')),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: NexGenPalette.matteBlack.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: NexGenPalette.cyan.withValues(alpha: 0.25),
+              width: 0.5,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 18, color: NexGenPalette.cyan.withValues(alpha: 0.7)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Ask Lumina about $categoryName...',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white.withValues(alpha: 0.25)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Featured sub-category card (full-width, tall, with PixelStripPreview)
+// ---------------------------------------------------------------------------
+class _FeaturedSubCategoryCard extends StatelessWidget {
+  final String categoryId;
+  final SubCategory sub;
+  const _FeaturedSubCategoryCard({required this.categoryId, required this.sub});
+
+  @override
+  Widget build(BuildContext context) {
+    final gradientColors = _gradientForSubCategory(sub.id);
+    final accentColor = _accentForSubCategory(sub.id);
+    final heroIcon = _heroIconForSubCategory(sub.id);
+    final previewColors = _previewColorsForSub(sub);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          height: 180,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                gradientColors[0].withValues(alpha: 0.3),
+                gradientColors[1].withValues(alpha: 0.2),
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
+              stops: const [0.0, 0.35, 1.0],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: accentColor.withValues(alpha: 0.5),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.25),
+                blurRadius: 28,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              // Radial glow
+              Positioned(
+                top: -10,
+                right: 20,
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        gradientColors[0].withValues(alpha: 0.25),
+                        gradientColors[1].withValues(alpha: 0.08),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Top row: icon + name + badge
+                    Row(
+                      children: [
+                        Icon(
+                          heroIcon,
+                          size: 28,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(color: accentColor.withValues(alpha: 0.8), blurRadius: 16),
+                          ],
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                sub.name,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '50+ designs available',
+                                style: TextStyle(
+                                  color: accentColor.withValues(alpha: 0.8),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: accentColor.withValues(alpha: 0.4), width: 0.5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Featured',
+                                style: TextStyle(
+                                  color: accentColor,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.auto_awesome, size: 12, color: accentColor),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    // PixelStripPreview
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: PixelStripPreview(
+                        colors: previewColors,
+                        pixelCount: 24,
+                        height: 42,
+                        animate: true,
+                        borderRadius: 10,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Bottom row: explore prompt
+                    Row(
+                      children: [
+                        Text(
+                          'Tap to explore',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_ios, size: 10, color: Colors.white.withValues(alpha: 0.35)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared sub-category helpers (used by both featured and grid cards)
+// ---------------------------------------------------------------------------
+
+/// Returns a hero icon for each sub-category type.
+IconData _heroIconForSubCategory(String subId) {
+  switch (subId) {
+    case 'sub_xmas': return Icons.park;
+    case 'sub_halloween': return Icons.pest_control;
+    case 'sub_july4': return Icons.celebration;
+    case 'sub_easter': return Icons.egg;
+    case 'sub_valentines': return Icons.favorite;
+    case 'sub_st_patricks': return Icons.local_florist;
+    case 'sub_kc': return Icons.sports_football;
+    case 'sub_seattle': return Icons.sports_football;
+    case 'sub_rb_generic':
+    case 'sub_gy_generic':
+    case 'sub_ob_generic': return Icons.emoji_events;
+    case 'sub_spring': return Icons.local_florist;
+    case 'sub_summer': return Icons.wb_sunny;
+    case 'sub_autumn': return Icons.park;
+    case 'sub_winter': return Icons.ac_unit;
+    case 'sub_warm_whites': return Icons.wb_incandescent;
+    case 'sub_cool_whites': return Icons.light_mode;
+    case 'sub_gold_accents': return Icons.auto_awesome;
+    case 'sub_security_floods': return Icons.flashlight_on;
+    case 'sub_birthday': return Icons.cake;
+    case 'sub_elegant_dinner': return Icons.restaurant;
+    case 'sub_rave': return Icons.speaker;
+    case 'sub_baby_shower': return Icons.child_friendly;
+    default: return Icons.palette;
+  }
+}
+
+/// Handpicked gradient pairs for each subcategory — curated for card aesthetics.
+List<Color> _gradientForSubCategory(String subId) {
+  switch (subId) {
+    case 'sub_xmas': return const [Color(0xFF2E7D32), Color(0xFFC62828)];
+    case 'sub_halloween': return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)];
+    case 'sub_july4': return const [Color(0xFFEF5350), Color(0xFF1565C0)];
+    case 'sub_easter': return const [Color(0xFFF8BBD0), Color(0xFFB39DDB)];
+    case 'sub_valentines': return const [Color(0xFFE91E63), Color(0xFFAD1457)];
+    case 'sub_st_patricks': return const [Color(0xFF43A047), Color(0xFF00C853)];
+    case 'sub_kc': return const [Color(0xFFD32F2F), Color(0xFFFFB300)];
+    case 'sub_seattle': return const [Color(0xFF1B5E20), Color(0xFF1565C0)];
+    case 'sub_rb_generic': return const [Color(0xFFD32F2F), Color(0xFF1565C0)];
+    case 'sub_gy_generic': return const [Color(0xFF2E7D32), Color(0xFFF9A825)];
+    case 'sub_ob_generic': return const [Color(0xFFEF6C00), Color(0xFF1565C0)];
+    case 'sub_spring': return const [Color(0xFF81C784), Color(0xFFF48FB1)];
+    case 'sub_summer': return const [Color(0xFFFFEE58), Color(0xFF29B6F6)];
+    case 'sub_autumn': return const [Color(0xFFFF8F00), Color(0xFF6D4C41)];
+    case 'sub_winter': return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
+    case 'sub_warm_whites': return const [Color(0xFFFFB74D), Color(0xFFFF8A65)];
+    case 'sub_cool_whites': return const [Color(0xFF90A4AE), Color(0xFFE0E0E0)];
+    case 'sub_gold_accents': return const [Color(0xFFFFD54F), Color(0xFFFFA000)];
+    case 'sub_security_floods': return const [Color(0xFFE0E0E0), Color(0xFF4FC3F7)];
+    case 'sub_birthday': return const [Color(0xFF00E5FF), Color(0xFFFF4081)];
+    case 'sub_elegant_dinner': return const [Color(0xFFFFB74D), Color(0xFF5D4037)];
+    case 'sub_rave': return const [Color(0xFFAA00FF), Color(0xFF00E5FF)];
+    case 'sub_baby_shower': return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)];
+    default: return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
+  }
+}
+
+/// Handpicked accent color for each subcategory.
+Color _accentForSubCategory(String subId) {
+  switch (subId) {
+    case 'sub_xmas': return const Color(0xFF4CAF50);
+    case 'sub_halloween': return const Color(0xFFFF6D00);
+    case 'sub_july4': return const Color(0xFFEF5350);
+    case 'sub_easter': return const Color(0xFFF8BBD0);
+    case 'sub_valentines': return const Color(0xFFE91E63);
+    case 'sub_st_patricks': return const Color(0xFF00C853);
+    case 'sub_kc': return const Color(0xFFD32F2F);
+    case 'sub_seattle': return const Color(0xFF43A047);
+    case 'sub_rb_generic': return const Color(0xFFEF5350);
+    case 'sub_gy_generic': return const Color(0xFF66BB6A);
+    case 'sub_ob_generic': return const Color(0xFFEF6C00);
+    case 'sub_spring': return const Color(0xFFF48FB1);
+    case 'sub_summer': return const Color(0xFFFFEE58);
+    case 'sub_autumn': return const Color(0xFFFF8F00);
+    case 'sub_winter': return const Color(0xFF81D4FA);
+    case 'sub_warm_whites': return const Color(0xFFFFB74D);
+    case 'sub_cool_whites': return const Color(0xFF90A4AE);
+    case 'sub_gold_accents': return const Color(0xFFFFD54F);
+    case 'sub_security_floods': return const Color(0xFF4FC3F7);
+    case 'sub_birthday': return const Color(0xFF00E5FF);
+    case 'sub_elegant_dinner': return const Color(0xFFFFB74D);
+    case 'sub_rave': return const Color(0xFFAA00FF);
+    case 'sub_baby_shower': return const Color(0xFF80DEEA);
+    default: return NexGenPalette.cyan;
+  }
+}
+
+/// Get representative palette colors for a subcategory's PixelStripPreview.
+/// Uses themeColors from the model if available, otherwise falls back to
+/// the gradient colors with some interpolation for visual richness.
+List<Color> _previewColorsForSub(SubCategory sub) {
+  if (sub.themeColors.isNotEmpty) return sub.themeColors;
+  final g = _gradientForSubCategory(sub.id);
+  if (g.length < 2) return g;
+  // Create a richer palette by interpolating between the two gradient stops
+  return [
+    g[0],
+    Color.lerp(g[0], g[1], 0.35)!,
+    Color.lerp(g[0], g[1], 0.65)!,
+    g[1],
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Enhanced sub-category grid card with mini PixelStripPreview + design count
+// ---------------------------------------------------------------------------
 class _SubCategoryCard extends StatelessWidget {
   final String categoryId;
   final SubCategory sub;
   const _SubCategoryCard({required this.categoryId, required this.sub});
-
-  /// Returns a hero icon for each sub-category type.
-  IconData _heroIconForSubCategory(String subId) {
-    switch (subId) {
-      // Holidays
-      case 'sub_xmas':
-        return Icons.park;
-      case 'sub_halloween':
-        return Icons.pest_control;
-      case 'sub_july4':
-        return Icons.celebration;
-      case 'sub_easter':
-        return Icons.egg;
-      case 'sub_valentines':
-        return Icons.favorite;
-      case 'sub_st_patricks':
-        return Icons.local_florist;
-      // Sports
-      case 'sub_kc':
-        return Icons.sports_football;
-      case 'sub_seattle':
-        return Icons.sports_football;
-      case 'sub_rb_generic':
-      case 'sub_gy_generic':
-      case 'sub_ob_generic':
-        return Icons.emoji_events;
-      // Seasonal
-      case 'sub_spring':
-        return Icons.local_florist;
-      case 'sub_summer':
-        return Icons.wb_sunny;
-      case 'sub_autumn':
-        return Icons.park;
-      case 'sub_winter':
-        return Icons.ac_unit;
-      // Architectural
-      case 'sub_warm_whites':
-        return Icons.wb_incandescent;
-      case 'sub_cool_whites':
-        return Icons.light_mode;
-      case 'sub_gold_accents':
-        return Icons.auto_awesome;
-      case 'sub_security_floods':
-        return Icons.flashlight_on;
-      // Party
-      case 'sub_birthday':
-        return Icons.cake;
-      case 'sub_elegant_dinner':
-        return Icons.restaurant;
-      case 'sub_rave':
-        return Icons.speaker;
-      case 'sub_baby_shower':
-        return Icons.child_friendly;
-      default:
-        return Icons.palette;
-    }
-  }
-
-  /// Handpicked gradient pairs for each subcategory — curated for card aesthetics.
-  List<Color> _gradientForSubCategory(String subId) {
-    switch (subId) {
-      // Holidays
-      case 'sub_xmas':
-        return const [Color(0xFF2E7D32), Color(0xFFC62828)]; // Deep green → deep red
-      case 'sub_halloween':
-        return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)]; // Vivid orange → purple
-      case 'sub_july4':
-        return const [Color(0xFFEF5350), Color(0xFF1565C0)]; // Red → blue
-      case 'sub_easter':
-        return const [Color(0xFFF8BBD0), Color(0xFFB39DDB)]; // Soft pink → lavender
-      case 'sub_valentines':
-        return const [Color(0xFFE91E63), Color(0xFFAD1457)]; // Hot pink → deep rose
-      case 'sub_st_patricks':
-        return const [Color(0xFF43A047), Color(0xFF00C853)]; // Forest green → bright green
-      // Sports
-      case 'sub_kc':
-        return const [Color(0xFFD32F2F), Color(0xFFFFB300)]; // Red → gold
-      case 'sub_seattle':
-        return const [Color(0xFF1B5E20), Color(0xFF1565C0)]; // Green → blue
-      case 'sub_rb_generic':
-        return const [Color(0xFFD32F2F), Color(0xFF1565C0)]; // Red → blue
-      case 'sub_gy_generic':
-        return const [Color(0xFF2E7D32), Color(0xFFF9A825)]; // Green → yellow
-      case 'sub_ob_generic':
-        return const [Color(0xFFEF6C00), Color(0xFF1565C0)]; // Orange → blue
-      // Seasonal
-      case 'sub_spring':
-        return const [Color(0xFF81C784), Color(0xFFF48FB1)]; // Fresh green → pink
-      case 'sub_summer':
-        return const [Color(0xFFFFEE58), Color(0xFF29B6F6)]; // Sunny yellow → sky blue
-      case 'sub_autumn':
-        return const [Color(0xFFFF8F00), Color(0xFF6D4C41)]; // Amber → brown
-      case 'sub_winter':
-        return const [Color(0xFF81D4FA), Color(0xFF7E57C2)]; // Icy blue → purple
-      // Architectural
-      case 'sub_warm_whites':
-        return const [Color(0xFFFFB74D), Color(0xFFFF8A65)]; // Warm amber → peach
-      case 'sub_cool_whites':
-        return const [Color(0xFF90A4AE), Color(0xFFE0E0E0)]; // Steel → silver
-      case 'sub_gold_accents':
-        return const [Color(0xFFFFD54F), Color(0xFFFFA000)]; // Light gold → deep gold
-      case 'sub_security_floods':
-        return const [Color(0xFFE0E0E0), Color(0xFF4FC3F7)]; // White → alert blue
-      // Party
-      case 'sub_birthday':
-        return const [Color(0xFF00E5FF), Color(0xFFFF4081)]; // Cyan → pink
-      case 'sub_elegant_dinner':
-        return const [Color(0xFFFFB74D), Color(0xFF5D4037)]; // Amber → espresso
-      case 'sub_rave':
-        return const [Color(0xFFAA00FF), Color(0xFF00E5FF)]; // Electric purple → cyan
-      case 'sub_baby_shower':
-        return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)]; // Baby blue → baby pink
-      default:
-        return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
-    }
-  }
-
-  /// Handpicked accent color for each subcategory.
-  Color _accentForSubCategory(String subId) {
-    switch (subId) {
-      // Holidays
-      case 'sub_xmas':
-        return const Color(0xFF4CAF50); // Christmas green
-      case 'sub_halloween':
-        return const Color(0xFFFF6D00); // Pumpkin orange
-      case 'sub_july4':
-        return const Color(0xFFEF5350); // Patriot red
-      case 'sub_easter':
-        return const Color(0xFFF8BBD0); // Pastel pink
-      case 'sub_valentines':
-        return const Color(0xFFE91E63); // Hot pink
-      case 'sub_st_patricks':
-        return const Color(0xFF00C853); // Bright green
-      // Sports
-      case 'sub_kc':
-        return const Color(0xFFD32F2F); // KC red
-      case 'sub_seattle':
-        return const Color(0xFF43A047); // Seattle green
-      case 'sub_rb_generic':
-        return const Color(0xFFEF5350); // Red
-      case 'sub_gy_generic':
-        return const Color(0xFF66BB6A); // Green
-      case 'sub_ob_generic':
-        return const Color(0xFFEF6C00); // Orange
-      // Seasonal
-      case 'sub_spring':
-        return const Color(0xFFF48FB1); // Spring pink
-      case 'sub_summer':
-        return const Color(0xFFFFEE58); // Sunny yellow
-      case 'sub_autumn':
-        return const Color(0xFFFF8F00); // Autumn amber
-      case 'sub_winter':
-        return const Color(0xFF81D4FA); // Icy blue
-      // Architectural
-      case 'sub_warm_whites':
-        return const Color(0xFFFFB74D); // Warm amber
-      case 'sub_cool_whites':
-        return const Color(0xFF90A4AE); // Cool steel
-      case 'sub_gold_accents':
-        return const Color(0xFFFFD54F); // Gold
-      case 'sub_security_floods':
-        return const Color(0xFF4FC3F7); // Alert blue
-      // Party
-      case 'sub_birthday':
-        return const Color(0xFF00E5FF); // Electric cyan
-      case 'sub_elegant_dinner':
-        return const Color(0xFFFFB74D); // Warm amber
-      case 'sub_rave':
-        return const Color(0xFFAA00FF); // Electric purple
-      case 'sub_baby_shower':
-        return const Color(0xFF80DEEA); // Baby blue
-      default:
-        return NexGenPalette.cyan;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final heroIcon = _heroIconForSubCategory(sub.id);
     final accentColor = _accentForSubCategory(sub.id);
     final gradientColors = _gradientForSubCategory(sub.id);
+    final previewColors = _previewColorsForSub(sub);
 
     return Material(
       color: Colors.transparent,
@@ -1074,15 +1344,15 @@ class _SubCategoryCard extends StatelessWidget {
           ),
           child: Stack(
             children: [
-              // Large radial glow behind icon
+              // Radial glow behind icon
               Positioned(
-                top: 10,
+                top: 8,
                 left: 0,
                 right: 0,
                 child: Center(
                   child: Container(
-                    width: 90,
-                    height: 90,
+                    width: 80,
+                    height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: RadialGradient(
@@ -1103,12 +1373,12 @@ class _SubCategoryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Single hero icon - centered and prominent
+                    // Hero icon
                     Expanded(
                       child: Center(
                         child: Icon(
                           heroIcon,
-                          size: 52,
+                          size: 44,
                           color: Colors.white,
                           shadows: [
                             Shadow(
@@ -1123,29 +1393,49 @@ class _SubCategoryCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    // Subcategory name with arrow
+                    // Mini PixelStripPreview
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: PixelStripPreview(
+                        colors: previewColors,
+                        pixelCount: 8,
+                        height: 18,
+                        animate: false,
+                        borderRadius: 6,
+                        backgroundColor: NexGenPalette.matteBlack.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Sub-category name
+                    Text(
+                      sub.name,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 2),
+                    // Design count + arrow
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(
-                            sub.name,
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
+                        Text(
+                          '50+ designs',
+                          style: TextStyle(
+                            color: accentColor.withValues(alpha: 0.7),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 3),
                         Icon(
                           Icons.arrow_forward_ios,
-                          color: accentColor.withValues(alpha: 0.8),
-                          size: 10,
+                          color: accentColor.withValues(alpha: 0.6),
+                          size: 8,
                         ),
                       ],
                     ),

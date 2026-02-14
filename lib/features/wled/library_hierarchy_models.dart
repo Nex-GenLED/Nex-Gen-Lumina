@@ -29,6 +29,11 @@ class LibraryNode {
   /// Theme colors for palette nodes. Null for folder/category nodes.
   final List<Color>? themeColors;
 
+  /// Representative preview colors for folder/category nodes.
+  /// Sampled from child palettes to give a taste of what's inside.
+  /// Null until populated by the data layer.
+  final List<Color>? previewColors;
+
   /// Sort order within parent (lower = first)
   final int sortOrder;
 
@@ -43,6 +48,7 @@ class LibraryNode {
     required this.nodeType,
     this.parentId,
     this.themeColors,
+    this.previewColors,
     this.sortOrder = 0,
     this.metadata,
   });
@@ -86,6 +92,7 @@ class LibraryNode {
     LibraryNodeType? nodeType,
     String? parentId,
     List<Color>? themeColors,
+    List<Color>? previewColors,
     int? sortOrder,
     Map<String, dynamic>? metadata,
   }) {
@@ -97,6 +104,7 @@ class LibraryNode {
       nodeType: nodeType ?? this.nodeType,
       parentId: parentId ?? this.parentId,
       themeColors: themeColors ?? this.themeColors,
+      previewColors: previewColors ?? this.previewColors,
       sortOrder: sortOrder ?? this.sortOrder,
       metadata: metadata ?? this.metadata,
     );

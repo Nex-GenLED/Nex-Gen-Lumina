@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -31,18 +32,39 @@ class LibraryNodeGrid extends StatelessWidget {
       );
     }
 
+    // Detect if this grid shows palettes → single-column list layout
+    final allPalettes = children.every((n) => n.isPalette);
+
+    if (allPalettes) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: children.length,
+        itemBuilder: (context, index) {
+          final node = children[index];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SizedBox(
+              height: 140,
+              child: LibraryNodeCard(node: node, index: index),
+            ),
+          );
+        },
+      );
+    }
+
+    // Folders: 2-column grid with taller aspect ratio
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.6,
+        childAspectRatio: 1.1,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node);
+        return LibraryNodeCard(node: node, index: index);
       },
     );
   }
@@ -51,8 +73,9 @@ class LibraryNodeGrid extends StatelessWidget {
 /// Individual node card for navigation
 class LibraryNodeCard extends StatelessWidget {
   final LibraryNode node;
+  final int? index;
 
-  const LibraryNodeCard({super.key, required this.node});
+  const LibraryNodeCard({super.key, required this.node, this.index});
 
   IconData _iconForNode() {
     final id = node.id;
@@ -243,11 +266,30 @@ class LibraryNodeCard extends StatelessWidget {
     return [c, c.withValues(alpha: 0.5)];
   }
 
+  /// Expand a 2-color gradient pair into a richer multi-color list
+  /// for the mini pixel preview strip on folder cards.
+  static List<Color> _expandGradient(List<Color> pair) {
+    if (pair.length < 2) return pair;
+    final a = pair[0];
+    final b = pair[1];
+    return [
+      a,
+      Color.lerp(a, b, 0.25)!,
+      Color.lerp(a, b, 0.5)!,
+      Color.lerp(a, b, 0.75)!,
+      b,
+      Color.lerp(b, a, 0.3)!,
+      a,
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Palettes get flowing gradient cards, folders get solid themed cards
+    // Palettes get color-dominant cards, folders get solid themed cards
     if (node.isPalette) {
-      return _buildPaletteCard(context);
+      // Only animate the first 8 visible palette cards
+      final shouldAnimate = index == null || index! < 8;
+      return _buildPaletteCard(context, animate: shouldAnimate);
     } else {
       return _buildFolderCard(context);
     }
@@ -295,13 +337,13 @@ class LibraryNodeCard extends StatelessWidget {
             children: [
               // Centered radial glow behind icon
               Positioned(
-                top: 10,
+                top: 6,
                 left: 0,
                 right: 0,
                 child: Center(
                   child: Container(
-                    width: 90,
-                    height: 90,
+                    width: 70,
+                    height: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: RadialGradient(
@@ -322,12 +364,13 @@ class LibraryNodeCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Single hero icon - centered and prominent
+                    // Hero icon (smaller to make room for preview)
                     Expanded(
+                      flex: 3,
                       child: Center(
                         child: Icon(
                           heroIcon,
-                          size: 52,
+                          size: 36,
                           color: Colors.white,
                           shadows: [
                             Shadow(
@@ -342,7 +385,22 @@ class LibraryNodeCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    // Mini pixel preview strip
+                    Expanded(
+                      flex: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: PixelStripPreview(
+                          colors: node.previewColors ?? _expandGradient(gradientColors),
+                          pixelCount: 7,
+                          height: double.infinity,
+                          animate: false,
+                          borderRadius: 8,
+                          backgroundColor: Colors.black.withValues(alpha: 0.35),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                     // Folder name with arrow
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -378,113 +436,184 @@ class LibraryNodeCard extends StatelessWidget {
     );
   }
 
-  /// Build a palette card with flowing gradient colors
-  Widget _buildPaletteCard(BuildContext context) {
-    final colors = node.themeColors ?? [NexGenPalette.cyan, NexGenPalette.blue];
-    final gradient = colors.length >= 2
-        ? [colors[0], colors[1]]
-        : [colors.first, colors.first.withValues(alpha: 0.7)];
-    // Adaptive contrast -- dark text on light cards, white on dark cards
-    final textColor = NexGenPalette.contrastTextFor(gradient);
-    final secondaryColor = NexGenPalette.contrastSecondaryFor(gradient);
-    final isLight = textColor == const Color(0xFF1A1A1A);
-    final dotBorder = isLight ? const Color(0xFF4A4A4A) : Colors.white;
-    final watermark = isLight
-        ? Colors.black.withValues(alpha: 0.06)
-        : Colors.white.withValues(alpha: 0.1);
+  /// Build a palette card with color-dominant design:
+  /// Left side: PixelStripPreview hero. Right side: name, description, color swatches.
+  Widget _buildPaletteCard(BuildContext context, {bool animate = true}) {
+    final colors = node.themeColors;
+    final hasColors = colors != null && colors.isNotEmpty;
+    final primaryColor = hasColors ? colors.first : NexGenPalette.cyan;
 
-    return GestureDetector(
-      onTap: () {
-        context.push('/library/${node.id}', extra: {'name': node.name});
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: gradient,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: gradient.first.withValues(alpha: 0.4),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.push('/library/${node.id}', extra: {'name': node.name});
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: NexGenPalette.matteBlack,
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                primaryColor.withValues(alpha: 0.12),
+                NexGenPalette.matteBlack,
+              ],
             ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // Subtle icon watermark
-            Positioned(
-              right: -15,
-              bottom: -15,
-              child: Icon(
-                Icons.palette,
-                size: 70,
-                color: watermark,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: primaryColor.withValues(alpha: 0.35),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: primaryColor.withValues(alpha: 0.2),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
               ),
-            ),
-            // Content
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Color dots preview at top
-                  Row(
-                    children: [
-                      for (var i = 0; i < (colors.length > 4 ? 4 : colors.length); i++)
-                        Container(
-                          width: 16,
-                          height: 16,
-                          margin: const EdgeInsets.only(right: 4),
-                          decoration: BoxDecoration(
-                            color: colors[i],
-                            shape: BoxShape.circle,
-                            border: Border.all(color: dotBorder, width: 2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.2),
-                                blurRadius: 2,
-                              ),
-                            ],
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Left: PixelStripPreview hero (~40%) ──
+              SizedBox(
+                width: 120,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(15),
+                  ),
+                  child: hasColors
+                      ? PixelStripPreview(
+                          colors: colors,
+                          pixelCount: 14,
+                          height: double.infinity,
+                          animate: animate,
+                          borderRadius: 0,
+                          backgroundColor: const Color(0xFF0A0E14),
+                        )
+                      : Container(
+                          color: const Color(0xFF0A0E14),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: List.generate(
+                                    4,
+                                    (i) => Container(
+                                      width: 10,
+                                      height: 10,
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 3),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.12),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'No colors',
+                                  style: TextStyle(
+                                    color: NexGenPalette.textSecondary
+                                        .withValues(alpha: 0.5),
+                                    fontSize: 9,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                    ],
-                  ),
-                  // Text content
-                  Column(
+                ),
+              ),
+              // ── Right: Info section (~60%) ──
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Palette name
                       Text(
                         node.name,
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          shadows: [Shadow(color: isLight ? Colors.white38 : Colors.black26, blurRadius: 2)],
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (node.description != null)
+                      // Description
+                      if (node.description != null) ...[
+                        const SizedBox(height: 3),
                         Text(
                           node.description!,
                           style: TextStyle(
-                            color: secondaryColor,
-                            fontSize: 10,
+                            color: NexGenPalette.textSecondary,
+                            fontSize: 11,
                           ),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const Spacer(),
+                      // Color swatches row
+                      if (hasColors)
+                        Row(
+                          children: [
+                            for (var i = 0;
+                                i < (colors.length > 5 ? 5 : colors.length);
+                                i++)
+                              Container(
+                                width: 22,
+                                height: 22,
+                                margin: const EdgeInsets.only(right: 5),
+                                decoration: BoxDecoration(
+                                  color: colors[i],
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color:
+                                        Colors.white.withValues(alpha: 0.2),
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color:
+                                          colors[i].withValues(alpha: 0.4),
+                                      blurRadius: 6,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (colors.length > 5)
+                              Text(
+                                '+${colors.length - 5}',
+                                style: TextStyle(
+                                  color: NexGenPalette.textSecondary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            const Spacer(),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              color: primaryColor.withValues(alpha: 0.6),
+                              size: 12,
+                            ),
+                          ],
                         ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
