@@ -18,8 +18,10 @@ import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show e
 /// Grid of library nodes (categories, folders, or palettes)
 class LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
+  final Color? parentAccent;
+  final List<Color>? parentGradient;
 
-  const LibraryNodeGrid({super.key, required this.children});
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient});
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +47,7 @@ class LibraryNodeGrid extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 12),
             child: SizedBox(
               height: 140,
-              child: LibraryNodeCard(node: node, index: index),
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
             ),
           );
         },
@@ -64,7 +66,7 @@ class LibraryNodeGrid extends StatelessWidget {
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index);
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient);
       },
     );
   }
@@ -74,8 +76,10 @@ class LibraryNodeGrid extends StatelessWidget {
 class LibraryNodeCard extends StatelessWidget {
   final LibraryNode node;
   final int? index;
+  final Color? parentAccent;
+  final List<Color>? parentGradient;
 
-  const LibraryNodeCard({super.key, required this.node, this.index});
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient});
 
   IconData _iconForNode() {
     final id = node.id;
@@ -123,6 +127,25 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'franchise_dreamworks') return Icons.movie_filter_outlined;
     if (id == 'franchise_harrypotter') return Icons.auto_fix_high_outlined;
     if (id == 'franchise_nintendo') return Icons.videogame_asset_outlined;
+
+    // Inherit icon from parentId when direct ID doesn't match
+    final pid = node.parentId;
+    if (pid != null) {
+      if (pid.startsWith('holiday_')) return Icons.celebration;
+      if (pid.startsWith('season_')) return Icons.nature_outlined;
+      if (pid.startsWith('event_')) return Icons.event_outlined;
+      if (pid.startsWith('league_')) return Icons.sports;
+      if (pid.startsWith('franchise_')) return Icons.movie_outlined;
+      if (pid.contains('ncaa') || pid.startsWith('conf_')) return Icons.school_outlined;
+      if (pid.startsWith('arch_')) return Icons.thermostat_outlined;
+      if (pid == LibraryCategoryIds.holidays) return Icons.celebration;
+      if (pid == LibraryCategoryIds.sports) return Icons.sports_football_outlined;
+      if (pid == LibraryCategoryIds.seasonal) return Icons.wb_sunny_outlined;
+      if (pid == LibraryCategoryIds.parties) return Icons.party_mode_outlined;
+      if (pid == LibraryCategoryIds.architectural) return Icons.home_outlined;
+      if (pid == LibraryCategoryIds.security) return Icons.security_outlined;
+      if (pid == LibraryCategoryIds.movies) return Icons.movie_outlined;
+    }
 
     // Default based on node type
     if (node.isPalette) return Icons.palette_outlined;
@@ -189,7 +212,45 @@ class LibraryNodeCard extends StatelessWidget {
       return node.themeColors!.first;
     }
 
+    // Inherit color from parentId when direct ID doesn't match
+    final pid = node.parentId;
+    if (pid != null) {
+      final parentColor = _colorForKnownId(pid);
+      if (parentColor != null) return parentColor;
+    }
+
+    // Use parent accent passed from route navigation as final fallback
+    if (parentAccent != null) return parentAccent!;
+
     return NexGenPalette.cyan;
+  }
+
+  /// Look up a known ID in the color table. Returns null if not found.
+  static Color? _colorForKnownId(String id) {
+    if (id == LibraryCategoryIds.architectural) return const Color(0xFFFF8C00);
+    if (id == LibraryCategoryIds.holidays) return const Color(0xFFE53935);
+    if (id == LibraryCategoryIds.sports) return const Color(0xFF1976D2);
+    if (id == LibraryCategoryIds.seasonal) return const Color(0xFFE65100);
+    if (id == LibraryCategoryIds.parties) return const Color(0xFF9C27B0);
+    if (id == LibraryCategoryIds.security) return const Color(0xFFD32F2F);
+    if (id == LibraryCategoryIds.movies) return const Color(0xFF6A1B9A);
+    if (id == 'holiday_christmas') return const Color(0xFFC62828);
+    if (id == 'holiday_halloween') return const Color(0xFFFF6F00);
+    if (id == 'holiday_july4' || id == 'holiday_july4th') return const Color(0xFF1565C0);
+    if (id == 'holiday_valentines') return const Color(0xFFD81B60);
+    if (id == 'holiday_stpatricks') return const Color(0xFF2E7D32);
+    if (id == 'holiday_easter') return const Color(0xFF7B1FA2);
+    if (id == 'holiday_thanksgiving') return const Color(0xFFE65100);
+    if (id == 'holiday_newyears' || id == 'holiday_newyear') return const Color(0xFFFFD700);
+    if (id == 'season_spring') return const Color(0xFF4CAF50);
+    if (id == 'season_summer') return const Color(0xFFFFC107);
+    if (id == 'season_autumn') return const Color(0xFFFF5722);
+    if (id == 'season_winter') return const Color(0xFF03A9F4);
+    if (id.startsWith('league_')) return const Color(0xFF1976D2);
+    if (id.startsWith('franchise_')) return const Color(0xFF6A1B9A);
+    if (id.startsWith('ncaa') || id.startsWith('conf_')) return const Color(0xFF1A237E);
+    if (id.startsWith('event_')) return const Color(0xFF9C27B0);
+    return null;
   }
 
   /// Get gradient color pair for folder nodes, matching the visual style
@@ -261,9 +322,59 @@ class LibraryNodeCard extends StatelessWidget {
       return [node.themeColors![0], node.themeColors![1]];
     }
 
+    // Inherit gradient from parentId when direct ID doesn't match
+    final pid = node.parentId;
+    if (pid != null) {
+      final parentGrad = _gradientForKnownId(pid);
+      if (parentGrad != null) return parentGrad;
+    }
+
+    // Use parent gradient passed from route navigation as final fallback
+    if (parentGradient != null && parentGradient!.length >= 2) return parentGradient!;
+
     // Default: derive from theme color
     final c = _getFolderThemeColor();
     return [c, c.withValues(alpha: 0.5)];
+  }
+
+  /// Look up a known ID in the gradient table. Returns null if not found.
+  static List<Color>? _gradientForKnownId(String id) {
+    // Categories
+    if (id == LibraryCategoryIds.architectural) return const [Color(0xFFFFB347), Color(0xFFFF7043)];
+    if (id == LibraryCategoryIds.holidays) return const [Color(0xFFFF4444), Color(0xFFC2185B)];
+    if (id == LibraryCategoryIds.sports) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
+    if (id == LibraryCategoryIds.seasonal) return const [Color(0xFFFF8F00), Color(0xFFE65100)];
+    if (id == LibraryCategoryIds.parties) return const [Color(0xFFFF69B4), Color(0xFF9C27B0)];
+    if (id == LibraryCategoryIds.security) return const [Color(0xFF4FC3F7), Color(0xFF1565C0)];
+    if (id == LibraryCategoryIds.movies) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
+    // Holidays
+    if (id == 'holiday_christmas') return const [Color(0xFF2E7D32), Color(0xFFC62828)];
+    if (id == 'holiday_halloween') return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)];
+    if (id == 'holiday_july4' || id == 'holiday_july4th') return const [Color(0xFFEF5350), Color(0xFF1565C0)];
+    if (id == 'holiday_valentines') return const [Color(0xFFE91E63), Color(0xFFAD1457)];
+    if (id == 'holiday_stpatricks') return const [Color(0xFF43A047), Color(0xFF00C853)];
+    if (id == 'holiday_easter') return const [Color(0xFFCE93D8), Color(0xFF7B1FA2)];
+    if (id == 'holiday_thanksgiving') return const [Color(0xFFFF9800), Color(0xFF8D6E63)];
+    if (id == 'holiday_newyears' || id == 'holiday_newyear') return const [Color(0xFFFFD700), Color(0xFFFF6F00)];
+    // Seasons
+    if (id == 'season_spring') return const [Color(0xFF81C784), Color(0xFFF48FB1)];
+    if (id == 'season_summer') return const [Color(0xFFFFEE58), Color(0xFF29B6F6)];
+    if (id == 'season_autumn') return const [Color(0xFFFF8F00), Color(0xFF6D4C41)];
+    if (id == 'season_winter') return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
+    // Events
+    if (id.startsWith('event_')) return const [Color(0xFFFF69B4), Color(0xFF9C27B0)];
+    // Sports
+    if (id == 'league_nfl') return const [Color(0xFF1565C0), Color(0xFF013369)];
+    if (id == 'league_nba') return const [Color(0xFFE53935), Color(0xFF880E4F)];
+    if (id == 'league_mlb') return const [Color(0xFF1976D2), Color(0xFF041E42)];
+    if (id == 'league_nhl') return const [Color(0xFF424242), Color(0xFF000000)];
+    if (id == 'league_mls') return const [Color(0xFF66BB6A), Color(0xFF2E7D32)];
+    if (id.startsWith('league_')) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
+    // Franchises
+    if (id.startsWith('franchise_')) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
+    // NCAA
+    if (id.startsWith('ncaa') || id.startsWith('conf_')) return const [Color(0xFF3949AB), Color(0xFF1A237E)];
+    return null;
   }
 
   /// Expand a 2-color gradient pair into a richer multi-color list
@@ -305,7 +416,12 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/library/${node.id}', extra: {'name': node.name});
+          context.push('/library/${node.id}', extra: {
+            'name': node.name,
+            'accentColor': accentColor.toARGB32(),
+            'gradient0': gradientColors[0].toARGB32(),
+            'gradient1': gradientColors[1].toARGB32(),
+          });
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -447,7 +563,12 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/library/${node.id}', extra: {'name': node.name});
+          context.push('/library/${node.id}', extra: {
+            'name': node.name,
+            'accentColor': primaryColor.toARGB32(),
+            'gradient0': primaryColor.toARGB32(),
+            'gradient1': primaryColor.withValues(alpha: 0.6).toARGB32(),
+          });
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -1166,7 +1287,23 @@ class PatternCard extends ConsumerWidget {
         }
       }
 
-      // Update the active preset label so home screen reflects the change
+      // Update preview immediately so home screen roofline matches device
+      try {
+        final colors = _getColors();
+        ref.read(wledStateProvider.notifier).applyLocalPreview(
+          colors: colors,
+          effectId: effectId,
+          speed: pattern.wledPayload['seg'] is List &&
+                  (pattern.wledPayload['seg'] as List).isNotEmpty
+              ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
+              : 128,
+          intensity: pattern.wledPayload['seg'] is List &&
+                  (pattern.wledPayload['seg'] as List).isNotEmpty
+              ? ((pattern.wledPayload['seg'] as List).first['ix'] as int?) ?? 128
+              : 128,
+          effectName: pattern.name,
+        );
+      } catch (_) {}
       ref.read(activePresetLabelProvider.notifier).state = pattern.name;
 
       if (context.mounted) {

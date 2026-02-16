@@ -32,6 +32,48 @@ import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/dashboard/widgets/glass_action_button.dart';
 
+/// Extract colors and effect parameters from a WLED JSON payload so the
+/// local preview can be updated immediately without waiting for the next poll.
+({List<Color> colors, int effectId, int speed, int intensity}) _extractPreviewFromPayload(
+    Map<String, dynamic> payload) {
+  var effectId = 0;
+  var speed = 128;
+  var intensity = 128;
+  final colors = <Color>[];
+
+  try {
+    final seg = payload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final first = seg.first;
+      if (first is Map) {
+        effectId = (first['fx'] as int?) ?? 0;
+        speed = (first['sx'] as int?) ?? 128;
+        intensity = (first['ix'] as int?) ?? 128;
+        final cols = first['col'];
+        if (cols is List) {
+          for (final col in cols) {
+            if (col is List && col.length >= 3) {
+              colors.add(Color.fromARGB(
+                255,
+                (col[0] as num).toInt().clamp(0, 255),
+                (col[1] as num).toInt().clamp(0, 255),
+                (col[2] as num).toInt().clamp(0, 255),
+              ));
+            }
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  return (
+    colors: colors.isNotEmpty ? colors : [Colors.white],
+    effectId: effectId,
+    speed: speed,
+    intensity: intensity,
+  );
+}
+
 /// Main dashboard page for WLED control
 class WledDashboardPage extends ConsumerStatefulWidget {
   const WledDashboardPage({super.key});
@@ -889,7 +931,24 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   (p) => p.name.toLowerCase() == patternName.toLowerCase(),
                   orElse: () => library.all.first,
                 );
-                await repo.applyJson(pattern.toWledPayload());
+                final payload = pattern.toWledPayload();
+                final success = await repo.applyJson(payload);
+
+                if (success) {
+                  // Update preview immediately
+                  try {
+                    final preview = _extractPreviewFromPayload(payload);
+                    ref.read(wledStateProvider.notifier).applyLocalPreview(
+                      colors: preview.colors,
+                      effectId: preview.effectId,
+                      speed: preview.speed,
+                      intensity: preview.intensity,
+                      effectName: patternName,
+                    );
+                    ref.read(activePresetLabelProvider.notifier).state = patternName;
+                  } catch (_) {}
+                }
+
                 ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
 
                 if (mounted) {
@@ -953,6 +1012,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               if (!mounted) return;
 
               if (success) {
+                // Update preview immediately so roofline matches device
+                try {
+                  final preview = _extractPreviewFromPayload(payload);
+                  ref.read(wledStateProvider.notifier).applyLocalPreview(
+                    colors: preview.colors,
+                    effectId: preview.effectId,
+                    speed: preview.speed,
+                    intensity: preview.intensity,
+                    effectName: favorite.patternName,
+                  );
+                } catch (_) {}
+
                 try {
                   ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
                 } catch (_) {}

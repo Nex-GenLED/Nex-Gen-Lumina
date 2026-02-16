@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets (small utilities shared with pattern_library_pages)
@@ -280,8 +281,10 @@ class _StyleChip extends StatelessWidget {
 class LibraryBrowserScreen extends ConsumerStatefulWidget {
   final String? nodeId;
   final String? nodeName;
+  final Color? parentAccent;
+  final List<Color>? parentGradient;
 
-  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName});
+  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient});
 
   @override
   ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
@@ -331,6 +334,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                 nodeId: widget.nodeId,
                 nodeName: widget.nodeName,
                 nodeAsync: nodeAsync,
+                accentColor: widget.parentAccent,
               ),
               // Breadcrumb navigation
               if (widget.nodeId != null)
@@ -365,14 +369,14 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           return Column(
                             children: [
                               const _KelvinReferenceChart(),
-                              Expanded(child: _LibraryNodeGrid(children: children)),
+                              Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
                             ],
                           );
                         }
-                        return _LibraryNodeGrid(children: children);
+                        return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
                       },
                       loading: () => const Center(child: CircularProgressIndicator()),
-                      error: (_, __) => _LibraryNodeGrid(children: children),
+                      error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
                     );
                   },
                   loading: () => const Center(child: CircularProgressIndicator()),
@@ -397,16 +401,19 @@ class _LibraryAppBar extends StatelessWidget {
   final String? nodeId;
   final String? nodeName;
   final AsyncValue<LibraryNode?> nodeAsync;
+  final Color? accentColor;
 
   const _LibraryAppBar({
     required this.nodeId,
     required this.nodeName,
     required this.nodeAsync,
+    this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final displayName = nodeName ?? nodeAsync.whenOrNull(data: (n) => n?.name) ?? 'Design Library';
+    final tint = accentColor ?? NexGenPalette.cyan;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -418,13 +425,14 @@ class _LibraryAppBar extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: NexGenPalette.gunmetal90,
+                  color: tint.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: tint.withValues(alpha: 0.3), width: 0.5),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.arrow_back_ios_new,
                   size: 20,
-                  color: Colors.white,
+                  color: tint,
                 ),
               ),
             ),
@@ -687,80 +695,8 @@ class _KelvinReferenceChart extends StatelessWidget {
 // originals are refactored to be publicly accessible.
 // ---------------------------------------------------------------------------
 
-/// Minimal grid placeholder for library child nodes.
-/// The full implementation lives in pattern_library_pages.dart as
-/// _LibraryNodeGrid / _LibraryNodeCard.
-class _LibraryNodeGrid extends StatelessWidget {
-  final List<LibraryNode> children;
-  const _LibraryNodeGrid({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    if (children.isEmpty) {
-      return Center(
-        child: Text('No items found', style: TextStyle(color: NexGenPalette.textSecondary)),
-      );
-    }
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.6,
-      ),
-      itemCount: children.length,
-      itemBuilder: (context, index) {
-        final node = children[index];
-        return _MinimalNodeCard(node: node);
-      },
-    );
-  }
-}
-
-class _MinimalNodeCard extends StatelessWidget {
-  final LibraryNode node;
-  const _MinimalNodeCard({required this.node});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: NexGenPalette.gunmetal90,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => LibraryBrowserScreen(nodeId: node.id, nodeName: node.name),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                node.isPalette ? Icons.palette_outlined : Icons.folder_outlined,
-                color: NexGenPalette.cyan,
-                size: 28,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                node.name,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+// _LibraryNodeGrid and _MinimalNodeCard have been replaced by the public
+// LibraryNodeGrid / LibraryNodeCard from pattern_grid_widgets.dart.
 
 /// Compact pattern item card used in ThemeSelectionScreen grid.
 /// This is a simplified version; the full implementation lives in

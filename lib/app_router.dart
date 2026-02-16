@@ -186,12 +186,28 @@ class AppRouter {
           final nodeId = state.pathParameters['nodeId']!;
           final extra = state.extra;
           String? nodeName;
-          if (extra is Map && extra['name'] is String) {
-            nodeName = extra['name'] as String;
+          Color? parentAccent;
+          List<Color>? parentGradient;
+          if (extra is Map) {
+            if (extra['name'] is String) nodeName = extra['name'] as String;
+            if (extra['accentColor'] is int) {
+              parentAccent = Color(extra['accentColor'] as int);
+            }
+            if (extra['gradient0'] is int && extra['gradient1'] is int) {
+              parentGradient = [
+                Color(extra['gradient0'] as int),
+                Color(extra['gradient1'] as int),
+              ];
+            }
           } else if (extra is LibraryNode) {
             nodeName = extra.name;
           }
-          return NoTransitionPage(child: LibraryBrowserScreen(nodeId: nodeId, nodeName: nodeName));
+          return NoTransitionPage(child: LibraryBrowserScreen(
+            nodeId: nodeId,
+            nodeName: nodeName,
+            parentAccent: parentAccent,
+            parentGradient: parentGradient,
+          ));
         },
       ),
       GoRoute(

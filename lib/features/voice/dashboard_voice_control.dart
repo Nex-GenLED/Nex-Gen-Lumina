@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -199,6 +200,11 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
+      ref.read(wledStateProvider.notifier).applyLocalPreview(
+        colors: [const Color.fromARGB(255, 255, 180, 100)],
+        effectId: 0,
+        effectName: 'Warm White',
+      );
       ref.read(activePresetLabelProvider.notifier).state = 'Warm White';
       return '✓ Applying warm white';
     } catch (e) {
@@ -228,6 +234,12 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
+      ref.read(wledStateProvider.notifier).applyLocalPreview(
+        colors: [const Color.fromARGB(255, 255, 255, 255)],
+        effectId: 0,
+        brightness: 255,
+        effectName: 'Bright White',
+      );
       ref.read(activePresetLabelProvider.notifier).state = 'Bright White';
       return '✓ Applying bright white';
     } catch (e) {
@@ -260,6 +272,15 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
+      ref.read(wledStateProvider.notifier).applyLocalPreview(
+        colors: [
+          const Color.fromARGB(255, 255, 0, 0),
+          const Color.fromARGB(255, 0, 255, 0),
+        ],
+        effectId: 28,
+        speed: 150,
+        effectName: 'Festive',
+      );
       ref.read(activePresetLabelProvider.notifier).state = 'Festive';
       return '✓ Applying festive pattern';
     } catch (e) {
