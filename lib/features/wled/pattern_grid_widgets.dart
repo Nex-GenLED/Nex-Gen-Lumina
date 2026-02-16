@@ -506,13 +506,15 @@ class LibraryNodeCard extends StatelessWidget {
                       flex: 2,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: PixelStripPreview(
-                          colors: node.previewColors ?? _expandGradient(gradientColors),
-                          pixelCount: 7,
-                          height: double.infinity,
-                          animate: false,
-                          borderRadius: 8,
-                          backgroundColor: Colors.black.withValues(alpha: 0.35),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) => PixelStripPreview(
+                            colors: node.previewColors ?? _expandGradient(gradientColors),
+                            pixelCount: 7,
+                            height: constraints.maxHeight,
+                            animate: false,
+                            borderRadius: 8,
+                            backgroundColor: Colors.black.withValues(alpha: 0.35),
+                          ),
                         ),
                       ),
                     ),
@@ -606,13 +608,15 @@ class LibraryNodeCard extends StatelessWidget {
                     left: Radius.circular(15),
                   ),
                   child: hasColors
-                      ? PixelStripPreview(
-                          colors: colors,
-                          pixelCount: 14,
-                          height: double.infinity,
-                          animate: animate,
-                          borderRadius: 0,
-                          backgroundColor: const Color(0xFF0A0E14),
+                      ? LayoutBuilder(
+                          builder: (context, constraints) => PixelStripPreview(
+                            colors: colors,
+                            pixelCount: 14,
+                            height: constraints.maxHeight,
+                            animate: animate,
+                            borderRadius: 0,
+                            backgroundColor: const Color(0xFF0A0E14),
+                          ),
                         )
                       : Container(
                           color: const Color(0xFF0A0E14),
