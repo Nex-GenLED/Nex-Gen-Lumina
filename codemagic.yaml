@@ -8,6 +8,9 @@ workflows:
       xcode: 16.2
       cocoapods: default
     scripts:
+      - name: Clean previous build artifacts
+        script: |
+          flutter clean
       - name: Get Flutter packages
         script: |
           flutter pub get
