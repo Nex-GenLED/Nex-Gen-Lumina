@@ -234,6 +234,60 @@ class WledService implements WledRepository {
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) => _postConfig(cfg);
 
+  @override
+  Future<WledHardwareConfig?> getConfig() async {
+    if (_simulate) {
+      // Return a simulated 2-bus config
+      return const WledHardwareConfig(
+        totalLeds: 200,
+        maxPowerMw: 30000,
+        buses: [
+          WledLedBus(pin: [0], start: 0, len: 100, type: 30, order: 1),
+          WledLedBus(pin: [1], start: 100, len: 100, type: 30, order: 1),
+        ],
+      );
+    }
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.getUrl(_uri('/json/cfg'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final cfg = jsonDecode(body) as Map<String, dynamic>;
+        final hw = cfg['hw'];
+        if (hw is! Map) return null;
+        final led = hw['led'];
+        if (led is! Map) return null;
+
+        final totalLeds = (led['total'] is num) ? (led['total'] as num).toInt() : 0;
+        final maxPwr = (led['maxpwr'] is num) ? (led['maxpwr'] as num).toInt() : 30000;
+
+        final ins = led['ins'];
+        final List<WledLedBus> buses = [];
+        if (ins is List) {
+          for (final entry in ins) {
+            if (entry is Map<String, dynamic>) {
+              buses.add(WledLedBus.fromMap(entry));
+            }
+          }
+        }
+
+        return WledHardwareConfig(
+          totalLeds: totalLeds,
+          maxPowerMw: maxPwr,
+          buses: buses,
+        );
+      }
+      debugPrint('WLED getConfig status ${res.statusCode}: $body');
+    } catch (e) {
+      debugPrint('WLED getConfig error: $e');
+    }
+    return null;
+  }
+
   /// Uploads a ledmap.json file to the device using the /edit API.
   /// Returns true on success.
   Future<bool> uploadLedMapJson(String jsonContent) async {

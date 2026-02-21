@@ -177,6 +177,20 @@ final deviceTotalLedCountProvider = FutureProvider<int?>((ref) async {
   }
 });
 
+/// Provider that fetches the full hardware LED configuration (buses, power, etc.)
+/// from the connected WLED device via GET /json/cfg.
+final deviceHardwareConfigProvider = FutureProvider<WledHardwareConfig?>((ref) async {
+  final repo = ref.watch(wledRepositoryProvider);
+  if (repo == null) return null;
+
+  try {
+    return await repo.getConfig();
+  } catch (e) {
+    debugPrint('Error fetching device hardware config: $e');
+    return null;
+  }
+});
+
 /// Provider for updating segment configuration on the WLED device.
 /// Returns a function that can be called to update a segment's boundaries.
 final updateSegmentConfigProvider = Provider<Future<bool> Function({

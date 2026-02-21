@@ -183,6 +183,18 @@ class DemoWledRepository implements WledRepository {
   List<WledPreset> getPresets() => _presets;
 
   @override
+  Future<WledHardwareConfig?> getConfig() async {
+    return WledHardwareConfig(
+      totalLeds: _totalLedCount,
+      maxPowerMw: 30000,
+      buses: [
+        const WledLedBus(pin: [0], start: 0, len: 100, type: 30, order: 1),
+        const WledLedBus(pin: [1], start: 100, len: 100, type: 30, order: 1),
+      ],
+    );
+  }
+
+  @override
   Future<bool> supportsRgbw() async => true;
 
   @override
