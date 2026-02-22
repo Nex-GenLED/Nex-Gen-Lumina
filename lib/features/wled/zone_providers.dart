@@ -47,3 +47,38 @@ final zoneSegmentsProvider = AsyncNotifierProvider<ZoneSegmentsNotifier, List<Wl
 
 /// Selected segment IDs for group operations
 final selectedSegmentsProvider = StateProvider<Set<int>>((ref) => <int>{});
+
+// ---------------------------------------------------------------------------
+// Channel Selection Filter
+// ---------------------------------------------------------------------------
+
+/// Tracks which channel (segment) IDs the user has explicitly selected for
+/// receiving aesthetic commands (patterns, colors, effects, speed, intensity).
+///
+/// - `null` → **All Channels** mode (default). Commands behave exactly as
+///   before — no behavioral change until the user actively engages the filter.
+/// - `Set<int>` → Only these segment IDs receive aesthetic commands.
+final selectedChannelIdsProvider = StateProvider<Set<int>?>((ref) => null);
+
+/// Convenience flag: `true` when the user has narrowed to a channel subset.
+final isChannelFilterActiveProvider = Provider<bool>((ref) {
+  return ref.watch(selectedChannelIdsProvider) != null;
+});
+
+/// Returns the effective list of segment IDs that should receive commands.
+///
+/// When the channel filter is `null` (all-channels mode) or no segments have
+/// been fetched yet, returns every known segment ID. When the filter is active,
+/// returns only the IDs present in both the filter set and the device's
+/// segment list (handles stale IDs from device reconfiguration).
+final effectiveChannelIdsProvider = Provider<List<int>>((ref) {
+  final filter = ref.watch(selectedChannelIdsProvider);
+  final allSegments = ref.watch(zoneSegmentsProvider).valueOrNull ?? [];
+  if (filter == null || allSegments.isEmpty) {
+    return allSegments.map((s) => s.id).toList();
+  }
+  return allSegments
+      .where((s) => filter.contains(s.id))
+      .map((s) => s.id)
+      .toList();
+});

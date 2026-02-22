@@ -157,6 +157,9 @@ class MqttRelayRepository implements WledRepository {
   }
 
   @override
+  Future<WledHardwareConfig?> getConfig() async => null;
+
+  @override
   Future<bool> supportsRgbw() async {
     // Query device info - for now return false as default
     // TODO: Add getInfo command to backend and parse leds.rgbw

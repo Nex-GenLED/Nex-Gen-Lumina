@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_effect_metadata.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
@@ -232,11 +234,14 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return;
     try {
-      await repo.applyJson({
+      var payload = <String, dynamic>{
         'seg': [
           {'fx': effectId}
         ]
-      });
+      };
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      await repo.applyJson(payload);
     } catch (e) {
       debugPrint('PatternAdjustmentPanel effect apply failed: $e');
     }
@@ -248,7 +253,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
       try {
-        await repo.applyJson({
+        var payload = <String, dynamic>{
           'seg': [
             {
               'sx': _speed,
@@ -256,7 +261,10 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
               'rev': _reverse,
             }
           ]
-        });
+        };
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel apply failed: $e');
       }
@@ -269,14 +277,17 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
       try {
-        await repo.applyJson({
+        var payload = <String, dynamic>{
           'seg': [
             {
               'grp': _grouping,
               'spc': _spacing,
             }
           ]
-        });
+        };
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel layout apply failed: $e');
       }
@@ -499,11 +510,14 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                     final repo = ref.read(wledRepositoryProvider);
                     if (repo == null) return;
                     try {
-                      await repo.applyJson({
+                      var payload = <String, dynamic>{
                         'seg': [
                           {'col': seq}
                         ]
-                      });
+                      };
+                      final channels = ref.read(effectiveChannelIdsProvider);
+                      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+                      await repo.applyJson(payload);
                     } catch (e) {
                       debugPrint('Apply custom palette failed: $e');
                     }

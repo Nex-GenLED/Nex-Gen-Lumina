@@ -1,3 +1,33 @@
+/// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
+///
+/// If [channelIds] is empty, or the payload has no `seg` key, the payload is
+/// returned unchanged (safe fallback). Otherwise the first segment object is
+/// used as a template and replicated once per channel ID.
+///
+/// This is a pure function with no side effects — safe to call from any
+/// provider or widget.
+Map<String, dynamic> applyChannelFilter(
+  Map<String, dynamic> payload,
+  List<int> channelIds,
+) {
+  if (channelIds.isEmpty) return payload;
+
+  final seg = payload['seg'];
+  if (seg is! List || seg.isEmpty) return payload;
+
+  // Use the first segment entry as a template.
+  final template = Map<String, dynamic>.from(seg.first as Map);
+  template.remove('id'); // strip hardcoded ID so each copy gets its own
+
+  final expandedSegs = channelIds.map((id) {
+    return <String, dynamic>{'id': id, ...template};
+  }).toList();
+
+  final result = Map<String, dynamic>.from(payload);
+  result['seg'] = expandedSegs;
+  return result;
+}
+
 /// Normalizes a WLED JSON API payload to prevent segment state carry-over.
 ///
 /// WLED only updates fields explicitly included in a POST /json/state payload.

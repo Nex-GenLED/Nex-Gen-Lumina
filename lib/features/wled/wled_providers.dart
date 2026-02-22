@@ -16,6 +16,8 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/services/lumina_backend_providers.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/app_providers.dart';
 
 /// Connectivity status provider that checks if user is on home network.
@@ -507,15 +509,51 @@ class WledNotifier extends Notifier<WledStateModel> {
 
     _posting = true;
     try {
-      final ok = await service.setState(
-        on: on,
-        brightness: brightness,
-        speed: speed,
-        // Only send color if explicitly provided; otherwise avoid overriding effect params.
-        color: color,
-        white: white,
-        forceRgbwZeroWhite: forceRgbwZeroWhite,
-      );
+      // Check if a channel filter is active (user selected specific channels).
+      final channelFilter = ref.read(selectedChannelIdsProvider);
+      final effectiveChannels = ref.read(effectiveChannelIdsProvider);
+
+      bool ok;
+      if (channelFilter == null || effectiveChannels.isEmpty) {
+        // --- All-Channels mode (default): existing behaviour, zero regression ---
+        ok = await service.setState(
+          on: on,
+          brightness: brightness,
+          speed: speed,
+          color: color,
+          white: white,
+          forceRgbwZeroWhite: forceRgbwZeroWhite,
+        );
+      } else {
+        // --- Channel-filter active: build a multi-segment payload manually ---
+        final Map<String, dynamic> payload = {};
+        // Device-level properties always apply globally.
+        if (on != null) payload['on'] = on;
+        if (brightness != null) payload['bri'] = brightness.clamp(0, 255);
+
+        // Segment-specific properties go only to selected channels.
+        final Map<String, dynamic> segTemplate = {};
+        if (speed != null) segTemplate['sx'] = speed.clamp(0, 255);
+        if (color != null || white != null) {
+          final rgbw = rgbToRgbw(
+            color?.red ?? 0,
+            color?.green ?? 0,
+            color?.blue ?? 0,
+            explicitWhite: white,
+            forceZeroWhite: forceRgbwZeroWhite == true,
+          );
+          segTemplate['col'] = [rgbw];
+        }
+
+        if (segTemplate.isNotEmpty) {
+          payload['seg'] = effectiveChannels.map((id) {
+            return <String, dynamic>{'id': id, ...segTemplate};
+          }).toList();
+        }
+
+        ok = await service.applyJson(payload);
+      }
+
       if (!ok && state.connected) {
         state = state.copyWith(connected: false);
         _ensureReconnectTimer();

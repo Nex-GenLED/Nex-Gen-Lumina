@@ -12,6 +12,8 @@ import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
 
@@ -1284,7 +1286,11 @@ class PatternCard extends ConsumerWidget {
 
       if (!isCustomEffect) {
         // Standard WLED effect - apply the pattern's wledPayload directly
-        final success = await repo.applyJson(pattern.wledPayload);
+        // Apply channel filter so only selected channels receive the pattern
+        var payload = pattern.wledPayload;
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        final success = await repo.applyJson(payload);
 
         if (!success) {
           throw Exception('Device did not accept command');
@@ -1451,7 +1457,10 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _debounce = Timer(const Duration(milliseconds: 200), () async {
       final repo = ref.read(wledRepositoryProvider);
       if (repo != null) {
-        await repo.applyJson({'seg': [segUpdate]});
+        var payload = <String, dynamic>{'seg': [segUpdate]};
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        await repo.applyJson(payload);
       }
     });
   }

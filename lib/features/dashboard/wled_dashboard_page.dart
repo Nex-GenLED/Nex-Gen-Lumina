@@ -13,6 +13,9 @@ import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -329,6 +332,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildHeroSection(context, ref, state, profileAsync),
             // Expandable Pattern Adjustment Panel
             _buildAdjustmentPanel(context, ref, state),
+            const SizedBox(height: 8),
+            // Channel selector — lets user choose which segments receive commands
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: ChannelSelectorBar(),
+            ),
             const SizedBox(height: 12),
             // Section B: Design Studio & Neighborhood Sync buttons side by side
             Padding(
@@ -694,7 +703,33 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       return Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700));
                     }),
                   ),
-                  const SizedBox(width: 12),
+                  // Channel filter badge — shows when user has narrowed to a subset
+                  Consumer(builder: (context, ref, _) {
+                    final isFiltered = ref.watch(isChannelFilterActiveProvider);
+                    final segments = ref.watch(zoneSegmentsProvider).valueOrNull ?? [];
+                    final selectedIds = ref.watch(selectedChannelIdsProvider);
+                    if (!isFiltered || segments.length <= 1) return const SizedBox(width: 12);
+                    final count = selectedIds?.length ?? segments.length;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: NexGenPalette.cyan.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          '$count/${segments.length} CH',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: NexGenPalette.cyan,
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
                   // Brightness label + slider grouped tightly
                   Row(mainAxisSize: MainAxisSize.min, children: [
                     Text('Brightness', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.white)),
@@ -931,7 +966,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   (p) => p.name.toLowerCase() == patternName.toLowerCase(),
                   orElse: () => library.all.first,
                 );
-                final payload = pattern.toWledPayload();
+                var payload = pattern.toWledPayload();
+                // Apply channel filter so only selected channels receive the pattern
+                final channels = ref.read(effectiveChannelIdsProvider);
+                if (channels.isNotEmpty) {
+                  payload = applyChannelFilter(payload, channels);
+                }
                 final success = await repo.applyJson(payload);
 
                 if (success) {
@@ -1006,7 +1046,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               debugPrint('Applying favorite: ${favorite.patternName}');
               debugPrint('Pattern data: ${favorite.patternData}');
 
-              final payload = favorite.patternData;
+              var payload = favorite.patternData;
+              // Apply channel filter so only selected channels receive the pattern
+              final channels = ref.read(effectiveChannelIdsProvider);
+              if (channels.isNotEmpty) {
+                payload = applyChannelFilter(payload, channels);
+              }
               final success = await repo.applyJson(payload);
 
               if (!mounted) return;

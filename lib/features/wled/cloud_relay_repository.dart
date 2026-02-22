@@ -210,6 +210,9 @@ class CloudRelayRepository implements WledRepository {
   }
 
   @override
+  Future<WledHardwareConfig?> getConfig() async => null;
+
+  @override
   Future<bool> supportsRgbw() async {
     // Query device info remotely
     final result = await _executeCommand('getInfo', {});
