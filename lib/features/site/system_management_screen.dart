@@ -7,6 +7,8 @@ import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -21,7 +23,7 @@ class SystemManagementScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 5,
+      length: 4,
       child: Scaffold(
         appBar: GlassAppBar(
           title: const Text('System Management'),
@@ -31,8 +33,7 @@ class SystemManagementScreen extends ConsumerWidget {
             indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
               Tab(icon: Icon(Icons.router_outlined, color: NexGenPalette.cyan), text: 'Controllers'),
-              Tab(icon: Icon(Icons.layers_outlined, color: NexGenPalette.cyan), text: 'Zones & Channels'),
-              Tab(icon: Icon(Icons.build_circle_outlined, color: NexGenPalette.cyan), text: 'Hardware'),
+              Tab(icon: Icon(Icons.layers_outlined, color: NexGenPalette.cyan), text: 'My Lights'),
               Tab(icon: Icon(Icons.cloud_outlined, color: NexGenPalette.cyan), text: 'Remote Access'),
               Tab(icon: Icon(Icons.tune_outlined, color: NexGenPalette.cyan), text: 'Mode'),
             ],
@@ -41,7 +42,6 @@ class SystemManagementScreen extends ConsumerWidget {
         body: const TabBarView(children: [
           _MyControllersTab(),
           _ZonesChannelsTab(),
-          _HardwareTab(),
           _RemoteAccessTab(),
           _ModeTab(),
         ]),
@@ -208,142 +208,65 @@ class _MyControllersTab extends ConsumerWidget {
   }
 }
 
-/// Centralized Zones & Channels management tab
-class _ZonesChannelsTab extends ConsumerWidget {
+/// Unified My Lights tab — inline areas, hardware config, effects, roofline
+class _ZonesChannelsTab extends ConsumerStatefulWidget {
   const _ZonesChannelsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(children: [
-        // Zone Control Card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Icon(Icons.layers, color: NexGenPalette.cyan),
-                const SizedBox(width: 8),
-                Text('Zone Control', style: Theme.of(context).textTheme.titleLarge),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                'Select and manage your lighting channels. Rename channels, select multiple for batch control, and organize your lighting zones.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.wledZones),
-                icon: const Icon(Icons.tune, color: Colors.black),
-                label: const Text('Manage Channels'),
-              ),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Roofline Configuration Card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Icon(Icons.roofing, color: NexGenPalette.violet),
-                const SizedBox(width: 8),
-                Text('Roofline Setup', style: Theme.of(context).textTheme.titleLarge),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                'Configure your roofline layout including peaks, valleys, and segment boundaries for precise lighting control.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              Row(children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => context.push(AppRoutes.rooflineSetupWizard),
-                    icon: const Icon(Icons.auto_fix_high, color: Colors.black),
-                    label: const Text('Setup Wizard'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.push(AppRoutes.rooflineEditor),
-                    icon: const Icon(Icons.edit),
-                    label: const Text('Edit Layout'),
-                  ),
-                ),
-              ]),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Segment Setup Card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Icon(Icons.straighten, color: NexGenPalette.cyan),
-                const SizedBox(width: 8),
-                Text('Segment Configuration', style: Theme.of(context).textTheme.titleLarge),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                'Define pixel ranges for each segment of your lighting installation. Map physical LED positions to logical zones.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.segmentSetup),
-                icon: const Icon(Icons.view_column, color: Colors.black),
-                label: const Text('Configure Segments'),
-              ),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Info Card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Icon(Icons.info_outline, color: NexGenPalette.textMedium),
-                const SizedBox(width: 8),
-                Text('Understanding Zones & Channels', style: Theme.of(context).textTheme.titleMedium),
-              ]),
-              const SizedBox(height: 12),
-              Text(
-                '• Channels: Physical LED ports on your controller\n'
-                '• Segments: Logical groups of pixels within channels\n'
-                '• Zones: Named areas combining multiple segments (e.g., "Front Peak", "Garage")\n'
-                '• Roofline: The overall layout defining how your house is outlined',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ]),
-          ),
-        ),
-      ]),
-    );
-  }
+  ConsumerState<_ZonesChannelsTab> createState() => _ZonesChannelsTabState();
 }
 
-class _HardwareTab extends ConsumerWidget {
-  const _HardwareTab();
-
+class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final segsAsync = ref.watch(zoneSegmentsProvider);
     final show2D = ref.watch(show2DEffectsProvider);
     final showAudio = ref.watch(showAudioEffectsProvider);
 
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(children: [
+        // ── Lighting Areas (inline) ──
+        Row(children: [
+          const Icon(Icons.layers, color: NexGenPalette.cyan),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Lighting Areas', style: Theme.of(context).textTheme.titleLarge),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh, size: 20),
+            onPressed: () => ref.read(zoneSegmentsProvider.notifier).refreshNow(),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text(
+          'Your lighting strands. Tap to rename.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
+        ),
+        const SizedBox(height: 12),
+
+        segsAsync.when(
+          data: (segs) => segs.isEmpty
+              ? _buildEmptyAreas()
+              : Column(
+                  children: [
+                    for (final s in segs) _buildAreaTile(context, s),
+                  ],
+                ),
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('Failed to load areas: $e'),
+          ),
+          loading: () => const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Hardware Configuration ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -351,21 +274,27 @@ class _HardwareTab extends ConsumerWidget {
               Row(children: [
                 const Icon(Icons.build_circle_outlined, color: NexGenPalette.cyan),
                 const SizedBox(width: 8),
-                Text('Hardware Configuration', style: Theme.of(context).textTheme.titleLarge),
+                Expanded(
+                  child: Text('Hardware Configuration', style: Theme.of(context).textTheme.titleMedium),
+                ),
               ]),
               const SizedBox(height: 8),
-              Text('Configure controller ports, LED counts, power limits, and LED type. Apply and reboot to take effect.', style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 16),
+              Text(
+                'Configure controller ports, LED counts, power limits, and LED type.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: () => context.push(AppRoutes.hardwareConfig),
                 icon: const Icon(Icons.settings, color: Colors.black),
-                label: const Text('Open Hardware Configuration'),
+                label: const Text('Open Hardware Config'),
               ),
             ]),
           ),
         ),
         const SizedBox(height: 12),
-        // Advanced Effects Settings Card
+
+        // ── Advanced Effects ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -377,11 +306,10 @@ class _HardwareTab extends ConsumerWidget {
               ]),
               const SizedBox(height: 8),
               Text(
-                'Enable additional effect categories for specialized hardware setups.',
+                'Enable additional effect categories for specialized hardware.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-              const SizedBox(height: 16),
-              // 2D Matrix Effects Toggle
+              const SizedBox(height: 12),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 secondary: Container(
@@ -403,7 +331,6 @@ class _HardwareTab extends ConsumerWidget {
                 onChanged: (v) => ref.read(show2DEffectsProvider.notifier).state = v,
               ),
               const Divider(height: 24),
-              // Audio-Reactive Effects Toggle
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 secondary: Container(
@@ -429,24 +356,141 @@ class _HardwareTab extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 12),
+
+        // ── Roofline Setup ──
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                const Icon(Icons.hub_outlined, color: NexGenPalette.cyan),
+                const Icon(Icons.roofing, color: NexGenPalette.violet),
                 const SizedBox(width: 8),
-                Text('Tips', style: Theme.of(context).textTheme.titleMedium),
+                Text('Roofline Setup', style: Theme.of(context).textTheme.titleMedium),
               ]),
               const SizedBox(height: 8),
-              Text('• Enable only the ports you use.\n• RGBW requires SK6812 strips.\n• Save & Reboot after changes.', style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                'Configure your roofline layout including peaks, valleys, and segment boundaries.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => context.push(AppRoutes.rooflineSetupWizard),
+                    icon: const Icon(Icons.auto_fix_high, color: Colors.black),
+                    label: const Text('Setup Wizard'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push(AppRoutes.rooflineEditor),
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Edit Layout'),
+                  ),
+                ),
+              ]),
             ]),
           ),
         ),
       ]),
     );
   }
+
+  Widget _buildAreaTile(BuildContext context, WledSegment segment) {
+    final ledCount = segment.ledCount;
+    final subtitle = ledCount > 0
+        ? '$ledCount lights (LEDs ${segment.start + 1}\u2013${segment.stop})'
+        : 'No lights configured';
+
+    return Card(
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.light_mode, color: NexGenPalette.cyan, size: 20),
+        ),
+        title: Text(segment.name, overflow: TextOverflow.ellipsis),
+        subtitle: Text(subtitle),
+        trailing: IconButton(
+          tooltip: 'Rename',
+          icon: const Icon(Icons.drive_file_rename_outline),
+          onPressed: () => _renameSegment(context, segment),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyAreas() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(children: [
+        Icon(Icons.view_week_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            'No lighting areas found. Configure your hardware to create areas.',
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _renameSegment(BuildContext context, WledSegment s) async {
+    final controller = TextEditingController(text: s.name);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Rename Area'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final name = controller.text.trim();
+    if (name.isEmpty) return;
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) return;
+    final success = await repo.renameSegment(id: s.id, name: name);
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Area renamed')),
+        );
+        await ref.read(zoneSegmentsProvider.notifier).refreshNow();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rename failed')),
+        );
+      }
+    }
+  }
 }
+
 
 /// Enhanced controller tile with status indicators and glassmorphic styling
 class _ControllerTile extends ConsumerWidget {

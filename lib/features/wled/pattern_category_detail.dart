@@ -9,6 +9,9 @@ import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/models/smart_pattern.dart';
@@ -21,6 +24,7 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/pattern_library_pages.dart' show LiveGradientStrip;
 import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 
 /// Netflix-style horizontal row of gradient cards
 class PatternCategoryRow extends ConsumerWidget {
@@ -97,7 +101,10 @@ class _GradientPatternCard extends ConsumerWidget {
         }
         try {
           // Use the pattern's toWledPayload() method for proper effect/speed/intensity
-          await repo.applyJson(data.toWledPayload());
+          var payload = data.toWledPayload();
+          final channels = ref.read(effectiveChannelIdsProvider);
+          if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+          await repo.applyJson(payload);
           // Update the active preset label
           ref.read(activePresetLabelProvider.notifier).state = data.name;
           if (context.mounted) {
@@ -208,7 +215,10 @@ class _GradientResultTile extends ConsumerWidget {
     }
     try {
       // Use the pattern's toWledPayload() method for proper effect/speed/intensity
-      final success = await repo.applyJson(data.toWledPayload());
+      var payload = data.toWledPayload();
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      final success = await repo.applyJson(payload);
 
       if (!success) {
         throw Exception('Device did not accept command');
@@ -307,7 +317,10 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
       return;
     }
     try {
-      await repo.applyJson(_payloadFromCurrent());
+      var payload = _payloadFromCurrent();
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      await repo.applyJson(payload);
       // Update the active preset label to show this pattern name
       ref.read(activePresetLabelProvider.notifier).state = _current.name;
       if (toast && mounted) {
@@ -332,14 +345,17 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
       try {
-        await repo.applyJson({
+        var payload = <String, dynamic>{
           'seg': [
             {
               'grp': _current.grouping,
               'spc': _current.spacing,
             }
           ]
-        });
+        };
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        await repo.applyJson(payload);
       } catch (e) {
         debugPrint('Apply grp/spc failed: $e');
       }
@@ -603,13 +619,16 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   final repo = ref.read(wledRepositoryProvider);
                   if (repo == null) return;
                   try {
-                    await repo.applyJson({
+                    var palPayload = <String, dynamic>{
                       'seg': [
                         {
                           'pal': seq,
                         }
                       ]
-                    });
+                    };
+                    final channels = ref.read(effectiveChannelIdsProvider);
+                    if (channels.isNotEmpty) palPayload = applyChannelFilter(palPayload, channels);
+                    await repo.applyJson(palPayload);
                   } catch (e) {
                     debugPrint('Apply custom palette failed: $e');
                   }
@@ -825,6 +844,14 @@ class CategoryDetailScreen extends ConsumerWidget {
 
           return CustomScrollView(
             slivers: [
+              // Channel/Area selector for multi-segment devices
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: ChannelSelectorBar(),
+                ),
+              ),
+
               // Lumina AI contextual search bar
               SliverToBoxAdapter(
                 child: Padding(
@@ -1483,7 +1510,10 @@ class _PatternItemCard extends ConsumerWidget {
           return;
         }
         try {
-          await repo.applyJson(item.wledPayload);
+          var itemPayload = Map<String, dynamic>.from(item.wledPayload);
+          final channels = ref.read(effectiveChannelIdsProvider);
+          if (channels.isNotEmpty) itemPayload = applyChannelFilter(itemPayload, channels);
+          await repo.applyJson(itemPayload);
           // Update the active preset label
           ref.read(activePresetLabelProvider.notifier).state = item.name;
           // Attempt immediate local reflection similar to Scenes card
@@ -1812,7 +1842,10 @@ class _CompactPatternItemCard extends ConsumerWidget {
     // colors in the col array, so sending all is harmless and ensures
     // the full colorway is applied.
     try {
-      await repo.applyJson(item.wledPayload);
+      var applyPayload = Map<String, dynamic>.from(item.wledPayload);
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) applyPayload = applyChannelFilter(applyPayload, channels);
+      await repo.applyJson(applyPayload);
       ref.read(activePresetLabelProvider.notifier).state = item.name;
       _updateLocalState(ref);
       if (context.mounted) {
@@ -1874,13 +1907,15 @@ class _CompactPatternItemCard extends ConsumerWidget {
   Future<void> _applyPatternWithColor(BuildContext context, WidgetRef ref, WledRepository repo, Color color) async {
     try {
       // Create payload with selected color
-      final payload = Map<String, dynamic>.from(item.wledPayload);
+      var payload = Map<String, dynamic>.from(item.wledPayload);
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final s0 = Map<String, dynamic>.from(seg.first as Map);
         s0['col'] = [[color.red, color.green, color.blue, 0]];
         payload['seg'] = [s0];
       }
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).state = item.name;
       if (context.mounted) {
@@ -1896,13 +1931,15 @@ class _CompactPatternItemCard extends ConsumerWidget {
 
   Future<void> _applyPatternWithColors(BuildContext context, WidgetRef ref, WledRepository repo, List<Color> colors, int effectId) async {
     try {
-      final payload = Map<String, dynamic>.from(item.wledPayload);
+      var payload = Map<String, dynamic>.from(item.wledPayload);
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final s0 = Map<String, dynamic>.from(seg.first as Map);
-        s0['col'] = colors.map((c) => [c.red, c.green, c.blue, 0]).toList();
+        s0['col'] = colors.map((c) => rgbToRgbw(c.red, c.green, c.blue)).toList();
         payload['seg'] = [s0];
       }
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).state = item.name;
       if (context.mounted) {

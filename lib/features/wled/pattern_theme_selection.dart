@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets (small utilities shared with pattern_library_pages)
@@ -79,11 +80,19 @@ class ThemeSelectionScreen extends ConsumerWidget {
                 ],
               ),
             ),
-            body: Padding(
-              padding: const EdgeInsets.all(16),
-              child: asyncItems.when(
-                data: (items) {
-                  if (items.isEmpty) return const _CenteredText('No generated items');
+            body: Column(
+              children: [
+                // Channel/Area selector for multi-segment devices
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: ChannelSelectorBar(),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: asyncItems.when(
+                      data: (items) {
+                        if (items.isEmpty) return const _CenteredText('No generated items');
                   List<PatternItem> filterBy(String vibe) {
                     if (vibe == 'All') return items;
                     return items.where((it) {
@@ -130,9 +139,12 @@ class ThemeSelectionScreen extends ConsumerWidget {
                     buildGrid(energy),
                   ]);
                 },
-                error: (e, st) => _ErrorState(error: '$e'),
-                loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
+                      error: (e, st) => _ErrorState(error: '$e'),
+                      loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         );

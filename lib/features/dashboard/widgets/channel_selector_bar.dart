@@ -77,11 +77,11 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
     final String label;
     if (!isFiltered) {
-      label = 'All Channels';
+      label = 'All Areas';
     } else if (selectedCount == totalCount) {
-      label = 'All Channels';
+      label = 'All Areas';
     } else {
-      label = '$selectedCount of $totalCount Channels';
+      label = '$selectedCount of $totalCount Areas';
     }
 
     return InkWell(

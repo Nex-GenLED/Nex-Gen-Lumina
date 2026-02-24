@@ -24,6 +24,7 @@ class SegmentSetupScreen extends ConsumerStatefulWidget {
 class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _dirty = false;
 
   @override
   void initState() {
@@ -44,41 +45,74 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
     final totalPixels = ref.watch(editorTotalPixelCountProvider);
     final segmentCount = ref.watch(editorSegmentCountProvider);
 
-    return Scaffold(
-      appBar: GlassAppBar(
-        title: const Text('Roofline Segments'),
-        actions: [
-          IconButton(
-            onPressed: _isSaving ? null : _save,
-            tooltip: 'Save Configuration',
-            icon: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save),
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // Stats header
-                _buildStatsHeader(totalPixels, segmentCount),
-
-                // Segment list
-                Expanded(
-                  child: config == null || config.segments.isEmpty
-                      ? _buildEmptyState()
-                      : _buildSegmentList(config.segments),
-                ),
-
-                // Add segment button
-                _buildAddButton(),
-              ],
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final discard = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            title: const Text('Unsaved Changes', style: TextStyle(color: Colors.white)),
+            content: const Text(
+              'You have unsaved changes. Save before leaving?',
+              style: TextStyle(color: Colors.white70),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Discard'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  Navigator.pop(ctx, false);
+                  await _save();
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+        if (discard == true && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: GlassAppBar(
+          title: const Text('Roofline Segments'),
+          actions: [
+            IconButton(
+              onPressed: _isSaving ? null : _save,
+              tooltip: 'Save Configuration',
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save),
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  // Stats header
+                  _buildStatsHeader(totalPixels, segmentCount),
+
+                  // Segment list
+                  Expanded(
+                    child: config == null || config.segments.isEmpty
+                        ? _buildEmptyState()
+                        : _buildSegmentList(config.segments),
+                  ),
+
+                  // Add segment button
+                  _buildAddButton(),
+                ],
+              ),
+      ),
     );
   }
 
@@ -156,6 +190,7 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
       onReorder: (oldIndex, newIndex) {
         if (newIndex > oldIndex) newIndex--;
         ref.read(rooflineConfigEditorProvider.notifier).reorderSegments(oldIndex, newIndex);
+        setState(() => _dirty = true);
       },
       itemBuilder: (context, index) {
         final segment = segments[index];
@@ -201,6 +236,7 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
           );
+      setState(() => _dirty = true);
     }
   }
 
@@ -219,6 +255,7 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
           );
+      setState(() => _dirty = true);
     }
   }
 
@@ -261,7 +298,18 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
     );
 
     if (confirm == true) {
-      ref.read(rooflineConfigEditorProvider.notifier).removeSegment(segment.id);
+      final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+      notifier.removeSegment(segment.id);
+      // Auto-save deletion to Firestore so it persists across reinstalls.
+      final ok = await notifier.save();
+      if (mounted && !ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to save — changes may not persist'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -272,7 +320,10 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
         await ref.read(rooflineConfigEditorProvider.notifier).save();
 
     if (mounted) {
-      setState(() => _isSaving = false);
+      setState(() {
+        _isSaving = false;
+        if (success) _dirty = false;
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

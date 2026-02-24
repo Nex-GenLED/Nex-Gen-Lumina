@@ -14,6 +14,7 @@ import 'package:nexgen_command/services/pattern_analytics_service.dart';
 import 'package:nexgen_command/data/team_color_database.dart';
 import 'package:nexgen_command/data/team_color_resolver.dart';
 import 'package:nexgen_command/data/holiday_color_database.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
@@ -435,11 +436,11 @@ class LuminaBrain {
     final colorsArray = holiday.colors.map((c) {
       return {
         'name': c.name,
-        'rgb': [c.r, c.g, c.b, 0],
+        'rgb': rgbToRgbw(c.r, c.g, c.b),
       };
     }).toList();
 
-    final segCol = holiday.colors.map((c) => [c.r, c.g, c.b]).toList();
+    final segCol = holiday.colors.map((c) => rgbToRgbw(c.r, c.g, c.b)).toList();
 
     final wledPayload = {
       'on': true,
@@ -449,7 +450,7 @@ class LuminaBrain {
           'id': 0,
           'on': true,
           'bri': 255,
-          'col': segCol.isEmpty ? [[255, 255, 255]] : segCol,
+          'col': segCol.isEmpty ? [rgbToRgbw(255, 255, 255)] : segCol,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,

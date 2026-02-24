@@ -311,7 +311,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           IconButton(
             icon: const Icon(Icons.settings_suggest_outlined),
             tooltip: 'Settings',
-            onPressed: () => context.push(AppRoutes.settings),
+            onPressed: () => context.go(AppRoutes.settings),
           )
         ],
       ),
@@ -896,11 +896,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     List<List<int>>? colors;
                     if (state.connected) {
                       final displayColors = state.displayColors;
-                      colors = displayColors.map((c) => [
+                      colors = displayColors.map((c) => rgbToRgbw(
                         (c.r * 255.0).round().clamp(0, 255),
                         (c.g * 255.0).round().clamp(0, 255),
                         (c.b * 255.0).round().clamp(0, 255),
-                      ]).toList();
+                      )).toList();
                     }
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

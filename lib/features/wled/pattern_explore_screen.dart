@@ -13,6 +13,9 @@ import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/pattern_library_browser.dart';
 import 'package:nexgen_command/features/wled/pattern_category_detail.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart' show showLuminaSheet;
+import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart' show LuminaSheetMode;
 
 /// Helper to execute custom Lumina effects (ID >= 1000).
 /// Returns true if the effect was a custom effect and was executed.
@@ -176,7 +179,10 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
               onClear: () => _handleSearch(''),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          // Channel/Area selector — lets user choose which areas receive patterns
+          pagePadding(child: const ChannelSelectorBar()),
+          const SizedBox(height: 8),
           // Conditional rendering based on search state
           if (_isSearching)
             Expanded(
@@ -197,6 +203,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                         _searchController.clear();
                         _handleSearch('');
                       },
+                      onLuminaTap: () => showLuminaSheet(context, ref, mode: LuminaSheetMode.compact),
                     )
                   : _LibrarySearchResultsView(
                       results: _searchResults!,
@@ -365,10 +372,12 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
 class _NoMatchRedirectWidget extends StatelessWidget {
   final String query;
   final VoidCallback onClearSearch;
+  final VoidCallback onLuminaTap;
 
   const _NoMatchRedirectWidget({
     required this.query,
     required this.onClearSearch,
+    required this.onLuminaTap,
   });
 
   @override
@@ -422,7 +431,7 @@ class _NoMatchRedirectWidget extends StatelessWidget {
             title: 'Describe it to Lumina',
             description: "Tell Lumina what you're imagining and we'll bring it to life with AI-powered pattern creation.",
             buttonText: 'Chat with Lumina',
-            onTap: () => context.go('/lumina'),
+            onTap: onLuminaTap,
           ),
           const SizedBox(height: 16),
 

@@ -6,6 +6,8 @@ import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -132,7 +134,7 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/designs');
+          context.push('/my-designs');
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -640,7 +642,7 @@ class MySavedDesignsSection extends ConsumerWidget {
                 TextButton.icon(
                   onPressed: () {
                     // Navigate to My Designs screen for full management
-                    context.push('/designs');
+                    context.push('/my-designs');
                   },
                   icon: const Icon(Icons.edit_outlined, size: 16),
                   label: const Text('Manage'),
@@ -693,7 +695,9 @@ class MySavedDesignsSection extends ConsumerWidget {
     }
 
     try {
-      final payload = design.toWledPayload();
+      var payload = design.toWledPayload();
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).state = design.name;
 
@@ -949,7 +953,7 @@ class RecentPatternsSection extends ConsumerWidget {
 
       if (!isCustomEffect) {
         // Standard WLED effect - send payload directly
-        final payload = {
+        var payload = <String, dynamic>{
           'on': true,
           'bri': pattern.brightness,
           'seg': [
@@ -962,6 +966,8 @@ class RecentPatternsSection extends ConsumerWidget {
           ],
         };
 
+        final channels = ref.read(effectiveChannelIdsProvider);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
         await repo.applyJson(payload);
       }
 

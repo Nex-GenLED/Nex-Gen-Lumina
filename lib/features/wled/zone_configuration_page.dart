@@ -21,7 +21,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Zone Control'),
+        title: const Text('My Lighting Areas'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -34,10 +34,10 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
         padding: const EdgeInsets.all(16),
         children: [
           // Header section
-          Text('My Channels', style: Theme.of(context).textTheme.titleLarge),
+          Text('My Areas', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'Select and manage your lighting channels',
+            'Select and manage your lighting areas',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
           ),
           const SizedBox(height: 16),
@@ -152,7 +152,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Use Design Studio to paint individual LEDs, create gradients, and apply effects to your channels.',
+                  'Use Design Studio to paint individual LEDs, create gradients, and apply effects to your areas.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.white60,
                   ),
@@ -176,7 +176,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
           ListTile(
             leading: const Icon(Icons.settings, color: Colors.white54),
             title: const Text('Hardware Configuration'),
-            subtitle: const Text('Configure LED counts per channel'),
+            subtitle: const Text('Configure LED counts per area'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/settings/hardware'),
           ),
@@ -190,7 +190,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Rename Channel'),
+        title: const Text('Rename Area'),
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(labelText: 'Name'),
@@ -216,7 +216,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
     if (mounted) {
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Channel renamed')),
+          const SnackBar(content: Text('Area renamed')),
         );
         await ref.read(zoneSegmentsProvider.notifier).refreshNow();
       } else {
@@ -287,7 +287,7 @@ class _EmptySegments extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'No channels configured. Enable channels in Hardware Configuration.',
+              'No lighting areas configured. Set up your LED counts in Hardware Configuration.',
               style: Theme.of(context).textTheme.bodyLarge,
             ),
           ),

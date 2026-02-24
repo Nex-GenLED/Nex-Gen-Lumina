@@ -4,6 +4,8 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 /// Card displaying scenes and presets with apply functionality
 class ScenesCard extends ConsumerWidget {
@@ -41,7 +43,10 @@ class ScenesCard extends ConsumerWidget {
                   trailing: FilledButton(
                     onPressed: () async {
                       if (repo == null) return;
-                      await repo.applyJson(p.json);
+                      var scenePayload = Map<String, dynamic>.from(p.json);
+                      final channels = ref.read(effectiveChannelIdsProvider);
+                      if (channels.isNotEmpty) scenePayload = applyChannelFilter(scenePayload, channels);
+                      await repo.applyJson(scenePayload);
                       final notifier = ref.read(wledStateProvider.notifier);
                       // attempt to immediately reflect bri/color/speed
                       final colList = (p.json['seg'] is List && (p.json['seg'] as List).isNotEmpty) ? ((p.json['seg'] as List).first as Map)['col'] : null;

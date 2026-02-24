@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 
 // ---------------------------------------------------------------------------
 // Data models
@@ -306,13 +307,12 @@ class SchedulePlanNotifier extends Notifier<SchedulePlanState> {
   /// Build a WLED JSON payload from a [LuminaLightingSuggestion].
   Map<String, dynamic> _buildPayload(LuminaLightingSuggestion s) {
     final bri = (s.brightness * 255).round().clamp(0, 255);
-    final cols = s.colors.take(3).map((c) => [
+    final cols = s.colors.take(3).map((c) => rgbToRgbw(
           (c.r * 255).round(),
           (c.g * 255).round(),
           (c.b * 255).round(),
-          0,
-        ]).toList();
-    if (cols.isEmpty) cols.add([255, 255, 255, 0]);
+        )).toList();
+    if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
 
     final speed = s.speed != null ? (s.speed! * 255).round() : 128;
 

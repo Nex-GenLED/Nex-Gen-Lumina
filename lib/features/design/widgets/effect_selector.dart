@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 
 /// Effect selector widget for the Design Studio.
@@ -286,7 +287,7 @@ class ChannelQuickActions extends ConsumerWidget {
         groups.add(LedColorGroup(
           startLed: startLed,
           endLed: endLed,
-          color: [color.red, color.green, color.blue, 0],
+          color: rgbToRgbw(color.red, color.green, color.blue),
         ));
       }
 

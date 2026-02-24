@@ -48,7 +48,7 @@ class LibraryNodeGrid extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: SizedBox(
-              height: 140,
+              height: 72,
               child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
             ),
           );
@@ -482,9 +482,8 @@ class LibraryNodeCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Hero icon (smaller to make room for preview)
+                    // Hero icon
                     Expanded(
-                      flex: 3,
                       child: Center(
                         child: Icon(
                           heroIcon,
@@ -503,24 +502,18 @@ class LibraryNodeCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Mini pixel preview strip
-                    Expanded(
-                      flex: 2,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) => PixelStripPreview(
-                            colors: node.previewColors ?? _expandGradient(gradientColors),
-                            pixelCount: 7,
-                            height: constraints.maxHeight,
-                            animate: false,
-                            borderRadius: 8,
-                            backgroundColor: Colors.black.withValues(alpha: 0.35),
-                          ),
+                    // Gradient color bar
+                    Container(
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(3),
+                        gradient: LinearGradient(
+                          colors: node.previewColors ?? _expandGradient(gradientColors),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     // Folder name with arrow
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -602,9 +595,9 @@ class LibraryNodeCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Left: PixelStripPreview hero (~40%) ──
+              // ── Left: PixelStripPreview hero ──
               SizedBox(
-                width: 120,
+                width: 64,
                 child: ClipRRect(
                   borderRadius: const BorderRadius.horizontal(
                     left: Radius.circular(15),
@@ -613,7 +606,7 @@ class LibraryNodeCard extends StatelessWidget {
                       ? LayoutBuilder(
                           builder: (context, constraints) => PixelStripPreview(
                             colors: colors,
-                            pixelCount: 14,
+                            pixelCount: 8,
                             height: constraints.maxHeight,
                             animate: animate,
                             borderRadius: 0,
@@ -622,74 +615,32 @@ class LibraryNodeCard extends StatelessWidget {
                         )
                       : Container(
                           color: const Color(0xFF0A0E14),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: List.generate(
-                                    4,
-                                    (i) => Container(
-                                      width: 10,
-                                      height: 10,
-                                      margin: const EdgeInsets.symmetric(
-                                          horizontal: 3),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.white
-                                            .withValues(alpha: 0.12),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'No colors',
-                                  style: TextStyle(
-                                    color: NexGenPalette.textSecondary
-                                        .withValues(alpha: 0.5),
-                                    fontSize: 9,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          child: const Center(
+                            child: Icon(Icons.palette_outlined, color: Colors.white24, size: 20),
                           ),
                         ),
                 ),
               ),
-              // ── Right: Info section (~60%) ──
+              // ── Right: Info section ──
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       // Palette name
                       Text(
                         node.name,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w700,
                         ),
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      // Description
-                      if (node.description != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          node.description!,
-                          style: TextStyle(
-                            color: NexGenPalette.textSecondary,
-                            fontSize: 11,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      const Spacer(),
+                      const SizedBox(height: 6),
                       // Color swatches row
                       if (hasColors)
                         Row(
@@ -698,22 +649,22 @@ class LibraryNodeCard extends StatelessWidget {
                                 i < (colors.length > 5 ? 5 : colors.length);
                                 i++)
                               Container(
-                                width: 22,
-                                height: 22,
-                                margin: const EdgeInsets.only(right: 5),
+                                width: 16,
+                                height: 16,
+                                margin: const EdgeInsets.only(right: 4),
                                 decoration: BoxDecoration(
                                   color: colors[i],
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                     color:
                                         Colors.white.withValues(alpha: 0.2),
-                                    width: 1.5,
+                                    width: 1,
                                   ),
                                   boxShadow: [
                                     BoxShadow(
                                       color:
                                           colors[i].withValues(alpha: 0.4),
-                                      blurRadius: 6,
+                                      blurRadius: 4,
                                     ),
                                   ],
                                 ),
@@ -731,7 +682,7 @@ class LibraryNodeCard extends StatelessWidget {
                             Icon(
                               Icons.arrow_forward_ios,
                               color: primaryColor.withValues(alpha: 0.6),
-                              size: 12,
+                              size: 10,
                             ),
                           ],
                         ),

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
@@ -78,6 +79,13 @@ class MySchedulePage extends ConsumerWidget {
   void _openEditor(BuildContext context, WidgetRef ref) => showScheduleEditor(context, ref);
 }
 
+/// Simple pattern that can be resolved locally without Cloud AI.
+class _SimplePattern {
+  final String actionLabel;
+  final String description;
+  const _SimplePattern(this.actionLabel, this.description);
+}
+
 /// Unified Lumina AI card combining Autopilot controls and schedule prompt input.
 /// Allows users to toggle autopilot, set preferences, and ask Lumina for schedule help.
 class _AutopilotQuickToggle extends ConsumerStatefulWidget {
@@ -151,18 +159,19 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       _error = null;
     });
     try {
-      // Parse the user's natural language request to extract schedule parameters
+      // Parse schedule metadata (time, days, off-time) and pattern info
       final scheduleData = await _parseScheduleRequest(text);
 
       if (scheduleData != null) {
-        // Create the schedule item
+        // Create the schedule item (with WLED payload if AI-generated)
         final newSchedule = ScheduleItem(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
-          timeLabel: scheduleData['timeLabel']!,
+          timeLabel: scheduleData['timeLabel'] as String,
           offTimeLabel: scheduleData['offTimeLabel'] as String?,
           repeatDays: scheduleData['repeatDays'] as List<String>,
-          actionLabel: scheduleData['actionLabel']!,
+          actionLabel: scheduleData['actionLabel'] as String,
           enabled: true,
+          wledPayload: scheduleData['wledPayload'] as Map<String, dynamic>?,
         );
 
         // Add to schedules
@@ -173,7 +182,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
         // Show friendly confirmation
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(scheduleData['confirmation']!),
+            content: Text(scheduleData['confirmation'] as String),
             backgroundColor: Colors.green.shade700,
             duration: const Duration(seconds: 3),
           ),
@@ -183,7 +192,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       } else {
         // Fallback: couldn't parse the request automatically
         if (!mounted) return;
-        setState(() => _error = 'I couldn\'t understand that request. Try something like "warm white every night at sunset"');
+        setState(() => _error = 'I couldn\'t understand that request. Try something like "warm white every night at sunset" or "USA colors from 6pm to 10pm"');
       }
     } catch (e) {
       debugPrint('Lumina schedule creation failed: $e');
@@ -193,18 +202,100 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Simple pattern keywords (no AI needed)
+  // -----------------------------------------------------------------------
+
+  static const _simplePatterns = <String, _SimplePattern>{
+    'warm white': _SimplePattern('Pattern: Warm White', 'warm white'),
+    'warm': _SimplePattern('Pattern: Warm White', 'warm white'),
+    'cool white': _SimplePattern('Pattern: Cool White', 'cool white'),
+    'bright white': _SimplePattern('Pattern: Bright White', 'bright white'),
+    'festive': _SimplePattern('Pattern: Festive', 'festive'),
+  };
+
+  /// Checks if the pattern part of the request can be handled locally.
+  /// Returns null if the request needs Cloud AI for themed pattern generation.
+  static _SimplePattern? _matchSimplePattern(String lowerText) {
+    // Check longest keys first to avoid partial matches
+    final sortedKeys = _simplePatterns.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final key in sortedKeys) {
+      if (lowerText.contains(key)) return _simplePatterns[key];
+    }
+    return null;
+  }
+
+  /// Extracts WLED payload JSON from an AI response string.
+  /// Looks for ```json ... ``` fenced blocks or raw { ... } objects.
+  static Map<String, dynamic>? _extractWledFromAIResponse(String response) {
+    try {
+      // Fenced code block
+      final fenceMatch =
+          RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(response);
+      if (fenceMatch != null) {
+        final jsonStr = fenceMatch.group(1)!.trim();
+        final obj = jsonDecode(jsonStr) as Map<String, dynamic>;
+        // The wled payload may be nested under 'wled' key or at root
+        if (obj.containsKey('wled') && obj['wled'] is Map) {
+          return (obj['wled'] as Map).cast<String, dynamic>();
+        }
+        if (obj.containsKey('seg') || obj.containsKey('on') || obj.containsKey('bri')) {
+          return obj;
+        }
+        return obj;
+      }
+      // Raw JSON object
+      final braceStart = response.indexOf('{');
+      final braceEnd = response.lastIndexOf('}');
+      if (braceStart >= 0 && braceEnd > braceStart) {
+        final jsonStr = response.substring(braceStart, braceEnd + 1);
+        final obj = jsonDecode(jsonStr) as Map<String, dynamic>;
+        if (obj.containsKey('wled') && obj['wled'] is Map) {
+          return (obj['wled'] as Map).cast<String, dynamic>();
+        }
+        if (obj.containsKey('seg') || obj.containsKey('on') || obj.containsKey('bri')) {
+          return obj;
+        }
+        return obj;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Extracts a pattern name from the AI response JSON.
+  static String? _extractPatternName(String response) {
+    try {
+      final fenceMatch =
+          RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(response);
+      String? jsonStr;
+      if (fenceMatch != null) {
+        jsonStr = fenceMatch.group(1)!.trim();
+      } else {
+        final braceStart = response.indexOf('{');
+        final braceEnd = response.lastIndexOf('}');
+        if (braceStart >= 0 && braceEnd > braceStart) {
+          jsonStr = response.substring(braceStart, braceEnd + 1);
+        }
+      }
+      if (jsonStr != null) {
+        final obj = jsonDecode(jsonStr) as Map<String, dynamic>;
+        return obj['patternName'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Parses natural language schedule requests into structured data.
   ///
-  /// Supports:
-  /// - Positive requests: "warm white at sunset", "turn on at 8pm"
-  /// - Negative constraints: "no bright lights after 10pm", "avoid bright after midnight"
-  /// - Brightness rules: "dim to 20% at 10pm", "reduce brightness after 11pm"
+  /// For simple patterns (warm white, turn off, brightness), resolves locally.
+  /// For themed/creative patterns (USA, Chiefs, rainbow), calls Cloud AI to
+  /// generate the actual WLED payload with correct colors and effects.
   Future<Map<String, dynamic>?> _parseScheduleRequest(String text) async {
     final lowerText = text.toLowerCase();
 
     // =====================================================================
-    // STEP 1: Detect negative constraints (no, avoid, don't want, nothing, etc.)
-    // These indicate the user wants to PREVENT or REDUCE something
+    // STEP 1: Detect negative constraints
     // =====================================================================
     final negativeKeywords = [
       'no ', 'not ', 'never ', 'avoid', "don't", 'dont', "doesn't", 'nothing',
@@ -212,8 +303,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       'dim ', 'dimmer', 'darker', 'quieter', 'softer', 'subtle',
     ];
     final isNegativeConstraint = negativeKeywords.any((kw) => lowerText.contains(kw));
-
-    // Detect if the user mentions bright/intense lighting in the negative context
     final mentionsBright = lowerText.contains('bright') ||
         lowerText.contains('intense') ||
         lowerText.contains('harsh') ||
@@ -222,7 +311,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
 
     // =====================================================================
     // STEP 2: Detect "after X" timing pattern
-    // "no bright lights after 10pm" means START the rule at 10pm
     // =====================================================================
     final afterTimeMatch = RegExp(
       r'after\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)',
@@ -239,7 +327,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     // =====================================================================
     String timeLabel;
 
-    // If "after X" pattern found, that's the START time
     if (afterTimeMatch != null) {
       final hour = afterTimeMatch.group(1)!;
       final minute = afterTimeMatch.group(2) ?? '00';
@@ -263,7 +350,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     } else if (lowerText.contains('midnight') || lowerText.contains('12:00 am')) {
       timeLabel = '12:00 AM';
     } else {
-      // Try to parse specific time like "8 pm" or "8:00 pm"
       final timeMatch = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', caseSensitive: false).firstMatch(lowerText);
       if (timeMatch != null) {
         final hour = timeMatch.group(1)!;
@@ -271,14 +357,12 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
         final ampm = timeMatch.group(3)!.toUpperCase();
         timeLabel = '$hour:$minute $ampm';
       } else {
-        // Default to sunset for evening requests
         timeLabel = 'Sunset';
       }
     }
 
     // =====================================================================
     // STEP 4: Determine OFF time
-    // For negative constraints, default to sunrise (rule applies through night)
     // =====================================================================
     String? offTimeLabel;
     final offTimePatterns = [
@@ -296,7 +380,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
         } else if (captured == 'sunset' || captured == 'dusk') {
           offTimeLabel = 'Sunset';
         } else {
-          // Specific time
           final hour = match.group(1)!;
           final minute = match.group(2) ?? '00';
           final ampm = match.group(3)!.toUpperCase();
@@ -306,7 +389,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       }
     }
 
-    // If no explicit off time but text mentions "dusk to dawn" or similar patterns
     if (offTimeLabel == null) {
       if (lowerText.contains('dusk to dawn') || lowerText.contains('sunset to sunrise')) {
         offTimeLabel = 'Sunrise';
@@ -315,7 +397,6 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       }
     }
 
-    // For negative constraints without explicit end time, default to sunrise
     if (offTimeLabel == null && isNegativeConstraint) {
       offTimeLabel = 'Sunrise';
     }
@@ -325,65 +406,74 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     // =====================================================================
     List<String> repeatDays;
     if (lowerText.contains('every night') || lowerText.contains('nightly') ||
-        lowerText.contains('every evening') || lowerText.contains('daily')) {
+        lowerText.contains('every evening') || lowerText.contains('daily') ||
+        lowerText.contains('every day')) {
       repeatDays = ['Daily'];
+    } else if (lowerText.contains('this week')) {
+      repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     } else if (lowerText.contains('weeknight')) {
       repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
     } else if (lowerText.contains('weekend')) {
       repeatDays = ['Sat', 'Sun'];
     } else {
-      // Default to daily
       repeatDays = ['Daily'];
     }
 
     // =====================================================================
     // STEP 6: Determine action/pattern
-    // Handle negative constraints by inverting the intent
+    // First check simple local patterns, then fall back to Cloud AI
     // =====================================================================
     String actionLabel;
     String patternDescription;
+    Map<String, dynamic>? wledPayload;
 
-    // Check for explicit brightness percentage
     final brightnessMatch = RegExp(r'(\d{1,3})\s*%', caseSensitive: false).firstMatch(lowerText);
 
     if (isNegativeConstraint && mentionsBright) {
-      // User wants to avoid bright lights → dim or turn off
-      // Suggest dimming to 20% as a reasonable night mode
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
     } else if (brightnessMatch != null) {
-      // Explicit brightness level requested
       final brightness = int.tryParse(brightnessMatch.group(1)!) ?? 50;
       final clampedBrightness = brightness.clamp(1, 100);
       actionLabel = 'Brightness: $clampedBrightness%';
       patternDescription = 'set brightness to $clampedBrightness%';
     } else if (lowerText.contains('dim') || lowerText.contains('night mode') || lowerText.contains('subtle')) {
-      // User wants dimmer lighting
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
-    } else if (lowerText.contains('warm white') || lowerText.contains('warm')) {
-      actionLabel = 'Pattern: Warm White';
-      patternDescription = 'warm white';
-    } else if (lowerText.contains('bright white') || lowerText.contains('bright')) {
-      actionLabel = 'Pattern: Bright White';
-      patternDescription = 'bright white';
-    } else if (lowerText.contains('festive')) {
-      actionLabel = 'Pattern: Festive';
-      patternDescription = 'festive';
     } else if (lowerText.contains('off') || lowerText.contains('turn off')) {
       actionLabel = 'Turn Off';
       patternDescription = 'off';
-    } else if (lowerText.contains('on') || lowerText.contains('turn on')) {
+    } else if (lowerText.contains('turn on') && !_hasThemeKeywords(lowerText)) {
       actionLabel = 'Turn On';
       patternDescription = 'on';
     } else if (isNegativeConstraint) {
-      // Generic negative constraint without specific pattern mentioned → dim
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
     } else {
-      // Default to warm white for lighting requests
-      actionLabel = 'Pattern: Warm White';
-      patternDescription = 'warm white';
+      // Check for simple local patterns first
+      final simple = _matchSimplePattern(lowerText);
+      if (simple != null && !_hasThemeKeywords(lowerText)) {
+        actionLabel = simple.actionLabel;
+        patternDescription = simple.description;
+      } else {
+        // ── Cloud AI: generate the actual themed pattern ──
+        // Strip schedule timing words to isolate the pattern request
+        final patternPrompt = _extractPatternIntent(text);
+        debugPrint('🧠 Schedule AI: Resolving themed pattern via Cloud AI: "$patternPrompt"');
+
+        try {
+          final aiResponse = await LuminaBrain.chat(ref, patternPrompt);
+          wledPayload = _extractWledFromAIResponse(aiResponse);
+          final patternName = _extractPatternName(aiResponse) ?? patternPrompt;
+          actionLabel = 'Pattern: $patternName';
+          patternDescription = patternName.toLowerCase();
+        } catch (e) {
+          debugPrint('Cloud AI failed for schedule pattern: $e');
+          // Fall back to warm white on AI failure
+          actionLabel = 'Pattern: Warm White';
+          patternDescription = 'warm white';
+        }
+      }
     }
 
     // =====================================================================
@@ -392,23 +482,24 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     final timeName = timeLabel.toLowerCase();
     final offTimeName = offTimeLabel?.toLowerCase();
     final daysDescription = repeatDays.contains('Daily')
-        ? 'every night'
-        : repeatDays.length == 5
-            ? 'on weeknights'
-            : 'on ${repeatDays.join(", ")}';
+        ? 'every day'
+        : repeatDays.length == 7
+            ? 'every day this week'
+            : repeatDays.length == 5
+                ? 'on weeknights'
+                : 'on ${repeatDays.join(", ")}';
 
     String confirmation;
     if (isNegativeConstraint && mentionsBright) {
-      // Special message for negative constraints
       if (offTimeName != null) {
-        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription from $timeName until $offTimeName. This helps avoid harsh lighting late at night.';
+        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription from $timeName until $offTimeName.';
       } else {
-        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription starting at $timeName. This helps avoid harsh lighting late at night.';
+        confirmation = 'Got it! I\'ve created a rule to $patternDescription $daysDescription starting at $timeName.';
       }
     } else if (offTimeName != null) {
-      confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription from $timeName to $offTimeName.';
+      confirmation = 'Scheduled $patternDescription $daysDescription from $timeName to $offTimeName.';
     } else {
-      confirmation = 'That sounds great! I\'ve set your system to $patternDescription $daysDescription at $timeName.';
+      confirmation = 'Scheduled $patternDescription $daysDescription at $timeName.';
     }
 
     return {
@@ -417,7 +508,57 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
       'repeatDays': repeatDays,
       'actionLabel': actionLabel,
       'confirmation': confirmation,
+      'wledPayload': wledPayload,
     };
+  }
+
+  /// Returns true if the text contains themed/creative pattern keywords that
+  /// need Cloud AI to resolve (e.g., team names, holidays, color themes).
+  static bool _hasThemeKeywords(String lowerText) {
+    const themeIndicators = [
+      'usa', 'patriotic', 'american', 'independence',
+      'christmas', 'halloween', 'valentine', 'easter', 'st patrick',
+      'chiefs', 'royals', 'lakers', 'yankees', 'cowboys', 'eagles',
+      'rainbow', 'aurora', 'galaxy', 'ocean', 'fire', 'ice', 'lava',
+      'party', 'romantic', 'spooky', 'cozy', 'elegant', 'tropical',
+      'candy cane', 'snowflake', 'firework', 'sunset vibes',
+      'red white and blue', 'red white blue',
+      'pattern', 'theme', 'colors', 'effect', 'vibe',
+    ];
+    return themeIndicators.any((kw) => lowerText.contains(kw));
+  }
+
+  /// Strips scheduling words from the text to isolate the pattern/theme intent.
+  /// "USA pattern every day this week from 6pm to 10pm"
+  /// → "USA pattern"
+  static String _extractPatternIntent(String text) {
+    var cleaned = text;
+    // Remove scheduling phrases
+    final schedulePhrases = [
+      RegExp(r'\b(?:every|each)\s+(?:day|night|evening|morning)\b', caseSensitive: false),
+      RegExp(r'\b(?:this|next|all)\s+week\b', caseSensitive: false),
+      RegExp(r'\bnightly\b', caseSensitive: false),
+      RegExp(r'\bdaily\b', caseSensitive: false),
+      RegExp(r'\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b', caseSensitive: false),
+      RegExp(r'\b(?:to|until|through|-)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b', caseSensitive: false),
+      RegExp(r'\bfrom\s+(?:sunset|sunrise|dusk|dawn)\b', caseSensitive: false),
+      RegExp(r'\b(?:to|until|through|-)\s*(?:sunset|sunrise|dusk|dawn)\b', caseSensitive: false),
+      RegExp(r'\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b', caseSensitive: false),
+      RegExp(r'\b(?:give|set|show|play|run|put|make)\s+(?:me|us|it)?\s*', caseSensitive: false),
+      RegExp(r'\b(?:on\s+)?(?:weekdays|weekends|weeknights)\b', caseSensitive: false),
+      RegExp(r'\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', caseSensitive: false),
+    ];
+
+    for (final pattern in schedulePhrases) {
+      cleaned = cleaned.replaceAll(pattern, ' ');
+    }
+
+    // Clean up whitespace
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    // If we stripped everything, use the original text
+    if (cleaned.length < 3) return text;
+    return cleaned;
   }
 
   void _applyQuick(String s) {

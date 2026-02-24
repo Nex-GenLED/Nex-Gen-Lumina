@@ -228,8 +228,38 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     }
   }
 
-  /// Tier 1: Only LED counts changed — update via segment state API (no reboot)
+  /// Tier 1: Only LED counts changed — update hardware config (total + bus lengths)
+  /// then sync segment boundaries. No reboot needed since bus count/pins are unchanged.
   Future<void> _saveSegmentCounts(WledRepository repo) async {
+    final total = _totalLeds;
+    final ledBuses = _buildBusesForCfg();
+
+    // Step 1: Update hardware config with new total and bus lengths.
+    // WLED clips segment stop values at hw.led.total, so this MUST be updated
+    // before adjusting segments — otherwise increased counts get silently clipped.
+    final cfgPayload = {
+      'hw': {
+        'led': {
+          'total': total,
+          'maxpwr': (_maxCurrentA * 1000).round(),
+          'ins': ledBuses,
+        },
+      },
+    };
+
+    debugPrint('Hardware config payload (count update): $cfgPayload');
+
+    final okCfg = await repo.applyConfig(cfgPayload);
+    if (!okCfg) {
+      debugPrint('applyConfig failed for count update — showing manual config dialog');
+      if (mounted) {
+        await _showManualConfigDialog(context, total, ledBuses);
+      }
+      return;
+    }
+
+    // Step 2: Update segment boundaries to match the new counts.
+    // This preserves segment names and per-segment settings.
     int segIdx = 0;
     int startAddress = 0;
     bool allOk = true;
@@ -250,9 +280,12 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
       segIdx++;
     }
 
+    // Step 3: Update local baseline so subsequent saves use the correct reference.
+    _originalBusCount = _enabled.where((e) => e).length;
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(allOk ? 'Channel sizes updated.' : 'Some updates failed. Check your WLED device.'),
+        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your WLED device.'),
       ));
     }
   }
@@ -286,6 +319,9 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     // Reboot controller so the new bus config takes effect
     final okRb = await repo.applyJson({'rb': true});
     if (!okRb) debugPrint('reboot command failed');
+
+    // Update local baseline so subsequent saves use the correct reference.
+    _originalBusCount = _enabled.where((e) => e).length;
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -7,15 +7,16 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
-
-/// Helper to convert RGB to RGBW format for WLED.
-List<int> _rgbToRgbw(int r, int g, int b) => [r, g, b, 0];
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
@@ -59,6 +60,14 @@ class _ColorwayEffectSelectorPageState
     super.dispose();
   }
 
+  /// Returns the effective WLED effect ID. When effect 0 (Solid) is selected
+  /// with multiple palette colors, substitutes effect 83 (Solid Pattern)
+  /// which distributes colors in repeating blocks using `grp`.
+  int _effectiveEffectId(int selectedId) {
+    if (selectedId == 0 && _paletteColors.length > 1) return 83;
+    return selectedId;
+  }
+
   void _sendToWled() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 150), () async {
@@ -76,18 +85,18 @@ class _ColorwayEffectSelectorPageState
       // Build WLED payload
       final cols = _paletteColors
           .take(3)
-          .map((c) => _rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
           .toList();
       if (cols.isEmpty) {
-        cols.add([255, 255, 255, 0]);
+        cols.add(rgbToRgbw(255, 255, 255));
       }
 
-      final payload = {
+      var payload = <String, dynamic>{
         'on': true,
         'bri': 255,
         'seg': [
           {
-            'fx': effectId,
+            'fx': _effectiveEffectId(effectId),
             'sx': speed,
             'ix': intensity,
             'pal': 5, // "Colors Only" palette
@@ -96,6 +105,10 @@ class _ColorwayEffectSelectorPageState
           }
         ]
       };
+
+      // Apply channel filter so all targeted segments receive the change
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
 
       await repo.applyJson(payload);
     });
@@ -117,18 +130,18 @@ class _ColorwayEffectSelectorPageState
     if (repo != null) {
       final cols = _paletteColors
           .take(3)
-          .map((c) => _rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
           .toList();
       if (cols.isEmpty) {
-        cols.add([255, 255, 255, 0]);
+        cols.add(rgbToRgbw(255, 255, 255));
       }
 
-      final payload = {
+      var payload = <String, dynamic>{
         'on': true,
         'bri': 255,
         'seg': [
           {
-            'fx': effectId,
+            'fx': _effectiveEffectId(effectId),
             'sx': speed,
             'ix': intensity,
             'pal': 5,
@@ -138,7 +151,17 @@ class _ColorwayEffectSelectorPageState
         ]
       };
 
+      // Apply channel filter so all targeted segments receive the pattern
+      final channels = ref.read(effectiveChannelIdsProvider);
+      debugPrint('🎯 Apply pattern: effectiveChannels=$channels');
+      if (channels.isNotEmpty) {
+        payload = applyChannelFilter(payload, channels);
+      } else {
+        debugPrint('⚠️ Apply pattern: No channels found — payload goes to default segment only');
+      }
+
       try {
+        debugPrint('📤 Apply pattern payload: $payload');
         await repo.applyJson(payload);
         appliedToDevice = currentState.connected;
       } catch (e) {
@@ -183,7 +206,13 @@ class _ColorwayEffectSelectorPageState
     final colorFilter = ref.watch(selectorColorBehaviorProvider);
 
     final effect = WledEffectsCatalog.getById(effectId);
-    final showColorLayout = effect?.usesColorLayout ?? false;
+    // Show color layout when the effect natively supports it, OR when
+    // Solid (effect 0) is selected with multiple palette colors — the user
+    // needs to choose how colors are distributed (we'll use Solid Pattern
+    // under the hood to make it work).
+    final hasMultipleColors = _paletteColors.length > 1;
+    final showColorLayout =
+        (effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors);
 
     // Build filtered effect list
     final bool showingTopPicks = motionFilter == null && colorFilter == null;
@@ -197,6 +226,12 @@ class _ColorwayEffectSelectorPageState
     // This widget is embedded in the library browser, so no Scaffold needed
     return Column(
       children: [
+        // Channel/Area selector — lets user choose which areas receive the pattern
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: ChannelSelectorBar(),
+        ),
+
         // Apply button row
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

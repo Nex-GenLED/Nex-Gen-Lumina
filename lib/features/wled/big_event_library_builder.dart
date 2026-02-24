@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/services/big_event_service.dart';
 
 /// Folder IDs for Big Event Designs
@@ -523,7 +524,7 @@ extension DualTeamPatternPayload on LibraryNode {
             'fx': 0, // Solid
             'col': team1Colors.take(3).map((c) {
               final color = Color(c);
-              return [color.red, color.green, color.blue, 0];
+              return rgbToRgbw(color.red, color.green, color.blue);
             }).toList(),
           },
           {
@@ -533,7 +534,7 @@ extension DualTeamPatternPayload on LibraryNode {
             'fx': 0, // Solid
             'col': team2Colors.take(3).map((c) {
               final color = Color(c);
-              return [color.red, color.green, color.blue, 0];
+              return rgbToRgbw(color.red, color.green, color.blue);
             }).toList(),
           },
         ],
@@ -554,7 +555,7 @@ extension DualTeamPatternPayload on LibraryNode {
           'sx': defaultSpeed,
           'ix': defaultIntensity,
           'pal': 5, // "Colors Only" - use segment colors only
-          'col': colors.take(3).map((c) => [c.red, c.green, c.blue, 0]).toList(),
+          'col': colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue)).toList(),
         },
       ],
     };

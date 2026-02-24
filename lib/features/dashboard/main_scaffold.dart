@@ -1,31 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
 import 'package:nexgen_command/features/geofence/geofence_monitor.dart';
-import 'package:nexgen_command/features/site/settings_page.dart';
-import 'package:nexgen_command/features/wled/pattern_library_pages.dart';
-import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
-import 'package:nexgen_command/features/simple/simple_dashboard.dart';
-import 'package:nexgen_command/features/simple/simple_settings.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
-import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
 
-/// Global provider for the selected tab index.
-/// With the Lumina tab removed, the mapping is:
-///   0 = Home, 1 = Schedule, 2 = Explore, 3 = System
-/// (Index 2 was Lumina — now replaced by the bottom sheet overlay.)
-final selectedTabIndexProvider = StateProvider<int>((ref) => 0);
-
 /// Root shell with persistent Bottom Navigation (Glass Dock).
-/// The center Lumina button now opens a draggable bottom sheet
-/// instead of navigating to a dedicated tab.
+/// Receives a [StatefulNavigationShell] from GoRouter's StatefulShellRoute
+/// to display the correct branch navigator and handle tab switching.
+///
+/// Branch mapping:
+///   0 = Home (/dashboard)
+///   1 = Schedule (/schedule)
+///   2 = Explore (/explore)
+///   3 = System (/settings)
 class MainScaffold extends ConsumerStatefulWidget {
-  const MainScaffold({super.key});
+  final StatefulNavigationShell navigationShell;
+
+  const MainScaffold({super.key, required this.navigationShell});
 
   @override
   ConsumerState<MainScaffold> createState() => _MainScaffoldState();
@@ -34,21 +32,14 @@ class MainScaffold extends ConsumerStatefulWidget {
 class _MainScaffoldState extends ConsumerState<MainScaffold> {
   bool _tourChecked = false;
 
-  // Pages without Lumina (it's now a bottom sheet overlay)
-  final _pages = const [
-    WledDashboardPage(),     // 0 — Home
-    MySchedulePage(),        // 1 — Schedule
-    ExplorePatternsScreen(), // 2 — Explore
-    SettingsPage(),          // 3 — System
-  ];
-
-  final _simplePages = const [
-    SimpleDashboard(),
-    SimpleSettings(),
-  ];
-
-  void _onTap(int i) {
-    ref.read(selectedTabIndexProvider.notifier).state = i;
+  void _onTap(int index) {
+    // If tapping the already-active tab, reset to its root
+    widget.navigationShell.goBranch(
+      index,
+      initialLocation: index == widget.navigationShell.currentIndex,
+    );
+    // Keep selectedTabIndexProvider in sync for backward compatibility
+    ref.read(selectedTabIndexProvider.notifier).state = index;
   }
 
   /// Quick tap on Lumina button → open compact sheet.
@@ -90,43 +81,71 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     ref.watch(autoConnectControllerProvider);
 
     final isSimpleMode = ref.watch(simpleModeProvider);
-    final tabIndex = ref.watch(selectedTabIndexProvider);
     final luminaState = ref.watch(luminaSheetProvider);
+    final shellIndex = widget.navigationShell.currentIndex;
 
+    // Sync selectedTabIndexProvider with shell's current index
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (ref.read(selectedTabIndexProvider) != shellIndex) {
+        ref.read(selectedTabIndexProvider.notifier).state = shellIndex;
+      }
+    });
+
+    // Listen for external tab changes (e.g., from Lumina bottom sheet commands)
+    ref.listen(selectedTabIndexProvider, (previous, next) {
+      if (next != widget.navigationShell.currentIndex) {
+        widget.navigationShell.goBranch(next);
+      }
+    });
+
+    // Reset to Home tab when switching between simple/full mode
     ref.listen(simpleModeProvider, (previous, next) {
       if (previous != next) {
+        widget.navigationShell.goBranch(0);
         ref.read(selectedTabIndexProvider.notifier).state = 0;
       }
     });
 
     return FeatureTourOverlay(
-      child: Scaffold(
-        extendBody: true,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: Stack(children: [
-          Positioned.fill(
-            child: IndexedStack(
-              index: tabIndex,
-              children: isSimpleMode ? _simplePages : _pages,
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          // If on a non-Home branch root, switch to Home instead of exiting
+          if (shellIndex != 0) {
+            _onTap(0);
+          }
+        },
+        child: Scaffold(
+          extendBody: true,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Stack(children: [
+            Positioned.fill(
+              // navigationShell renders the current branch's navigator
+              child: widget.navigationShell,
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: isSimpleMode
-                ? SimpleNavBar(index: tabIndex, onTap: _onTap)
-                : GlassDockNavBar(
-                    index: tabIndex,
-                    onTap: _onTap,
-                    onLuminaTap: _handleLuminaTap,
-                    onLuminaLongPress: _handleLuminaLongPress,
-                    isVoiceListening: luminaState.isOpen &&
-                        luminaState.mode == LuminaSheetMode.listening,
-                    hasActiveSession: luminaState.hasActiveSession,
-                  ),
-          ),
-        ]),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: isSimpleMode
+                  ? SimpleNavBar(
+                      // SimpleMode: map 2-tab indices to branch indices
+                      index: shellIndex == 3 ? 1 : 0,
+                      onTap: (i) => _onTap(i == 0 ? 0 : 3),
+                    )
+                  : GlassDockNavBar(
+                      index: shellIndex,
+                      onTap: _onTap,
+                      onLuminaTap: _handleLuminaTap,
+                      onLuminaLongPress: _handleLuminaLongPress,
+                      isVoiceListening: luminaState.isOpen &&
+                          luminaState.mode == LuminaSheetMode.listening,
+                      hasActiveSession: luminaState.hasActiveSession,
+                    ),
+            ),
+          ]),
+        ),
       ),
     );
   }

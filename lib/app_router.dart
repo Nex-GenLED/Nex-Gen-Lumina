@@ -48,6 +48,9 @@ import 'package:nexgen_command/features/installer/media_access_code_screen.dart'
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+// Dashboard pages for branch wrappers
+import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
+import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
 // Demo experience imports
 import 'package:nexgen_command/features/demo/demo_welcome_screen.dart';
 import 'package:nexgen_command/features/demo/demo_profile_screen.dart';
@@ -59,332 +62,427 @@ import 'package:nexgen_command/route_guards.dart';
 class AppRouter {
   static final _authListenable = AuthStateListenable();
 
+  // Navigator keys for StatefulShellRoute branches
+  static final _rootNavigatorKey = GlobalKey<NavigatorState>();
+  static final _homeNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'home');
+  static final _scheduleNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'schedule');
+  static final _exploreNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'explore');
+  static final _systemNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'system');
+
   static final GoRouter router = GoRouter(
+    navigatorKey: _rootNavigatorKey,
     initialLocation: AppRoutes.login,
-    // Refresh route when auth state changes
     refreshListenable: _authListenable,
-    // Redirect based on authentication state and installation access
     redirect: appRedirect,
     routes: [
+      // ===== AUTH ROUTES (root navigator, no shell) =====
       GoRoute(
         path: AppRoutes.login,
         name: 'login',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: LoginPage()),
       ),
       GoRoute(
         path: AppRoutes.signUp,
         name: 'signup',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: SignUpPage()),
       ),
       GoRoute(
         path: AppRoutes.forgotPassword,
         name: 'forgot-password',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: ForgotPasswordPage()),
       ),
-      // Installation access control routes
+      // ===== INSTALLATION ACCESS CONTROL (root navigator) =====
       GoRoute(
         path: AppRoutes.linkAccount,
         name: 'link-account',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: LinkAccountScreen()),
       ),
       GoRoute(
         path: AppRoutes.joinWithCode,
         name: 'join-with-code',
-        pageBuilder: (context, state) => const MaterialPage(
-          fullscreenDialog: true,
-          child: JoinWithCodeScreen(),
-        ),
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: JoinWithCodeScreen()),
       ),
-      // Demo experience routes
+      // ===== DEMO ROUTES (root navigator) =====
       GoRoute(
         path: AppRoutes.demoWelcome,
         name: 'demo-welcome',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: DemoWelcomeScreen()),
       ),
       GoRoute(
         path: AppRoutes.demoProfile,
         name: 'demo-profile',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoProfileScreen()),
       ),
       GoRoute(
         path: AppRoutes.demoPhoto,
         name: 'demo-photo',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoPhotoScreen()),
       ),
       GoRoute(
         path: AppRoutes.demoRoofline,
         name: 'demo-roofline',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoRooflineScreen()),
       ),
       GoRoute(
         path: AppRoutes.demoComplete,
         name: 'demo-complete',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoCompletionScreen()),
       ),
+      // ===== ONBOARDING (root navigator) =====
       GoRoute(
         path: AppRoutes.discovery,
         name: 'discovery',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: DiscoveryPage()),
       ),
       GoRoute(
         path: AppRoutes.welcome,
         name: 'welcome',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: WelcomeWizardPage()),
       ),
-      GoRoute(
-        path: AppRoutes.dashboard,
-        name: 'dashboard',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MainScaffold()),
-      ),
+      // ===== SETUP / FULLSCREEN MODAL ROUTES (root navigator) =====
       GoRoute(
         path: AppRoutes.controllerSetupWizard,
         name: 'controller-setup-wizard',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => MaterialPage(fullscreenDialog: true, child: const ControllerSetupWizard()),
       ),
       GoRoute(
         path: AppRoutes.wifiConnect,
         name: 'wifi-connect',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => MaterialPage(fullscreenDialog: true, child: const WledManualSetup()),
-      ),
-      GoRoute(
-        path: AppRoutes.patternCategory,
-        name: 'pattern-category',
-        pageBuilder: (context, state) {
-          final id = state.pathParameters['categoryId']!;
-          final extra = state.extra;
-          String? name;
-          if (extra is Map && extra['name'] is String) {
-            name = extra['name'] as String;
-          } else if (extra is PatternCategory) {
-            name = extra.name;
-          }
-          return NoTransitionPage(child: CategoryDetailScreen(categoryId: id, categoryName: name));
-        },
-      ),
-      GoRoute(
-        path: AppRoutes.patternSubCategory,
-        name: 'pattern-subcategory',
-        pageBuilder: (context, state) {
-          final categoryId = state.pathParameters['categoryId']!;
-          final subId = state.pathParameters['subId']!;
-          String? displayName;
-          final extra = state.extra;
-          if (extra is Map && extra['name'] is String) displayName = extra['name'] as String;
-          return NoTransitionPage(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
-        },
-      ),
-      // Library hierarchy routes
-      GoRoute(
-        path: AppRoutes.libraryRoot,
-        name: 'library-root',
-        pageBuilder: (context, state) => const NoTransitionPage(child: LibraryBrowserScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.libraryNode,
-        name: 'library-node',
-        pageBuilder: (context, state) {
-          final nodeId = state.pathParameters['nodeId']!;
-          final extra = state.extra;
-          String? nodeName;
-          Color? parentAccent;
-          List<Color>? parentGradient;
-          if (extra is Map) {
-            if (extra['name'] is String) nodeName = extra['name'] as String;
-            if (extra['accentColor'] is int) {
-              parentAccent = Color(extra['accentColor'] as int);
-            }
-            if (extra['gradient0'] is int && extra['gradient1'] is int) {
-              parentGradient = [
-                Color(extra['gradient0'] as int),
-                Color(extra['gradient1'] as int),
-              ];
-            }
-          } else if (extra is LibraryNode) {
-            nodeName = extra.name;
-          }
-          return NoTransitionPage(child: LibraryBrowserScreen(
-            nodeId: nodeId,
-            nodeName: nodeName,
-            parentAccent: parentAccent,
-            parentGradient: parentGradient,
-          ));
-        },
-      ),
-      GoRoute(
-        path: AppRoutes.settings,
-        name: 'settings',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SettingsPage()),
-      ),
-      GoRoute(
-        path: AppRoutes.settingsSystem,
-        name: 'settings-system',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SystemManagementScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.neighborhoodSync,
-        name: 'neighborhood-sync',
-        pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.controllersSettings,
-        name: 'controllers-settings',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ManageControllersPage()),
-      ),
-      GoRoute(
-        path: AppRoutes.profile,
-        name: 'profile',
-        pageBuilder: (context, state) => const NoTransitionPage(child: UserProfileScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.profileEdit,
-        name: 'profile-edit',
-        pageBuilder: (context, state) => const NoTransitionPage(child: EditProfileScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.security,
-        name: 'security',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SecuritySettingsScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.subUsers,
-        name: 'sub-users',
-        pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
       ),
       GoRoute(
         path: AppRoutes.deviceSetup,
         name: 'device-setup',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: DeviceSetupPage()),
-      ),
-      GoRoute(
-        path: AppRoutes.wledZones,
-        name: 'wled-zones',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ZoneConfigurationPage()),
-      ),
-      GoRoute(
-        path: AppRoutes.hardwareConfig,
-        name: 'hardware-config',
-        pageBuilder: (context, state) => const NoTransitionPage(child: HardwareConfigScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.helpCenter,
-        name: 'help-center',
-        pageBuilder: (context, state) => const NoTransitionPage(child: HelpCenterScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.referrals,
-        name: 'referrals',
-        pageBuilder: (context, state) => const NoTransitionPage(child: ReferralProgramScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.luminaStudio,
-        name: 'lumina-studio',
-        pageBuilder: (context, state) => const NoTransitionPage(child: LuminaStudioScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.geofenceSetup,
-        name: 'geofence-setup',
-        pageBuilder: (context, state) => const NoTransitionPage(child: GeofenceSetupScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.remoteAccess,
-        name: 'remote-access',
-        pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.designStudio,
-        name: 'design-studio',
-        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
       ),
       GoRoute(
         path: AppRoutes.editPattern,
         name: 'edit-pattern',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) {
           final pattern = state.extra as EditablePattern?;
           return MaterialPage(child: EditPatternScreen(initialPattern: pattern));
         },
       ),
       GoRoute(
+        path: AppRoutes.designStudio,
+        name: 'design-studio',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
+      ),
+      GoRoute(
         path: AppRoutes.myDesigns,
         name: 'my-designs',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: MyDesignsScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.myScenes,
-        name: 'my-scenes',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.voiceAssistants,
-        name: 'voice-assistants',
-        pageBuilder: (context, state) => const NoTransitionPage(child: VoiceAssistantGuideScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.myProperties,
-        name: 'my-properties',
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
       ),
       GoRoute(
         path: AppRoutes.rooflineEditor,
         name: 'roofline-editor',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineEditorScreen()),
       ),
       GoRoute(
         path: AppRoutes.segmentSetup,
         name: 'segment-setup',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SegmentSetupScreen()),
       ),
       GoRoute(
         path: AppRoutes.rooflineSetupWizard,
         name: 'roofline-setup-wizard',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
       ),
-      GoRoute(
-        path: AppRoutes.currentColors,
-        name: 'current-colors',
-        pageBuilder: (context, state) => const NoTransitionPage(child: CurrentColorsEditorScreen()),
-      ),
-      // Installer mode routes
+      // ===== INSTALLER / MEDIA / ADMIN (root navigator) =====
       GoRoute(
         path: AppRoutes.installerLanding,
         name: 'installer-landing',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerLandingScreen()),
       ),
       GoRoute(
         path: AppRoutes.installerPin,
         name: 'installer-pin',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
       ),
       GoRoute(
         path: AppRoutes.installerWizard,
         name: 'installer-wizard',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
       ),
-      // Media mode routes
       GoRoute(
         path: AppRoutes.mediaLanding,
         name: 'media-landing',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaLandingScreen()),
       ),
       GoRoute(
         path: AppRoutes.mediaAccessCode,
         name: 'media-access-code',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaAccessCodeScreen()),
       ),
       GoRoute(
         path: AppRoutes.mediaDashboard,
         name: 'media-dashboard',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaDashboardScreen()),
       ),
-      // Admin management routes
       GoRoute(
         path: AppRoutes.adminPin,
         name: 'admin-pin',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminPinScreen()),
       ),
       GoRoute(
         path: AppRoutes.adminDashboard,
         name: 'admin-dashboard',
+        parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
+      ),
+
+      // ===== STATEFUL SHELL ROUTE (persistent bottom nav) =====
+      StatefulShellRoute.indexedStack(
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state, navigationShell) {
+          return MainScaffold(navigationShell: navigationShell);
+        },
+        branches: [
+          // ── Branch 0: HOME ──
+          StatefulShellBranch(
+            navigatorKey: _homeNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.dashboard,
+                name: 'dashboard',
+                pageBuilder: (context, state) => const NoTransitionPage(child: WledDashboardPage()),
+              ),
+            ],
+          ),
+          // ── Branch 1: SCHEDULE ──
+          StatefulShellBranch(
+            navigatorKey: _scheduleNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.schedule,
+                name: 'schedule',
+                pageBuilder: (context, state) => const NoTransitionPage(child: MySchedulePage()),
+              ),
+            ],
+          ),
+          // ── Branch 2: EXPLORE ──
+          StatefulShellBranch(
+            navigatorKey: _exploreNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.explore,
+                name: 'explore',
+                pageBuilder: (context, state) => const NoTransitionPage(child: ExplorePatternsScreen()),
+                routes: [
+                  // /explore/:categoryId
+                  GoRoute(
+                    path: ':categoryId',
+                    name: 'pattern-category',
+                    pageBuilder: (context, state) {
+                      final id = state.pathParameters['categoryId']!;
+                      final extra = state.extra;
+                      String? name;
+                      if (extra is Map && extra['name'] is String) {
+                        name = extra['name'] as String;
+                      } else if (extra is PatternCategory) {
+                        name = extra.name;
+                      }
+                      return NoTransitionPage(child: CategoryDetailScreen(categoryId: id, categoryName: name));
+                    },
+                    routes: [
+                      // /explore/:categoryId/sub/:subId
+                      GoRoute(
+                        path: 'sub/:subId',
+                        name: 'pattern-subcategory',
+                        pageBuilder: (context, state) {
+                          final categoryId = state.pathParameters['categoryId']!;
+                          final subId = state.pathParameters['subId']!;
+                          String? displayName;
+                          final extra = state.extra;
+                          if (extra is Map && extra['name'] is String) displayName = extra['name'] as String;
+                          return NoTransitionPage(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              // /library (separate root in Explore branch)
+              GoRoute(
+                path: AppRoutes.libraryRoot,
+                name: 'library-root',
+                pageBuilder: (context, state) => const NoTransitionPage(child: LibraryBrowserScreen()),
+              ),
+              // /library/:nodeId
+              GoRoute(
+                path: AppRoutes.libraryNode,
+                name: 'library-node',
+                pageBuilder: (context, state) {
+                  final nodeId = state.pathParameters['nodeId']!;
+                  final extra = state.extra;
+                  String? nodeName;
+                  Color? parentAccent;
+                  List<Color>? parentGradient;
+                  if (extra is Map) {
+                    if (extra['name'] is String) nodeName = extra['name'] as String;
+                    if (extra['accentColor'] is int) {
+                      parentAccent = Color(extra['accentColor'] as int);
+                    }
+                    if (extra['gradient0'] is int && extra['gradient1'] is int) {
+                      parentGradient = [
+                        Color(extra['gradient0'] as int),
+                        Color(extra['gradient1'] as int),
+                      ];
+                    }
+                  } else if (extra is LibraryNode) {
+                    nodeName = extra.name;
+                  }
+                  return NoTransitionPage(child: LibraryBrowserScreen(
+                    nodeId: nodeId,
+                    nodeName: nodeName,
+                    parentAccent: parentAccent,
+                    parentGradient: parentGradient,
+                  ));
+                },
+              ),
+              // /my-scenes (in Explore branch — only accessed from Explore screens)
+              GoRoute(
+                path: AppRoutes.myScenes,
+                name: 'my-scenes',
+                pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
+              ),
+            ],
+          ),
+          // ── Branch 3: SYSTEM ──
+          StatefulShellBranch(
+            navigatorKey: _systemNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.settings,
+                name: 'settings',
+                pageBuilder: (context, state) => const NoTransitionPage(child: SettingsPage()),
+                routes: [
+                  GoRoute(
+                    path: 'system',
+                    name: 'settings-system',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: SystemManagementScreen()),
+                  ),
+                  GoRoute(
+                    path: 'controllers',
+                    name: 'controllers-settings',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: ManageControllersPage()),
+                  ),
+                  GoRoute(
+                    path: 'profile',
+                    name: 'profile',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: UserProfileScreen()),
+                    routes: [
+                      GoRoute(
+                        path: 'edit',
+                        name: 'profile-edit',
+                        pageBuilder: (context, state) => const NoTransitionPage(child: EditProfileScreen()),
+                      ),
+                    ],
+                  ),
+                  GoRoute(
+                    path: 'security',
+                    name: 'security',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: SecuritySettingsScreen()),
+                  ),
+                  GoRoute(
+                    path: 'hardware',
+                    name: 'hardware-config',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: HardwareConfigScreen()),
+                  ),
+                  GoRoute(
+                    path: 'help',
+                    name: 'help-center',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: HelpCenterScreen()),
+                  ),
+                  GoRoute(
+                    path: 'referrals',
+                    name: 'referrals',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: ReferralProgramScreen()),
+                  ),
+                  GoRoute(
+                    path: 'studio',
+                    name: 'lumina-studio',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: LuminaStudioScreen()),
+                  ),
+                  GoRoute(
+                    path: 'geofence',
+                    name: 'geofence-setup',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: GeofenceSetupScreen()),
+                  ),
+                  GoRoute(
+                    path: 'remote-access',
+                    name: 'remote-access',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
+                  ),
+                  GoRoute(
+                    path: 'voice-assistants',
+                    name: 'voice-assistants',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: VoiceAssistantGuideScreen()),
+                  ),
+                  GoRoute(
+                    path: 'properties',
+                    name: 'my-properties',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
+                  ),
+                  GoRoute(
+                    path: 'neighborhood-sync',
+                    name: 'neighborhood-sync',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
+                  ),
+                  GoRoute(
+                    path: 'current-colors',
+                    name: 'current-colors',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: CurrentColorsEditorScreen()),
+                  ),
+                  GoRoute(
+                    path: 'users',
+                    name: 'sub-users',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
+                  ),
+                  GoRoute(
+                    path: 'roofline-editor',
+                    name: 'roofline-editor-settings',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: RooflineEditorScreen()),
+                  ),
+                ],
+              ),
+              // /wled/zones (in System branch)
+              GoRoute(
+                path: AppRoutes.wledZones,
+                name: 'wled-zones',
+                pageBuilder: (context, state) => const NoTransitionPage(child: ZoneConfigurationPage()),
+              ),
+            ],
+          ),
+        ],
       ),
     ],
   );
@@ -399,6 +497,8 @@ class AppRoutes {
   static const String discovery = '/discovery';
   static const String welcome = '/welcome';
   static const String dashboard = '/dashboard';
+  static const String schedule = '/schedule';
+  static const String explore = '/explore';
   static const String settings = '/settings';
   static const String settingsSystem = '/settings/system';
   static const String controllersSettings = '/settings/controllers';

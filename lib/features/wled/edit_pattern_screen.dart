@@ -7,6 +7,8 @@ import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/theme.dart';
@@ -14,6 +16,7 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 
 /// Full-screen Edit Pattern screen modeled after the native controller app.
 ///
@@ -81,7 +84,9 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     if (repo == null) return;
 
     final totalPixels = await repo.getTotalLedCount() ?? 150;
-    final payload = _pattern.toWledPayload(totalPixels);
+    var payload = _pattern.toWledPayload(totalPixels);
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
     await repo.applyJson(payload);
   }
 
@@ -156,6 +161,11 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Channel/Area selector for multi-segment devices
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: ChannelSelectorBar(),
+            ),
             // Pattern name
             _buildPatternNameField(),
             // Roofline preview

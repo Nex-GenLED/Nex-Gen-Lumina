@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,22 +8,77 @@ import 'package:nexgen_command/theme.dart';
 /// Key for tracking tour completion
 const String kFeatureTourCompletedKey = 'feature_tour_completed_v1';
 
-/// Check if user has completed the feature tour
+/// Check if user has completed the feature tour.
+/// Checks Firestore first (for cross-device sync), falls back to SharedPreferences.
 Future<bool> isFeatureTourCompleted() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getBool(kFeatureTourCompletedKey) ?? false;
+  try {
+    // First, check Firestore if user is logged in
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (doc.exists) {
+        final tourCompleted = doc.data()?['feature_tour_completed'] as bool?;
+        if (tourCompleted == true) {
+          // Also update local storage for offline access
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(kFeatureTourCompletedKey, true);
+          return true;
+        }
+      }
+    }
+
+    // Fall back to local SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(kFeatureTourCompletedKey) ?? false;
+  } catch (e) {
+    debugPrint('Feature tour completed check error: $e');
+    // Fall back to local storage on error
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(kFeatureTourCompletedKey) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
-/// Mark the feature tour as completed
+/// Mark the feature tour as completed in both Firestore and locally.
 Future<void> markFeatureTourCompleted() async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setBool(kFeatureTourCompletedKey, true);
+  try {
+    // Mark locally first
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kFeatureTourCompletedKey, true);
+
+    // Then update Firestore if user is logged in
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'feature_tour_completed': true,
+        'updated_at': Timestamp.now(),
+      });
+      debugPrint('Feature tour marked complete in Firestore');
+    }
+  } catch (e) {
+    debugPrint('Mark feature tour completed error: $e');
+  }
 }
 
 /// Reset tour for testing or re-viewing
 Future<void> resetFeatureTour() async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.remove(kFeatureTourCompletedKey);
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kFeatureTourCompletedKey);
+    debugPrint('Feature tour reset locally');
+  } catch (e) {
+    debugPrint('Reset feature tour error: $e');
+  }
 }
 
 /// Represents a single step in the feature tour
@@ -468,11 +525,11 @@ List<TourStep> getDefaultTourSteps() {
       tooltipAlignment: Alignment.center,
     ),
 
-    // Zone Control
+    // Lighting Areas
     const TourStep(
       id: 'zone_control',
-      title: 'Zone Control',
-      description: 'Fine-tune individual lighting zones around your home. '
+      title: 'Lighting Areas',
+      description: 'Fine-tune individual lighting areas around your home. '
           'Adjust colors, effects, speed, and intensity for each area independently.',
       icon: Icons.tune,
       tooltipAlignment: Alignment.center,

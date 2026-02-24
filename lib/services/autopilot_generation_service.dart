@@ -8,6 +8,7 @@ import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/calendar_event_service.dart';
 import 'package:nexgen_command/services/hoa_compliance_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:uuid/uuid.dart';
 
 /// Service responsible for generating autopilot schedule suggestions.
@@ -401,7 +402,7 @@ class AutopilotGenerationService {
       // Convert to RGBW format (W=0 for saturated colors)
       final colors = event.suggestedColors!
           .take(3)
-          .map((c) => [c.red, c.green, c.blue, 0])
+          .map((c) => rgbToRgbw(c.red, c.green, c.blue))
           .toList();
 
       return {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 
 /// The final composed pattern ready to be applied to WLED devices.
 ///
@@ -89,7 +90,7 @@ class ComposedPattern {
     required int totalPixels,
     int brightness = 200,
   }) {
-    final colorList = [color.red, color.green, color.blue, 0];
+    final colorList = rgbToRgbw(color.red, color.green, color.blue);
     return ComposedPattern(
       name: name,
       colorGroups: [

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
 ///
 /// If [channelIds] is empty, or the payload has no `seg` key, the payload is
@@ -25,6 +27,7 @@ Map<String, dynamic> applyChannelFilter(
 
   final result = Map<String, dynamic>.from(payload);
   result['seg'] = expandedSegs;
+  debugPrint('🎯 applyChannelFilter: targeting segments $channelIds (${expandedSegs.length} segs)');
   return result;
 }
 

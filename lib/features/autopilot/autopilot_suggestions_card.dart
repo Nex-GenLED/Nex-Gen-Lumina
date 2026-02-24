@@ -8,11 +8,20 @@ import 'package:nexgen_command/theme.dart';
 ///
 /// Shows when `autonomyLevel == 1` (Suggest mode) and there are
 /// pending suggestions that need user approval.
-class AutopilotSuggestionsCard extends ConsumerWidget {
+class AutopilotSuggestionsCard extends ConsumerStatefulWidget {
   const AutopilotSuggestionsCard({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AutopilotSuggestionsCard> createState() =>
+      _AutopilotSuggestionsCardState();
+}
+
+class _AutopilotSuggestionsCardState
+    extends ConsumerState<AutopilotSuggestionsCard> {
+  bool _showAll = false;
+
+  @override
+  Widget build(BuildContext context) {
     final suggestions = ref.watch(autopilotSuggestionsProvider);
     final pendingSuggestions =
         suggestions.where((s) => s.status == SuggestionStatus.pending).toList();
@@ -20,6 +29,9 @@ class AutopilotSuggestionsCard extends ConsumerWidget {
     if (pendingSuggestions.isEmpty) {
       return const SizedBox.shrink();
     }
+
+    final displayCount =
+        _showAll ? pendingSuggestions.length : pendingSuggestions.length.clamp(0, 3);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -64,7 +76,7 @@ class AutopilotSuggestionsCard extends ConsumerWidget {
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: pendingSuggestions.length.clamp(0, 3),
+            itemCount: displayCount,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final suggestion = pendingSuggestions[index];
@@ -98,10 +110,12 @@ class AutopilotSuggestionsCard extends ConsumerWidget {
               child: Center(
                 child: TextButton(
                   onPressed: () {
-                    // Navigate to full suggestions view
+                    setState(() => _showAll = !_showAll);
                   },
                   child: Text(
-                    'View all ${pendingSuggestions.length} suggestions',
+                    _showAll
+                        ? 'Show fewer'
+                        : 'View all ${pendingSuggestions.length} suggestions',
                     style: const TextStyle(color: NexGenPalette.cyan),
                   ),
                 ),

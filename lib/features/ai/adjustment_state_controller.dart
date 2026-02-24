@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 
 // ---------------------------------------------------------------------------
 // State model
@@ -209,14 +210,13 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
   Map<String, dynamic> _buildPayload(LuminaLightingSuggestion s) {
     final bri = (s.brightness * 255).round().clamp(0, 255);
 
-    final cols = s.colors.take(3).map((c) => [
+    final cols = s.colors.take(3).map((c) => rgbToRgbw(
           (c.r * 255).round(),
           (c.g * 255).round(),
           (c.b * 255).round(),
-          0,
-        ]).toList();
+        )).toList();
     if (cols.isEmpty) {
-      cols.add([255, 255, 255, 0]);
+      cols.add(rgbToRgbw(255, 255, 255));
     }
 
     final rawSpeed = s.speed != null ? (s.speed! * 255).round() : 128;

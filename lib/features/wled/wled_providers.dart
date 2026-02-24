@@ -514,8 +514,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       final effectiveChannels = ref.read(effectiveChannelIdsProvider);
 
       bool ok;
-      if (channelFilter == null || effectiveChannels.isEmpty) {
-        // --- All-Channels mode (default): existing behaviour, zero regression ---
+      if (effectiveChannels.isEmpty) {
+        // No segment info available yet — fall back to legacy single-segment.
         ok = await service.setState(
           on: on,
           brightness: brightness,
@@ -525,13 +525,13 @@ class WledNotifier extends Notifier<WledStateModel> {
           forceRgbwZeroWhite: forceRgbwZeroWhite,
         );
       } else {
-        // --- Channel-filter active: build a multi-segment payload manually ---
+        // Target ALL effective channels (all segments, or filtered subset).
         final Map<String, dynamic> payload = {};
         // Device-level properties always apply globally.
         if (on != null) payload['on'] = on;
         if (brightness != null) payload['bri'] = brightness.clamp(0, 255);
 
-        // Segment-specific properties go only to selected channels.
+        // Segment-specific properties go to each effective channel.
         final Map<String, dynamic> segTemplate = {};
         if (speed != null) segTemplate['sx'] = speed.clamp(0, 255);
         if (color != null || white != null) {

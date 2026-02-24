@@ -142,6 +142,9 @@ class UserModel {
   /// Whether the user has completed the welcome wizard/tutorial
   final bool welcomeCompleted;
 
+  /// Whether the user has completed the interactive feature tour
+  final bool featureTourCompleted;
+
   // AR Preview configuration
   /// Serialized roofline mask data for AR preview overlay
   final Map<String, dynamic>? rooflineMask;
@@ -230,6 +233,7 @@ class UserModel {
     this.mqttRelayEnabled = false,
     String? luminaBackendUrl,
     this.welcomeCompleted = false,
+    this.featureTourCompleted = false,
     this.rooflineMask,
     this.useStockHouseImage = false,
     this.housePhotoUrl,
@@ -323,6 +327,7 @@ class UserModel {
       mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
       luminaBackendUrl: json['lumina_backend_url'] as String?,
       welcomeCompleted: (json['welcome_completed'] as bool?) ?? false,
+      featureTourCompleted: (json['feature_tour_completed'] as bool?) ?? false,
       rooflineMask: json['roofline_mask'] as Map<String, dynamic>?,
       useStockHouseImage: (json['use_stock_house_image'] as bool?) ?? false,
       housePhotoUrl: json['house_photo_url'] as String?,
@@ -420,6 +425,7 @@ class UserModel {
       'mqtt_relay_enabled': mqttRelayEnabled,
       'lumina_backend_url': luminaBackendUrl,
       'welcome_completed': welcomeCompleted,
+      'feature_tour_completed': featureTourCompleted,
       'roofline_mask': rooflineMask,
       'use_stock_house_image': useStockHouseImage,
       'house_photo_url': housePhotoUrl,
@@ -481,6 +487,7 @@ class UserModel {
     bool? mqttRelayEnabled,
     String? luminaBackendUrl,
     bool? welcomeCompleted,
+    bool? featureTourCompleted,
     Map<String, dynamic>? rooflineMask,
     bool? useStockHouseImage,
     String? housePhotoUrl,
@@ -539,6 +546,7 @@ class UserModel {
       mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
       luminaBackendUrl: luminaBackendUrl ?? this.luminaBackendUrl,
       welcomeCompleted: welcomeCompleted ?? this.welcomeCompleted,
+      featureTourCompleted: featureTourCompleted ?? this.featureTourCompleted,
       rooflineMask: rooflineMask ?? this.rooflineMask,
       useStockHouseImage: useStockHouseImage ?? this.useStockHouseImage,
       housePhotoUrl: housePhotoUrl ?? this.housePhotoUrl,

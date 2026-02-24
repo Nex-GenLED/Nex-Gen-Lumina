@@ -327,12 +327,17 @@ class GradientPattern {
     final cols = colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList();
     if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255, forceZeroWhite: true));
 
+    // When effect 0 (Solid) is used with multiple colors, substitute effect 83
+    // (Solid Pattern) which distributes colors in repeating blocks. Solid only
+    // shows the first color, losing the rest of the palette.
+    final fx = (effectId == 0 && colors.length > 1) ? 83 : effectId;
+
     return {
       'on': true,
       'bri': brightness,
       'seg': [
         {
-          'fx': effectId,
+          'fx': fx,
           'sx': speed,
           'ix': intensity,
           'pal': 5, // "Colors Only" - prevents rainbow palette blending
