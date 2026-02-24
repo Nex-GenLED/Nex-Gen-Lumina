@@ -448,8 +448,8 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push(
-            '/library/${category.id}',
+          context.go(
+            '/explore/library/${category.id}',
             extra: {'name': category.name},
           );
         },
@@ -1145,7 +1145,7 @@ class _PinnedCategoryRow extends ConsumerWidget {
                 TextButton(
                   onPressed: () {
                     // Navigate to category detail
-                    context.push(
+                    context.go(
                       AppRoutes.patternCategory.replaceFirst(':categoryId', pinnedData.category.id),
                       extra: pinnedData.category,
                     );
@@ -1297,7 +1297,7 @@ class _SubCategoryChip extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         // Navigate to theme selection for this sub-category
-        context.push(
+        context.go(
           AppRoutes.patternSubCategory
               .replaceFirst(':categoryId', categoryId)
               .replaceFirst(':subId', subCategory.id),

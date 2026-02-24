@@ -285,7 +285,7 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.hardwareConfig),
+                onPressed: () => context.go(AppRoutes.hardwareConfig),
                 icon: const Icon(Icons.settings, color: Colors.black),
                 label: const Text('Open Hardware Config'),
               ),
@@ -909,7 +909,7 @@ class _RemoteAccessTab extends ConsumerWidget {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: () => context.push(AppRoutes.remoteAccess),
+                    onPressed: () => context.go(AppRoutes.remoteAccess),
                     icon: const Icon(Icons.settings, color: Colors.black),
                     label: const Text('Configure Remote Access'),
                   ),
@@ -1254,7 +1254,7 @@ class _ModeTab extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.neighborhoodSync),
+                onPressed: () => context.go(AppRoutes.neighborhoodSync),
                 icon: const Icon(Icons.sync, color: Colors.black),
                 label: const Text('Open Neighborhood Sync'),
               ),

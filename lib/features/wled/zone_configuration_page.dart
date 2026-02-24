@@ -178,7 +178,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
             title: const Text('Hardware Configuration'),
             subtitle: const Text('Configure LED counts per area'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/settings/hardware'),
+            onTap: () => context.go('/settings/hardware'),
           ),
         ],
       ),

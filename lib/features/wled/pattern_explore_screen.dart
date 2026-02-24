@@ -163,7 +163,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
         title: const Text('Explore Patterns'),
         actions: [
           IconButton(
-            onPressed: () => context.push('/my-scenes'),
+            onPressed: () => context.go('/explore/scenes'),
             icon: const Icon(Icons.layers_outlined),
             tooltip: 'My Scenes',
           ),
@@ -570,7 +570,7 @@ class _LibrarySearchResultsView extends ConsumerWidget {
           const SizedBox(height: 12),
           ...results.palettes.map((palette) => _LibraryPaletteResultCard(
             node: palette,
-            onTap: () => context.push('/library/${palette.id}'),
+            onTap: () => context.go('/explore/library/${palette.id}'),
           )),
           const SizedBox(height: 20),
         ],
@@ -587,7 +587,7 @@ class _LibrarySearchResultsView extends ConsumerWidget {
           const SizedBox(height: 12),
           ...results.folders.map((folder) => _LibraryFolderResultCard(
             node: folder,
-            onTap: () => context.push('/library/${folder.id}'),
+            onTap: () => context.go('/explore/library/${folder.id}'),
           )),
           const SizedBox(height: 20),
         ],

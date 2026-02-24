@@ -16,7 +16,7 @@ class ZonesCard extends StatelessWidget {
           Icon(Icons.view_week_rounded, color: NexGenPalette.cyan),
           const SizedBox(width: 12),
           Expanded(child: Text('Zones & Segments', style: Theme.of(context).textTheme.titleMedium)),
-          FilledButton.icon(onPressed: () => context.push(AppRoutes.wledZones), icon: const Icon(Icons.tune), label: const Text('Configure'))
+          FilledButton.icon(onPressed: () => context.go(AppRoutes.wledZones), icon: const Icon(Icons.tune), label: const Text('Configure'))
         ]),
       ),
     );

@@ -11,6 +11,7 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets (small utilities shared with pattern_library_pages)
@@ -433,7 +434,7 @@ class _LibraryAppBar extends StatelessWidget {
         children: [
           if (nodeId != null)
             GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
+              onTap: () => context.pop(),
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -489,8 +490,8 @@ class _LibraryBreadcrumb extends StatelessWidget {
           // Home/Library root
           GestureDetector(
             onTap: () {
-              // Pop all the way back to library root
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              // Navigate back to Explore root
+              context.go('/explore');
             },
             child: Row(
               children: [

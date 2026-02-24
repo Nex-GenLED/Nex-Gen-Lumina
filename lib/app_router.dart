@@ -289,6 +289,10 @@ class AppRouter {
             ],
           ),
           // ── Branch 2: EXPLORE ──
+          // All sub-routes nested under /explore so context.go() keeps the
+          // shell visible and back-navigation (pop) works naturally.
+          // Literal child paths (library, scenes) MUST come before :categoryId
+          // to prevent the wildcard from matching "library" or "scenes".
           StatefulShellBranch(
             navigatorKey: _exploreNavigatorKey,
             routes: [
@@ -297,7 +301,45 @@ class AppRouter {
                 name: 'explore',
                 pageBuilder: (context, state) => const NoTransitionPage(child: ExplorePatternsScreen()),
                 routes: [
-                  // /explore/:categoryId
+                  // /explore/library/:nodeId — library node browser
+                  GoRoute(
+                    path: 'library/:nodeId',
+                    name: 'library-node',
+                    pageBuilder: (context, state) {
+                      final nodeId = state.pathParameters['nodeId']!;
+                      final extra = state.extra;
+                      String? nodeName;
+                      Color? parentAccent;
+                      List<Color>? parentGradient;
+                      if (extra is Map) {
+                        if (extra['name'] is String) nodeName = extra['name'] as String;
+                        if (extra['accentColor'] is int) {
+                          parentAccent = Color(extra['accentColor'] as int);
+                        }
+                        if (extra['gradient0'] is int && extra['gradient1'] is int) {
+                          parentGradient = [
+                            Color(extra['gradient0'] as int),
+                            Color(extra['gradient1'] as int),
+                          ];
+                        }
+                      } else if (extra is LibraryNode) {
+                        nodeName = extra.name;
+                      }
+                      return NoTransitionPage(child: LibraryBrowserScreen(
+                        nodeId: nodeId,
+                        nodeName: nodeName,
+                        parentAccent: parentAccent,
+                        parentGradient: parentGradient,
+                      ));
+                    },
+                  ),
+                  // /explore/scenes — saved scenes list
+                  GoRoute(
+                    path: 'scenes',
+                    name: 'my-scenes',
+                    pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
+                  ),
+                  // /explore/:categoryId — pattern category detail (wildcard LAST)
                   GoRoute(
                     path: ':categoryId',
                     name: 'pattern-category',
@@ -329,50 +371,6 @@ class AppRouter {
                     ],
                   ),
                 ],
-              ),
-              // /library (separate root in Explore branch)
-              GoRoute(
-                path: AppRoutes.libraryRoot,
-                name: 'library-root',
-                pageBuilder: (context, state) => const NoTransitionPage(child: LibraryBrowserScreen()),
-              ),
-              // /library/:nodeId
-              GoRoute(
-                path: AppRoutes.libraryNode,
-                name: 'library-node',
-                pageBuilder: (context, state) {
-                  final nodeId = state.pathParameters['nodeId']!;
-                  final extra = state.extra;
-                  String? nodeName;
-                  Color? parentAccent;
-                  List<Color>? parentGradient;
-                  if (extra is Map) {
-                    if (extra['name'] is String) nodeName = extra['name'] as String;
-                    if (extra['accentColor'] is int) {
-                      parentAccent = Color(extra['accentColor'] as int);
-                    }
-                    if (extra['gradient0'] is int && extra['gradient1'] is int) {
-                      parentGradient = [
-                        Color(extra['gradient0'] as int),
-                        Color(extra['gradient1'] as int),
-                      ];
-                    }
-                  } else if (extra is LibraryNode) {
-                    nodeName = extra.name;
-                  }
-                  return NoTransitionPage(child: LibraryBrowserScreen(
-                    nodeId: nodeId,
-                    nodeName: nodeName,
-                    parentAccent: parentAccent,
-                    parentGradient: parentGradient,
-                  ));
-                },
-              ),
-              // /my-scenes (in Explore branch — only accessed from Explore screens)
-              GoRoute(
-                path: AppRoutes.myScenes,
-                name: 'my-scenes',
-                pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
               ),
             ],
           ),
@@ -520,7 +518,7 @@ class AppRoutes {
   static const String designStudio = '/design-studio';
   static const String editPattern = '/edit-pattern';
   static const String myDesigns = '/my-designs';
-  static const String myScenes = '/my-scenes';
+  static const String myScenes = '/explore/scenes';
   static const String voiceAssistants = '/settings/voice-assistants';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
@@ -540,9 +538,8 @@ class AppRoutes {
   static const String adminDashboard = '/admin/dashboard';
   // Neighborhood sync
   static const String neighborhoodSync = '/settings/neighborhood-sync';
-  // Library hierarchy routes
-  static const String libraryRoot = '/library';
-  static const String libraryNode = '/library/:nodeId';
+  // Library hierarchy routes (nested under /explore for persistent nav bar)
+  static const String libraryNode = '/explore/library/:nodeId';
   // Installation access control routes
   static const String linkAccount = '/link-account';
   static const String joinWithCode = '/join-with-code';

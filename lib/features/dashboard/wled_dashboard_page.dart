@@ -356,7 +356,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     child: GlassActionButton(
                       icon: Icons.groups_outlined,
                       label: 'Neighborhood Sync',
-                      onTap: () => context.push(AppRoutes.neighborhoodSync),
+                      onTap: () => context.go(AppRoutes.neighborhoodSync),
                     ),
                   ),
                 ],
@@ -628,7 +628,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () => context.push(AppRoutes.profileEdit),
+            onTap: () => context.go(AppRoutes.profileEdit),
             borderRadius: BorderRadius.circular(10),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

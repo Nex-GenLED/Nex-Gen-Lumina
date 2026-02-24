@@ -351,7 +351,18 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     if (tabIndex != null) {
       ref.read(selectedTabIndexProvider.notifier).state = tabIndex;
     } else if (route != null && mounted) {
-      context.push(route);
+      // Use go() for within-shell routes so nav bar stays visible;
+      // use push() for fullscreen/modal routes (outside shell).
+      final isShellRoute = route.startsWith('/explore') ||
+          route.startsWith('/settings') ||
+          route.startsWith('/schedule') ||
+          route.startsWith('/wled/') ||
+          route == '/dashboard';
+      if (isShellRoute) {
+        context.go(route);
+      } else {
+        context.push(route);
+      }
     }
 
     ref.read(luminaSheetProvider.notifier).addAssistantMessage(
