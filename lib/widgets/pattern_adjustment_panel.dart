@@ -240,7 +240,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
         ]
       };
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
     } catch (e) {
       debugPrint('PatternAdjustmentPanel effect apply failed: $e');
@@ -263,7 +263,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           ]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel apply failed: $e');
@@ -286,7 +286,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           ]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel layout apply failed: $e');
@@ -516,7 +516,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                         ]
                       };
                       final channels = ref.read(effectiveChannelIdsProvider);
-                      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+                      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
                       await repo.applyJson(payload);
                     } catch (e) {
                       debugPrint('Apply custom palette failed: $e');

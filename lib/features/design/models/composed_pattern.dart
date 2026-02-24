@@ -90,7 +90,7 @@ class ComposedPattern {
     required int totalPixels,
     int brightness = 200,
   }) {
-    final colorList = rgbToRgbw(color.red, color.green, color.blue);
+    final colorList = rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true);
     return ComposedPattern(
       name: name,
       colorGroups: [

@@ -524,7 +524,7 @@ extension DualTeamPatternPayload on LibraryNode {
             'fx': 0, // Solid
             'col': team1Colors.take(3).map((c) {
               final color = Color(c);
-              return rgbToRgbw(color.red, color.green, color.blue);
+              return rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true);
             }).toList(),
           },
           {
@@ -534,7 +534,7 @@ extension DualTeamPatternPayload on LibraryNode {
             'fx': 0, // Solid
             'col': team2Colors.take(3).map((c) {
               final color = Color(c);
-              return rgbToRgbw(color.red, color.green, color.blue);
+              return rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true);
             }).toList(),
           },
         ],
@@ -555,7 +555,7 @@ extension DualTeamPatternPayload on LibraryNode {
           'sx': defaultSpeed,
           'ix': defaultIntensity,
           'pal': 5, // "Colors Only" - use segment colors only
-          'col': colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue)).toList(),
+          'col': colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList(),
         },
       ],
     };

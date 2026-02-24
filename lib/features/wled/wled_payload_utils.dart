@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 /// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
 ///
@@ -6,12 +7,16 @@ import 'package:flutter/foundation.dart';
 /// returned unchanged (safe fallback). Otherwise the first segment object is
 /// used as a template and replicated once per channel ID.
 ///
+/// When [channels] is provided, each segment entry gets `start`/`stop` values
+/// from the corresponding hardware bus, so WLED targets the correct LED range.
+///
 /// This is a pure function with no side effects — safe to call from any
 /// provider or widget.
 Map<String, dynamic> applyChannelFilter(
   Map<String, dynamic> payload,
-  List<int> channelIds,
-) {
+  List<int> channelIds, [
+  List<DeviceChannel> channels = const [],
+]) {
   if (channelIds.isEmpty) return payload;
 
   final seg = payload['seg'];
@@ -20,14 +25,25 @@ Map<String, dynamic> applyChannelFilter(
   // Use the first segment entry as a template.
   final template = Map<String, dynamic>.from(seg.first as Map);
   template.remove('id'); // strip hardcoded ID so each copy gets its own
+  template.remove('start');
+  template.remove('stop');
 
   final expandedSegs = channelIds.map((id) {
-    return <String, dynamic>{'id': id, ...template};
+    final s = <String, dynamic>{'id': id, ...template};
+    // Look up bus range — set start/stop so WLED targets the correct LEDs
+    for (final ch in channels) {
+      if (ch.id == id) {
+        s['start'] = ch.start;
+        s['stop'] = ch.stop;
+        break;
+      }
+    }
+    return s;
   }).toList();
 
   final result = Map<String, dynamic>.from(payload);
   result['seg'] = expandedSegs;
-  debugPrint('🎯 applyChannelFilter: targeting segments $channelIds (${expandedSegs.length} segs)');
+  debugPrint('🎯 applyChannelFilter: targeting channels $channelIds (${expandedSegs.length} segs)');
   return result;
 }
 

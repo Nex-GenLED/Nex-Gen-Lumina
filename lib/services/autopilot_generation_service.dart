@@ -402,7 +402,7 @@ class AutopilotGenerationService {
       // Convert to RGBW format (W=0 for saturated colors)
       final colors = event.suggestedColors!
           .take(3)
-          .map((c) => rgbToRgbw(c.red, c.green, c.blue))
+          .map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true))
           .toList();
 
       return {

@@ -970,7 +970,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 // Apply channel filter so only selected channels receive the pattern
                 final channels = ref.read(effectiveChannelIdsProvider);
                 if (channels.isNotEmpty) {
-                  payload = applyChannelFilter(payload, channels);
+                  payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
                 }
                 final success = await repo.applyJson(payload);
 
@@ -1050,7 +1050,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               // Apply channel filter so only selected channels receive the pattern
               final channels = ref.read(effectiveChannelIdsProvider);
               if (channels.isNotEmpty) {
-                payload = applyChannelFilter(payload, channels);
+                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
               }
               final success = await repo.applyJson(payload);
 

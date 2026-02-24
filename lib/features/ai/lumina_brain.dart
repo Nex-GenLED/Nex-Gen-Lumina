@@ -436,11 +436,11 @@ class LuminaBrain {
     final colorsArray = holiday.colors.map((c) {
       return {
         'name': c.name,
-        'rgb': rgbToRgbw(c.r, c.g, c.b),
+        'rgb': rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true),
       };
     }).toList();
 
-    final segCol = holiday.colors.map((c) => rgbToRgbw(c.r, c.g, c.b)).toList();
+    final segCol = holiday.colors.map((c) => rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true)).toList();
 
     final wledPayload = {
       'on': true,
@@ -450,7 +450,7 @@ class LuminaBrain {
           'id': 0,
           'on': true,
           'bri': 255,
-          'col': segCol.isEmpty ? [rgbToRgbw(255, 255, 255)] : segCol,
+          'col': segCol.isEmpty ? [rgbToRgbw(255, 255, 255, forceZeroWhite: true)] : segCol,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,

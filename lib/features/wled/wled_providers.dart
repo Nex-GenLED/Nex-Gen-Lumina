@@ -546,8 +546,17 @@ class WledNotifier extends Notifier<WledStateModel> {
         }
 
         if (segTemplate.isNotEmpty) {
+          final deviceCh = ref.read(deviceChannelsProvider);
           payload['seg'] = effectiveChannels.map((id) {
-            return <String, dynamic>{'id': id, ...segTemplate};
+            final s = <String, dynamic>{'id': id, ...segTemplate};
+            for (final ch in deviceCh) {
+              if (ch.id == id) {
+                s['start'] = ch.start;
+                s['stop'] = ch.stop;
+                break;
+              }
+            }
+            return s;
           }).toList();
         }
 

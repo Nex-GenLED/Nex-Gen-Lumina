@@ -85,7 +85,7 @@ class _ColorwayEffectSelectorPageState
       // Build WLED payload
       final cols = _paletteColors
           .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
           .toList();
       if (cols.isEmpty) {
         cols.add(rgbToRgbw(255, 255, 255));
@@ -108,7 +108,7 @@ class _ColorwayEffectSelectorPageState
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
 
       await repo.applyJson(payload);
     });
@@ -130,7 +130,7 @@ class _ColorwayEffectSelectorPageState
     if (repo != null) {
       final cols = _paletteColors
           .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round()))
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
           .toList();
       if (cols.isEmpty) {
         cols.add(rgbToRgbw(255, 255, 255));
@@ -155,7 +155,7 @@ class _ColorwayEffectSelectorPageState
       final channels = ref.read(effectiveChannelIdsProvider);
       debugPrint('🎯 Apply pattern: effectiveChannels=$channels');
       if (channels.isNotEmpty) {
-        payload = applyChannelFilter(payload, channels);
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       } else {
         debugPrint('⚠️ Apply pattern: No channels found — payload goes to default segment only');
       }

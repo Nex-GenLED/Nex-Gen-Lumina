@@ -49,15 +49,50 @@ final zoneSegmentsProvider = AsyncNotifierProvider<ZoneSegmentsNotifier, List<Wl
 final selectedSegmentsProvider = StateProvider<Set<int>>((ref) => <int>{});
 
 // ---------------------------------------------------------------------------
-// Channel Selection Filter
+// Channel Selection Filter (bus-based)
 // ---------------------------------------------------------------------------
 
-/// Tracks which channel (segment) IDs the user has explicitly selected for
+/// A logical channel derived from hardware bus configuration.
+/// Each WLED bus (GPIO output) maps to one channel with a defined LED range.
+class DeviceChannel {
+  final int id;       // bus index (0, 1, ...)
+  final String name;  // "Channel 1", "Channel 2"
+  final int start;    // LED start index (inclusive)
+  final int stop;     // LED stop index (exclusive)
+  final int gpioPin;  // GPIO pin number
+
+  const DeviceChannel({
+    required this.id,
+    required this.name,
+    required this.start,
+    required this.stop,
+    required this.gpioPin,
+  });
+}
+
+/// Derives channels from hardware bus configuration (`/json/cfg → hw.led.ins[]`).
+/// Each bus becomes one channel with its LED range and GPIO pin.
+final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
+  final hwConfig = ref.watch(deviceHardwareConfigProvider).valueOrNull;
+  if (hwConfig == null || hwConfig.buses.isEmpty) return [];
+  return hwConfig.buses.asMap().entries.map((e) {
+    final i = e.key;
+    final bus = e.value;
+    return DeviceChannel(
+      id: i,
+      name: 'Channel ${i + 1}',
+      start: bus.start,
+      stop: bus.start + bus.len,
+      gpioPin: bus.pin.isNotEmpty ? bus.pin.first : -1,
+    );
+  }).toList();
+});
+
+/// Tracks which channel (bus) IDs the user has explicitly selected for
 /// receiving aesthetic commands (patterns, colors, effects, speed, intensity).
 ///
-/// - `null` → **All Channels** mode (default). Commands behave exactly as
-///   before — no behavioral change until the user actively engages the filter.
-/// - `Set<int>` → Only these segment IDs receive aesthetic commands.
+/// - `null` → **All Channels** mode (default). Commands target all buses.
+/// - `Set<int>` → Only these bus indices receive aesthetic commands.
 final selectedChannelIdsProvider = StateProvider<Set<int>?>((ref) => null);
 
 /// Convenience flag: `true` when the user has narrowed to a channel subset.
@@ -65,20 +100,19 @@ final isChannelFilterActiveProvider = Provider<bool>((ref) {
   return ref.watch(selectedChannelIdsProvider) != null;
 });
 
-/// Returns the effective list of segment IDs that should receive commands.
+/// Returns the effective list of channel (bus) IDs that should receive commands.
 ///
-/// When the channel filter is `null` (all-channels mode) or no segments have
-/// been fetched yet, returns every known segment ID. When the filter is active,
-/// returns only the IDs present in both the filter set and the device's
-/// segment list (handles stale IDs from device reconfiguration).
+/// When the channel filter is `null` (all-channels mode), returns every known
+/// bus index. When the filter is active, returns only the IDs present in both
+/// the filter set and the device's bus list.
 final effectiveChannelIdsProvider = Provider<List<int>>((ref) {
   final filter = ref.watch(selectedChannelIdsProvider);
-  final allSegments = ref.watch(zoneSegmentsProvider).valueOrNull ?? [];
-  if (filter == null || allSegments.isEmpty) {
-    return allSegments.map((s) => s.id).toList();
+  final channels = ref.watch(deviceChannelsProvider);
+  if (filter == null || channels.isEmpty) {
+    return channels.map((c) => c.id).toList();
   }
-  return allSegments
-      .where((s) => filter.contains(s.id))
-      .map((s) => s.id)
+  return channels
+      .where((c) => filter.contains(c.id))
+      .map((c) => c.id)
       .toList();
 });

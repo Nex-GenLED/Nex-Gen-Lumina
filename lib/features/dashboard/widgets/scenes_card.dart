@@ -45,7 +45,7 @@ class ScenesCard extends ConsumerWidget {
                       if (repo == null) return;
                       var scenePayload = Map<String, dynamic>.from(p.json);
                       final channels = ref.read(effectiveChannelIdsProvider);
-                      if (channels.isNotEmpty) scenePayload = applyChannelFilter(scenePayload, channels);
+                      if (channels.isNotEmpty) scenePayload = applyChannelFilter(scenePayload, channels, ref.read(deviceChannelsProvider));
                       await repo.applyJson(scenePayload);
                       final notifier = ref.read(wledStateProvider.notifier);
                       // attempt to immediately reflect bri/color/speed

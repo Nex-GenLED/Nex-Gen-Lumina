@@ -16,6 +16,9 @@ import 'package:nexgen_command/features/wled/wled_repository.dart';
 /// [explicitWhite]: If provided, use this white value instead of auto-calculating
 /// [forceZeroWhite]: If true, force W=0 (for pure saturated colors)
 ///
+/// Note: WLED's "Use Gamma correction for color" setting should be enabled
+/// on the device for accurate color rendering on RGBW LED strips.
+///
 /// Returns [R, G, B, W] array - WLED handles color order conversion
 List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhite = false}) {
   int finalR = r;
@@ -27,7 +30,9 @@ List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhit
     // Explicit white value provided - use it directly
     finalW = explicitWhite.clamp(0, 255);
   } else if (forceZeroWhite) {
-    // Force W=0 for pure saturated colors
+    // Force W=0 for pure saturated colors.
+    // Color accuracy on RGBW strips is handled by WLED's gamma correction
+    // (enabled in LED Preferences → "Use Gamma correction for color").
     finalW = 0;
   } else {
     // AUTO-CALCULATE W: Extract white component from RGB

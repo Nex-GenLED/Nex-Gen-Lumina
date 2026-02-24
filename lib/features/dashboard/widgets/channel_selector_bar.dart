@@ -3,18 +3,17 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 /// A compact, expandable bar that lets the user choose which WLED channels
-/// (segments) should receive aesthetic commands (patterns, colors, effects).
+/// (hardware buses) should receive aesthetic commands (patterns, colors, effects).
 ///
 /// **Default state:** Shows "All Channels" as a single cyan chip.
 /// **Expanded state:** Shows individual channel chips that can be toggled.
 ///
 /// The selection is stored in [selectedChannelIdsProvider]:
 /// - `null` → all channels (default, unified control)
-/// - `Set<int>` → only those segment IDs are targeted
+/// - `Set<int>` → only those bus indices are targeted
 class ChannelSelectorBar extends ConsumerStatefulWidget {
   const ChannelSelectorBar({super.key});
 
@@ -27,11 +26,10 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   @override
   Widget build(BuildContext context) {
-    final segmentsAsync = ref.watch(zoneSegmentsProvider);
-    final segments = segmentsAsync.valueOrNull ?? [];
+    final channels = ref.watch(deviceChannelsProvider);
 
-    // Don't render anything if we have 0 or 1 segment (no filtering needed).
-    if (segments.length <= 1) return const SizedBox.shrink();
+    // Don't render anything if we have 0 or 1 channel (no filtering needed).
+    if (channels.length <= 1) return const SizedBox.shrink();
 
     final selectedIds = ref.watch(selectedChannelIdsProvider);
     final isFiltered = selectedIds != null;
@@ -56,9 +54,9 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
             mainAxisSize: MainAxisSize.min,
             children: [
               // Header row — always visible
-              _buildHeader(context, segments, selectedIds),
+              _buildHeader(context, channels, selectedIds),
               // Expanded channel chips
-              if (_expanded) _buildChannelChips(context, segments, selectedIds),
+              if (_expanded) _buildChannelChips(context, channels, selectedIds),
             ],
           ),
         ),
@@ -68,20 +66,20 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   Widget _buildHeader(
     BuildContext context,
-    List<WledSegment> segments,
+    List<DeviceChannel> channels,
     Set<int>? selectedIds,
   ) {
     final isFiltered = selectedIds != null;
-    final selectedCount = isFiltered ? selectedIds.length : segments.length;
-    final totalCount = segments.length;
+    final selectedCount = isFiltered ? selectedIds.length : channels.length;
+    final totalCount = channels.length;
 
     final String label;
     if (!isFiltered) {
-      label = 'All Areas';
+      label = 'All Channels';
     } else if (selectedCount == totalCount) {
-      label = 'All Areas';
+      label = 'All Channels';
     } else {
-      label = '$selectedCount of $totalCount Areas';
+      label = '$selectedCount of $totalCount Channels';
     }
 
     return InkWell(
@@ -139,7 +137,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   Widget _buildChannelChips(
     BuildContext context,
-    List<WledSegment> segments,
+    List<DeviceChannel> channels,
     Set<int>? selectedIds,
   ) {
     final isAllMode = selectedIds == null;
@@ -159,11 +157,11 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
             },
           ),
           // Individual channel chips
-          for (final seg in segments)
+          for (final ch in channels)
             _buildChip(
-              label: seg.name,
-              selected: isAllMode || selectedIds!.contains(seg.id),
-              onTap: () => _toggleChannel(seg.id, segments, selectedIds),
+              label: ch.name,
+              selected: isAllMode || selectedIds!.contains(ch.id),
+              onTap: () => _toggleChannel(ch.id, channels, selectedIds),
             ),
         ],
       ),
@@ -172,10 +170,10 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   void _toggleChannel(
     int channelId,
-    List<WledSegment> segments,
+    List<DeviceChannel> channels,
     Set<int>? currentSelection,
   ) {
-    final allIds = segments.map((s) => s.id).toSet();
+    final allIds = channels.map((c) => c.id).toSet();
 
     if (currentSelection == null) {
       // Switching from all-mode: select all except the tapped one.

@@ -287,7 +287,7 @@ class ChannelQuickActions extends ConsumerWidget {
         groups.add(LedColorGroup(
           startLed: startLed,
           endLed: endLed,
-          color: rgbToRgbw(color.red, color.green, color.blue),
+          color: rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true),
         ));
       }
 
