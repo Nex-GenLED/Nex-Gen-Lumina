@@ -119,22 +119,30 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         child: Scaffold(
           extendBody: true,
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          body: widget.navigationShell,
-          bottomNavigationBar: isSimpleMode
-              ? SimpleNavBar(
-                  // SimpleMode: map 2-tab indices to branch indices
-                  index: shellIndex == 3 ? 1 : 0,
-                  onTap: (i) => _onTap(i == 0 ? 0 : 3),
-                )
-              : GlassDockNavBar(
-                  index: shellIndex,
-                  onTap: _onTap,
-                  onLuminaTap: _handleLuminaTap,
-                  onLuminaLongPress: _handleLuminaLongPress,
-                  isVoiceListening: luminaState.isOpen &&
-                      luminaState.mode == LuminaSheetMode.listening,
-                  hasActiveSession: luminaState.hasActiveSession,
-                ),
+          body: Stack(
+            children: [
+              Positioned.fill(child: widget.navigationShell),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: isSimpleMode
+                    ? SimpleNavBar(
+                        index: shellIndex == 3 ? 1 : 0,
+                        onTap: (i) => _onTap(i == 0 ? 0 : 3),
+                      )
+                    : GlassDockNavBar(
+                        index: shellIndex,
+                        onTap: _onTap,
+                        onLuminaTap: _handleLuminaTap,
+                        onLuminaLongPress: _handleLuminaLongPress,
+                        isVoiceListening: luminaState.isOpen &&
+                            luminaState.mode == LuminaSheetMode.listening,
+                        hasActiveSession: luminaState.hasActiveSession,
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
