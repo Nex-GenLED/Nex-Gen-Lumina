@@ -74,9 +74,9 @@ class DesignLibraryBrowser extends ConsumerWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 2.2,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 2.8,
               ),
               itemCount: totalItems,
               itemBuilder: (context, index) {
@@ -129,28 +129,28 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
         },
         splashColor: _accentColor.withValues(alpha: 0.10),
         highlightColor: _accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                _accentColor.withValues(alpha: 0.15),
+                _accentColor.withValues(alpha: 0.12),
                 NexGenPalette.matteBlack.withValues(alpha: 0.98),
               ],
               stops: const [0.0, 1.0],
             ),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: _accentColor.withValues(alpha: 0.25),
+              color: _accentColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: _accentColor.withValues(alpha: 0.12),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: _accentColor.withValues(alpha: 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
@@ -160,37 +160,36 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
               children: [
                 // Compact icon with subtle glow ring
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _accentColor.withValues(alpha: 0.15),
+                    color: _accentColor.withValues(alpha: 0.12),
                     border: Border.all(
-                      color: _accentColor.withValues(alpha: 0.3),
-                      width: 1,
+                      color: _accentColor.withValues(alpha: 0.25),
+                      width: 0.5,
                     ),
                   ),
                   child: Icon(
                     Icons.palette_outlined,
-                    size: 18,
+                    size: 16,
                     color: _accentColor,
                     shadows: [
                       Shadow(
-                        color: _accentColor.withValues(alpha: 0.6),
-                        blurRadius: 10,
+                        color: _accentColor.withValues(alpha: 0.5),
+                        blurRadius: 8,
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 10),
-                // Name
                 Expanded(
                   child: Text(
                     'My Saved Designs',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontSize: 12,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -198,8 +197,8 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
                 ),
                 Icon(
                   Icons.arrow_forward_ios,
-                  color: _accentColor.withValues(alpha: 0.5),
-                  size: 12,
+                  color: _accentColor.withValues(alpha: 0.4),
+                  size: 10,
                 ),
               ],
             ),
@@ -381,28 +380,28 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
         },
         splashColor: accentColor.withValues(alpha: 0.10),
         highlightColor: accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                gradientColors[0].withValues(alpha: 0.15),
+                gradientColors[0].withValues(alpha: 0.12),
                 NexGenPalette.matteBlack.withValues(alpha: 0.98),
               ],
               stops: const [0.0, 1.0],
             ),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.25),
+              color: accentColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: accentColor.withValues(alpha: 0.12),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: accentColor.withValues(alpha: 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
@@ -415,37 +414,36 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                   children: [
                     // Compact icon with subtle glow ring
                     Container(
-                      width: 36,
-                      height: 36,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: accentColor.withValues(alpha: 0.15),
+                        color: accentColor.withValues(alpha: 0.12),
                         border: Border.all(
-                          color: accentColor.withValues(alpha: 0.3),
-                          width: 1,
+                          color: accentColor.withValues(alpha: 0.25),
+                          width: 0.5,
                         ),
                       ),
                       child: Icon(
                         heroIcon,
-                        size: 18,
+                        size: 16,
                         color: accentColor,
                         shadows: [
                           Shadow(
-                            color: accentColor.withValues(alpha: 0.6),
-                            blurRadius: 10,
+                            color: accentColor.withValues(alpha: 0.5),
+                            blurRadius: 8,
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 10),
-                    // Name
                     Expanded(
                       child: Text(
                         category.name,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
-                          fontSize: 13,
+                          fontSize: 12,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -453,8 +451,8 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                     ),
                     Icon(
                       Icons.arrow_forward_ios,
-                      color: accentColor.withValues(alpha: 0.5),
-                      size: 12,
+                      color: accentColor.withValues(alpha: 0.4),
+                      size: 10,
                     ),
                   ],
                 ),
@@ -466,7 +464,7 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                 child: GestureDetector(
                   onTap: () => _togglePin(context, ref, isPinned),
                   child: Container(
-                    padding: const EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.5),
                       shape: BoxShape.circle,
@@ -474,7 +472,7 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
                     child: Icon(
                       isPinned ? Icons.push_pin : Icons.push_pin_outlined,
                       color: isPinned ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.7),
-                      size: 14,
+                      size: 12,
                     ),
                   ),
                 ),

@@ -48,7 +48,7 @@ class LibraryNodeGrid extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: SizedBox(
-              height: 64,
+              height: 56,
               child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
             ),
           );
@@ -61,21 +61,21 @@ class LibraryNodeGrid extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.35,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 2.8,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
         return TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
-          duration: Duration(milliseconds: 300 + (index * 50).clamp(0, 400)),
+          duration: Duration(milliseconds: 250 + (index * 40).clamp(0, 300)),
           curve: Curves.easeOut,
           builder: (context, value, child) => Opacity(
             opacity: value,
             child: Transform.translate(
-              offset: Offset(0, 12 * (1 - value)),
+              offset: Offset(0, 8 * (1 - value)),
               child: child,
             ),
           ),
@@ -420,7 +420,7 @@ class LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a folder card with LED-inspired visual design
+  /// Build a compact horizontal folder card matching top-level category style
   Widget _buildFolderCard(BuildContext context) {
     final heroIcon = _iconForNode();
     final accentColor = _getFolderThemeColor();
@@ -437,119 +437,98 @@ class LibraryNodeCard extends StatelessWidget {
             'gradient1': gradientColors[1].toARGB32(),
           });
         },
-        splashColor: accentColor.withValues(alpha: 0.10),
-        highlightColor: accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
+        splashColor: accentColor.withValues(alpha: 0.08),
+        highlightColor: accentColor.withValues(alpha: 0.04),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
               colors: [
-                gradientColors[0].withValues(alpha: 0.20),
-                gradientColors[1].withValues(alpha: 0.08),
-                NexGenPalette.matteBlack,
+                gradientColors[0].withValues(alpha: 0.12),
+                NexGenPalette.matteBlack.withValues(alpha: 0.98),
               ],
-              stops: const [0.0, 0.5, 1.0],
+              stops: const [0.0, 1.0],
             ),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.30),
+              color: accentColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
-          ),
-          child: Column(
-            children: [
-              // Top section: icon with ambient glow
-              Expanded(
-                child: Center(
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: accentColor.withValues(alpha: 0.10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accentColor.withValues(alpha: 0.35),
-                          blurRadius: 24,
-                          spreadRadius: 4,
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      heroIcon,
-                      size: 24,
-                      color: Colors.white.withValues(alpha: 0.95),
-                      shadows: [
-                        Shadow(
-                          color: accentColor.withValues(alpha: 0.7),
-                          blurRadius: 16,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // LED-inspired color preview strip
-              Container(
-                height: 3,
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(2),
-                  gradient: LinearGradient(
-                    colors: node.previewColors ?? _expandGradient(gradientColors),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: gradientColors[0].withValues(alpha: 0.4),
-                      blurRadius: 6,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-              ),
-              // Bottom: name row
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        node.name,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.arrow_forward_ios,
-                      color: accentColor.withValues(alpha: 0.6),
-                      size: 10,
-                    ),
-                  ],
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                // Icon circle with faint glow
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accentColor.withValues(alpha: 0.12),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.25),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Icon(
+                    heroIcon,
+                    size: 16,
+                    color: accentColor,
+                    shadows: [
+                      Shadow(
+                        color: accentColor.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Folder name
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  color: accentColor.withValues(alpha: 0.4),
+                  size: 10,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// Build a palette card with full-width animated LED strip preview
+  /// Build a palette card with color dot indicators
   Widget _buildPaletteCard(BuildContext context, {bool animate = true}) {
     final colors = node.themeColors;
     final hasColors = colors != null && colors.isNotEmpty;
     final primaryColor = hasColors ? colors.first : NexGenPalette.cyan;
-    final secondaryColor = hasColors && colors.length > 1 ? colors[1] : primaryColor;
+
+    // Limit to maximum 4 representative colors
+    final displayColors = hasColors
+        ? (colors.length <= 4 ? colors : colors.sublist(0, 4))
+        : <Color>[];
 
     return Material(
       color: Colors.transparent,
@@ -559,125 +538,82 @@ class LibraryNodeCard extends StatelessWidget {
             'name': node.name,
             'accentColor': primaryColor.toARGB32(),
             'gradient0': primaryColor.toARGB32(),
-            'gradient1': secondaryColor.toARGB32(),
+            'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
           });
         },
-        splashColor: primaryColor.withValues(alpha: 0.10),
-        highlightColor: primaryColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
+        splashColor: primaryColor.withValues(alpha: 0.08),
+        highlightColor: primaryColor.withValues(alpha: 0.04),
         child: Container(
           decoration: BoxDecoration(
             color: NexGenPalette.matteBlack,
-            borderRadius: BorderRadius.circular(14),
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                primaryColor.withValues(alpha: 0.08),
+                NexGenPalette.matteBlack,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: primaryColor.withValues(alpha: 0.30),
+              color: primaryColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: primaryColor.withValues(alpha: 0.15),
-                blurRadius: 12,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // ── Top: Full-width animated LED strip preview ──
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
-                child: SizedBox(
-                  height: 28,
-                  child: hasColors
-                      ? Stack(
-                          children: [
-                            // Animated pixel strip fills the top
-                            Positioned.fill(
-                              child: PixelStripPreview(
-                                colors: colors,
-                                pixelCount: 12,
-                                height: 28,
-                                animate: animate,
-                                borderRadius: 0,
-                                backgroundColor: const Color(0xFF0A0E14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                // Color dots (1-4 max) with subtle glow
+                if (displayColors.isNotEmpty) ...[
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var i = 0; i < displayColors.length; i++)
+                        Container(
+                          width: 10,
+                          height: 10,
+                          margin: EdgeInsets.only(right: i < displayColors.length - 1 ? 4 : 0),
+                          decoration: BoxDecoration(
+                            color: displayColors[i],
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: displayColors[i].withValues(alpha: 0.6),
+                                blurRadius: 6,
+                                spreadRadius: 1,
                               ),
-                            ),
-                            // Subtle vignette overlay for blending into card body
-                            Positioned(
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              height: 8,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.transparent,
-                                      NexGenPalette.matteBlack,
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Container(
-                          color: const Color(0xFF0A0E14),
-                          child: const Center(
-                            child: Icon(Icons.palette_outlined, color: Colors.white24, size: 16),
+                            ],
                           ),
                         ),
-                ),
-              ),
-              // ── Bottom: Info section ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-                child: Row(
-                  children: [
-                    // Palette name
-                    Expanded(
-                      child: Text(
-                        node.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                ] else ...[
+                  const Icon(Icons.palette_outlined, color: Colors.white24, size: 16),
+                  const SizedBox(width: 12),
+                ],
+                // Palette name
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(width: 6),
-                    // Color dot indicators
-                    if (hasColors)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (var i = 0; i < (colors.length > 4 ? 4 : colors.length); i++)
-                            Container(
-                              width: 8,
-                              height: 8,
-                              margin: EdgeInsets.only(left: i > 0 ? 3 : 0),
-                              decoration: BoxDecoration(
-                                color: colors[i],
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: colors[i].withValues(alpha: 0.5),
-                                    blurRadius: 4,
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                  ],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
+                Icon(
+                  Icons.arrow_forward_ios,
+                  color: primaryColor.withValues(alpha: 0.4),
+                  size: 10,
+                ),
+              ],
+            ),
           ),
         ),
       ),
