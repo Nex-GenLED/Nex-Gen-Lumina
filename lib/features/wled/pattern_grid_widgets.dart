@@ -418,7 +418,7 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.go('/explore/library/${node.id}', extra: {
+          context.push('/explore/library/${node.id}', extra: {
             'name': node.name,
             'accentColor': accentColor.toARGB32(),
             'gradient0': gradientColors[0].toARGB32(),
@@ -560,7 +560,7 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.go('/explore/library/${node.id}', extra: {
+          context.push('/explore/library/${node.id}', extra: {
             'name': node.name,
             'accentColor': primaryColor.toARGB32(),
             'gradient0': primaryColor.toARGB32(),

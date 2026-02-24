@@ -8,7 +8,6 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
-import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -219,14 +218,14 @@ class _ZonesChannelsTab extends ConsumerStatefulWidget {
 class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
   @override
   Widget build(BuildContext context) {
-    final segsAsync = ref.watch(zoneSegmentsProvider);
+    final hwConfigAsync = ref.watch(deviceHardwareConfigProvider);
     final show2D = ref.watch(show2DEffectsProvider);
     final showAudio = ref.watch(showAudioEffectsProvider);
 
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(children: [
-        // ── Lighting Areas (inline) ──
+        // ── Lighting Areas (reflects hardware channel configuration) ──
         Row(children: [
           const Icon(Icons.layers, color: NexGenPalette.cyan),
           const SizedBox(width: 8),
@@ -236,27 +235,28 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh, size: 20),
-            onPressed: () => ref.read(zoneSegmentsProvider.notifier).refreshNow(),
+            onPressed: () => ref.invalidate(deviceHardwareConfigProvider),
           ),
         ]),
         const SizedBox(height: 4),
         Text(
-          'Your lighting strands. Tap to rename.',
+          'Your lighting channels as configured in Hardware Config.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white54),
         ),
         const SizedBox(height: 12),
 
-        segsAsync.when(
-          data: (segs) => segs.isEmpty
+        hwConfigAsync.when(
+          data: (config) => (config == null || config.buses.isEmpty)
               ? _buildEmptyAreas()
               : Column(
                   children: [
-                    for (final s in segs) _buildAreaTile(context, s),
+                    for (var i = 0; i < config.buses.length; i++)
+                      _buildBusAreaTile(context, config.buses[i], i),
                   ],
                 ),
           error: (e, _) => Padding(
             padding: const EdgeInsets.all(12),
-            child: Text('Failed to load areas: $e'),
+            child: Text('Failed to load channel config: $e'),
           ),
           loading: () => const Padding(
             padding: EdgeInsets.all(24),
@@ -285,7 +285,7 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
-                onPressed: () => context.go(AppRoutes.hardwareConfig),
+                onPressed: () => context.push(AppRoutes.hardwareConfig),
                 icon: const Icon(Icons.settings, color: Colors.black),
                 label: const Text('Open Hardware Config'),
               ),
@@ -397,11 +397,11 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
     );
   }
 
-  Widget _buildAreaTile(BuildContext context, WledSegment segment) {
-    final ledCount = segment.ledCount;
-    final subtitle = ledCount > 0
-        ? '$ledCount lights (LEDs ${segment.start + 1}\u2013${segment.stop})'
+  Widget _buildBusAreaTile(BuildContext context, WledLedBus bus, int index) {
+    final subtitle = bus.len > 0
+        ? '${bus.len} lights (LEDs ${bus.start + 1}\u2013${bus.start + bus.len})'
         : 'No lights configured';
+    final gpioLabel = 'GPIO ${bus.pin.isNotEmpty ? bus.pin.first : "?"}';
 
     return Card(
       child: ListTile(
@@ -414,13 +414,8 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
           ),
           child: const Icon(Icons.light_mode, color: NexGenPalette.cyan, size: 20),
         ),
-        title: Text(segment.name, overflow: TextOverflow.ellipsis),
-        subtitle: Text(subtitle),
-        trailing: IconButton(
-          tooltip: 'Rename',
-          icon: const Icon(Icons.drive_file_rename_outline),
-          onPressed: () => _renameSegment(context, segment),
-        ),
+        title: Text('Channel ${index + 1}', overflow: TextOverflow.ellipsis),
+        subtitle: Text('$subtitle  \u2022  $gpioLabel'),
       ),
     );
   }
@@ -448,47 +443,6 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
     );
   }
 
-  Future<void> _renameSegment(BuildContext context, WledSegment s) async {
-    final controller = TextEditingController(text: s.name);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Rename Area'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(labelText: 'Name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final name = controller.text.trim();
-    if (name.isEmpty) return;
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
-    final success = await repo.renameSegment(id: s.id, name: name);
-    if (mounted) {
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Area renamed')),
-        );
-        await ref.read(zoneSegmentsProvider.notifier).refreshNow();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Rename failed')),
-        );
-      }
-    }
-  }
 }
 
 
@@ -909,7 +863,7 @@ class _RemoteAccessTab extends ConsumerWidget {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: () => context.go(AppRoutes.remoteAccess),
+                    onPressed: () => context.push(AppRoutes.remoteAccess),
                     icon: const Icon(Icons.settings, color: Colors.black),
                     label: const Text('Configure Remote Access'),
                   ),
@@ -1254,7 +1208,7 @@ class _ModeTab extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: () => context.go(AppRoutes.neighborhoodSync),
+                onPressed: () => context.push(AppRoutes.neighborhoodSync),
                 icon: const Icon(Icons.sync, color: Colors.black),
                 label: const Text('Open Neighborhood Sync'),
               ),

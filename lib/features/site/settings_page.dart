@@ -53,8 +53,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       appBar: GlassAppBar(
         title: const Text('Settings'),
         actions: [
-          IconButton(tooltip: 'Refer a Friend', icon: const Icon(Icons.card_giftcard), onPressed: () => context.go(AppRoutes.referrals)),
-          IconButton(tooltip: 'Shop Nex-Gen Store', icon: const Icon(Icons.shopping_bag_outlined), onPressed: () => context.go(AppRoutes.luminaStudio)),
+          IconButton(tooltip: 'Refer a Friend', icon: const Icon(Icons.card_giftcard), onPressed: () => context.push(AppRoutes.referrals)),
+          IconButton(tooltip: 'Shop Nex-Gen Store', icon: const Icon(Icons.shopping_bag_outlined), onPressed: () => context.push(AppRoutes.luminaStudio)),
         ],
       ),
       body: ListView(
@@ -286,7 +286,7 @@ class _SystemManagementButton extends StatelessWidget {
           height: 56,
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: () => context.go(AppRoutes.settingsSystem),
+            onPressed: () => context.push(AppRoutes.settingsSystem),
             icon: const Icon(Icons.tune, color: Colors.black),
             label: const Text('System & Device Management'),
           ),
@@ -448,7 +448,7 @@ class _ControllerHardwareTile extends StatelessWidget {
             ),
           );
           if (proceed == true && context.mounted) {
-            context.go(AppRoutes.hardwareConfig);
+            context.push(AppRoutes.hardwareConfig);
           }
         },
       ),
@@ -467,7 +467,7 @@ class _UserProfileEntry extends ConsumerWidget {
           title: const Text('My Profile'),
         subtitle: Text(email),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.go('/settings/profile'),
+        onTap: () => context.push('/settings/profile'),
       ),
     );
   }
@@ -483,7 +483,7 @@ class _ControllersTile extends StatelessWidget {
         title: const Text('Controllers & Devices'),
         subtitle: const Text('Add, remove, and select your controllers.'),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.go(AppRoutes.controllersSettings),
+        onTap: () => context.push(AppRoutes.controllersSettings),
       ),
     );
   }
@@ -551,7 +551,7 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
     );
   }
 
-  Future<void> _openHelpCenter(BuildContext context) async => context.go(AppRoutes.helpCenter);
+  Future<void> _openHelpCenter(BuildContext context) async => context.push(AppRoutes.helpCenter);
 
   Future<void> _openVideos(BuildContext context) async {
     final uri = Uri.parse('https://www.youtube.com/@nexgen');
@@ -977,7 +977,7 @@ class _MyPropertiesCard extends ConsumerWidget {
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan),
               ),
             ),
-      onTap: () => context.go(AppRoutes.myProperties),
+      onTap: () => context.push(AppRoutes.myProperties),
     );
   }
 }
@@ -1007,7 +1007,7 @@ class _VoiceAssistantsCard extends StatelessWidget {
           style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.violet),
         ),
       ),
-      onTap: () => context.go(AppRoutes.voiceAssistants),
+      onTap: () => context.push(AppRoutes.voiceAssistants),
     );
   }
 }
@@ -1089,7 +1089,7 @@ class _GrowthCard extends StatelessWidget {
                 iconColor: NexGenPalette.cyan,
                 title: 'Refer a Friend',
                 subtitle: 'Share Lumina and earn rewards.',
-                onTap: () => context.go(AppRoutes.referrals),
+                onTap: () => context.push(AppRoutes.referrals),
               ),
               Container(
                 height: 1,
@@ -1101,7 +1101,7 @@ class _GrowthCard extends StatelessWidget {
                 iconColor: NexGenPalette.violet,
                 title: 'Shop Nex-Gen Store',
                 subtitle: 'Design upgrades in the virtual showroom.',
-                onTap: () => context.go(AppRoutes.luminaStudio),
+                onTap: () => context.push(AppRoutes.luminaStudio),
               ),
             ]),
           ),

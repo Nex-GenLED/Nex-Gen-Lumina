@@ -657,7 +657,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                           content: Text('${_current.name} saved to My Scenes'),
                           action: SnackBarAction(
                             label: 'View',
-                            onPressed: () => context.go('/explore/scenes'),
+                            onPressed: () => context.push('/explore/scenes'),
                           ),
                         ),
                       );
@@ -769,7 +769,7 @@ class _CategoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => context.go('/explore/${category.id}', extra: category),
+      onTap: () => context.push('/explore/${category.id}', extra: category),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         child: Stack(children: [
@@ -1060,7 +1060,7 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => context.go('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
+        onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
         borderRadius: BorderRadius.circular(20),
         child: Container(
           height: 180,
@@ -1342,7 +1342,7 @@ class _SubCategoryCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => context.go('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
+        onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
         borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(

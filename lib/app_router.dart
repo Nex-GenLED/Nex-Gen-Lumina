@@ -305,6 +305,7 @@ class AppRouter {
                   GoRoute(
                     path: 'library/:nodeId',
                     name: 'library-node',
+                    parentNavigatorKey: _exploreNavigatorKey,
                     pageBuilder: (context, state) {
                       final nodeId = state.pathParameters['nodeId']!;
                       final extra = state.extra;
@@ -337,12 +338,14 @@ class AppRouter {
                   GoRoute(
                     path: 'scenes',
                     name: 'my-scenes',
+                    parentNavigatorKey: _exploreNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
                   ),
                   // /explore/:categoryId — pattern category detail (wildcard LAST)
                   GoRoute(
                     path: ':categoryId',
                     name: 'pattern-category',
+                    parentNavigatorKey: _exploreNavigatorKey,
                     pageBuilder: (context, state) {
                       final id = state.pathParameters['categoryId']!;
                       final extra = state.extra;
@@ -359,6 +362,7 @@ class AppRouter {
                       GoRoute(
                         path: 'sub/:subId',
                         name: 'pattern-subcategory',
+                        parentNavigatorKey: _exploreNavigatorKey,
                         pageBuilder: (context, state) {
                           final categoryId = state.pathParameters['categoryId']!;
                           final subId = state.pathParameters['subId']!;
@@ -386,21 +390,25 @@ class AppRouter {
                   GoRoute(
                     path: 'system',
                     name: 'settings-system',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: SystemManagementScreen()),
                   ),
                   GoRoute(
                     path: 'controllers',
                     name: 'controllers-settings',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: ManageControllersPage()),
                   ),
                   GoRoute(
                     path: 'profile',
                     name: 'profile',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: UserProfileScreen()),
                     routes: [
                       GoRoute(
                         path: 'edit',
                         name: 'profile-edit',
+                        parentNavigatorKey: _systemNavigatorKey,
                         pageBuilder: (context, state) => const NoTransitionPage(child: EditProfileScreen()),
                       ),
                     ],
@@ -408,68 +416,77 @@ class AppRouter {
                   GoRoute(
                     path: 'security',
                     name: 'security',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: SecuritySettingsScreen()),
                   ),
                   GoRoute(
                     path: 'hardware',
                     name: 'hardware-config',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: HardwareConfigScreen()),
                   ),
                   GoRoute(
                     path: 'help',
                     name: 'help-center',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: HelpCenterScreen()),
                   ),
                   GoRoute(
                     path: 'referrals',
                     name: 'referrals',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: ReferralProgramScreen()),
                   ),
                   GoRoute(
                     path: 'studio',
                     name: 'lumina-studio',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: LuminaStudioScreen()),
                   ),
                   GoRoute(
                     path: 'geofence',
                     name: 'geofence-setup',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: GeofenceSetupScreen()),
                   ),
                   GoRoute(
                     path: 'remote-access',
                     name: 'remote-access',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
                   ),
                   GoRoute(
                     path: 'voice-assistants',
                     name: 'voice-assistants',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: VoiceAssistantGuideScreen()),
                   ),
                   GoRoute(
                     path: 'properties',
                     name: 'my-properties',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
                   ),
                   GoRoute(
                     path: 'neighborhood-sync',
                     name: 'neighborhood-sync',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
                   ),
                   GoRoute(
                     path: 'current-colors',
                     name: 'current-colors',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: CurrentColorsEditorScreen()),
                   ),
                   GoRoute(
                     path: 'users',
                     name: 'sub-users',
+                    parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
                   ),
-                  GoRoute(
-                    path: 'roofline-editor',
-                    name: 'roofline-editor-settings',
-                    pageBuilder: (context, state) => const NoTransitionPage(child: RooflineEditorScreen()),
-                  ),
+                  // Note: roofline-editor is intentionally a root-level fullscreen route,
+                  // not nested here. See the root GoRoute for /settings/roofline-editor.
                 ],
               ),
               // /wled/zones (in System branch)
