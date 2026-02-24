@@ -48,7 +48,7 @@ class LibraryNodeGrid extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: SizedBox(
-              height: 72,
+              height: 64,
               child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
             ),
           );
@@ -63,12 +63,24 @@ class LibraryNodeGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.1,
+        childAspectRatio: 1.35,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient);
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: Duration(milliseconds: 300 + (index * 50).clamp(0, 400)),
+          curve: Curves.easeOut,
+          builder: (context, value, child) => Opacity(
+            opacity: value,
+            child: Transform.translate(
+              offset: Offset(0, 12 * (1 - value)),
+              child: child,
+            ),
+          ),
+          child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
+        );
       },
     );
   }
@@ -408,7 +420,7 @@ class LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a folder card with single hero icon design matching main category cards
+  /// Build a folder card with LED-inspired visual design
   Widget _buildFolderCard(BuildContext context) {
     final heroIcon = _iconForNode();
     final accentColor = _getFolderThemeColor();
@@ -425,119 +437,102 @@ class LibraryNodeCard extends StatelessWidget {
             'gradient1': gradientColors[1].toARGB32(),
           });
         },
-        borderRadius: BorderRadius.circular(16),
+        splashColor: accentColor.withValues(alpha: 0.10),
+        highlightColor: accentColor.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
               colors: [
-                gradientColors[0].withValues(alpha: 0.25),
-                gradientColors[1].withValues(alpha: 0.15),
-                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+                gradientColors[0].withValues(alpha: 0.20),
+                gradientColors[1].withValues(alpha: 0.08),
+                NexGenPalette.matteBlack,
               ],
-              stops: const [0.0, 0.4, 1.0],
+              stops: const [0.0, 0.5, 1.0],
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.4),
-              width: 1,
+              color: accentColor.withValues(alpha: 0.30),
+              width: 0.5,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withValues(alpha: 0.2),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
-              ),
-            ],
           ),
-          child: Stack(
+          child: Column(
             children: [
-              // Centered radial glow behind icon
-              Positioned(
-                top: 6,
-                left: 0,
-                right: 0,
+              // Top section: icon with ambient glow
+              Expanded(
                 child: Center(
                   child: Container(
-                    width: 70,
-                    height: 70,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          gradientColors[0].withValues(alpha: 0.3),
-                          gradientColors[1].withValues(alpha: 0.1),
-                          Colors.transparent,
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
+                      color: accentColor.withValues(alpha: 0.10),
+                      boxShadow: [
+                        BoxShadow(
+                          color: accentColor.withValues(alpha: 0.35),
+                          blurRadius: 24,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      heroIcon,
+                      size: 24,
+                      color: Colors.white.withValues(alpha: 0.95),
+                      shadows: [
+                        Shadow(
+                          color: accentColor.withValues(alpha: 0.7),
+                          blurRadius: 16,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-              // Content
+              // LED-inspired color preview strip
+              Container(
+                height: 3,
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  gradient: LinearGradient(
+                    colors: node.previewColors ?? _expandGradient(gradientColors),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: gradientColors[0].withValues(alpha: 0.4),
+                      blurRadius: 6,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+              ),
+              // Bottom: name row
               Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Hero icon
-                    Expanded(
-                      child: Center(
-                        child: Icon(
-                          heroIcon,
-                          size: 36,
+                    Flexible(
+                      child: Text(
+                        node.name,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           color: Colors.white,
-                          shadows: [
-                            Shadow(
-                              color: accentColor.withValues(alpha: 0.8),
-                              blurRadius: 24,
-                            ),
-                            Shadow(
-                              color: gradientColors[0].withValues(alpha: 0.5),
-                              blurRadius: 16,
-                            ),
-                          ],
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                       ),
                     ),
-                    // Gradient color bar
-                    Container(
-                      height: 6,
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(3),
-                        gradient: LinearGradient(
-                          colors: node.previewColors ?? _expandGradient(gradientColors),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    // Folder name with arrow
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            node.name,
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          color: accentColor.withValues(alpha: 0.8),
-                          size: 10,
-                        ),
-                      ],
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      color: accentColor.withValues(alpha: 0.6),
+                      size: 10,
                     ),
                   ],
                 ),
@@ -549,12 +544,12 @@ class LibraryNodeCard extends StatelessWidget {
     );
   }
 
-  /// Build a palette card with color-dominant design:
-  /// Left side: PixelStripPreview hero. Right side: name, description, color swatches.
+  /// Build a palette card with full-width animated LED strip preview
   Widget _buildPaletteCard(BuildContext context, {bool animate = true}) {
     final colors = node.themeColors;
     final hasColors = colors != null && colors.isNotEmpty;
     final primaryColor = hasColors ? colors.first : NexGenPalette.cyan;
+    final secondaryColor = hasColors && colors.length > 1 ? colors[1] : primaryColor;
 
     return Material(
       color: Colors.transparent,
@@ -564,73 +559,87 @@ class LibraryNodeCard extends StatelessWidget {
             'name': node.name,
             'accentColor': primaryColor.toARGB32(),
             'gradient0': primaryColor.toARGB32(),
-            'gradient1': primaryColor.withValues(alpha: 0.6).toARGB32(),
+            'gradient1': secondaryColor.toARGB32(),
           });
         },
-        borderRadius: BorderRadius.circular(16),
+        splashColor: primaryColor.withValues(alpha: 0.10),
+        highlightColor: primaryColor.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
           decoration: BoxDecoration(
             color: NexGenPalette.matteBlack,
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                primaryColor.withValues(alpha: 0.12),
-                NexGenPalette.matteBlack,
-              ],
-            ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: primaryColor.withValues(alpha: 0.35),
-              width: 1,
+              color: primaryColor.withValues(alpha: 0.30),
+              width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: primaryColor.withValues(alpha: 0.2),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
+                color: primaryColor.withValues(alpha: 0.15),
+                blurRadius: 12,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Left: PixelStripPreview hero ──
-              SizedBox(
-                width: 64,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(15),
-                  ),
+              // ── Top: Full-width animated LED strip preview ──
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+                child: SizedBox(
+                  height: 28,
                   child: hasColors
-                      ? LayoutBuilder(
-                          builder: (context, constraints) => PixelStripPreview(
-                            colors: colors,
-                            pixelCount: 8,
-                            height: constraints.maxHeight,
-                            animate: animate,
-                            borderRadius: 0,
-                            backgroundColor: const Color(0xFF0A0E14),
-                          ),
+                      ? Stack(
+                          children: [
+                            // Animated pixel strip fills the top
+                            Positioned.fill(
+                              child: PixelStripPreview(
+                                colors: colors,
+                                pixelCount: 12,
+                                height: 28,
+                                animate: animate,
+                                borderRadius: 0,
+                                backgroundColor: const Color(0xFF0A0E14),
+                              ),
+                            ),
+                            // Subtle vignette overlay for blending into card body
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: 8,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      NexGenPalette.matteBlack,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         )
                       : Container(
                           color: const Color(0xFF0A0E14),
                           child: const Center(
-                            child: Icon(Icons.palette_outlined, color: Colors.white24, size: 20),
+                            child: Icon(Icons.palette_outlined, color: Colors.white24, size: 16),
                           ),
                         ),
                 ),
               ),
-              // ── Right: Info section ──
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Palette name
-                      Text(
+              // ── Bottom: Info section ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                child: Row(
+                  children: [
+                    // Palette name
+                    Expanded(
+                      child: Text(
                         node.name,
                         style: const TextStyle(
                           color: Colors.white,
@@ -640,54 +649,32 @@ class LibraryNodeCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6),
-                      // Color swatches row
-                      if (hasColors)
-                        Row(
-                          children: [
-                            for (var i = 0;
-                                i < (colors.length > 5 ? 5 : colors.length);
-                                i++)
-                              Container(
-                                width: 16,
-                                height: 16,
-                                margin: const EdgeInsets.only(right: 4),
-                                decoration: BoxDecoration(
-                                  color: colors[i],
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.2),
-                                    width: 1,
+                    ),
+                    const SizedBox(width: 6),
+                    // Color dot indicators
+                    if (hasColors)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var i = 0; i < (colors.length > 4 ? 4 : colors.length); i++)
+                            Container(
+                              width: 8,
+                              height: 8,
+                              margin: EdgeInsets.only(left: i > 0 ? 3 : 0),
+                              decoration: BoxDecoration(
+                                color: colors[i],
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: colors[i].withValues(alpha: 0.5),
+                                    blurRadius: 4,
                                   ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color:
-                                          colors[i].withValues(alpha: 0.4),
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
+                                ],
                               ),
-                            if (colors.length > 5)
-                              Text(
-                                '+${colors.length - 5}',
-                                style: TextStyle(
-                                  color: NexGenPalette.textSecondary,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            const Spacer(),
-                            Icon(
-                              Icons.arrow_forward_ios,
-                              color: primaryColor.withValues(alpha: 0.6),
-                              size: 10,
                             ),
-                          ],
-                        ),
-                    ],
-                  ),
+                        ],
+                      ),
+                  ],
                 ),
               ),
             ],
@@ -1240,7 +1227,7 @@ class PatternCard extends ConsumerWidget {
         // Apply channel filter so only selected channels receive the pattern
         var payload = pattern.wledPayload;
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         final success = await repo.applyJson(payload);
 
         if (!success) {
@@ -1410,7 +1397,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
       if (repo != null) {
         var payload = <String, dynamic>{'seg': [segUpdate]};
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       }
     });

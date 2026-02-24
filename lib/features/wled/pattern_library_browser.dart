@@ -74,9 +74,9 @@ class DesignLibraryBrowser extends ConsumerWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.6,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 2.2,
               ),
               itemCount: totalItems,
               itemBuilder: (context, index) {
@@ -117,15 +117,6 @@ class DesignLibraryBrowser extends ConsumerWidget {
 class _SavedDesignsCategoryCard extends StatelessWidget {
   const _SavedDesignsCategoryCard();
 
-  static const _icons = [
-    Icons.palette_outlined,
-    Icons.bookmark_outlined,
-    Icons.favorite_outline,
-    Icons.folder_special_outlined,
-    Icons.auto_awesome_outlined,
-    Icons.brush_outlined,
-  ];
-
   static const _accentColor = NexGenPalette.cyan;
 
   @override
@@ -136,150 +127,85 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
         onTap: () {
           context.push('/my-designs');
         },
-        borderRadius: BorderRadius.circular(16),
+        splashColor: _accentColor.withValues(alpha: 0.10),
+        highlightColor: _accentColor.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
           decoration: BoxDecoration(
-            // Premium dark background with cyan accent gradient
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
                 _accentColor.withValues(alpha: 0.15),
-                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+                NexGenPalette.matteBlack.withValues(alpha: 0.98),
               ],
+              stops: const [0.0, 1.0],
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: _accentColor.withValues(alpha: 0.5),
-              width: 1.5,
+              color: _accentColor.withValues(alpha: 0.25),
+              width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: _accentColor.withValues(alpha: 0.2),
-                blurRadius: 16,
+                color: _accentColor.withValues(alpha: 0.12),
+                blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: Stack(
-            children: [
-              // Accent glow in corner
-              Positioned(
-                top: -20,
-                right: -20,
-                child: Container(
-                  width: 80,
-                  height: 80,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                // Compact icon with subtle glow ring
+                Container(
+                  width: 36,
+                  height: 36,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        _accentColor.withValues(alpha: 0.25),
-                        _accentColor.withValues(alpha: 0.0),
-                      ],
+                    color: _accentColor.withValues(alpha: 0.15),
+                    border: Border.all(
+                      color: _accentColor.withValues(alpha: 0.3),
+                      width: 1,
                     ),
-                  ),
-                ),
-              ),
-              // Content
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Icon grid
-                    Expanded(
-                      child: _buildIconGrid(),
-                    ),
-                    const SizedBox(height: 8),
-                    // Category name
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'My Saved Designs',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          color: _accentColor.withValues(alpha: 0.7),
-                          size: 12,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Star badge to indicate this is the user's custom content
-              Positioned(
-                right: 4,
-                top: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: _accentColor.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    Icons.star,
+                    Icons.palette_outlined,
+                    size: 18,
                     color: _accentColor,
-                    size: 14,
+                    shadows: [
+                      Shadow(
+                        color: _accentColor.withValues(alpha: 0.6),
+                        blurRadius: 10,
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                // Name
+                Expanded(
+                  child: Text(
+                    'My Saved Designs',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  color: _accentColor.withValues(alpha: 0.5),
+                  size: 12,
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildIconGrid() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final iconSize = (constraints.maxWidth - 16) / 3.5;
-
-        return Wrap(
-          spacing: 4,
-          runSpacing: 2,
-          alignment: WrapAlignment.center,
-          runAlignment: WrapAlignment.center,
-          children: _icons.asMap().entries.map((entry) {
-            final index = entry.key;
-            final icon = entry.value;
-
-            final isHighlighted = index % 2 == 0;
-            final iconColor = isHighlighted
-                ? _accentColor
-                : Colors.white.withValues(alpha: 0.5);
-
-            return SizedBox(
-              width: iconSize,
-              height: iconSize,
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: iconSize * 0.7,
-                shadows: isHighlighted
-                    ? [
-                        Shadow(
-                          color: _accentColor.withValues(alpha: 0.5),
-                          blurRadius: 8,
-                        ),
-                      ]
-                    : null,
-              ),
-            );
-          }).toList(),
-        );
-      },
     );
   }
 }
@@ -453,121 +379,94 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
             extra: {'name': category.name},
           );
         },
-        borderRadius: BorderRadius.circular(16),
+        splashColor: accentColor.withValues(alpha: 0.10),
+        highlightColor: accentColor.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
           decoration: BoxDecoration(
-            // Category-specific gradient background
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                gradientColors[0].withValues(alpha: 0.25),
-                gradientColors[1].withValues(alpha: 0.15),
-                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+                gradientColors[0].withValues(alpha: 0.15),
+                NexGenPalette.matteBlack.withValues(alpha: 0.98),
               ],
-              stops: const [0.0, 0.4, 1.0],
+              stops: const [0.0, 1.0],
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: accentColor.withValues(alpha: 0.4),
-              width: 1,
+              color: accentColor.withValues(alpha: 0.25),
+              width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: accentColor.withValues(alpha: 0.2),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
+                color: accentColor.withValues(alpha: 0.12),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
           child: Stack(
             children: [
-              // Large radial glow behind icon
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    width: 90,
-                    height: 90,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          gradientColors[0].withValues(alpha: 0.3),
-                          gradientColors[1].withValues(alpha: 0.1),
-                          Colors.transparent,
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
               // Content
               Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
                   children: [
-                    // Single hero icon - centered and prominent
-                    Expanded(
-                      child: Center(
-                        child: Icon(
-                          heroIcon,
-                          size: 52,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(
-                              color: accentColor.withValues(alpha: 0.8),
-                              blurRadius: 24,
-                            ),
-                            Shadow(
-                              color: gradientColors[0].withValues(alpha: 0.5),
-                              blurRadius: 16,
-                            ),
-                          ],
+                    // Compact icon with subtle glow ring
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: accentColor.withValues(alpha: 0.15),
+                        border: Border.all(
+                          color: accentColor.withValues(alpha: 0.3),
+                          width: 1,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    // Category name with arrow
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            category.name,
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
+                      child: Icon(
+                        heroIcon,
+                        size: 18,
+                        color: accentColor,
+                        shadows: [
+                          Shadow(
+                            color: accentColor.withValues(alpha: 0.6),
+                            blurRadius: 10,
                           ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Name
+                    Expanded(
+                      child: Text(
+                        category.name,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
                         ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          color: accentColor.withValues(alpha: 0.8),
-                          size: 10,
-                        ),
-                      ],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      color: accentColor.withValues(alpha: 0.5),
+                      size: 12,
                     ),
                   ],
                 ),
               ),
               // Pin button
               Positioned(
-                right: 4,
-                top: 4,
+                right: 2,
+                top: 2,
                 child: GestureDetector(
                   onTap: () => _togglePin(context, ref, isPinned),
                   child: Container(
-                    padding: const EdgeInsets.all(5),
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.5),
                       shape: BoxShape.circle,
@@ -697,7 +596,7 @@ class MySavedDesignsSection extends ConsumerWidget {
     try {
       var payload = design.toWledPayload();
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).state = design.name;
 
@@ -967,7 +866,7 @@ class RecentPatternsSection extends ConsumerWidget {
         };
 
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels);
+        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       }
 
