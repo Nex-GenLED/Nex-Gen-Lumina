@@ -9,6 +9,7 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
+import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 
@@ -42,6 +43,13 @@ Future<void> main() async {
 
   // Initialize local notifications (no prompts on web)
   await NotificationsService.init();
+
+  // Register sports alerts background service (Android foreground + iOS BGFetch)
+  if (!kIsWeb) {
+    initialiseSportsBackgroundService().catchError((e) {
+      debugPrint('Sports background service init failed: $e');
+    });
+  }
 
   // Initialize background learning service and run startup check
   final learningService = BackgroundLearningService();

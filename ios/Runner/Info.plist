@@ -61,6 +61,12 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>location</string>
+        <string>fetch</string>
+        <string>processing</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.nexgenled.lumina.sportscheck</string>
     </array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required for AR spatial mapping of your lights.</string>

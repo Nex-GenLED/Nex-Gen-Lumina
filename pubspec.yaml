@@ -37,6 +37,8 @@ dependencies:
   encrypt: ^5.0.3
   flutter_secure_storage: ^9.2.2
   crypto: ^3.0.3
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.1
 
 dev_dependencies:
   flutter_test:

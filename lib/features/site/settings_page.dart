@@ -20,6 +20,8 @@ import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
+import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
+import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -78,6 +80,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
           const _VoiceAssistantsCard(),
+          const SizedBox(height: 16),
+          const _SportsAlertsCard(),
           const SizedBox(height: 16),
           const _SimpleModeToggleCard(),
           const SizedBox(height: 16),
@@ -1008,6 +1012,44 @@ class _VoiceAssistantsCard extends StatelessWidget {
         ),
       ),
       onTap: () => context.push(AppRoutes.voiceAssistants),
+    );
+  }
+}
+
+class _SportsAlertsCard extends ConsumerWidget {
+  const _SportsAlertsCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isActive = ref.watch(sportsAlertActiveProvider);
+
+    return PremiumIconCard(
+      icon: Icons.sports_football,
+      title: 'Sports Alerts',
+      subtitle: 'Light shows when your team scores',
+      accentColor: const Color(0xFFFF6B00),
+      iconBackgroundGradient: const LinearGradient(
+        colors: [Color(0xFFFF6B00), Color(0xFFFF9800)],
+      ),
+      trailing: isActive
+          ? Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF4CAF50),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4CAF50).withValues(alpha: 0.5),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            )
+          : null,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SportsAlertsScreen()),
+      ),
     );
   }
 }
