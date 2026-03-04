@@ -11,6 +11,7 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -250,6 +251,7 @@ class _StyleChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
+          constraints: const BoxConstraints(minHeight: 36),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: isSelected ? NexGenPalette.cyan.withValues(alpha: 0.2) : NexGenPalette.gunmetal90,
@@ -305,6 +307,7 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
 
 class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   bool _isPaletteView = false;
+  double _scrollOffset = 0.0;
 
   @override
   void dispose() {
@@ -329,229 +332,210 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
         ? ref.watch(libraryAncestorsProvider(widget.nodeId!))
         : const AsyncValue<List<LibraryNode>>.data([]);
 
+    final displayName = widget.nodeName ?? nodeAsync.whenOrNull(data: (n) => n?.name) ?? 'Design Library';
+    final folderTheme = getFolderTheme(displayName);
+    final gradientColors = widget.parentGradient ?? folderTheme.gradientColors;
+    final emoji = folderTheme.emoji;
+
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
-        // Reset mood filter when navigating back from a palette view
         if (_isPaletteView && didPop) {
           ref.read(selectedMoodFilterProvider.notifier).state = null;
         }
       },
       child: Scaffold(
-        backgroundColor: NexGenPalette.gunmetal,
-        body: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // App bar with back button and title
-              _LibraryAppBar(
-                nodeId: widget.nodeId,
-                nodeName: widget.nodeName,
-                nodeAsync: nodeAsync,
-                accentColor: widget.parentAccent,
-              ),
-              // Breadcrumb navigation
-              if (widget.nodeId != null)
-                ancestorsAsync.when(
-                  data: (ancestors) => _LibraryBreadcrumb(
-                    ancestors: ancestors,
-                    currentNodeName: widget.nodeName,
+        backgroundColor: ExploreDesignTokens.backgroundBase,
+        body: Stack(
+          children: [
+            // Radial gradient background (same as Level 1)
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment(-0.3, -0.6),
+                    radius: 0.8,
+                    colors: [Color(0xFF1A1A2E), Color(0xFF080810)],
                   ),
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
                 ),
-              // Main content
-              Expanded(
-                child: childrenAsync.when(
-                  data: (children) {
-                    // Check if this is a palette node - show patterns instead
-                    return nodeAsync.when(
-                      data: (node) {
-                        if (node != null && node.isPalette) {
-                          // Track that we're viewing a palette
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted && !_isPaletteView) {
-                              setState(() => _isPaletteView = true);
-                            }
-                          });
-                          // Use the new simplified effect selector
-                          return ColorwayEffectSelectorPage(paletteNode: node);
-                        }
-                        // Show children as navigation grid
-                        // For Architectural Downlighting, show Kelvin chart above the grid
-                        if (widget.nodeId == LibraryCategoryIds.architectural) {
-                          return Column(
-                            children: [
-                              const _KelvinReferenceChart(),
-                              Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
-                            ],
-                          );
-                        }
-                        return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
-                      },
-                      loading: () => const Center(child: CircularProgressIndicator()),
-                      error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
-                    );
-                  },
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (err, __) => Center(
-                    child: Text(
-                      'Unable to load content',
-                      style: TextStyle(color: NexGenPalette.textSecondary),
+              ),
+            ),
+            SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Transparent AppBar with back button
+                  AppBar(
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    leading: IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+                      onPressed: () => context.pop(),
+                    ),
+                    title: Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    bottom: PreferredSize(
+                      preferredSize: const Size.fromHeight(3),
+                      child: Container(
+                        height: 3,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: gradientColors.length >= 2
+                                ? gradientColors
+                                : [gradientColors.first, gradientColors.first.withValues(alpha: 0.4)],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  // Hero Banner with parallax
+                  ClipRect(
+                    child: SizedBox(
+                      height: 120,
+                      child: () {
+                        final clamp = _scrollOffset.clamp(0.0, 80.0);
+                        return Stack(
+                          children: [
+                            // Background gradient — 30% parallax
+                            Transform.translate(
+                              offset: Offset(0, -clamp * 0.3),
+                              child: Container(
+                                width: double.infinity,
+                                height: 160, // taller for parallax headroom
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: gradientColors.length >= 2
+                                        ? gradientColors
+                                        : [gradientColors.first, gradientColors.first.withValues(alpha: 0.4)],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Frosted dark overlay
+                            Positioned.fill(
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [Colors.transparent, Color(0x40000000)],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Centered emoji — 50% parallax
+                            Transform.translate(
+                              offset: Offset(0, -clamp * 0.5),
+                              child: Center(
+                                child: Text(
+                                  emoji,
+                                  style: const TextStyle(fontSize: 56),
+                                ),
+                              ),
+                            ),
+                            // Folder name — 50% parallax
+                            Positioned(
+                              left: 16,
+                              bottom: 12 + clamp * 0.5,
+                              child: Text(
+                                displayName,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 24,
+                                  shadows: [Shadow(color: Color(0x80000000), blurRadius: 8)],
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }(),
+                    ),
+                  ),
+                  // Breadcrumb navigation
+                  if (widget.nodeId != null)
+                    ancestorsAsync.when(
+                      data: (ancestors) {
+                        final crumbs = [
+                          'Library',
+                          ...ancestors.map((a) => a.name),
+                          if (widget.nodeName != null) widget.nodeName!,
+                        ];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: BreadcrumbTrail(crumbs: crumbs),
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
+                    ),
+                  // Main content — scroll drives hero parallax
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollUpdateNotification) {
+                          setState(() {
+                            _scrollOffset = notification.metrics.pixels;
+                          });
+                        }
+                        return false;
+                      },
+                      child: childrenAsync.when(
+                      data: (children) {
+                        return nodeAsync.when(
+                          data: (node) {
+                            if (node != null && node.isPalette) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isPaletteView) {
+                                  setState(() => _isPaletteView = true);
+                                }
+                              });
+                              return ColorwayEffectSelectorPage(paletteNode: node);
+                            }
+                            if (widget.nodeId == LibraryCategoryIds.architectural) {
+                              return Column(
+                                children: [
+                                  const _KelvinReferenceChart(),
+                                  Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
+                                ],
+                              );
+                            }
+                            return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
+                          },
+                          loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                          error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
+                        );
+                      },
+                      loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                      error: (err, __) => Center(
+                        child: Text(
+                          'Unable to load content',
+                          style: TextStyle(color: ExploreDesignTokens.textSecondary),
+                        ),
+                      ),
+                    ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// App bar for the library browser
-class _LibraryAppBar extends StatelessWidget {
-  final String? nodeId;
-  final String? nodeName;
-  final AsyncValue<LibraryNode?> nodeAsync;
-  final Color? accentColor;
-
-  const _LibraryAppBar({
-    required this.nodeId,
-    required this.nodeName,
-    required this.nodeAsync,
-    this.accentColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final displayName = nodeName ?? nodeAsync.whenOrNull(data: (n) => n?.name) ?? 'Design Library';
-    final tint = accentColor ?? NexGenPalette.cyan;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          if (nodeId != null)
-            GestureDetector(
-              onTap: () => context.pop(),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: tint.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: tint.withValues(alpha: 0.3), width: 0.5),
-                ),
-                child: Icon(
-                  Icons.arrow_back_ios_new,
-                  size: 20,
-                  color: tint,
-                ),
-              ),
-            ),
-          if (nodeId != null) const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              displayName,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Breadcrumb navigation showing path from root to current node
-class _LibraryBreadcrumb extends StatelessWidget {
-  final List<LibraryNode> ancestors;
-  final String? currentNodeName;
-
-  const _LibraryBreadcrumb({
-    required this.ancestors,
-    this.currentNodeName,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (ancestors.isEmpty && currentNodeName == null) {
-      return const SizedBox.shrink();
-    }
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          // Home/Library root
-          GestureDetector(
-            onTap: () {
-              // Navigate back to Explore root
-              context.go('/explore');
-            },
-            child: Row(
-              children: [
-                Icon(Icons.home, size: 16, color: NexGenPalette.cyan),
-                const SizedBox(width: 4),
-                Text(
-                  'Library',
-                  style: TextStyle(
-                    color: NexGenPalette.cyan,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Ancestor breadcrumbs
-          for (final ancestor in ancestors) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.chevron_right, size: 16, color: NexGenPalette.textSecondary),
-            ),
-            GestureDetector(
-              onTap: () {
-                // Navigate back to this ancestor
-                final popsNeeded = ancestors.indexOf(ancestor) + 1;
-                for (var i = 0; i < ancestors.length - popsNeeded + 1; i++) {
-                  Navigator.of(context).pop();
-                }
-              },
-              child: Text(
-                ancestor.name,
-                style: TextStyle(
-                  color: NexGenPalette.cyan,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-          // Current node (not clickable)
-          if (currentNodeName != null) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.chevron_right, size: 16, color: NexGenPalette.textSecondary),
-            ),
-            Text(
-              currentNodeName!,
-              style: TextStyle(
-                color: NexGenPalette.textMedium,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
+// _LibraryAppBar and _LibraryBreadcrumb have been replaced by inline
+// AppBar and BreadcrumbTrail from the explore design system.
 
 /// Kelvin color temperature reference chart for Architectural Downlighting.
 /// Shows a gradient bar from 2000K (warm amber) to 6500K (cool blue-white)

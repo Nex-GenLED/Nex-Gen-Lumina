@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/models/autopilot_activity_entry.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
+import 'package:nexgen_command/services/autopilot_scheduler.dart';
 
 /// Provider for the user's autopilot enabled state.
 /// Derived from the user profile.
@@ -372,6 +374,30 @@ class AutopilotSettingsService {
         ));
   }
 
+  /// Enable or disable auto-detection of game days.
+  Future<void> setAutoDetectGameDays(bool enabled) async {
+    await _updateProfile((p) => p.copyWith(
+          autoDetectGameDays: enabled,
+          updatedAt: DateTime.now(),
+        ));
+  }
+
+  /// Enable or disable pre-game team colorway lighting.
+  Future<void> setPreGameLighting(bool enabled) async {
+    await _updateProfile((p) => p.copyWith(
+          preGameLighting: enabled,
+          updatedAt: DateTime.now(),
+        ));
+  }
+
+  /// Enable or disable score celebration LED animations via autopilot.
+  Future<void> setScoreCelebrations(bool enabled) async {
+    await _updateProfile((p) => p.copyWith(
+          scoreCelebrations: enabled,
+          updatedAt: DateTime.now(),
+        ));
+  }
+
   Future<void> _updateProfile(UserModel Function(UserModel) updater) async {
     final profileAsync = _ref.read(currentUserProfileProvider);
     final profile = profileAsync.maybeWhen(
@@ -389,3 +415,40 @@ class AutopilotSettingsService {
 final autopilotSettingsServiceProvider = Provider<AutopilotSettingsService>(
   (ref) => AutopilotSettingsService(ref),
 );
+
+// ---------------------------------------------------------------------------
+// Sports & Events providers
+// ---------------------------------------------------------------------------
+
+/// Whether autopilot should auto-detect game days and start monitoring.
+final autoDetectGameDaysProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.autoDetectGameDays ?? true,
+    orElse: () => true,
+  );
+});
+
+/// Whether to apply team colorway before game starts.
+final preGameLightingProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.preGameLighting ?? true,
+    orElse: () => true,
+  );
+});
+
+/// Whether score celebrations (LED animations) are enabled via autopilot.
+final scoreCelebrationsProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.scoreCelebrations ?? true,
+    orElse: () => true,
+  );
+});
+
+/// Read-only view of recent autopilot activity / decision log.
+final autopilotActivityLogProvider = Provider<List<AutopilotActivityEntry>>((ref) {
+  final scheduler = ref.watch(autopilotSchedulerProvider);
+  return scheduler.activityLog;
+});

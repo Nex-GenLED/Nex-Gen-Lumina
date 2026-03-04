@@ -59,6 +59,35 @@ import 'package:nexgen_command/features/demo/demo_roofline_screen.dart';
 import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
 import 'package:nexgen_command/route_guards.dart';
 
+/// Slide + fade transition for Explore sub-routes.
+CustomTransitionPage<void> _exploreFadeSlide({
+  required Widget child,
+  required GoRouterState state,
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 280),
+    reverseTransitionDuration: const Duration(milliseconds: 280),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+      );
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0.06, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
 class AppRouter {
   static final _authListenable = AuthStateListenable();
 
@@ -326,12 +355,15 @@ class AppRouter {
                       } else if (extra is LibraryNode) {
                         nodeName = extra.name;
                       }
-                      return NoTransitionPage(child: LibraryBrowserScreen(
-                        nodeId: nodeId,
-                        nodeName: nodeName,
-                        parentAccent: parentAccent,
-                        parentGradient: parentGradient,
-                      ));
+                      return _exploreFadeSlide(
+                        state: state,
+                        child: LibraryBrowserScreen(
+                          nodeId: nodeId,
+                          nodeName: nodeName,
+                          parentAccent: parentAccent,
+                          parentGradient: parentGradient,
+                        ),
+                      );
                     },
                   ),
                   // /explore/scenes — saved scenes list
@@ -339,7 +371,7 @@ class AppRouter {
                     path: 'scenes',
                     name: 'my-scenes',
                     parentNavigatorKey: _exploreNavigatorKey,
-                    pageBuilder: (context, state) => const NoTransitionPage(child: MyScenesScreen()),
+                    pageBuilder: (context, state) => _exploreFadeSlide(state: state, child: const MyScenesScreen()),
                   ),
                   // /explore/:categoryId — pattern category detail (wildcard LAST)
                   GoRoute(
@@ -355,7 +387,7 @@ class AppRouter {
                       } else if (extra is PatternCategory) {
                         name = extra.name;
                       }
-                      return NoTransitionPage(child: CategoryDetailScreen(categoryId: id, categoryName: name));
+                      return _exploreFadeSlide(state: state, child: CategoryDetailScreen(categoryId: id, categoryName: name));
                     },
                     routes: [
                       // /explore/:categoryId/sub/:subId
@@ -369,7 +401,7 @@ class AppRouter {
                           String? displayName;
                           final extra = state.extra;
                           if (extra is Map && extra['name'] is String) displayName = extra['name'] as String;
-                          return NoTransitionPage(child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
+                          return _exploreFadeSlide(state: state, child: ThemeSelectionScreen(categoryId: categoryId, subCategoryId: subId, subCategoryName: displayName));
                         },
                       ),
                     ],

@@ -29,8 +29,8 @@ final wledConnectivityStatusProvider = FutureProvider<ConnectivityStatus>((ref) 
     orElse: () => null,
   );
 
-  final homeSsid = userProfile?.homeSsid;
-  final isHome = await connectivityService.isOnHomeNetwork(homeSsid);
+  final homeSsidHash = userProfile?.homeSsidHash;
+  final isHome = await connectivityService.isOnHomeNetwork(homeSsidHash);
 
   if (!await connectivityService.hasWifiConnection()) {
     return ConnectivityStatus.offline;

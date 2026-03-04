@@ -521,6 +521,8 @@ class _ScheduleItemCard extends StatelessWidget {
         return Icons.celebration;
       case AutopilotTrigger.gameDay:
         return Icons.sports_football;
+      case AutopilotTrigger.sportsScoreAlert:
+        return Icons.notifications_active;
       case AutopilotTrigger.sunset:
         return Icons.wb_twilight;
       case AutopilotTrigger.sunrise:

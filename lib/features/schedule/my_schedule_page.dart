@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
+import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class MySchedulePage extends ConsumerWidget {
@@ -1066,6 +1067,57 @@ class _AutopilotSetupSheetState extends ConsumerState<_AutopilotSetupSheet> {
 
                   const SizedBox(height: 24),
 
+                  // Sports & Events section
+                  Text(
+                    'Sports & Events',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Autopilot integrates with your sports teams for game-day lighting.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: NexGenPalette.textMedium,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _SportsToggleRow(
+                    label: 'Auto-detect game days',
+                    subtitle: 'Start monitoring when your team plays',
+                    value: ref.watch(autoDetectGameDaysProvider),
+                    onChanged: (v) => ref.read(autopilotSettingsServiceProvider)
+                        .setAutoDetectGameDays(v),
+                  ),
+                  _SportsToggleRow(
+                    label: 'Pre-game lighting',
+                    subtitle: 'Switch to team colors before kickoff',
+                    value: ref.watch(preGameLightingProvider),
+                    onChanged: (v) => ref.read(autopilotSettingsServiceProvider)
+                        .setPreGameLighting(v),
+                  ),
+                  _SportsToggleRow(
+                    label: 'Score celebrations',
+                    subtitle: 'Flash lights on touchdowns, goals, and more',
+                    value: ref.watch(scoreCelebrationsProvider),
+                    onChanged: (v) => ref.read(autopilotSettingsServiceProvider)
+                        .setScoreCelebrations(v),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SportsAlertsScreen()),
+                      );
+                    },
+                    icon: const Icon(Icons.sports_football, size: 18),
+                    label: const Text('Manage Teams'),
+                    style: TextButton.styleFrom(foregroundColor: NexGenPalette.cyan),
+                  ),
+
+                  const SizedBox(height: 24),
+
                   // Action buttons
                   Row(
                     children: [
@@ -1260,6 +1312,50 @@ class _ModeOption extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SportsToggleRow extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SportsToggleRow({
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: Theme.of(context).textTheme.bodyMedium),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: NexGenPalette.textMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            onChanged: onChanged,
+            activeColor: NexGenPalette.cyan,
+          ),
+        ],
       ),
     );
   }

@@ -4,7 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
+import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_service.dart';
+import 'package:nexgen_command/features/sports_alerts/services/game_schedule_service.dart';
+import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/models/autopilot_activity_entry.dart';
+import 'package:nexgen_command/models/autopilot_override.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
@@ -18,6 +25,8 @@ import 'package:nexgen_command/services/preference_learning_service.dart';
 /// - Applies patterns at scheduled times (when autonomyLevel == 2)
 /// - Creates suggestions for user approval (when autonomyLevel == 1)
 /// - Manages the autopilot lifecycle
+/// - Coordinates with Sports Alerts via the override protocol
+/// - Proactively detects upcoming games and activates game mode
 class AutopilotScheduler {
   final Ref _ref;
 
@@ -33,7 +42,29 @@ class AutopilotScheduler {
   /// Auto-apply confidence threshold.
   static const kAutoApplyThreshold = 0.75;
 
+  // ---------------------------------------------------------------------------
+  // Override protocol state
+  // ---------------------------------------------------------------------------
+
+  /// Currently active override token (null when no override is in progress).
+  OverrideToken? _activeOverride;
+
+  /// Activity log — most recent first, capped at [_maxLogEntries].
+  final List<AutopilotActivityEntry> _activityLog = [];
+  static const _maxLogEntries = 50;
+
+  /// Counter for sports context evaluation cadence (every 5th cycle = ~5 min).
+  int _sportsCheckCounter = 0;
+
+  /// Tracks which team slugs have already triggered game-mode activation
+  /// this session, to avoid repeated activations.
+  final Set<String> _activatedTeamSlugs = {};
+
   AutopilotScheduler(this._ref);
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
 
   /// Start the autopilot scheduler.
   void start() {
@@ -57,8 +88,120 @@ class AutopilotScheduler {
     _isRunning = false;
     _checkTimer?.cancel();
     _checkTimer = null;
+    _activatedTeamSlugs.clear();
     debugPrint('AutopilotScheduler: Stopped');
   }
+
+  // ---------------------------------------------------------------------------
+  // Override protocol — public API
+  // ---------------------------------------------------------------------------
+
+  /// Request temporary control of the WLED device.
+  ///
+  /// Called by [AlertTriggerService] before running a score-alert animation
+  /// so the scheduler pauses and captures state for clean restoration.
+  ///
+  /// Returns an [OverrideToken] on success, or `null` if another override
+  /// is already active.
+  Future<OverrideToken?> requestOverride({
+    required OverrideSource source,
+    required Duration duration,
+  }) async {
+    if (_activeOverride != null && !_activeOverride!.isExpired) {
+      debugPrint(
+        'AutopilotScheduler: Override already active from '
+        '${_activeOverride!.source}, rejecting',
+      );
+      return null;
+    }
+
+    // Capture current WLED state via repository
+    Map<String, dynamic>? capturedState;
+    try {
+      final repo = _ref.read(wledRepositoryProvider);
+      if (repo != null) {
+        capturedState = await repo.getState();
+      }
+    } catch (e) {
+      debugPrint('AutopilotScheduler: Failed to capture state: $e');
+    }
+
+    _activeOverride = OverrideToken(
+      source: source,
+      duration: duration,
+      capturedState: capturedState,
+    );
+
+    _addActivityLogEntry(AutopilotActivityEntry(
+      timestamp: DateTime.now(),
+      type: ActivityEntryType.overrideStarted,
+      source: source.name,
+      message: 'Score alert override started (${duration.inSeconds}s)',
+    ));
+
+    debugPrint(
+      'AutopilotScheduler: Override granted to ${source.name} '
+      'for ${duration.inSeconds}s',
+    );
+    return _activeOverride;
+  }
+
+  /// Release a previously granted override, restoring the captured state.
+  ///
+  /// Called by [AlertTriggerService] after its animation completes. The
+  /// scheduler — not the alert service — owns restoration when autopilot
+  /// is running.
+  Future<void> releaseOverride(OverrideToken token) async {
+    if (_activeOverride == null || _activeOverride!.id != token.id) {
+      debugPrint('AutopilotScheduler: Ignoring stale override release');
+      return;
+    }
+
+    // Restore captured state
+    if (token.capturedState != null && token.capturedState!.isNotEmpty) {
+      try {
+        final repo = _ref.read(wledRepositoryProvider);
+        if (repo != null) {
+          await repo.applyJson(token.capturedState!);
+          debugPrint('AutopilotScheduler: State restored after override');
+        }
+      } catch (e) {
+        debugPrint('AutopilotScheduler: Failed to restore state: $e');
+      }
+    }
+
+    _addActivityLogEntry(AutopilotActivityEntry(
+      timestamp: DateTime.now(),
+      type: ActivityEntryType.overrideEnded,
+      source: token.source.name,
+      message: 'Override ended, previous state restored',
+    ));
+
+    _activeOverride = null;
+  }
+
+  /// Whether an override is currently active.
+  bool get isOverrideActive =>
+      _activeOverride != null && !_activeOverride!.isExpired;
+
+  // ---------------------------------------------------------------------------
+  // Activity log
+  // ---------------------------------------------------------------------------
+
+  void _addActivityLogEntry(AutopilotActivityEntry entry) {
+    _activityLog.insert(0, entry);
+    if (_activityLog.length > _maxLogEntries) {
+      _activityLog.removeLast();
+    }
+  }
+
+  /// Public read-only view of recent autopilot decisions.
+  List<AutopilotActivityEntry> get activityLog =>
+      List.unmodifiable(_activityLog);
+
+  // ---------------------------------------------------------------------------
+  // Core scheduling loop
+  // ---------------------------------------------------------------------------
 
   /// Run a full autopilot cycle.
   Future<void> _runCycle() async {
@@ -178,10 +321,29 @@ class AutopilotScheduler {
 
   /// Check scheduled items and apply any that are due.
   void _checkScheduledItems() {
+    // Skip scheduling while an override is active
+    if (_activeOverride != null && !_activeOverride!.isExpired) {
+      debugPrint('AutopilotScheduler: Skipping check — override active');
+      return;
+    }
+
+    // Auto-cleanup expired overrides
+    if (_activeOverride != null && _activeOverride!.isExpired) {
+      debugPrint('AutopilotScheduler: Override expired, auto-releasing');
+      releaseOverride(_activeOverride!);
+    }
+
     final now = DateTime.now();
     final profile = _getCurrentProfile();
 
     if (profile == null || !profile.autopilotEnabled) return;
+
+    // Sports context check every 5 minutes (every 5th cycle)
+    _sportsCheckCounter++;
+    if (_sportsCheckCounter >= 5) {
+      _sportsCheckCounter = 0;
+      _evaluateSportsContext(profile);
+    }
 
     for (final item in _activeSchedule) {
       if (item.shouldFireAt(now) && !item.isApproved) {
@@ -210,6 +372,13 @@ class AutopilotScheduler {
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');
 
+        _addActivityLogEntry(AutopilotActivityEntry(
+          timestamp: DateTime.now(),
+          type: ActivityEntryType.patternApplied,
+          source: item.trigger.name,
+          message: '${item.patternName} applied — ${item.reason}',
+        ));
+
         // Mark as applied in the schedule
         final index = _activeSchedule.indexWhere((s) => s.id == item.id);
         if (index >= 0) {
@@ -225,6 +394,123 @@ class AutopilotScheduler {
       debugPrint('AutopilotScheduler: Error applying pattern: $e');
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Proactive sports context evaluation
+  // ---------------------------------------------------------------------------
+
+  /// Evaluate whether any of the user's teams have an upcoming game and
+  /// proactively activate game mode.
+  ///
+  /// Called every ~5 minutes from the scheduling loop.
+  Future<void> _evaluateSportsContext(UserModel profile) async {
+    if (!profile.autoDetectGameDays) return;
+
+    final teams = profile.sportsTeamPriority.isNotEmpty
+        ? profile.sportsTeamPriority
+        : profile.sportsTeams;
+    if (teams.isEmpty) return;
+
+    final gameScheduleService = GameScheduleService();
+
+    try {
+      for (final teamSlug in teams) {
+        // Skip teams we've already activated this session
+        if (_activatedTeamSlugs.contains(teamSlug)) continue;
+
+        final teamInfo = kTeamColors[teamSlug];
+        if (teamInfo == null) continue;
+
+        final hasGame = await gameScheduleService.hasGameSoon(
+          teamInfo.espnTeamId,
+          teamInfo.sport,
+          minutes: 60,
+        );
+
+        if (hasGame) {
+          _activatedTeamSlugs.add(teamSlug);
+
+          _addActivityLogEntry(AutopilotActivityEntry(
+            timestamp: DateTime.now(),
+            type: ActivityEntryType.gameDetected,
+            source: 'evaluateSportsContext',
+            message:
+                '${teamInfo.teamName} game starting within 60 min — '
+                'activating game mode',
+            metadata: {'teamSlug': teamSlug, 'sport': teamInfo.sport.name},
+          ));
+
+          // Auto-activate the background score monitoring service
+          try {
+            await startSportsService();
+
+            _addActivityLogEntry(AutopilotActivityEntry(
+              timestamp: DateTime.now(),
+              type: ActivityEntryType.backgroundServiceActivated,
+              source: 'evaluateSportsContext',
+              message:
+                  'Sports monitoring auto-started for ${teamInfo.teamName}',
+            ));
+          } catch (e) {
+            debugPrint(
+              'AutopilotScheduler: Failed to start sports service: $e',
+            );
+          }
+
+          // Optionally shift to pre-game team colorway
+          if (profile.preGameLighting) {
+            await _applyPreGameColorway(teamInfo);
+          }
+
+          // One team at a time to avoid conflicts
+          break;
+        }
+      }
+    } catch (e) {
+      debugPrint('AutopilotScheduler: Sports context evaluation failed: $e');
+    } finally {
+      gameScheduleService.dispose();
+    }
+  }
+
+  /// Apply a subtle team-color baseline before the game starts.
+  Future<void> _applyPreGameColorway(TeamColors teamInfo) async {
+    final repo = _ref.read(wledRepositoryProvider);
+    if (repo == null) return;
+
+    final primary = AlertTriggerService.colorToRgbw(teamInfo.primary);
+    final secondary = AlertTriggerService.colorToRgbw(teamInfo.secondary);
+
+    final payload = <String, dynamic>{
+      'on': true,
+      'bri': 180,
+      'seg': [
+        {
+          'fx': 0, // Solid
+          'sx': 128,
+          'ix': 128,
+          'col': [primary, secondary, [0, 0, 0, 0]],
+        },
+      ],
+    };
+
+    try {
+      await repo.applyJson(payload);
+
+      _addActivityLogEntry(AutopilotActivityEntry(
+        timestamp: DateTime.now(),
+        type: ActivityEntryType.preGameLightingApplied,
+        source: 'evaluateSportsContext',
+        message: '${teamInfo.teamName} pre-game colorway applied',
+      ));
+    } catch (e) {
+      debugPrint('AutopilotScheduler: Failed to apply pre-game colorway: $e');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Suggestion handling
+  // ---------------------------------------------------------------------------
 
   /// Handle user approval of a suggestion.
   Future<void> approveSuggestion(String suggestionId) async {

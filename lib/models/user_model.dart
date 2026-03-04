@@ -130,8 +130,10 @@ class UserModel {
   // Remote Access configuration
   /// URL for cloud relay webhook (Dynamic DNS pointing to home network)
   final String? webhookUrl;
-  /// WiFi SSID of the user's home network (for detecting local vs remote)
+  /// WiFi SSID of the user's home network (decrypted, for display)
   final String? homeSsid;
+  /// SHA-256 hash of the home SSID (for comparison in ConnectivityService)
+  final String? homeSsidHash;
   /// Whether remote access via cloud relay is enabled
   final bool remoteAccessEnabled;
   /// Whether to use MQTT relay via Lumina Backend (vs Firestore/webhook)
@@ -168,6 +170,12 @@ class UserModel {
   final List<String> sportsTeamPriority;
   /// Whether to receive weekly schedule preview notifications (Sunday evenings)
   final bool weeklySchedulePreviewEnabled;
+  /// Whether autopilot should auto-detect game days and start monitoring
+  final bool autoDetectGameDays;
+  /// Whether to apply team colorway before game starts
+  final bool preGameLighting;
+  /// Whether score celebrations (LED animations) are enabled via autopilot
+  final bool scoreCelebrations;
 
   /// User's saved schedules for automation
   final List<ScheduleItem> schedules;
@@ -229,6 +237,7 @@ class UserModel {
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
+    this.homeSsidHash,
     this.remoteAccessEnabled = false,
     this.mqttRelayEnabled = false,
     String? luminaBackendUrl,
@@ -244,6 +253,9 @@ class UserModel {
     this.customHolidays = const [],
     List<String>? sportsTeamPriority,
     this.weeklySchedulePreviewEnabled = true,
+    this.autoDetectGameDays = true,
+    this.preGameLighting = true,
+    this.scoreCelebrations = true,
     this.schedules = const [],
     // Installation access control
     this.installationId,
@@ -323,6 +335,7 @@ class UserModel {
       dealerEmail: json['dealer_email'] as String?,
       webhookUrl: json['webhook_url'] as String?,
       homeSsid: json['home_ssid'] as String?,
+      homeSsidHash: json['home_ssid_hash'] as String?,
       remoteAccessEnabled: (json['remote_access_enabled'] as bool?) ?? false,
       mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
       luminaBackendUrl: json['lumina_backend_url'] as String?,
@@ -350,6 +363,9 @@ class UserModel {
               .toList() ??
           const [],
       weeklySchedulePreviewEnabled: (json['weekly_schedule_preview_enabled'] as bool?) ?? true,
+      autoDetectGameDays: (json['auto_detect_game_days'] as bool?) ?? true,
+      preGameLighting: (json['pre_game_lighting'] as bool?) ?? true,
+      scoreCelebrations: (json['score_celebrations'] as bool?) ?? true,
       schedules: (json['schedules'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map((e) => ScheduleItem.fromJson(e))
@@ -421,6 +437,7 @@ class UserModel {
       'dealer_email': dealerEmail,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
+      'home_ssid_hash': homeSsidHash,
       'remote_access_enabled': remoteAccessEnabled,
       'mqtt_relay_enabled': mqttRelayEnabled,
       'lumina_backend_url': luminaBackendUrl,
@@ -437,6 +454,9 @@ class UserModel {
       'custom_holidays': customHolidays.map((e) => e.toJson()).toList(),
       'sports_team_priority': sportsTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
+      'auto_detect_game_days': autoDetectGameDays,
+      'pre_game_lighting': preGameLighting,
+      'score_celebrations': scoreCelebrations,
       'schedules': schedules.map((e) => e.toJson()).toList(),
       // Installation access control
       if (installationId != null) 'installation_id': installationId,
@@ -483,6 +503,7 @@ class UserModel {
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
+    String? homeSsidHash,
     bool? remoteAccessEnabled,
     bool? mqttRelayEnabled,
     String? luminaBackendUrl,
@@ -498,6 +519,9 @@ class UserModel {
     List<CustomHoliday>? customHolidays,
     List<String>? sportsTeamPriority,
     bool? weeklySchedulePreviewEnabled,
+    bool? autoDetectGameDays,
+    bool? preGameLighting,
+    bool? scoreCelebrations,
     List<ScheduleItem>? schedules,
     // Installation access control
     String? installationId,
@@ -542,6 +566,7 @@ class UserModel {
       dealerEmail: dealerEmail ?? this.dealerEmail,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       homeSsid: homeSsid ?? this.homeSsid,
+      homeSsidHash: homeSsidHash ?? this.homeSsidHash,
       remoteAccessEnabled: remoteAccessEnabled ?? this.remoteAccessEnabled,
       mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
       luminaBackendUrl: luminaBackendUrl ?? this.luminaBackendUrl,
@@ -557,6 +582,9 @@ class UserModel {
       customHolidays: customHolidays ?? this.customHolidays,
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,
+      autoDetectGameDays: autoDetectGameDays ?? this.autoDetectGameDays,
+      preGameLighting: preGameLighting ?? this.preGameLighting,
+      scoreCelebrations: scoreCelebrations ?? this.scoreCelebrations,
       schedules: schedules ?? this.schedules,
       // Installation access control
       installationId: installationId ?? this.installationId,

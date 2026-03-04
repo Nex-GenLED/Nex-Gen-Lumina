@@ -256,25 +256,29 @@ class _ColorwayEffectSelectorPageState
                 ),
               ),
               // Open in full pattern editor
-              IconButton(
-                onPressed: () {
-                  final effectId = ref.read(selectorEffectIdProvider);
-                  final speed = ref.read(selectorSpeedProvider);
-                  final intensity = ref.read(selectorIntensityProvider);
-                  final pattern = EditablePattern.fromGradientColors(
-                    id: widget.paletteNode.id,
-                    name: widget.paletteNode.name,
-                    colors: _paletteColors,
-                    effectId: effectId,
-                    speed: speed,
-                    intensity: intensity,
-                  );
-                  context.push(AppRoutes.editPattern, extra: pattern);
-                },
-                icon: const Icon(Icons.tune, size: 20),
-                tooltip: 'Open in Pattern Editor',
-                style: IconButton.styleFrom(
-                  foregroundColor: NexGenPalette.textMedium,
+              SizedBox(
+                width: 44,
+                height: 44,
+                child: IconButton(
+                  onPressed: () {
+                    final effectId = ref.read(selectorEffectIdProvider);
+                    final speed = ref.read(selectorSpeedProvider);
+                    final intensity = ref.read(selectorIntensityProvider);
+                    final pattern = EditablePattern.fromGradientColors(
+                      id: widget.paletteNode.id,
+                      name: widget.paletteNode.name,
+                      colors: _paletteColors,
+                      effectId: effectId,
+                      speed: speed,
+                      intensity: intensity,
+                    );
+                    context.push(AppRoutes.editPattern, extra: pattern);
+                  },
+                  icon: const Icon(Icons.tune, size: 22),
+                  tooltip: 'Open in Pattern Editor',
+                  style: IconButton.styleFrom(
+                    foregroundColor: NexGenPalette.textMedium,
+                  ),
                 ),
               ),
               // Apply button
@@ -285,7 +289,9 @@ class _ColorwayEffectSelectorPageState
                 style: ElevatedButton.styleFrom(
                   backgroundColor: NexGenPalette.cyan,
                   foregroundColor: NexGenPalette.matteBlack,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -453,7 +459,7 @@ class _ColorwayEffectSelectorPageState
 
   Widget _buildMotionFilterRow(MotionType? selected) {
     return SizedBox(
-      height: 34,
+      height: 36,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -482,7 +488,7 @@ class _ColorwayEffectSelectorPageState
   Widget _buildColorFilterRow(ColorBehavior? selected) {
     // Simplified color behavior options - merge usesSelected + blends into "My Colors"
     return SizedBox(
-      height: 34,
+      height: 36,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -532,7 +538,8 @@ class _ColorwayEffectSelectorPageState
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        constraints: const BoxConstraints(minHeight: 36),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
               ? (subtle ? NexGenPalette.cyan.withValues(alpha: 0.15) : NexGenPalette.cyan.withValues(alpha: 0.2))

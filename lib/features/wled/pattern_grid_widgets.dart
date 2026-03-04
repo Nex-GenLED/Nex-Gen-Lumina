@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
+import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
 class LibraryNodeGrid extends StatelessWidget {
@@ -56,26 +57,27 @@ class LibraryNodeGrid extends StatelessWidget {
       );
     }
 
-    // Folders: 2-column grid with taller aspect ratio
+    // Folders: 2-column grid with hero cards
     return GridView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 2.8,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.1,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
+        // Staggered entrance: 60ms delay per card, fade + 20px slide up
         return TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
-          duration: Duration(milliseconds: 250 + (index * 40).clamp(0, 300)),
-          curve: Curves.easeOut,
+          duration: Duration(milliseconds: 400 + (index * 60).clamp(0, 480)),
+          curve: Curves.easeOutCubic,
           builder: (context, value, child) => Opacity(
-            opacity: value,
+            opacity: value.clamp(0.0, 1.0),
             child: Transform.translate(
-              offset: Offset(0, 8 * (1 - value)),
+              offset: Offset(0, 20 * (1 - value)),
               child: child,
             ),
           ),
@@ -420,101 +422,118 @@ class LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a compact horizontal folder card matching top-level category style
+  /// Build a subfolder card with gradient top area, color swatch dots, and info bottom
   Widget _buildFolderCard(BuildContext context) {
-    final heroIcon = _iconForNode();
-    final accentColor = _getFolderThemeColor();
     final gradientColors = _getGradientForNode();
+    final previewColors = node.themeColors ?? node.previewColors;
+    // Show up to 3 preview color dots
+    final dotColors = previewColors != null && previewColors.isNotEmpty
+        ? previewColors.take(3).toList()
+        : gradientColors;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': accentColor.toARGB32(),
-            'gradient0': gradientColors[0].toARGB32(),
-            'gradient1': gradientColors[1].toARGB32(),
-          });
-        },
-        borderRadius: BorderRadius.circular(12),
-        splashColor: accentColor.withValues(alpha: 0.08),
-        highlightColor: accentColor.withValues(alpha: 0.04),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                gradientColors[0].withValues(alpha: 0.12),
-                NexGenPalette.matteBlack.withValues(alpha: 0.98),
-              ],
-              stops: const [0.0, 1.0],
-            ),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: accentColor.withValues(alpha: 0.20),
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withValues(alpha: 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                // Icon circle with faint glow
-                Container(
-                  width: 32,
-                  height: 32,
+    return LuminaGlassCard(
+      glowColor: gradientColors.first,
+      glowIntensity: 0.2,
+      onTap: () {
+        final accentColor = _getFolderThemeColor();
+        context.push('/explore/library/${node.id}', extra: {
+          'name': node.name,
+          'accentColor': accentColor.toARGB32(),
+          'gradient0': gradientColors[0].toARGB32(),
+          'gradient1': gradientColors[1].toARGB32(),
+        });
+      },
+      child: Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top area — gradient with color swatch dots
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                child: Container(
+                  height: 80,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: accentColor.withValues(alpha: 0.12),
-                    border: Border.all(
-                      color: accentColor.withValues(alpha: 0.25),
-                      width: 0.5,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: gradientColors,
                     ),
                   ),
-                  child: Icon(
-                    heroIcon,
-                    size: 16,
-                    color: accentColor,
-                    shadows: [
-                      Shadow(
-                        color: accentColor.withValues(alpha: 0.5),
-                        blurRadius: 8,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Radial glow behind dots
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.15),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Color swatch dots
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (int i = 0; i < dotColors.length; i++) ...[
+                            if (i > 0) const SizedBox(width: 8),
+                            ColorSwatchDot(color: dotColors[i], size: 22),
+                          ],
+                        ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                // Folder name
-                Expanded(
-                  child: Text(
-                    node.name,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              ),
+              // Bottom area — name + count
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        node.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        node.isPalette ? 'Color theme' : 'Tap to explore',
+                        style: TextStyle(
+                          color: ExploreDesignTokens.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: accentColor.withValues(alpha: 0.4),
-                  size: 10,
-                ),
-              ],
+              ),
+            ],
+          ),
+          // Subtle chevron indicator bottom-right
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: Icon(
+              Icons.chevron_right,
+              size: 16,
+              color: Colors.white.withValues(alpha: 0.3),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -714,6 +733,10 @@ class PalettePatternGrid extends ConsumerWidget {
                               onPressed: () {
                                 ref.read(selectedMoodFilterProvider.notifier).state = null;
                               },
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 56),
+                                textStyle: const TextStyle(fontSize: 15),
+                              ),
                               child: const Text('Show All Patterns'),
                             ),
                           ],
@@ -738,7 +761,7 @@ class PalettePatternGrid extends ConsumerWidget {
           ],
         );
       },
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const ExploreShimmerGrid(crossAxisCount: 4, itemCount: 8, childAspectRatio: 0.85),
       error: (_, __) => Center(
         child: Text(
           'Unable to load patterns',
@@ -825,6 +848,7 @@ class _MoodChip extends StatelessWidget {
       onTap: count > 0 || isSelected ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
+        constraints: const BoxConstraints(minHeight: 36),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
@@ -992,7 +1016,8 @@ class _GlobalMoodChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        constraints: const BoxConstraints(minHeight: 36),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
               ? color.withValues(alpha: 0.2)

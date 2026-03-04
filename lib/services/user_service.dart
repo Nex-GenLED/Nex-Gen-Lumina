@@ -476,8 +476,17 @@ class UserService {
       final updates = <String, dynamic>{
         'updated_at': FieldValue.serverTimestamp(),
       };
-      if (webhookUrl != null) updates['webhook_url'] = webhookUrl;
-      if (homeSsid != null) updates['home_ssid'] = homeSsid;
+      // SECURITY: Encrypt webhook URL before storing
+      if (webhookUrl != null) {
+        updates['webhook_url_encrypted'] =
+            EncryptionService.encryptString(webhookUrl);
+      }
+      // SECURITY: Store both encrypted SSID (for display) and hash (for comparison)
+      if (homeSsid != null) {
+        updates['home_ssid_encrypted'] =
+            EncryptionService.encryptString(homeSsid);
+        updates['home_ssid_hash'] = EncryptionService.hashSsid(homeSsid);
+      }
       if (enabled != null) updates['remote_access_enabled'] = enabled;
 
       await _firestore.collection('users').doc(userId).update(updates);
@@ -492,10 +501,12 @@ class UserService {
   Future<void> saveHomeSsid(String userId, String ssid) async {
     try {
       await _firestore.collection('users').doc(userId).update({
-        'home_ssid': ssid,
+        // SECURITY: Encrypt for display recovery, hash for comparison
+        'home_ssid_encrypted': EncryptionService.encryptString(ssid),
+        'home_ssid_hash': EncryptionService.hashSsid(ssid),
         'updated_at': FieldValue.serverTimestamp(),
       });
-      debugPrint('✅ Home SSID saved: $ssid');
+      debugPrint('✅ Home SSID saved (encrypted + hashed)');
     } catch (e) {
       debugPrint('❌ saveHomeSsid failed: $e');
       rethrow;
@@ -520,6 +531,11 @@ class UserService {
   Future<void> clearRemoteAccessConfig(String userId) async {
     try {
       await _firestore.collection('users').doc(userId).update({
+        // Delete encrypted fields (current format)
+        'webhook_url_encrypted': FieldValue.delete(),
+        'home_ssid_encrypted': FieldValue.delete(),
+        'home_ssid_hash': FieldValue.delete(),
+        // Also clean up legacy plain-text fields if they exist
         'webhook_url': FieldValue.delete(),
         'home_ssid': FieldValue.delete(),
         'remote_access_enabled': false,

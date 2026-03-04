@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../../models/autopilot_override.dart';
+import '../../../services/autopilot_scheduler.dart';
 import '../../wled/wled_service.dart';
 import '../data/team_colors.dart';
 import '../models/score_alert_config.dart';
@@ -29,15 +31,25 @@ const _kNotificationDetails = NotificationDetails(
 /// Uses the existing [WledService] HTTP integration to send JSON payloads
 /// to the Dig-Octa / WLED controller. Captures the current zone state before
 /// each animation and restores it afterwards.
+///
+/// When an [AutopilotScheduler] is provided (i.e. autopilot is active), state
+/// capture and restoration are delegated to the scheduler via the override
+/// protocol. This prevents double-restore conflicts where both services try
+/// to reset the lights simultaneously.
 class AlertTriggerService {
   AlertTriggerService({
     required List<String> controllerIps,
     FlutterLocalNotificationsPlugin? notifications,
+    this.autopilotScheduler,
   })  : _controllerIps = controllerIps,
         _notifications = notifications ?? FlutterLocalNotificationsPlugin();
 
   final List<String> _controllerIps;
   final FlutterLocalNotificationsPlugin _notifications;
+
+  /// Optional reference to the autopilot scheduler for override coordination.
+  /// When non-null, state capture/restore is delegated to the scheduler.
+  final AutopilotScheduler? autopilotScheduler;
 
   /// Guard against overlapping animations on the same controller.
   bool _animationInProgress = false;
@@ -63,20 +75,64 @@ class AlertTriggerService {
     }
 
     _animationInProgress = true;
+    OverrideToken? token;
+
     try {
+      // Request override from autopilot if available
+      if (autopilotScheduler != null) {
+        final animDuration = animationDuration(event.eventType);
+        token = await autopilotScheduler!.requestOverride(
+          source: OverrideSource.sportsScoreAlert,
+          duration: animDuration,
+        );
+        // If override was denied (another override active), still proceed
+        // with the animation — we just won't get clean autopilot restore
+      }
+
       for (final ip in _controllerIps) {
         final svc = WledService('http://$ip');
         try {
-          final previousState = await _captureZoneState(svc);
+          // Only do our own capture/restore if autopilot is NOT managing it
+          final previousState =
+              (token == null) ? await _captureZoneState(svc) : <String, dynamic>{};
+
           await _applyAlertAnimation(event.eventType, teamColors, svc);
-          await _restoreZoneState(svc, previousState);
+
+          if (token == null) {
+            await _restoreZoneState(svc, previousState);
+          }
         } catch (e) {
           debugPrint('[AlertTrigger] Error on $ip: $e');
         }
       }
     } finally {
+      // Release override — autopilot restores state
+      if (token != null) {
+        await autopilotScheduler!.releaseOverride(token);
+      }
       _animationInProgress = false;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Animation duration helper
+  // ---------------------------------------------------------------------------
+
+  /// Calculate expected animation duration for each event type.
+  ///
+  /// Used by the override protocol to set the override window, and
+  /// available to the scheduler for pre-computing durations.
+  static Duration animationDuration(AlertEventType eventType) {
+    return switch (eventType) {
+      AlertEventType.touchdown || AlertEventType.goal =>
+        const Duration(seconds: 15),
+      AlertEventType.fieldGoal => const Duration(seconds: 8),
+      AlertEventType.safety => const Duration(seconds: 6),
+      AlertEventType.run => const Duration(seconds: 6),
+      AlertEventType.quarterEndWinning => const Duration(seconds: 10),
+      AlertEventType.clutchBasket => const Duration(seconds: 5),
+      AlertEventType.turnover => Duration.zero,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -192,7 +248,7 @@ class AlertTriggerService {
   /// Field Goal: 8s — Pulse/breathing in team primary (3 pulses).
   /// Breathe effect = ID 2 (Breathe) at moderate speed.
   Future<void> _animateFieldGoal(TeamColors team, WledService svc) async {
-    final primary = _colorToRgbw(team.primary);
+    final primary = colorToRgbw(team.primary);
 
     // Breathe effect ID 2 → actually WLED "Breathe" is fx 2 when
     // using the standard effect list; for pulse we use Breath (ID 2)
@@ -216,7 +272,7 @@ class AlertTriggerService {
   /// Safety: 6s — fast flash in team primary.
   /// Strobe effect (ID 23 = Strobe Mega) at max speed.
   Future<void> _animateSafety(TeamColors team, WledService svc) async {
-    final primary = _colorToRgbw(team.primary);
+    final primary = colorToRgbw(team.primary);
 
     await svc.applyJson({
       'on': true,
@@ -251,7 +307,7 @@ class AlertTriggerService {
 
   /// Quarter end winning: 10s — slow breathe in team primary.
   Future<void> _animateQuarterEnd(TeamColors team, WledService svc) async {
-    final primary = _colorToRgbw(team.primary);
+    final primary = colorToRgbw(team.primary);
 
     await svc.applyJson({
       'on': true,
@@ -271,7 +327,7 @@ class AlertTriggerService {
 
   /// Clutch basket: 5s — rapid flash in team primary.
   Future<void> _animateClutchBasket(TeamColors team, WledService svc) async {
-    final primary = _colorToRgbw(team.primary);
+    final primary = colorToRgbw(team.primary);
 
     await svc.applyJson({
       'on': true,
@@ -295,14 +351,16 @@ class AlertTriggerService {
 
   /// Build the WLED 3-slot color array: [primary, secondary, black].
   List<List<int>> _teamColorArray(TeamColors team) => [
-        _colorToRgbw(team.primary),
-        _colorToRgbw(team.secondary),
+        colorToRgbw(team.primary),
+        colorToRgbw(team.secondary),
         [0, 0, 0, 0],
       ];
 
   /// Convert a Flutter [Color] to RGBW with forceZeroWhite for saturated
   /// team colors (per project convention).
-  static List<int> _colorToRgbw(Color c) => rgbToRgbw(
+  ///
+  /// Public so the [AutopilotScheduler] can reuse for pre-game colorways.
+  static List<int> colorToRgbw(Color c) => rgbToRgbw(
         (c.r * 255.0).round().clamp(0, 255),
         (c.g * 255.0).round().clamp(0, 255),
         (c.b * 255.0).round().clamp(0, 255),

@@ -154,8 +154,10 @@ class EncryptionService {
       encrypted.remove('webhook_url'); // Remove plain text
     }
 
-    // Hash WiFi SSID (one-way - cannot be decrypted)
+    // Encrypt WiFi SSID for display recovery + hash for comparison
     if (userData['home_ssid'] != null) {
+      encrypted['home_ssid_encrypted'] =
+          encryptString(userData['home_ssid']);
       encrypted['home_ssid_hash'] = hashSsid(userData['home_ssid']);
       encrypted.remove('home_ssid'); // Remove plain text
     }
@@ -190,14 +192,21 @@ class EncryptionService {
       decrypted['webhook_url'] = userData['webhook_url'];
     }
 
-    // Note: home_ssid_hash stays as hash (cannot be decrypted)
-    // Use compareSsid() to check if current SSID matches
+    // Decrypt home SSID for display (stored encrypted alongside hash)
+    if (userData['home_ssid_encrypted'] != null) {
+      decrypted['home_ssid'] = decryptString(userData['home_ssid_encrypted']);
+      decrypted.remove('home_ssid_encrypted');
+    } else if (userData['home_ssid'] != null) {
+      // Backward compatibility: plain text SSID
+      decrypted['home_ssid'] = userData['home_ssid'];
+    }
+
+    // Keep hash for comparison (used by ConnectivityService)
     if (userData['home_ssid_hash'] != null) {
       decrypted['home_ssid_hash'] = userData['home_ssid_hash'];
-      decrypted.remove('home_ssid'); // Ensure plain text is not present
-    } else if (userData['home_ssid'] != null) {
-      // Backward compatibility: store hash for future
-      decrypted['home_ssid_hash'] = hashSsid(userData['home_ssid']);
+    } else if (decrypted['home_ssid'] != null) {
+      // Backward compatibility: compute hash from plain/decrypted SSID
+      decrypted['home_ssid_hash'] = hashSsid(decrypted['home_ssid']);
     }
 
     return decrypted;

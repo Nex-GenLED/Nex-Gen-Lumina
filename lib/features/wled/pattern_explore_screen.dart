@@ -5,10 +5,10 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/pattern_library_browser.dart';
 import 'package:nexgen_command/features/wled/pattern_category_detail.dart';
@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart' show showLuminaSheet;
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart' show LuminaSheetMode;
+import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 
 /// Helper to execute custom Lumina effects (ID >= 1000).
 /// Returns true if the effect was a custom effect and was executed.
@@ -142,14 +143,12 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
       orElse: () => ref.read(recommendedPatternsProvider), // Fallback to sync provider while loading
     );
     final profileAsync = ref.watch(currentUserProfileProvider);
-    String _greetingTitle() {
-      // Default title
+    String greetingTitle() {
       const fallback = 'Your Quick Picks';
       final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
       if (profile == null) return fallback;
       final name = profile.displayName.trim();
       if (name.isEmpty) return fallback;
-      // Use evening greeting when appropriate, otherwise fallback label
       final hour = DateTime.now().hour;
       if (hour >= 17 || hour < 5) {
         final first = name.split(' ').first;
@@ -158,89 +157,378 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
       return fallback;
     }
 
+    final categoriesAsync = ref.watch(patternCategoriesProvider);
+
     return Scaffold(
-      appBar: GlassAppBar(
-        title: const Text('Explore Patterns'),
-        actions: [
-          IconButton(
-            onPressed: () => context.push('/explore/scenes'),
-            icon: const Icon(Icons.layers_outlined),
-            tooltip: 'My Scenes',
+      backgroundColor: ExploreDesignTokens.backgroundBase,
+      body: Stack(
+        children: [
+          // Subtle radial gradient background
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(-0.3, -0.6),
+                  radius: 0.8,
+                  colors: [Color(0xFF1A1A2E), Color(0xFF080810)],
+                ),
+              ),
+            ),
+          ),
+          // Main content
+          Column(
+            children: [
+              // Transparent AppBar
+              AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                title: const Text(
+                  'Explore Patterns',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 22,
+                  ),
+                ),
+                actions: [
+                  IconButton(
+                    onPressed: () => context.push('/explore/scenes'),
+                    icon: const Icon(Icons.layers_outlined, color: Colors.white),
+                    tooltip: 'My Scenes',
+                  ),
+                  IconButton(
+                    onPressed: () {},
+                    icon: Icon(Icons.search, color: ExploreDesignTokens.textSecondary),
+                    tooltip: 'Search',
+                  ),
+                ],
+              ),
+              // Search bar + channel selector
+              pagePadding(
+                child: _LuminaAISearchBar(
+                  controller: _searchController,
+                  onSubmitted: _handleSearch,
+                  onClear: () => _handleSearch(''),
+                ),
+              ),
+              const SizedBox(height: 8),
+              pagePadding(child: const ChannelSelectorBar()),
+              const SizedBox(height: 8),
+              // Conditional rendering based on search state
+              if (_isSearching)
+                Expanded(
+                  child: Column(
+                    children: [
+                      const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                      const SizedBox(height: 8),
+                      Text('Searching design library...', style: TextStyle(color: ExploreDesignTokens.textSecondary)),
+                    ],
+                  ),
+                )
+              else if (_hasSearched)
+                Expanded(
+                  child: (_searchResults == null || !_searchResults!.hasResults)
+                      ? _NoMatchRedirectWidget(
+                          query: _currentQuery,
+                          onClearSearch: () {
+                            _searchController.clear();
+                            _handleSearch('');
+                          },
+                          onLuminaTap: () => showLuminaSheet(context, ref, mode: LuminaSheetMode.compact),
+                        )
+                      : _LibrarySearchResultsView(
+                          results: _searchResults!,
+                          query: _currentQuery,
+                        ),
+                )
+              else
+                // Default explore content (no active search)
+                Expanded(
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      // 1. My Saved Designs section
+                      SliverToBoxAdapter(
+                        child: pagePadding(child: const MySavedDesignsSection()),
+                      ),
+
+                      // 2. Your Quick Picks section
+                      SliverToBoxAdapter(
+                        child: pagePadding(
+                          child: PatternCategoryRow(title: greetingTitle(), patterns: recs, query: '', isFeatured: true),
+                        ),
+                      ),
+                      const SliverToBoxAdapter(child: SizedBox(height: 24)),
+
+                      // 3. Recent Patterns section
+                      SliverToBoxAdapter(
+                        child: pagePadding(child: const RecentPatternsSection()),
+                      ),
+
+                      // 4. Pinned Categories section
+                      SliverToBoxAdapter(
+                        child: pagePadding(child: const PinnedCategoriesSection()),
+                      ),
+
+                      // 5. Browse Design Library header
+                      SliverToBoxAdapter(
+                        child: pagePadding(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: SectionHeader(
+                              title: 'Browse Design Library',
+                              subtitle: 'Explore all categories',
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 6. Folder grid
+                      categoriesAsync.when(
+                        data: (categories) => SliverPadding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          sliver: SliverGrid(
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.85,
+                            ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) => _FolderHeroCard(
+                                category: categories[index],
+                                index: index,
+                              ),
+                              childCount: categories.length,
+                            ),
+                          ),
+                        ),
+                        loading: () => const SliverToBoxAdapter(
+                          child: ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                        ),
+                        error: (_, __) => SliverToBoxAdapter(
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'Unable to load categories',
+                                style: TextStyle(color: ExploreDesignTokens.textSecondary),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Bottom padding
+                      const SliverToBoxAdapter(child: SizedBox(height: 120)),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          pagePadding(
-            child: _LuminaAISearchBar(
-              controller: _searchController,
-              onSubmitted: _handleSearch,
-              onClear: () => _handleSearch(''),
-            ),
+    );
+  }
+}
+
+// ── Folder gradient color map (matches category names) ──
+
+const Map<String, List<Color>> _folderGradients = {
+  'architectural downlighting (white)': [Color(0xFFE0E0E0), Color(0xFF90CAF9)],
+  'holidays':          [Color(0xFFFF5252), Color(0xFF69F0AE)],
+  'game day fan zone': [Color(0xFFFF6D00), Color(0xFF2979FF)],
+  'seasonal vibes':    [Color(0xFFFFB300), Color(0xFFFF6F00)],
+  'parties & events':  [Color(0xFFE040FB), Color(0xFFFF4081)],
+  'movies & superheroes': [Color(0xFF7B61FF), Color(0xFFFF4081)],
+  'security & alerts': [Color(0xFFFF1744), Color(0xFFFF6F00)],
+  'nature & outdoors': [Color(0xFF43A047), Color(0xFF80DEEA)],
+  'solid colors':      [Color(0xFF4FC3F7), Color(0xFF7B61FF)],
+  'effects':           [Color(0xFFCE93D8), Color(0xFFFF4081)],
+  'favorites':         [Color(0xFFFF4081), Color(0xFFF50057)],
+};
+
+const List<Color> _defaultFolderGradient = [Color(0xFF4FC3F7), Color(0xFFCE93D8)];
+
+List<Color> _gradientForFolder(String name) {
+  return _folderGradients[name.toLowerCase().trim()] ?? _defaultFolderGradient;
+}
+
+const Map<String, String> _folderEmojis = {
+  'architectural downlighting (white)': '🏛️',
+  'holidays':          '🎄',
+  'game day fan zone': '🏆',
+  'seasonal vibes':    '🍂',
+  'parties & events':  '🎉',
+  'movies & superheroes': '🎬',
+  'security & alerts': '🔐',
+  'nature & outdoors': '🌿',
+  'solid colors':      '🎨',
+  'effects':           '✨',
+  'favorites':         '❤️',
+};
+
+String _emojiForFolder(String name) {
+  return _folderEmojis[name.toLowerCase().trim()] ?? '✨';
+}
+
+// ── FolderHeroCard ──
+
+class _FolderHeroCard extends StatefulWidget {
+  final PatternCategory category;
+  final int index;
+
+  const _FolderHeroCard({required this.category, required this.index});
+
+  @override
+  State<_FolderHeroCard> createState() => _FolderHeroCardState();
+}
+
+class _FolderHeroCardState extends State<_FolderHeroCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gradientColors = _gradientForFolder(widget.category.name);
+    final emoji = _emojiForFolder(widget.category.name);
+
+    // Staggered entrance animation: 60ms delay per card
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: Duration(milliseconds: 400 + widget.index * 60),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(0, 20 * (1 - value)),
+            child: child,
           ),
-          const SizedBox(height: 8),
-          // Channel/Area selector — lets user choose which areas receive patterns
-          pagePadding(child: const ChannelSelectorBar()),
-          const SizedBox(height: 8),
-          // Conditional rendering based on search state
-          if (_isSearching)
-            Expanded(
-              child: Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const CircularProgressIndicator(strokeWidth: 2),
-                  const SizedBox(height: 12),
-                  Text('Searching design library...', style: Theme.of(context).textTheme.bodyLarge),
-                ]),
-              ),
-            )
-          else if (_hasSearched)
-            Expanded(
-              child: (_searchResults == null || !_searchResults!.hasResults)
-                  ? _NoMatchRedirectWidget(
-                      query: _currentQuery,
-                      onClearSearch: () {
-                        _searchController.clear();
-                        _handleSearch('');
-                      },
-                      onLuminaTap: () => showLuminaSheet(context, ref, mode: LuminaSheetMode.compact),
-                    )
-                  : _LibrarySearchResultsView(
-                      results: _searchResults!,
-                      query: _currentQuery,
+        );
+      },
+      child: LuminaGlassCard(
+        glowColor: gradientColors[0],
+        glowIntensity: 0.2,
+        onTap: () {
+          context.push(
+            '/explore/library/${widget.category.id}',
+            extra: {'name': widget.category.name},
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // TOP HALF — gradient hero area
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              child: SizedBox(
+                height: 110,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Gradient background
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: gradientColors,
+                        ),
+                      ),
                     ),
-            )
-          else
-            // Default explore content (no active search)
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 120),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // 1. My Saved Designs section (at top)
-                  pagePadding(child: const MySavedDesignsSection()),
-
-                  // 2. Your Quick Picks section
-                  pagePadding(
-                    child: PatternCategoryRow(title: _greetingTitle(), patterns: recs, query: '', isFeatured: true),
-                  ),
-                  gap(24),
-
-                  // 3. Recent Patterns section
-                  pagePadding(child: const RecentPatternsSection()),
-
-                  // 4. Pinned Categories section (user-added folders, in order added)
-                  pagePadding(child: const PinnedCategoriesSection()),
-
-                  // 5. Browse Design Library section (at bottom)
-                  pagePadding(
-                    child: DesignLibraryBrowser(),
-                  ),
-                  gap(28),
-                ]),
+                    // Shimmer sweep
+                    AnimatedBuilder(
+                      animation: _shimmerController,
+                      builder: (context, _) {
+                        return ShaderMask(
+                          shaderCallback: (bounds) {
+                            final sweep = _shimmerController.value * 2 - 0.5;
+                            return LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: const [
+                                Color(0x00FFFFFF),
+                                Color(0x4DFFFFFF), // 30% white
+                                Color(0x00FFFFFF),
+                              ],
+                              stops: [
+                                (sweep - 0.3).clamp(0.0, 1.0),
+                                sweep.clamp(0.0, 1.0),
+                                (sweep + 0.3).clamp(0.0, 1.0),
+                              ],
+                            ).createShader(bounds);
+                          },
+                          blendMode: BlendMode.srcATop,
+                          child: Container(color: Colors.white),
+                        );
+                      },
+                    ),
+                    // Centered emoji
+                    Center(
+                      child: Text(
+                        emoji,
+                        style: const TextStyle(fontSize: 44),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-        ]),
+            // BOTTOM HALF — info area
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      widget.category.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0x26FFFFFF), // 15% white
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Tap to explore',
+                        style: TextStyle(
+                          color: ExploreDesignTokens.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -330,33 +618,33 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
           // Show clear button when text is present
           if (_hasText) ...[
             InkWell(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(22),
               onTap: _handleClear,
               child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
                   color: Colors.white24,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.close, color: Colors.white70, size: 18),
+                child: const Icon(Icons.close, color: Colors.white70, size: 22),
               ),
             ),
             const SizedBox(width: 8),
           ],
           InkWell(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(22),
             onTap: () {
               _debounceTimer?.cancel();
               widget.onSubmitted(widget.controller.text);
             },
             child: Container(
-              width: 32,
-              height: 32,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(color: NexGenPalette.cyan, shape: BoxShape.circle, boxShadow: [
                 BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 2)),
               ]),
-              child: const Icon(Icons.send, color: Colors.black, size: 18),
+              child: const Icon(Icons.send, color: Colors.black, size: 22),
             ),
           ),
         ]),
@@ -449,6 +737,10 @@ class _NoMatchRedirectWidget extends StatelessWidget {
           // Clear search link
           TextButton(
             onPressed: onClearSearch,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(double.infinity, 56),
+              textStyle: const TextStyle(fontSize: 15),
+            ),
             child: Text(
               'Or browse our existing designs',
               style: TextStyle(color: NexGenPalette.textSecondary),
@@ -520,7 +812,9 @@ class _RedirectOptionCard extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: iconColor.withValues(alpha: 0.2),
                 foregroundColor: iconColor,
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                minimumSize: const Size(double.infinity, 56),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum AutopilotTrigger {
   holiday,
   gameDay,
+  sportsScoreAlert,
   sunset,
   sunrise,
   weeknight,
@@ -268,6 +269,8 @@ extension AutopilotTriggerExtension on AutopilotTrigger {
         return 'Holiday';
       case AutopilotTrigger.gameDay:
         return 'Game Day';
+      case AutopilotTrigger.sportsScoreAlert:
+        return 'Score Alert';
       case AutopilotTrigger.sunset:
         return 'Sunset';
       case AutopilotTrigger.sunrise:
@@ -291,6 +294,8 @@ extension AutopilotTriggerExtension on AutopilotTrigger {
         return '🎉';
       case AutopilotTrigger.gameDay:
         return '🏈';
+      case AutopilotTrigger.sportsScoreAlert:
+        return '🚨';
       case AutopilotTrigger.sunset:
         return '🌅';
       case AutopilotTrigger.sunrise:
