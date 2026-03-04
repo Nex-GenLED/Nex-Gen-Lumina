@@ -9,7 +9,6 @@ import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/sports_schedule_service.dart';
-import 'package:nexgen_command/services/big_event_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
@@ -18,36 +17,7 @@ import 'package:nexgen_command/models/usage_analytics_models.dart';
 /// For now we use an in-memory mock; can be swapped to Firestore later.
 final patternRepositoryProvider = Provider<PatternRepository>((ref) {
   final repo = PatternRepository();
-
-  // Watch big events and update repository when they change
-  ref.listen(upcomingBigEventsProvider, (previous, next) {
-    next.whenData((events) {
-      repo.updateBigEventNodes(events);
-      debugPrint('patternRepositoryProvider: Big events updated - ${events.length} events');
-    });
-  });
-
-  // Initial sync - try to get current events
-  final eventsAsync = ref.read(upcomingBigEventsProvider);
-  eventsAsync.whenData((events) {
-    repo.updateBigEventNodes(events);
-  });
-
   return repo;
-});
-
-/// Provider to force a refresh of big events (e.g., on app resume or manual refresh).
-/// Call ref.invalidate(bigEventRefreshTriggerProvider) to trigger a refresh.
-final bigEventRefreshTriggerProvider = FutureProvider<void>((ref) async {
-  final service = ref.watch(bigEventServiceProvider);
-
-  // Check if refresh is needed (Sunday 9pm logic)
-  final needsRefresh = await service.needsRefresh();
-  if (needsRefresh) {
-    debugPrint('bigEventRefreshTriggerProvider: Refresh needed, invalidating events');
-    ref.invalidate(upcomingBigEventsProvider);
-    await service.markRefreshed();
-  }
 });
 
 /// Loads all pattern categories (folders)
@@ -1124,19 +1094,7 @@ String _formatUsageTime(DateTime time) {
 
 /// Provider to get child nodes of a parent node in the library hierarchy.
 /// Pass null for parentId to get root categories.
-///
-/// Automatically checks for big event refreshes when accessing the
-/// Game Day Fan Zone category (cat_sports).
 final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, String?>((ref, parentId) async {
-  // Trigger big event refresh check when accessing sports category
-  if (parentId == LibraryCategoryIds.sports || parentId == null) {
-    try {
-      await ref.read(bigEventRefreshTriggerProvider.future);
-    } catch (e) {
-      debugPrint('libraryChildNodesProvider: Big event refresh check failed: $e');
-    }
-  }
-
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getChildNodes(parentId);
 });

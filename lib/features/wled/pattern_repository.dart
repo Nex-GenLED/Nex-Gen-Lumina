@@ -5,14 +5,12 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/sports_library_builder.dart';
-import 'package:nexgen_command/features/wled/big_event_library_builder.dart';
 import 'package:nexgen_command/data/holiday_palettes.dart';
 import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
 import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
-import 'package:nexgen_command/services/big_event_service.dart';
 import 'package:flutter/material.dart';
 
 /// In-memory data source for the Pattern Library.
@@ -20,25 +18,8 @@ import 'package:flutter/material.dart';
 class PatternRepository {
   PatternRepository();
 
-  /// Dynamic big event nodes that can be updated at runtime
-  List<LibraryNode> _bigEventNodes = [];
-
   /// Dynamic My Teams nodes based on user profile
   List<LibraryNode> _myTeamsNodes = [];
-
-  /// Update the big event nodes (called when events change)
-  void updateBigEventNodes(List<BigEvent> events) {
-    _bigEventNodes = BigEventLibraryBuilder.buildBigEventHierarchy(events);
-    // Clear cache to force rebuild with new events
-    _cachedNodes = null;
-    debugPrint('PatternRepository: Updated big event nodes with ${events.length} events');
-  }
-
-  /// Clear big event nodes (e.g., when no events are upcoming)
-  void clearBigEventNodes() {
-    _bigEventNodes = [];
-    _cachedNodes = null;
-  }
 
   /// Update My Teams based on user's saved team preferences.
   /// Call this when user profile loads or when sportsTeams changes.
@@ -673,11 +654,6 @@ class PatternRepository {
 
     // Root categories
     nodes.addAll(_buildRootCategories());
-
-    // Big Events (dynamic - appears first in Game Day Fan Zone if active)
-    if (_bigEventNodes.isNotEmpty) {
-      nodes.addAll(_bigEventNodes);
-    }
 
     // My Teams folder (always present, palettes added dynamically based on user profile)
     nodes.add(SportsLibraryBuilder.getMyTeamsFolder());
