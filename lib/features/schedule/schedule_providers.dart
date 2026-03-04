@@ -24,6 +24,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   final Ref _ref;
   bool _initialized = false;
 
+  /// Guard flag: while a local mutation is being persisted to Firestore,
+  /// suppress stream-listener overwrites to prevent flash-back-to-old-data.
+  bool _isMutating = false;
+
   SchedulesNotifier(this._ref) : super([]) {
     _init();
   }
@@ -34,7 +38,9 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       userSchedulesStreamProvider,
       (previous, next) {
         next.whenData((schedules) {
-          if (!_initialized || state != schedules) {
+          // Skip stream updates while a local mutation is in-flight
+          if (_isMutating) return;
+          if (!_initialized || !_listEquals(state, schedules)) {
             state = schedules;
             _initialized = true;
             debugPrint('SchedulesNotifier: Loaded ${schedules.length} schedules from Firestore');
@@ -43,6 +49,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       },
       fireImmediately: true,
     );
+  }
+
+  /// Deep-compare two schedule lists by ID and enabled state.
+  static bool _listEquals(List<ScheduleItem> a, List<ScheduleItem> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].enabled != b[i].enabled) return false;
+    }
+    return true;
   }
 
   String? get _userId {
@@ -60,6 +75,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return;
     }
 
+    _isMutating = true;
+
     // Optimistically update local state
     state = [
       for (final s in state)
@@ -73,6 +90,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('Schedule $id toggled to $value and saved');
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist toggle: $e');
+    } finally {
+      _isMutating = false;
     }
   }
 
@@ -83,6 +102,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Cannot add - no user signed in');
       return;
     }
+
+    _isMutating = true;
 
     // Optimistically update local state
     state = [...state, item];
@@ -95,6 +116,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Failed to persist add: $e');
       // Revert on failure
       state = state.where((s) => s.id != item.id).toList();
+    } finally {
+      _isMutating = false;
     }
   }
 
@@ -105,6 +128,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Cannot remove - no user signed in');
       return;
     }
+
+    _isMutating = true;
 
     // Store for potential revert
     final removed = state.firstWhere((s) => s.id == id, orElse: () => throw Exception('Not found'));
@@ -120,6 +145,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Failed to persist remove: $e');
       // Revert on failure
       state = [...state, removed];
+    } finally {
+      _isMutating = false;
     }
   }
 
@@ -130,6 +157,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Cannot update - no user signed in');
       return;
     }
+
+    _isMutating = true;
 
     // Store old value for potential revert
     final oldItem = state.firstWhere((s) => s.id == item.id, orElse: () => throw Exception('Not found'));
@@ -145,6 +174,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Failed to persist update: $e');
       // Revert on failure
       state = [for (final s in state) if (s.id == item.id) oldItem else s];
+    } finally {
+      _isMutating = false;
     }
   }
 
@@ -155,6 +186,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Cannot replace - no user signed in');
       return;
     }
+
+    _isMutating = true;
 
     // Store old state for potential revert
     final oldState = state;
@@ -170,6 +203,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Failed to persist replaceAll: $e');
       // Revert on failure
       state = oldState;
+    } finally {
+      _isMutating = false;
     }
   }
 
@@ -180,6 +215,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Cannot addAll - no user signed in');
       return;
     }
+
+    _isMutating = true;
 
     // Merge with existing, avoiding duplicates by ID
     final existingIds = state.map((s) => s.id).toSet();
@@ -197,6 +234,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist addAll: $e');
       state = oldState;
+    } finally {
+      _isMutating = false;
     }
   }
 }

@@ -59,33 +59,154 @@ class NightTrackBar extends StatelessWidget {
 
   Color _idealTextOn(Color bg) => bg.computeLuminance() > 0.5 ? Colors.black : Colors.white;
 
+  /// Tries to extract a color from WLED payload segment data.
+  /// Returns null if no usable color is found.
+  _PatternStyle? _styleFromPayload(Map<String, dynamic>? payload) {
+    if (payload == null) return null;
+
+    try {
+      // Look for segment colors: payload.seg[0].col[0] = [R, G, B] or [R, G, B, W]
+      final seg = payload['seg'];
+      if (seg == null) return null;
+
+      List? segments;
+      if (seg is List && seg.isNotEmpty) {
+        segments = seg;
+      } else {
+        return null;
+      }
+
+      final firstSeg = segments[0];
+      if (firstSeg is! Map) return null;
+
+      final cols = firstSeg['col'];
+      if (cols is! List || cols.isEmpty) return null;
+
+      // Extract up to 3 colors from the segment
+      final colors = <Color>[];
+      for (final col in cols) {
+        if (col is List && col.length >= 3) {
+          final r = (col[0] as num).toInt().clamp(0, 255);
+          final g = (col[1] as num).toInt().clamp(0, 255);
+          final b = (col[2] as num).toInt().clamp(0, 255);
+          final color = Color.fromARGB(255, r, g, b);
+          // Skip pure black (off) colors
+          if (r > 5 || g > 5 || b > 5) {
+            colors.add(color);
+          }
+        }
+      }
+
+      if (colors.isEmpty) return null;
+
+      if (colors.length == 1) {
+        return _PatternStyle(color: colors[0], textColor: _idealTextOn(colors[0]));
+      }
+
+      // Multiple colors - create gradient
+      return _PatternStyle(
+        gradient: LinearGradient(colors: colors),
+        textColor: Colors.white,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   _PatternStyle _styleForPattern(String name) {
     final lower = name.toLowerCase();
+
+    // Candy cane
     if (lower.contains('candy') || lower.contains('cane')) {
       return const _PatternStyle(
         gradient: LinearGradient(colors: [Colors.red, Colors.white, Colors.red, Colors.white, Colors.red], stops: [0.0, 0.25, 0.5, 0.75, 1.0]),
         textColor: Colors.white,
       );
     }
+    // Sports teams
     if (lower.contains('chiefs')) {
       return const _PatternStyle(gradient: LinearGradient(colors: [Colors.red, Colors.amber]), textColor: Colors.white);
+    }
+    if (lower.contains('royals')) {
+      return const _PatternStyle(gradient: LinearGradient(colors: [Color(0xFF004687), Color(0xFFC09A5B)]), textColor: Colors.white);
+    }
+    // White variants
+    if (lower.contains('bright white') || lower.contains('pure white')) {
+      return const _PatternStyle(color: Color(0xFFF5F5F5), textColor: Colors.black87);
+    }
+    if (lower.contains('cool white') || lower.contains('cool')) {
+      return const _PatternStyle(color: Color(0xFFE0E8F0), textColor: Colors.black87);
     }
     if (lower.contains('warm white') || lower.contains('warm')) {
       final c = Colors.amber;
       return _PatternStyle(color: c, textColor: _idealTextOn(c));
     }
-    if (lower.contains('holiday')) {
+    // Holidays
+    if (lower.contains('christmas') || lower.contains('holiday')) {
       return const _PatternStyle(gradient: LinearGradient(colors: [Colors.red, Colors.green]), textColor: Colors.white);
     }
+    if (lower.contains('halloween') || lower.contains('spooky')) {
+      return const _PatternStyle(gradient: LinearGradient(colors: [Colors.orange, Colors.purple]), textColor: Colors.white);
+    }
+    if (lower.contains('valentine') || lower.contains('romantic')) {
+      return const _PatternStyle(gradient: LinearGradient(colors: [Colors.pink, Colors.red]), textColor: Colors.white);
+    }
+    if (lower.contains('patriot') || lower.contains('usa') || lower.contains('july')) {
+      return const _PatternStyle(gradient: LinearGradient(colors: [Colors.red, Colors.white, Colors.blue]), textColor: Colors.white);
+    }
+    // Basic colors
+    if (lower.contains('rainbow') || lower.contains('pride')) {
+      return const _PatternStyle(gradient: LinearGradient(colors: [Colors.red, Colors.orange, Colors.yellow, Colors.green, Colors.blue, Colors.purple]), textColor: Colors.white);
+    }
+    if (lower.contains('blue')) {
+      return const _PatternStyle(color: Colors.blue, textColor: Colors.white);
+    }
+    if (lower.contains('red')) {
+      return const _PatternStyle(color: Colors.red, textColor: Colors.white);
+    }
+    if (lower.contains('green')) {
+      return const _PatternStyle(color: Colors.green, textColor: Colors.white);
+    }
+    if (lower.contains('purple') || lower.contains('violet')) {
+      return const _PatternStyle(color: Colors.purple, textColor: Colors.white);
+    }
+    if (lower.contains('orange')) {
+      return const _PatternStyle(color: Colors.orange, textColor: Colors.white);
+    }
+    if (lower.contains('pink')) {
+      return const _PatternStyle(color: Colors.pink, textColor: Colors.white);
+    }
+    if (lower.contains('gold') || lower.contains('amber')) {
+      return _PatternStyle(color: Colors.amber.shade600, textColor: Colors.white);
+    }
+    if (lower.contains('white')) {
+      return const _PatternStyle(color: Color(0xFFF0F0F0), textColor: Colors.black87);
+    }
+    // Off / Turn off
     if (lower.contains('off') || lower.contains('turn off')) {
       return const _PatternStyle(color: NexGenPalette.trackDark, textColor: NexGenPalette.textHigh);
     }
+    if (lower.contains('turn on')) {
+      return _PatternStyle(color: Colors.amber.shade700, textColor: Colors.white);
+    }
+    // Brightness
     if (lower.contains('brightness')) {
-      // Brightness schedules - show as a warm amber tone
       return _PatternStyle(color: Colors.amber.shade700, textColor: Colors.white);
     }
     // Default to app accent gradient
     return _PatternStyle(gradient: LinearGradient(colors: [NexGenPalette.violet, NexGenPalette.cyan]), textColor: Colors.white);
+  }
+
+  /// Resolves the visual style for a schedule item.
+  /// Priority: wledPayload colors > pattern name match > default gradient.
+  _PatternStyle _styleFromItem(ScheduleItem item) {
+    // First try extracting colors from the WLED payload
+    final payloadStyle = _styleFromPayload(item.wledPayload);
+    if (payloadStyle != null) return payloadStyle;
+
+    // Fall back to pattern name matching
+    final patternName = _patternNameFromAction(item.actionLabel);
+    return _styleForPattern(patternName);
   }
 
   String _patternNameFromAction(String actionLabel) {
@@ -110,7 +231,7 @@ class NightTrackBar extends StatelessWidget {
           : 1.0; // Default to sunrise if no end time
 
       final patternName = _patternNameFromAction(item.actionLabel);
-      final style = _styleForPattern(patternName);
+      final style = _styleFromItem(item);
 
       segments.add(_ScheduleSegment(
         startPosition: startPos,

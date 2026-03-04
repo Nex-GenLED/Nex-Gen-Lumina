@@ -261,6 +261,12 @@ class AutopilotSettingsService {
       timeLabel = 'Sunrise';
     }
 
+    // Default off time: Sunrise for sunset-triggered, otherwise none
+    String? offTimeLabel;
+    if (item.trigger == AutopilotTrigger.sunset) {
+      offTimeLabel = 'Sunrise';
+    }
+
     // Format repeat days
     List<String> repeatDays = item.repeatDays;
     if (repeatDays.isEmpty) {
@@ -277,9 +283,11 @@ class AutopilotSettingsService {
     return ScheduleItem(
       id: 'autopilot-${item.id}',
       timeLabel: timeLabel,
+      offTimeLabel: offTimeLabel,
       repeatDays: repeatDays,
       actionLabel: actionLabel,
       enabled: true,
+      wledPayload: item.wledPayload,
     );
   }
 

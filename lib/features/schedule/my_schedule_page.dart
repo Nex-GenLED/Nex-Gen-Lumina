@@ -64,6 +64,56 @@ class MySchedulePage extends ConsumerWidget {
             const AutopilotSuggestionsCard(),
             const SizedBox(height: 16),
             _WeeklyAgendaLarge(sunAsync: sunAsync),
+            if (schedules.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: MajorSectionHeader(
+                      title: 'All Schedules',
+                      subtitle: '${schedules.length} total',
+                      icon: Icons.list_alt_rounded,
+                      iconColor: NexGenPalette.cyan,
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                  if (schedules.length > 5)
+                    TextButton.icon(
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: NexGenPalette.gunmetal90,
+                            title: const Text('Clear All Schedules?'),
+                            content: Text('This will delete all ${schedules.length} schedules. This cannot be undone.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                                style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                                child: const Text('Clear All'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed == true) {
+                          ref.read(schedulesProvider.notifier).replaceAll([]);
+                        }
+                      },
+                      icon: Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.red.shade400),
+                      label: Text('Clear All', style: TextStyle(color: Colors.red.shade400, fontSize: 12)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ...schedules.map((s) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ScheduleCard(item: s),
+              )),
+            ],
           ],
         ),
       ),
@@ -1257,9 +1307,15 @@ void showScheduleEditor(BuildContext context, WidgetRef ref, {int? preselectedDa
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: _ScheduleEditor(preselectedDayIndex: preselectedDayIndex, editing: editing),
+    builder: (_) => DraggableScrollableSheet(
+      initialChildSize: 0.92,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, scrollController) => _ScheduleEditor(
+        preselectedDayIndex: preselectedDayIndex,
+        editing: editing,
+        scrollController: scrollController,
+      ),
     ),
   );
 }
@@ -1357,7 +1413,8 @@ class _ScheduleCard extends ConsumerWidget {
 class _ScheduleEditor extends ConsumerStatefulWidget {
   final int? preselectedDayIndex; // 0..6 => S..S
   final ScheduleItem? editing;
-  const _ScheduleEditor({this.preselectedDayIndex, this.editing});
+  final ScrollController? scrollController;
+  const _ScheduleEditor({this.preselectedDayIndex, this.editing, this.scrollController});
   @override
   ConsumerState<_ScheduleEditor> createState() => _ScheduleEditorState();
 }
@@ -1390,8 +1447,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   @override
   void initState() {
     super.initState();
-    // Defaults
-    _selectedDays = {1, 3, 5};
+    // Defaults: all days (Daily) unless a specific day was preselected
+    _selectedDays = {0, 1, 2, 3, 4, 5, 6};
     _enabled = true;
     // If editing an existing item, hydrate state from it.
     final editing = widget.editing;
@@ -1487,11 +1544,12 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
           decoration: BoxDecoration(color: NexGenPalette.gunmetal90, border: Border(top: BorderSide(color: NexGenPalette.line)), boxShadow: [
             BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.06), blurRadius: 20),
           ]),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           child: SafeArea(
             top: false,
-            child: SingleChildScrollView(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            child: ListView(
+              controller: widget.scrollController,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
+              children: [
                 Row(children: [
                   Text(widget.editing == null ? 'New Schedule' : 'Edit Schedule', style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
@@ -1753,6 +1811,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       repeatDays: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
+                      wledPayload: widget.editing?.wledPayload,
+                      presetId: widget.editing?.presetId,
                     );
 
                     try {
@@ -1775,7 +1835,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   },
                   child: Text(widget.editing == null ? 'Save Schedule' : 'Update Schedule'),
                 ),
-              ]),
+              ],
             ),
           ),
         ),
