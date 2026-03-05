@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
+import 'neighborhood_sync_engine.dart';
 import 'widgets/member_position_list.dart';
 import 'widgets/neighborhood_onboarding.dart';
 import 'widgets/schedule_list.dart';
@@ -28,6 +29,10 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
   @override
   Widget build(BuildContext context) {
     final groupsAsync = ref.watch(userNeighborhoodsProvider);
+
+    // Activate the sync engine controller so this device listens for
+    // incoming sync commands when belonging to an active group.
+    ref.watch(syncEngineControllerProvider);
 
     return Scaffold(
       backgroundColor: Colors.black,

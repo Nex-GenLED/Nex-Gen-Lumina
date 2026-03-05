@@ -84,7 +84,9 @@ class LuminaBrain {
     }
 
     // TIER 0.5: Holiday / season / cultural event resolution
-    if (!isOpenEnded) {
+    // Always run this tier — even for "open-ended" queries like "give me a St. Patrick's
+    // Day design". The confidence threshold already filters out spurious matches.
+    {
       final holidayResult = HolidayColorDatabase.resolve(userPrompt);
       if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
         debugPrint('🎄 TIER 0.5: Resolved holiday: ${holidayResult.holiday!.name} '

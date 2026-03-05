@@ -131,8 +131,8 @@ class SportsTeamsDatabase {
       name: UnifiedTeamEntry.extractTeamName(entry.officialName, entry.city),
       league: entry.league,
       city: entry.city,
-      colors: entry.colors
-          .map((c) => Color.fromARGB(255, c.r, c.g, c.b))
+      colors: entry.ledOptimizedRgb
+          .map((rgb) => Color.fromARGB(255, rgb[0], rgb[1], rgb[2]))
           .toList(),
       nickname: _deriveNickname(entry),
     );

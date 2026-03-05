@@ -620,6 +620,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (_) => const _AutopilotSetupSheet(),
     );
@@ -833,15 +834,14 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
                       ),
                     ],
                     const Spacer(),
-                    if (autopilotEnabled)
-                      GestureDetector(
-                        onTap: () => _showAutopilotSetupDialog(context, ref),
-                        child: Icon(
-                          Icons.settings_outlined,
-                          color: NexGenPalette.textMedium,
-                          size: 18,
-                        ),
+                    GestureDetector(
+                      onTap: () => _showAutopilotSetupDialog(context, ref),
+                      child: Icon(
+                        Icons.settings_outlined,
+                        color: NexGenPalette.textMedium,
+                        size: 18,
                       ),
+                    ),
                     const SizedBox(width: 8),
                     Transform.scale(
                       scale: 0.8,
@@ -849,13 +849,11 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
                         value: autopilotEnabled,
                         activeColor: NexGenPalette.cyan,
                         onChanged: (value) async {
+                          final service = ref.read(autopilotSettingsServiceProvider);
                           if (value) {
-                            final confirmed = await _showAutopilotSetupDialog(context, ref);
-                            if (confirmed == true) {
-                              ref.read(autopilotSettingsServiceProvider).setEnabled(true);
-                            }
+                            await service.setEnabled(true);
                           } else {
-                            ref.read(autopilotSettingsServiceProvider).setEnabled(false);
+                            await service.setEnabled(false);
                           }
                         },
                       ),
@@ -927,19 +925,22 @@ class _AutopilotSetupSheetState extends ConsumerState<_AutopilotSetupSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90,
-            border: Border(top: BorderSide(color: NexGenPalette.line)),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-          child: SafeArea(
-            top: false,
+    final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: NexGenPalette.gunmetal90,
+              border: Border(top: BorderSide(color: NexGenPalette.line)),
+            ),
             child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 32 + bottomPadding),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -1119,36 +1120,20 @@ class _AutopilotSetupSheetState extends ConsumerState<_AutopilotSetupSheet> {
                   const SizedBox(height: 24),
 
                   // Action buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: NexGenPalette.textMedium,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: const Text('Cancel'),
-                        ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () async {
+                        await ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(_autonomyLevel);
+                        if (context.mounted) Navigator.of(context).pop(true);
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: NexGenPalette.cyan,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: FilledButton(
-                          onPressed: () {
-                            ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(_autonomyLevel);
-                            ref.read(autopilotSettingsServiceProvider).setEnabled(true);
-                            Navigator.of(context).pop(true);
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: NexGenPalette.cyan,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          child: const Text('Enable Autopilot'),
-                        ),
-                      ),
-                    ],
+                      child: const Text('Save Settings'),
+                    ),
                   ),
                 ],
               ),

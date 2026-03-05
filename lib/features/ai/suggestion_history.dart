@@ -37,10 +37,39 @@ class SuggestionHistoryService {
     RegExp(r'\bimpress\s+me\b', caseSensitive: false),
   ];
 
-  /// Checks if the query is open-ended and should receive varied responses
+  /// Keywords that indicate a specific theme, overriding open-ended detection.
+  /// e.g. "give me a St. Patrick's Day design" is NOT open-ended.
+  static final List<RegExp> _specificThemeIndicators = [
+    RegExp(r"(st\.?\s*patrick|saint\s*patrick|shamrock)", caseSensitive: false),
+    RegExp(r"(christmas|xmas|holiday\s+lights)", caseSensitive: false),
+    RegExp(r"(halloween|spooky|trick.or.treat)", caseSensitive: false),
+    RegExp(r"(valentine|romantic\s+heart)", caseSensitive: false),
+    RegExp(r"(easter|spring\s+pastel)", caseSensitive: false),
+    RegExp(r"(4th\s+of\s+july|independence\s+day|patriotic|america)", caseSensitive: false),
+    RegExp(r"(thanksgiving|harvest|autumn)", caseSensitive: false),
+    RegExp(r"(hanukkah|chanukah|diwali|kwanzaa)", caseSensitive: false),
+    RegExp(r"(new\s+year|nye)", caseSensitive: false),
+    RegExp(r"(mardi\s+gras|cinco\s+de\s+mayo|pride)", caseSensitive: false),
+    RegExp(r"(memorial\s+day|veterans?\s+day|labor\s+day)", caseSensitive: false),
+    RegExp(r"(cowboys|eagles|chiefs|packers|steelers|niners|49ers)", caseSensitive: false),
+    RegExp(r"(lakers|celtics|bulls|warriors|yankees|dodgers)", caseSensitive: false),
+    RegExp(r"(sunset|sunrise|ocean|forest|aurora|rainbow)", caseSensitive: false),
+  ];
+
+  /// Checks if the query is open-ended and should receive varied responses.
+  /// Returns false if the query names a specific theme/holiday/team even when
+  /// it matches a broad pattern like "give me a...".
   static bool isOpenEndedQuery(String query) {
     final normalized = query.toLowerCase().trim();
-    return _openEndedPatterns.any((pattern) => pattern.hasMatch(normalized));
+    final matchesOpenPattern = _openEndedPatterns.any((pattern) => pattern.hasMatch(normalized));
+    if (!matchesOpenPattern) return false;
+
+    // If the query also names a specific theme, it's not truly open-ended
+    if (_specificThemeIndicators.any((pattern) => pattern.hasMatch(normalized))) {
+      return false;
+    }
+
+    return true;
   }
 
   /// Records a suggestion in the history

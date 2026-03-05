@@ -398,6 +398,8 @@ class AutopilotSettingsService {
         ));
   }
 
+  /// Update only the changed profile fields, NOT the entire document.
+  /// This avoids overwriting the schedules array during concurrent writes.
   Future<void> _updateProfile(UserModel Function(UserModel) updater) async {
     final profileAsync = _ref.read(currentUserProfileProvider);
     final profile = profileAsync.maybeWhen(
@@ -407,8 +409,23 @@ class AutopilotSettingsService {
     if (profile == null) return;
 
     final updated = updater(profile);
+
+    // Diff the old vs new toJson to find only changed fields
+    final oldJson = profile.toJson();
+    final newJson = updated.toJson();
+    final changedFields = <String, dynamic>{};
+    for (final key in newJson.keys) {
+      // Skip the schedules field — managed by SchedulesNotifier
+      if (key == 'schedules') continue;
+      if (newJson[key] != oldJson[key]) {
+        changedFields[key] = newJson[key];
+      }
+    }
+
+    if (changedFields.isEmpty) return;
+
     final userService = _ref.read(userServiceProvider);
-    await userService.updateUser(updated);
+    await userService.updateUserProfile(profile.id, changedFields);
   }
 }
 

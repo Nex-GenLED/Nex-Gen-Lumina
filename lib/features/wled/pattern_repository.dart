@@ -257,7 +257,45 @@ class PatternRepository {
   static List<List<int>> _colorsToWledCol(List<Color> colors) {
     // WLED col expects up to 3 color slots; keep first 3 theme colors
     // Force W=0 to keep saturated colors accurate - WLED handles GRB conversion
-    return colors.take(3).map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList(growable: false);
+    // Also strip noise channels from dominant colors to prevent pink/magenta
+    // cast on LEDs (e.g., red with stray blue appears pink on RGBW strips).
+    return colors.take(3).map((c) {
+      final r = c.red;
+      final g = c.green;
+      final b = c.blue;
+      final cleaned = _cleanForLed(r, g, b);
+      return rgbToRgbw(cleaned[0], cleaned[1], cleaned[2], forceZeroWhite: true);
+    }).toList(growable: false);
+  }
+
+  /// Strip noise channels from LED-bound colors.
+  /// On RGBW strips, small stray values in non-dominant channels cause
+  /// visible color shifts (e.g., red + small blue = pink).
+  static List<int> _cleanForLed(int r, int g, int b) {
+    // White/near-white: pass through
+    if (r > 240 && g > 240 && b > 240) return [r, g, b];
+
+    const dominant = 150;
+    const noise = 60;
+
+    // Red-dominant: strip stray green/blue
+    if (r > dominant && g < r * 0.6 && b < r * 0.6) {
+      return [r, g > noise ? g : 0, b > noise ? b : 0];
+    }
+    // Green-dominant: strip stray red/blue
+    if (g > dominant && r < g * 0.5 && b < g * 0.5) {
+      return [0, g, 0];
+    }
+    // Blue-dominant: strip stray red, reduce green noise
+    if (b > 80 && b > r && b > g) {
+      return [0, g > noise ? g : 0, b < 150 ? (b * 1.7).round().clamp(0, 255) : b];
+    }
+    // Orange/amber (high red + medium green, no blue)
+    if (r > dominant && g > 60 && g < 220 && b < noise) {
+      return [r, g, 0];
+    }
+
+    return [r, g, b];
   }
 
   /// Generate pattern items for a given sub-category using its theme palette.
@@ -648,45 +686,79 @@ class PatternRepository {
     return _cachedNodes!;
   }
 
-  /// Build the complete library hierarchy from all data sources
+  /// Build the complete library hierarchy from all data sources.
+  /// Each data source is wrapped in try/catch so one failure doesn't break all categories.
   List<LibraryNode> _buildFullHierarchy() {
     final nodes = <LibraryNode>[];
 
-    // Root categories
+    // Root categories (always safe — static const data)
     nodes.addAll(_buildRootCategories());
 
-    // My Teams folder (always present, palettes added dynamically based on user profile)
-    nodes.add(SportsLibraryBuilder.getMyTeamsFolder());
-    if (_myTeamsNodes.isNotEmpty) {
-      nodes.addAll(_myTeamsNodes);
+    try {
+      // My Teams folder (always present, palettes added dynamically based on user profile)
+      nodes.add(SportsLibraryBuilder.getMyTeamsFolder());
+      if (_myTeamsNodes.isNotEmpty) {
+        nodes.addAll(_myTeamsNodes);
+      }
+    } catch (e) {
+      debugPrint('[PatternRepository] My Teams failed: $e');
     }
 
-    // Sports: leagues + teams + NCAA
-    nodes.addAll(SportsLibraryBuilder.buildFullSportsHierarchy());
+    try {
+      // Sports: leagues + teams + NCAA
+      nodes.addAll(SportsLibraryBuilder.buildFullSportsHierarchy());
+    } catch (e) {
+      debugPrint('[PatternRepository] Sports hierarchy failed: $e');
+    }
 
-    // Holidays: folders + palettes
-    nodes.addAll(HolidayPalettes.getHolidayFolders());
-    nodes.addAll(HolidayPalettes.getAllHolidayPaletteNodes());
+    try {
+      // Holidays: folders + palettes
+      nodes.addAll(HolidayPalettes.getHolidayFolders());
+      nodes.addAll(HolidayPalettes.getAllHolidayPaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Holidays failed: $e');
+    }
 
-    // Seasonal: folders + colorways
-    nodes.addAll(SeasonalColorways.getSeasonFolders());
-    nodes.addAll(SeasonalColorways.getAllSeasonalPaletteNodes());
+    try {
+      // Seasonal: folders + colorways
+      nodes.addAll(SeasonalColorways.getSeasonFolders());
+      nodes.addAll(SeasonalColorways.getAllSeasonalPaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Seasonal failed: $e');
+    }
 
-    // Parties & Events: folders + palettes
-    nodes.addAll(PartyEventPalettes.getEventFolders());
-    nodes.addAll(PartyEventPalettes.getAllEventPaletteNodes());
+    try {
+      // Parties & Events: folders + palettes
+      nodes.addAll(PartyEventPalettes.getEventFolders());
+      nodes.addAll(PartyEventPalettes.getAllEventPaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Parties & Events failed: $e');
+    }
 
-    // Movies & Superheroes: franchises + palettes
-    nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
-    nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
+    try {
+      // Movies & Superheroes: franchises + palettes
+      nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
+      nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Movies & Superheroes failed: $e');
+    }
 
-    // Nature & Outdoors: environments + palettes
-    nodes.addAll(NatureOutdoorsPalettes.getAllNatureFolders());
-    nodes.addAll(NatureOutdoorsPalettes.getAllNaturePaletteNodes());
+    try {
+      // Nature & Outdoors: environments + palettes
+      nodes.addAll(NatureOutdoorsPalettes.getAllNatureFolders());
+      nodes.addAll(NatureOutdoorsPalettes.getAllNaturePaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Nature & Outdoors failed: $e');
+    }
 
-    // Architectural & Security: direct palettes
-    nodes.addAll(_buildArchitecturalPalettes());
-    nodes.addAll(_buildSecurityPalettes());
+    try {
+      // Architectural & Security: direct palettes
+      nodes.addAll(_buildArchitecturalPalettes());
+      nodes.addAll(_buildSecurityPalettes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Architectural/Security failed: $e');
+    }
+
 
     return nodes;
   }
@@ -1014,7 +1086,6 @@ class PatternRepository {
   /// Get child nodes for any parent (null for root categories)
   Future<List<LibraryNode>> getChildNodes(String? parentId) async {
     if (parentId == null) {
-      // Return root categories
       return _allNodes
           .where((n) => n.nodeType == LibraryNodeType.category && n.parentId == null)
           .toList()

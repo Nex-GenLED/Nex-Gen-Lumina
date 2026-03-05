@@ -286,7 +286,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                               crossAxisCount: 2,
                               mainAxisSpacing: 12,
                               crossAxisSpacing: 12,
-                              childAspectRatio: 0.85,
+                              childAspectRatio: 1.4,
                             ),
                             delegate: SliverChildBuilderDelegate(
                               (context, index) => _FolderHeroCard(
@@ -368,44 +368,21 @@ String _emojiForFolder(String name) {
 
 // ── FolderHeroCard ──
 
-class _FolderHeroCard extends StatefulWidget {
+class _FolderHeroCard extends StatelessWidget {
   final PatternCategory category;
   final int index;
 
   const _FolderHeroCard({required this.category, required this.index});
 
   @override
-  State<_FolderHeroCard> createState() => _FolderHeroCardState();
-}
-
-class _FolderHeroCardState extends State<_FolderHeroCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _shimmerController;
-
-  @override
-  void initState() {
-    super.initState();
-    _shimmerController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _shimmerController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final gradientColors = _gradientForFolder(widget.category.name);
-    final emoji = _emojiForFolder(widget.category.name);
+    final gradientColors = _gradientForFolder(category.name);
+    final emoji = _emojiForFolder(category.name);
 
     // Staggered entrance animation: 60ms delay per card
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 400 + widget.index * 60),
+      duration: Duration(milliseconds: 400 + index * 60),
       curve: Curves.easeOutCubic,
       builder: (context, value, child) {
         return Opacity(
@@ -421,98 +398,86 @@ class _FolderHeroCardState extends State<_FolderHeroCard>
         glowIntensity: 0.2,
         onTap: () {
           context.push(
-            '/explore/library/${widget.category.id}',
-            extra: {'name': widget.category.name},
+            '/explore/library/${category.id}',
+            extra: {'name': category.name},
           );
         },
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // TOP HALF — gradient hero area
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              child: SizedBox(
-                height: 110,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Gradient background
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: gradientColors,
-                        ),
-                      ),
-                    ),
-                    // Shimmer sweep
-                    AnimatedBuilder(
-                      animation: _shimmerController,
-                      builder: (context, _) {
-                        return ShaderMask(
-                          shaderCallback: (bounds) {
-                            final sweep = _shimmerController.value * 2 - 0.5;
-                            return LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: const [
-                                Color(0x00FFFFFF),
-                                Color(0x4DFFFFFF), // 30% white
-                                Color(0x00FFFFFF),
-                              ],
-                              stops: [
-                                (sweep - 0.3).clamp(0.0, 1.0),
-                                sweep.clamp(0.0, 1.0),
-                                (sweep + 0.3).clamp(0.0, 1.0),
-                              ],
-                            ).createShader(bounds);
-                          },
-                          blendMode: BlendMode.srcATop,
-                          child: Container(color: Colors.white),
-                        );
-                      },
-                    ),
-                    // Centered emoji
-                    Center(
-                      child: Text(
-                        emoji,
-                        style: const TextStyle(fontSize: 44),
-                      ),
-                    ),
-                  ],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Full-bleed gradient background
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: gradientColors,
+                  ),
                 ),
               ),
-            ),
-            // BOTTOM HALF — info area
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              // Dark scrim at bottom for text legibility
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 56,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0x00000000),
+                        Color(0x66000000), // 40% black
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Emoji — upper center area
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Text(
+                    emoji,
+                    style: const TextStyle(fontSize: 32),
+                  ),
+                ),
+              ),
+              // Name + pill — bottom-left
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 12,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      widget.category.name,
+                      category.name,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
-                        fontSize: 15,
+                        fontSize: 14,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: const Color(0x26FFFFFF), // 15% white
+                        color: const Color(0x33000000), // 20% black
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
+                      child: const Text(
                         'Tap to explore',
                         style: TextStyle(
-                          color: ExploreDesignTokens.textSecondary,
+                          color: Color(0xCCFFFFFF), // 80% white
                           fontSize: 11,
                         ),
                       ),
@@ -520,8 +485,8 @@ class _FolderHeroCardState extends State<_FolderHeroCard>
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

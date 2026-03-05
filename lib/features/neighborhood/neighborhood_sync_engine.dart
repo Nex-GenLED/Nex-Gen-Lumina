@@ -94,7 +94,10 @@ class NeighborhoodSyncEngine {
 
     // Optionally reverse for right-to-left animation
     if (config.reverseDirection) {
-      sorted.reversed;
+      final reversed = sorted.reversed.toList();
+      sorted
+        ..clear()
+        ..addAll(reversed);
     }
 
     final delays = <String, int>{};
@@ -401,12 +404,16 @@ final syncEngineActiveProvider = StateProvider<bool>((ref) {
   return false;
 });
 
-/// Auto-start/stop sync engine based on active state.
+/// Auto-start/stop sync engine based on active state OR active group membership.
+///
+/// Must be watched somewhere in the widget tree (e.g., NeighborhoodSyncScreen)
+/// for the engine to start listening for incoming sync commands.
 final syncEngineControllerProvider = Provider<void>((ref) {
-  final isActive = ref.watch(syncEngineActiveProvider);
+  final manuallyActive = ref.watch(syncEngineActiveProvider);
+  final hasActiveGroup = ref.watch(isInActiveSyncProvider);
   final engine = ref.watch(neighborhoodSyncEngineProvider);
 
-  if (isActive) {
+  if (manuallyActive || hasActiveGroup) {
     engine.startListening();
   } else {
     engine.stopListening();

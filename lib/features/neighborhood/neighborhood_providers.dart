@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'neighborhood_models.dart';
@@ -393,17 +394,20 @@ final isGroupCreatorProvider = Provider<bool>((ref) {
   final group = ref.watch(activeNeighborhoodProvider).valueOrNull;
   if (group == null) return false;
 
-  // This would need to be compared with the current user's UID
-  // For now, we'll return true if the group exists (will be refined)
-  return true;
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  return uid != null && group.creatorUid == uid;
 });
 
 /// Provider to get the current user's member data in the active group.
 final currentUserMemberProvider = Provider<NeighborhoodMember?>((ref) {
   final members = ref.watch(neighborhoodMembersProvider).valueOrNull ?? [];
-  // Would need to filter by current user UID
-  // For now return first member as placeholder
-  return members.isNotEmpty ? members.first : null;
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null || members.isEmpty) return null;
+  try {
+    return members.firstWhere((m) => m.oderId == uid);
+  } catch (_) {
+    return null;
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

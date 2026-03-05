@@ -1911,7 +1911,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final s0 = Map<String, dynamic>.from(seg.first as Map);
-        s0['col'] = [[color.red, color.green, color.blue, 0]];
+        s0['col'] = [rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true)];
         payload['seg'] = [s0];
       }
       final channels = ref.read(effectiveChannelIdsProvider);

@@ -64,25 +64,12 @@ class LibraryNodeGrid extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.1,
+        childAspectRatio: 1.4,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        // Staggered entrance: 60ms delay per card, fade + 20px slide up
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: Duration(milliseconds: 400 + (index * 60).clamp(0, 480)),
-          curve: Curves.easeOutCubic,
-          builder: (context, value, child) => Opacity(
-            opacity: value.clamp(0.0, 1.0),
-            child: Transform.translate(
-              offset: Offset(0, 20 * (1 - value)),
-              child: child,
-            ),
-          ),
-          child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
-        );
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient);
       },
     );
   }
@@ -431,9 +418,7 @@ class LibraryNodeCard extends StatelessWidget {
         ? previewColors.take(3).toList()
         : gradientColors;
 
-    return LuminaGlassCard(
-      glowColor: gradientColors.first,
-      glowIntensity: 0.2,
+    return GestureDetector(
       onTap: () {
         final accentColor = _getFolderThemeColor();
         context.push('/explore/library/${node.id}', extra: {
@@ -443,97 +428,80 @@ class LibraryNodeCard extends StatelessWidget {
           'gradient1': gradientColors[1].toARGB32(),
         });
       },
-      child: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Top area — gradient with color swatch dots
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: gradientColors,
-                    ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: gradientColors.first.withValues(alpha: 0.4)),
+          color: const Color(0xFF1A1A2E),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Top area — gradient with color swatch dots
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              child: Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: gradientColors,
                   ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Radial glow behind dots
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: 0.15),
-                              Colors.transparent,
-                            ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (int i = 0; i < dotColors.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 6),
+                      ColorSwatchDot(color: dotColors[i], size: 16),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            // Bottom area — name + count
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      node.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          'Tap to explore',
+                          style: TextStyle(
+                            color: ExploreDesignTokens.textMuted,
+                            fontSize: 11,
                           ),
                         ),
-                      ),
-                      // Color swatch dots
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (int i = 0; i < dotColors.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 8),
-                            ColorSwatchDot(color: dotColors[i], size: 22),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
+                        const Spacer(),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: Colors.white.withValues(alpha: 0.3),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              // Bottom area — name + count
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        node.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        node.isPalette ? 'Color theme' : 'Tap to explore',
-                        style: TextStyle(
-                          color: ExploreDesignTokens.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // Subtle chevron indicator bottom-right
-          Positioned(
-            right: 8,
-            bottom: 8,
-            child: Icon(
-              Icons.chevron_right,
-              size: 16,
-              color: Colors.white.withValues(alpha: 0.3),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

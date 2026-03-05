@@ -335,7 +335,6 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     final displayName = widget.nodeName ?? nodeAsync.whenOrNull(data: (n) => n?.name) ?? 'Design Library';
     final folderTheme = getFolderTheme(displayName);
     final gradientColors = widget.parentGradient ?? folderTheme.gradientColors;
-    final emoji = folderTheme.emoji;
 
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
@@ -345,186 +344,86 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       },
       child: Scaffold(
         backgroundColor: ExploreDesignTokens.backgroundBase,
-        body: Stack(
-          children: [
-            // Radial gradient background (same as Level 1)
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment(-0.3, -0.6),
-                    radius: 0.8,
-                    colors: [Color(0xFF1A1A2E), Color(0xFF080810)],
-                  ),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF0E0E1A),
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+            onPressed: () => context.pop(),
+          ),
+          title: Text(
+            displayName,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20),
+            overflow: TextOverflow.ellipsis,
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(3),
+            child: Container(
+              height: 3,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradientColors.length >= 2
+                      ? gradientColors
+                      : [gradientColors.first, gradientColors.first.withValues(alpha: 0.4)],
                 ),
               ),
             ),
-            SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Transparent AppBar with back button
-                  AppBar(
-                    backgroundColor: Colors.transparent,
-                    elevation: 0,
-                    leading: IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-                      onPressed: () => context.pop(),
-                    ),
-                    title: Text(
-                      displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 20,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    bottom: PreferredSize(
-                      preferredSize: const Size.fromHeight(3),
-                      child: Container(
-                        height: 3,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: gradientColors.length >= 2
-                                ? gradientColors
-                                : [gradientColors.first, gradientColors.first.withValues(alpha: 0.4)],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Hero Banner with parallax
-                  ClipRect(
-                    child: SizedBox(
-                      height: 120,
-                      child: () {
-                        final clamp = _scrollOffset.clamp(0.0, 80.0);
-                        return Stack(
+          ),
+        ),
+        body: Column(
+          children: [
+            // Breadcrumb navigation
+            if (widget.nodeId != null)
+              ancestorsAsync.when(
+                data: (ancestors) {
+                  final crumbs = [
+                    'Library',
+                    ...ancestors.map((a) => a.name),
+                    if (widget.nodeName != null) widget.nodeName!,
+                  ];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: BreadcrumbTrail(crumbs: crumbs),
+                  );
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+            // Main content
+            Expanded(
+              child: childrenAsync.when(
+                data: (children) {
+                  return nodeAsync.when(
+                    data: (node) {
+                      if (node != null && node.isPalette) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && !_isPaletteView) {
+                            setState(() => _isPaletteView = true);
+                          }
+                        });
+                        return ColorwayEffectSelectorPage(paletteNode: node);
+                      }
+                      if (widget.nodeId == LibraryCategoryIds.architectural) {
+                        return Column(
                           children: [
-                            // Background gradient — 30% parallax
-                            Transform.translate(
-                              offset: Offset(0, -clamp * 0.3),
-                              child: Container(
-                                width: double.infinity,
-                                height: 160, // taller for parallax headroom
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: gradientColors.length >= 2
-                                        ? gradientColors
-                                        : [gradientColors.first, gradientColors.first.withValues(alpha: 0.4)],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // Frosted dark overlay
-                            Positioned.fill(
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [Colors.transparent, Color(0x40000000)],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // Centered emoji — 50% parallax
-                            Transform.translate(
-                              offset: Offset(0, -clamp * 0.5),
-                              child: Center(
-                                child: Text(
-                                  emoji,
-                                  style: const TextStyle(fontSize: 56),
-                                ),
-                              ),
-                            ),
-                            // Folder name — 50% parallax
-                            Positioned(
-                              left: 16,
-                              bottom: 12 + clamp * 0.5,
-                              child: Text(
-                                displayName,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 24,
-                                  shadows: [Shadow(color: Color(0x80000000), blurRadius: 8)],
-                                ),
-                              ),
-                            ),
+                            const _KelvinReferenceChart(),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
                           ],
                         );
-                      }(),
-                    ),
+                      }
+                      return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
+                    },
+                    loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
+                  );
+                },
+                loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                error: (err, __) => Center(
+                  child: Text(
+                    'Unable to load content',
+                    style: TextStyle(color: ExploreDesignTokens.textSecondary),
                   ),
-                  // Breadcrumb navigation
-                  if (widget.nodeId != null)
-                    ancestorsAsync.when(
-                      data: (ancestors) {
-                        final crumbs = [
-                          'Library',
-                          ...ancestors.map((a) => a.name),
-                          if (widget.nodeName != null) widget.nodeName!,
-                        ];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          child: BreadcrumbTrail(crumbs: crumbs),
-                        );
-                      },
-                      loading: () => const SizedBox.shrink(),
-                      error: (_, __) => const SizedBox.shrink(),
-                    ),
-                  // Main content — scroll drives hero parallax
-                  Expanded(
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: (notification) {
-                        if (notification is ScrollUpdateNotification) {
-                          setState(() {
-                            _scrollOffset = notification.metrics.pixels;
-                          });
-                        }
-                        return false;
-                      },
-                      child: childrenAsync.when(
-                      data: (children) {
-                        return nodeAsync.when(
-                          data: (node) {
-                            if (node != null && node.isPalette) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted && !_isPaletteView) {
-                                  setState(() => _isPaletteView = true);
-                                }
-                              });
-                              return ColorwayEffectSelectorPage(paletteNode: node);
-                            }
-                            if (widget.nodeId == LibraryCategoryIds.architectural) {
-                              return Column(
-                                children: [
-                                  const _KelvinReferenceChart(),
-                                  Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
-                                ],
-                              );
-                            }
-                            return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
-                          },
-                          loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                          error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
-                        );
-                      },
-                      loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                      error: (err, __) => Center(
-                        child: Text(
-                          'Unable to load content',
-                          style: TextStyle(color: ExploreDesignTokens.textSecondary),
-                        ),
-                      ),
-                    ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ],
