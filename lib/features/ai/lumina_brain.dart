@@ -40,7 +40,8 @@ class LuminaBrain {
 
     // TIER 0: Smart team resolution with fuzzy matching + user context
     // Replaces basic SportsTeamsDatabase.findTeamInQuery with multi-phase resolver
-    if (!isOpenEnded) {
+    // Skip when query is clearly about schedules/time — prevents "sunset" fuzzy-matching "suns"
+    if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt)) {
       // Read user context for "My Teams" boost and location disambiguation
       List<String>? userTeams;
       String? userLocation;
@@ -991,6 +992,28 @@ Rules:
     }
 
     return null;
+  }
+
+  /// Returns true if the query is about scheduling or time-based automation,
+  /// NOT a sports team reference. Prevents "sunset" from fuzzy-matching "suns".
+  static bool _isScheduleOrTimeQuery(String query) {
+    final lower = query.toLowerCase();
+    const timeKeywords = [
+      'schedule',
+      'sunrise',
+      'sunset',
+      'dusk',
+      'dawn',
+      'timer',
+      'automate',
+      'automation',
+      'every day',
+      'every night',
+      'recurring',
+      'turn on at',
+      'turn off at',
+    ];
+    return timeKeywords.any((kw) => lower.contains(kw));
   }
 }
 

@@ -194,7 +194,7 @@ class AutopilotGenerationService {
         if (sunset != null) scheduledTime = sunset;
       }
 
-      // Create a warm white payload
+      // Create a soft 2700K warm white payload with 1-on-1-off spacing
       final wledPayload = {
         'on': true,
         'bri': 180,
@@ -203,8 +203,10 @@ class AutopilotGenerationService {
             'fx': 0, // Solid
             'sx': 128,
             'ix': 128,
+            'grp': 1, // 1 LED on
+            'spc': 1, // 1 LED off (alternating pattern)
             'pal': 0, // Use direct colors
-            'col': [[255, 250, 244, 0]], // Warm white
+            'col': [[255, 169, 87, 0]], // 2700K warm white
           }
         ],
       };
@@ -389,8 +391,10 @@ class AutopilotGenerationService {
               'fx': 0, // Solid
               'sx': 128,
               'ix': 128,
+              'grp': 1,
+              'spc': 1, // 1 on 1 off for soft look
               'pal': 0,
-              'col': [[255, 250, 244, 200]], // Warm white with W channel
+              'col': [[255, 169, 87, 0]], // 2700K warm white
             }
           ],
         },
@@ -434,8 +438,10 @@ class AutopilotGenerationService {
             'fx': 0,
             'sx': 128,
             'ix': 128,
+            'grp': 1,
+            'spc': 1,
             'pal': 0,
-            'col': [[255, 180, 100, 200]], // Warm amber with W channel
+            'col': [[255, 169, 87, 0]], // 2700K warm white
           }
         ],
       },
@@ -459,8 +465,10 @@ class AutopilotGenerationService {
               'fx': 0,
               'sx': 128,
               'ix': 128,
+              'grp': 1,
+              'spc': 1, // 1 on 1 off for soft look
               'pal': 0,
-              'col': [[255, 250, 244, 200]], // RGBW format
+              'col': [[255, 169, 87, 0]], // 2700K warm white
             }
           ],
         },
@@ -478,8 +486,10 @@ class AutopilotGenerationService {
               'fx': 0,
               'sx': 128,
               'ix': 128,
+              'grp': 1,
+              'spc': 1,
               'pal': 0,
-              'col': [[255, 200, 150, 150], [255, 180, 120, 120]], // RGBW format
+              'col': [[255, 169, 87, 0], [255, 147, 65, 0]], // 2700K tones
             }
           ],
         },
@@ -496,8 +506,10 @@ class AutopilotGenerationService {
             'fx': 0,
             'sx': 128,
             'ix': 128,
+            'grp': 1,
+            'spc': 1,
             'pal': 0,
-            'col': [[255, 220, 180, 180]], // RGBW format
+            'col': [[255, 169, 87, 0]], // 2700K warm white
           }
         ],
       },

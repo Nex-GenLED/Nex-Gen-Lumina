@@ -610,7 +610,12 @@ class AutopilotScheduler {
 final autopilotSchedulerProvider = Provider<AutopilotScheduler>((ref) {
   final scheduler = AutopilotScheduler(ref);
 
-  // Auto-start when provider is created if autopilot is enabled
+  // Start immediately if autopilot is already enabled at app launch
+  if (ref.read(autopilotEnabledProvider)) {
+    scheduler.start();
+  }
+
+  // React to future enable/disable changes
   ref.listen(autopilotEnabledProvider, (previous, next) {
     if (next) {
       scheduler.start();
