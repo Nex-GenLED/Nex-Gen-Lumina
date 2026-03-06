@@ -38,6 +38,19 @@ class LuminaBrain {
       debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
     }
 
+    // TIER 0.5 (run first): Holiday / season / cultural event resolution
+    // Runs before team resolution to prevent holidays like "St. Patrick's" from
+    // fuzzy-matching to sports teams (e.g., "patricks" → "patriots").
+    {
+      final holidayResult = HolidayColorDatabase.resolve(userPrompt);
+      if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
+        debugPrint('🎄 TIER 0.5: Resolved holiday: ${holidayResult.holiday!.name} '
+            'confidence=${holidayResult.confidence.toStringAsFixed(2)}');
+        final response = _buildHolidayResponse(holidayResult.holiday!);
+        return response;
+      }
+    }
+
     // TIER 0: Smart team resolution with fuzzy matching + user context
     // Replaces basic SportsTeamsDatabase.findTeamInQuery with multi-phase resolver
     // Skip when query is clearly about schedules/time — prevents "sunset" fuzzy-matching "suns"
@@ -79,19 +92,6 @@ class LuminaBrain {
             '(${teamResult.confidence.toStringAsFixed(2)}) - using anyway');
         final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
         final response = _buildCanonicalTeamResponse(teamResult.team, context);
-        return response;
-      }
-    }
-
-    // TIER 0.5: Holiday / season / cultural event resolution
-    // Always run this tier — even for "open-ended" queries like "give me a St. Patrick's
-    // Day design". The confidence threshold already filters out spurious matches.
-    {
-      final holidayResult = HolidayColorDatabase.resolve(userPrompt);
-      if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
-        debugPrint('🎄 TIER 0.5: Resolved holiday: ${holidayResult.holiday!.name} '
-            'confidence=${holidayResult.confidence.toStringAsFixed(2)}');
-        final response = _buildHolidayResponse(holidayResult.holiday!);
         return response;
       }
     }

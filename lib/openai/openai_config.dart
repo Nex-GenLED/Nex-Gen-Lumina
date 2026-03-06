@@ -3,404 +3,286 @@ import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 
-/// OpenAI configuration and client for Lumina.
+/// LuminaAI — Two-layer Claude routing for Nex-Gen LED's Lumina feature.
 ///
-/// Uses Firebase Cloud Functions as a proxy to OpenAI API.
-/// The function 'openaiProxy' handles authentication and API key management.
+/// LAYER ARCHITECTURE:
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │  Tiers 0–2 (LuminaBrain): Local — zero API cost            │
+/// │    Holiday DB → Team DB → Theme Library → Semantic Cache   │
+/// ├─────────────────────────────────────────────────────────────┤
+/// │  Tier 3 Fast  → claude-haiku-4-5  (simple, unmatched cmds) │
+/// │  Tier 3 Smart → claude-opus-4-6   (creative, mood, design) │
+/// └─────────────────────────────────────────────────────────────┘
+///
+/// Routing is decided by [_classifyPromptTier] before every Tier 3 call.
+/// Refinements and raw WLED generation always use Haiku (deterministic).
+/// All calls proxy through Firebase Cloud Function 'claudeProxy' so
+/// the Anthropic API key never lives in the app.
+
+// ─── Model identifiers ────────────────────────────────────────────────────────
+
+const _kHaiku  = 'claude-haiku-4-5-20251001';
+const _kOpus   = 'claude-opus-4-6';
+
+// ─── Tier classification ──────────────────────────────────────────────────────
+
+enum _LuminaTier { fast, smart }
+
+/// Classifies a Tier-3 prompt as fast (Haiku) or smart (Opus 4).
+///
+/// Fast: short, direct, unambiguous commands the model just needs to
+///       format as JSON — no design thinking required.
+/// Smart: mood, theme, multi-zone scene design, event-based requests,
+///        anything open-ended that benefits from real reasoning.
+_LuminaTier _classifyPromptTier(String prompt) {
+  final t = prompt.toLowerCase().trim();
+
+  // Smart triggers — anything requiring creativity or design judgment
+  final smartPatterns = [
+    RegExp(r'\b(vibe|mood|feel|feeling|scene|aesthetic)\b'),
+    RegExp(r'\b(surprise|suggest|recommend|help me|design|create a scene|what should)\b'),
+    RegExp(r'\b(party|romantic|spooky|cozy|elegant|festive|magical|mysterious|dramatic)\b'),
+    RegExp(r'\b(game day|tailgate|date night|anniversary|wedding|birthday)\b'),
+    RegExp(r'\b(halloween|christmas|fourth of july|thanksgiving|st patrick|easter|valentines)\b'),
+    RegExp(r'\b(chiefs|royals|seahawks|cowboys|titans|lakers|cubs|yankees)\b'),
+    RegExp(r'\b(and|but|also|except|without|only)\b.{3,}\b(color|zone|effect|segment)\b'),
+    RegExp(r"\b(make it|give me|show me|i want|i'd like|can you)\b"),
+  ];
+
+  // Fast triggers — simple, atomic commands
+  final fastPatterns = [
+    RegExp(r'^(turn\s+)?(lights?\s+)?(on|off)$'),
+    RegExp(r'^(set\s+)?(brightness|dim|brighten)'),
+    RegExp(r'^(set\s+)?(all\s+)?(lights?\s+to\s+)?\w+$'),
+    RegExp(r'\b(solid|chase|twinkle|fade|pulse|strobe|rainbow|breathe|fireworks)\b'),
+    RegExp(r'\b(brighter|dimmer|slower|faster|more subtle|tone it down)\b'),
+  ];
+
+  // Word count heuristic — long prompts almost always need Opus
+  final wordCount = t.split(RegExp(r'\s+')).length;
+  if (wordCount > 12) return _LuminaTier.smart;
+
+  if (smartPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.smart;
+  if (fastPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.fast;
+
+  // Default: short ambiguous prompts go fast; medium go smart
+  return wordCount <= 5 ? _LuminaTier.fast : _LuminaTier.smart;
+}
+
+// ─── LuminaAI ─────────────────────────────────────────────────────────────────
 
 class LuminaAI {
-  static final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+  static final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
-  /// Sends a standard chat request to Lumina via Firebase Cloud Function.
-  /// Returns the assistant's textual response (which may include
-  /// a hidden JSON block according to the output rules).
-  ///
-  /// [contextBlock] can be used to inject dynamic user context into the
-  /// system instruction (e.g., location, date, interests, time of day).
-  ///
-  /// [temperature] controls response randomness (0.0-1.0). Lower values
-  /// produce more deterministic outputs. Default is 0.2 for consistency.
-  /// Use higher values (0.6-0.8) for creative/varied responses.
-  static Future<String> chat(String userPrompt, {String? contextBlock, double? temperature}) async {
+  // ─── System prompts ─────────────────────────────────────────────────────────
 
-    // System instruction per product spec - uses canonical palettes for consistency
-    String systemInstruction =
-        'You are Lumina, the AI Lighting Controller for Nex-Gen LED. '
-        'You are helpful, concise, and enthusiastic.\n\n'
-        'Output rules:\n'
-        '- If the user asks to change the lights, you MUST include a JSON object in your response alongside a short verbal confirmation.\n'
-        '- The JSON must follow this schema: {"patternName": string, "thought": string, "colors": [{"name": string, "rgb": [R,G,B,W]}], "effect": {"name": string, "id": number, "direction": string, "isStatic": boolean}, "speed": number, "intensity": number, "wled": object}.\n'
-        '- patternName: A descriptive name for the pattern (e.g., "Chiefs Game Day", "Spooky Halloween", "Warm Relaxation").\n'
-        '- colors: Array of color objects with human-readable name and RGBW values. IMPORTANT: For saturated colors (red, green, blue, etc.), always set W=0. Only use W>0 for white tones.\n'
-        '- effect: Object with name (e.g., "Chase", "Breathe", "Solid", "Twinkle", "Rainbow"), id (WLED fx number), direction ("left", "right", "center-out", "alternating", "none"), isStatic (true if no movement).\n'
-        '- speed: 0-255 where 128 is medium.\n'
-        '- intensity: 0-255 where 128 is medium.\n'
-        '- The "wled" object must be a valid WLED /json state payload.\n'
-        '- Do not explain the JSON. Just include the JSON block hidden within the message text so the app can parse it.\n'
-        '- Keep verbal confirmations brief, friendly, and on one line.\n\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'CRITICAL: COLOR-RESPECTING EFFECTS vs COLOR-OVERRIDING EFFECTS\n'
-        '═══════════════════════════════════════════════════════════════════════════\n\n'
-        'Some WLED effects IGNORE the colors you specify and display their own colors instead.\n'
-        'This is the #1 cause of user complaints - recommending a "Christmas" theme but getting rainbow colors.\n\n'
-        'COLOR-RESPECTING EFFECTS (SAFE - use your specified colors):\n'
-        '- 0: Solid (static), 1: Blink, 2: Breathe, 3: Wipe, 6: Sweep\n'
-        '- 11: Scan, 12: Fade, 13: Theater, 15: Running, 16: Saw\n'
-        '- 17: Twinkle, 18: Dissolve, 20: Sparkle, 21: Sparkle Dark\n'
-        '- 23: Strobe, 27: Android, 28: Chase, 31: Chase Flash\n'
-        '- 37: Candle, 38: Fire, 39: Fireworks, 40: Scanner\n'
-        '- 41: Running Dual, 42: Halloween, 43: Tricolor Chase\n'
-        '- 44: Tricolor Wipe, 45: Tricolor Fade, 46: Lightning\n'
-        '- 48: Multi Comet, 49: Fairy, 50: Fairy Twinkle\n'
-        '- 52: Fireworks Starburst, 54: Bouncing Balls\n'
-        '- 59: Drip, 67: Colorwaves, 75: Lake, 76: Meteor\n'
-        '- 79: Ripple, 80: Twinklefox, 87: Glitter, 95: Flow\n\n'
-        'COLOR-OVERRIDING EFFECTS (DANGEROUS - ignore your colors!):\n'
-        '- 4: Wipe Random, 5: Random Colors, 8: Colorloop\n'
-        '- 9: Rainbow, 10: Rainbow Cycle, 14: Theater Rainbow\n'
-        '- 19: Dissolve Random, 24: Strobe Rainbow, 26: Blink Rainbow\n'
-        '- 29: Chase Random, 30: Chase Rainbow, 32: Chase Flash Random\n'
-        '- 33: Chase Rainbow White, 34: Colorful, 35: Traffic Light\n'
-        '- 36: Sweep Random, 57: Sinelon Rainbow, 62: Ripple Rainbow\n'
-        '- 63: Pride 2015, 65: Palette, 93: Noise Pal, 100: TV Simulator\n\n'
-        'RULE: NEVER use color-overriding effects unless user explicitly requests:\n'
-        '- "rainbow", "multicolor", "pride", "random colors"\n'
-        'For ALL themed requests (holidays, sports teams, moods), use COLOR-RESPECTING effects only.\n\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'MOOD-TO-EFFECT MAPPING (use these as defaults based on user intent)\n'
-        '═══════════════════════════════════════════════════════════════════════════\n\n'
-        'CALM / RELAXING / COZY:\n'
-        '- Best effects: 0 (Solid), 2 (Breathe), 12 (Fade), 75 (Lake)\n'
-        '- Speed: 30-80 (slow), Intensity: 100-150 (moderate)\n'
-        '- Triggers: "relax", "calm", "cozy", "peaceful", "chill", "unwind", "meditation"\n\n'
-        'ROMANTIC / INTIMATE / DATE NIGHT:\n'
-        '- Best effects: 2 (Breathe), 37 (Candle), 49 (Fairy), 17 (Twinkle)\n'
-        '- Speed: 30-60 (very slow), Intensity: 100-150 (soft)\n'
-        '- Triggers: "romantic", "date", "intimate", "love", "valentine", "sensual"\n\n'
-        'ELEGANT / SOPHISTICATED / CLASSY:\n'
-        '- Best effects: 2 (Breathe), 17 (Twinkle), 87 (Glitter), 49 (Fairy)\n'
-        '- Speed: 40-80 (slow-moderate), Intensity: 100-150 (refined)\n'
-        '- Triggers: "elegant", "classy", "fancy", "sophisticated", "upscale", "formal", "wedding"\n\n'
-        'FESTIVE / PARTY / CELEBRATION:\n'
-        '- Best effects: 39 (Fireworks), 52 (Fireworks Starburst), 28 (Chase), 15 (Running), 20 (Sparkle)\n'
-        '- Speed: 150-220 (fast), Intensity: 200-255 (high)\n'
-        '- Triggers: "party", "celebrate", "festive", "fun", "dance", "birthday", "new years"\n\n'
-        'MAGICAL / ENCHANTING / FAIRY-TALE:\n'
-        '- Best effects: 17 (Twinkle), 49 (Fairy), 80 (Twinklefox), 87 (Glitter), 76 (Meteor)\n'
-        '- Speed: 60-100 (moderate), Intensity: 150-200\n'
-        '- Triggers: "magical", "enchanting", "fairy", "whimsical", "dreamy", "starry"\n\n'
-        'MYSTERIOUS / DRAMATIC / SPOOKY:\n'
-        '- Best effects: 76 (Meteor), 37 (Candle), 38 (Fire), 46 (Lightning), 48 (Multi Comet)\n'
-        '- Speed: 60-120 (moderate), Intensity: 150-220\n'
-        '- Triggers: "mysterious", "dramatic", "spooky", "halloween", "intense", "bold"\n\n'
-        'ENERGETIC / HIGH-ENERGY / SPORTS:\n'
-        '- Best effects: 28 (Chase), 15 (Running), 41 (Running Dual), 39 (Fireworks)\n'
-        '- Speed: 150-220 (fast), Intensity: 200-255 (high)\n'
-        '- Triggers: "energetic", "hyped", "sports", "game day", "exciting", "pumped"\n\n'
-        'NATURAL / OCEAN / WATER:\n'
-        '- Best effects: 95 (Flow), 79 (Ripple), 75 (Lake), 67 (Colorwaves), 59 (Drip)\n'
-        '- Speed: 40-100 (slow-moderate), Intensity: 120-180\n'
-        '- Triggers: "ocean", "water", "waves", "beach", "nature", "rain", "flowing"\n\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'CANONICAL COLOR PALETTES WITH COLOR-RESPECTING EFFECTS ONLY\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'ALWAYS use these exact colors as the default - only vary when user explicitly requests.\n'
-        'ALL effects listed below are COLOR-RESPECTING (will display your specified colors).\n\n'
-        '== HOLIDAYS ==\n'
-        '4th of July / Independence Day / Patriotic / USA:\n'
-        '  - Old Glory Red [191,10,48,0], White [255,255,255,0], Old Glory Blue [0,40,104,0]\n'
-        '  - Default fx: 39 (Fireworks), alt: 52, 43, 13 | speed: 150, intensity: 200\n'
-        '  - Aliases: july 4th, independence day, patriotic, usa, american, merica\n\n'
-        'Christmas / Holiday:\n'
-        '  - Christmas Red [255,0,0,0], Christmas Green [0,255,0,0], Snow White [255,255,255,0]\n'
-        '  - Default fx: 13 (Theater), alt: 17, 80, 43 | speed: 100, intensity: 180\n'
-        '  - Aliases: xmas, holiday, merry christmas, festive\n\n'
-        'Halloween / Spooky:\n'
-        '  - Pumpkin Orange [255,102,0,0], Witch Purple [148,0,211,0], Slime Green [57,255,20,0]\n'
-        '  - Default fx: 17 (Twinkle), alt: 37, 76, 42 | speed: 80, intensity: 200\n'
-        '  - Aliases: spooky, trick or treat, scary, october\n\n'
-        'Valentines Day / Romantic:\n'
-        '  - Rose Red [255,0,64,0], Blush Pink [255,105,180,0], Soft White [255,240,245,0]\n'
-        '  - Default fx: 2 (Breathe), alt: 17, 49, 0 | speed: 60, intensity: 150\n'
-        '  - Aliases: valentines, love, romantic, hearts\n\n'
-        'St Patricks Day / Irish:\n'
-        '  - Shamrock Green [0,158,96,0], Kelly Green [76,187,23,0], Gold [255,215,0,0]\n'
-        '  - Default fx: 15 (Running), alt: 13, 17 | speed: 120, intensity: 180\n'
-        '  - Aliases: st paddys, irish, lucky, green\n\n'
-        'Easter / Spring:\n'
-        '  - Easter Pink [255,182,193,0], Easter Yellow [253,253,150,0], Easter Blue [173,216,230,0], Easter Lavender [230,190,255,0]\n'
-        '  - Default fx: 2 (Breathe), alt: 17, 49 | speed: 80, intensity: 150\n'
-        '  - Aliases: spring, pastel, bunny\n\n'
-        'Thanksgiving / Autumn:\n'
-        '  - Harvest Orange [255,117,24,0], Cranberry [159,0,63,0], Golden Brown [153,101,21,0]\n'
-        '  - Default fx: 37 (Candle), alt: 2, 17 | speed: 60, intensity: 180\n'
-        '  - Aliases: fall, autumn, harvest, turkey day\n\n'
-        '== SPORTS TEAMS (Use COLOR-RESPECTING chase effects, NOT rainbow chase!) ==\n'
-        'Chiefs / Kansas City Chiefs:\n'
-        '  - Chiefs Red [227,24,55,0], Chiefs Gold [255,184,28,0]\n'
-        '  - Default fx: 28 (Chase), alt: 15, 41, 39 | speed: 150, intensity: 220\n'
-        '  - Aliases: kc chiefs, kansas city, arrowhead, mahomes\n\n'
-        'Cowboys / Dallas Cowboys:\n'
-        '  - Cowboys Blue [0,53,148,0], Cowboys Silver [134,147,151,0], White [255,255,255,0]\n'
-        '  - Default fx: 28 (Chase), alt: 15, 41 | speed: 140, intensity: 200\n'
-        '  - Aliases: dallas, americas team, dak\n\n'
-        'Royals / Kansas City Royals:\n'
-        '  - Royals Blue [0,70,135,0], Royals Gold [189,155,96,0]\n'
-        '  - Default fx: 15 (Running), alt: 28, 41 | speed: 120, intensity: 180\n'
-        '  - Aliases: kc royals, kansas city royals\n\n'
-        'Titans / Tennessee Titans:\n'
-        '  - Titans Navy [12,35,64,0], Titans Light Blue [75,146,219,0], Titans Red [200,16,46,0]\n'
-        '  - Default fx: 28 (Chase), alt: 15, 41 | speed: 140, intensity: 200\n'
-        '  - Aliases: tennessee, nashville titans\n\n'
-        '== MOODS & THEMES ==\n'
-        'Romantic / Date Night:\n'
-        '  - Deep Red [139,0,0,0], Soft Pink [255,182,193,0], Warm White [255,200,150,100]\n'
-        '  - Default fx: 2 (Breathe), alt: 37, 49 | speed: 40, intensity: 120\n\n'
-        'Relaxing / Calm:\n'
-        '  - Warm White [255,180,100,200]\n'
-        '  - Default fx: 0 (Solid), alt: 2 | speed: 0, intensity: 128\n'
-        '  - Aliases: relax, chill, unwind, cozy\n\n'
-        'Party / Celebration:\n'
-        '  - Hot Pink [255,20,147,0], Electric Blue [0,255,255,0], Lime Green [50,205,50,0], Purple [148,0,211,0]\n'
-        '  - Default fx: 39 (Fireworks), alt: 52, 20, 15 | speed: 200, intensity: 255\n'
-        '  - Aliases: celebrate, dance, fun, rave\n\n'
-        'Ocean / Beach:\n'
-        '  - Deep Ocean [0,105,148,0], Seafoam [64,224,208,0], Sandy White [255,245,238,0]\n'
-        '  - Default fx: 95 (Flow), alt: 79, 75 | speed: 80, intensity: 180\n'
-        '  - Aliases: beach, sea, underwater, aquatic, waves\n\n'
-        'Sunset / Golden Hour:\n'
-        '  - Sunset Orange [255,107,53,0], Sunset Pink [255,105,180,0], Sunset Purple [139,90,139,0]\n'
-        '  - Default fx: 2 (Breathe), alt: 95, 67 | speed: 60, intensity: 150\n'
-        '  - Aliases: golden hour, dusk, evening\n\n'
-        'Neon / Cyberpunk:\n'
-        '  - Neon Pink [255,16,240,0], Neon Blue [0,255,255,0], Neon Green [57,255,20,0]\n'
-        '  - Default fx: 15 (Running), alt: 28, 39 | speed: 180, intensity: 255\n'
-        '  - Aliases: cyber, synthwave, retro, 80s\n\n'
-        'Elegant / Classy:\n'
-        '  - Champagne Gold [247,231,206,0], Soft White [255,250,250,0]\n'
-        '  - Default fx: 2 (Breathe), alt: 17, 87 | speed: 40, intensity: 100\n'
-        '  - Aliases: sophisticated, upscale, fancy, formal\n\n'
-        'IMPORTANT CONSISTENCY RULES:\n'
-        '- Use the canonical colors listed above when user requests a theme WITHOUT specifying colors.\n'
-        '- Same query = same colors. "4th of July" always returns [191,10,48], [255,255,255], [0,40,104].\n'
-        '- Only introduce variations when user EXPLICITLY requests: "brighter", "more subtle", "different shade", "vintage", "modern", "playful".\n'
-        '- If user says "4th of July but more subtle", you may reduce saturation. If they just say "4th of July", use exact canonical colors.\n'
-        '- For unknown themes not in the list, you may create reasonable colors, but be consistent if asked again.\n\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'SCHEDULE / AUTOMATION REQUESTS\n'
-        '═══════════════════════════════════════════════════════════════════════════\n\n'
-        'If the user asks to "schedule", "automate", or set a time-based pattern '
-        '(e.g., "sunset to sunrise", "every night", "turn on at 7pm"):\n'
-        '- Do NOT generate a lighting pattern JSON.\n'
-        '- Instead respond with a short, friendly message explaining that schedules '
-        'are managed on the Schedule tab (tap the calendar icon in the bottom nav).\n'
-        '- Offer to help them pick a pattern or color theme they can then schedule.\n'
-        '- "Sunset" and "sunrise" in a scheduling context refer to TIME, not a color theme.\n\n'
-        'USER COLOR PREFERENCES (HIGHEST PRIORITY - OVERRIDE CANONICAL PALETTES):\n'
-        '- If user specifies "only [colors]" or "just [colors]": Use EXCLUSIVELY those colors, ignore canonical palette entirely.\n'
-        '  Example: "party with only blue and green" → Use blue and green ONLY, not the canonical party colors.\n'
-        '- If user specifies "with [colors]" or "using [colors]": Include those specific colors in the design.\n'
-        '  Example: "Christmas with purple" → Red, green, AND purple.\n'
-        '- If user specifies "no [color]", "without [color]", "but not [color]", "except [color]": EXCLUDE that color completely.\n'
-        '  Example: "party but no pink" → Use party effect/vibe but replace pink with another fun color (cyan, yellow, etc.).\n'
-        '  Example: "Halloween without orange" → Use purple and green, no orange.\n'
-        '- User color preferences ALWAYS override canonical palettes. The user knows what they want.\n'
-        '- When excluding a color, pick a thematically appropriate replacement (e.g., for party without pink, use cyan or yellow).\n\n'
-        'WLED Color Format (RGBW):\n'
-        '- Use standard 4-element color arrays [R,G,B,W] in the wled payload. WLED handles any color order conversion internally.\n'
-        '- For saturated colors, ALWAYS set W=0 to avoid washing out the color.\n'
-        '- Only use W>0 for warm/cool white effects.\n\n'
-        '═══════════════════════════════════════════════════════════════════════════\n'
-        'EXAMPLES (all use COLOR-RESPECTING effects to preserve themed colors)\n'
-        '═══════════════════════════════════════════════════════════════════════════\n\n'
-        'User: 4th of July\n'
-        'Assistant: Happy Independence Day! Here come the red, white, and blue fireworks! {"patternName":"4th of July","thought":"Applying official US flag colors with fireworks effect (fx:39 respects colors)","colors":[{"name":"Old Glory Red","rgb":[191,10,48,0]},{"name":"White","rgb":[255,255,255,0]},{"name":"Old Glory Blue","rgb":[0,40,104,0]}],"effect":{"name":"Fireworks","id":39,"direction":"center-out","isStatic":false},"speed":150,"intensity":200,"wled":{"on":true,"bri":255,"seg":[{"col":[[191,10,48,0],[255,255,255,0],[0,40,104,0]],"fx":39,"sx":150,"ix":200}]}}\n\n'
-        'User: Go Chiefs!\n'
-        'Assistant: Chiefs Kingdom! Red and Gold chase coming up! {"patternName":"Chiefs Game Day","thought":"Applying official Chiefs colors with chase effect (fx:28 respects colors, NOT rainbow chase)","colors":[{"name":"Chiefs Red","rgb":[227,24,55,0]},{"name":"Chiefs Gold","rgb":[255,184,28,0]}],"effect":{"name":"Chase","id":28,"direction":"right","isStatic":false},"speed":150,"intensity":220,"wled":{"on":true,"bri":255,"seg":[{"col":[[227,24,55,0],[255,184,28,0]],"fx":28,"sx":150,"ix":220}]}}\n\n'
-        'User: Spooky vibes\n'
-        'Assistant: Spooky mode activated! {"patternName":"Spooky Halloween","thought":"Halloween palette with twinkle effect (fx:17 respects colors)","colors":[{"name":"Pumpkin Orange","rgb":[255,102,0,0]},{"name":"Witch Purple","rgb":[148,0,211,0]},{"name":"Slime Green","rgb":[57,255,20,0]}],"effect":{"name":"Twinkle","id":17,"direction":"alternating","isStatic":false},"speed":80,"intensity":200,"wled":{"on":true,"bri":255,"seg":[{"col":[[255,102,0,0],[148,0,211,0],[57,255,20,0]],"fx":17,"sx":80,"ix":200}]}}\n\n'
-        'User: Something relaxing\n'
-        'Assistant: Time to unwind with warm, static whites. {"patternName":"Warm Relaxation","thought":"Soft warm white for relaxation (fx:0 Solid)","colors":[{"name":"Warm White","rgb":[255,180,100,200]}],"effect":{"name":"Solid","id":0,"direction":"none","isStatic":true},"speed":0,"intensity":128,"wled":{"on":true,"bri":180,"seg":[{"col":[[255,180,100,200]],"fx":0}]}}\n\n'
-        'User: Give me a party design with only blue and green\n'
-        'Assistant: Blue and green party coming up! {"patternName":"Cool Party Vibes","thought":"Party effect using only the requested blue and green colors (fx:39 Fireworks respects colors)","colors":[{"name":"Electric Blue","rgb":[0,255,255,0]},{"name":"Lime Green","rgb":[50,205,50,0]}],"effect":{"name":"Fireworks","id":39,"direction":"center-out","isStatic":false},"speed":200,"intensity":255,"wled":{"on":true,"bri":255,"seg":[{"col":[[0,255,255,0],[50,205,50,0]],"fx":39,"sx":200,"ix":255}]}}\n\n'
-        'User: Halloween but no orange\n'
-        'Assistant: Spooky purple and green Halloween! {"patternName":"Dark Halloween","thought":"Halloween vibes without orange - using purple and green instead (fx:17 respects colors)","colors":[{"name":"Witch Purple","rgb":[148,0,211,0]},{"name":"Slime Green","rgb":[57,255,20,0]},{"name":"Blood Red","rgb":[139,0,0,0]}],"effect":{"name":"Twinkle","id":17,"direction":"alternating","isStatic":false},"speed":80,"intensity":200,"wled":{"on":true,"bri":255,"seg":[{"col":[[148,0,211,0],[57,255,20,0],[139,0,0,0]],"fx":17,"sx":80,"ix":200}]}}\n\n'
-        'User: Give me a rainbow effect\n'
-        'Assistant: Rainbow colors coming up! {"patternName":"Rainbow Spectrum","thought":"User explicitly requested rainbow, using Rainbow Cycle effect","colors":[{"name":"Rainbow","rgb":[255,0,0,0]}],"effect":{"name":"Rainbow Cycle","id":10,"direction":"right","isStatic":false},"speed":80,"intensity":128,"wled":{"on":true,"bri":255,"seg":[{"fx":10,"sx":80,"ix":128}]}}\n\n'
-        'NOTE: Rainbow effect (fx:10) is only used because user explicitly requested "rainbow". For themed requests, ALWAYS use color-respecting effects.';
+  /// Fast-layer system prompt for Haiku.
+  /// Tight, output-focused. No prose, just structured execution.
+  static const String _kFastSystemPrompt =
+      'You are Lumina Fast — the command executor for Nex-Gen LED permanent exterior '
+      'lighting systems. You translate direct user commands into WLED JSON payloads.\n\n'
+      'Output rules:\n'
+      '- ALWAYS return a brief verbal confirmation + embedded JSON block.\n'
+      '- JSON schema: {"patternName":string,"thought":string,"colors":[{"name":string,"rgb":[R,G,B,W]}],'
+      '"effect":{"name":string,"id":number,"direction":string,"isStatic":boolean},'
+      '"speed":number,"intensity":number,"wled":object}\n'
+      '- For saturated colors set W=0. Only use W>0 for warm/cool white.\n'
+      '- "wled" must be a valid WLED /json state payload.\n'
+      '- Verbal confirmation: one short sentence, no filler.\n\n'
+      'COLOR-RESPECTING EFFECTS (safe — use for all themed requests):\n'
+      '0:Solid, 2:Breathe, 12:Fade, 13:Theater, 15:Running, 17:Twinkle, '
+      '20:Sparkle, 28:Chase, 37:Candle, 38:Fire, 39:Fireworks, 41:Running Dual, '
+      '43:Tricolor Chase, 46:Lightning, 49:Fairy, 52:Fireworks Starburst, '
+      '76:Meteor, 79:Ripple, 80:Twinklefox, 87:Glitter, 95:Flow\n\n'
+      'NEVER use rainbow/random effects (fx 4,5,8,9,10,14,19,24,26,29,30,34,63,65) '
+      'unless user explicitly says "rainbow" or "random colors".';
 
-    if (contextBlock != null && contextBlock.trim().isNotEmpty) {
-      systemInstruction = '$systemInstruction\n\n$contextBlock';
-    }
+  /// Smart-layer system prompt for Opus 4.
+  /// Full design intelligence, canonical palettes, mood mapping, roofline awareness.
+  static const String _kSmartSystemPrompt =
+      'You are Lumina, the AI Lighting Designer for Nex-Gen LED permanent exterior '
+      'lighting systems. You think like a professional lighting designer.\n\n'
+      'Brand voice: premium, confident, specific. "One Time. Every Time."\n'
+      'Personality: warm but direct. Short sentences. Zero filler phrases.\n\n'
+      'Output rules:\n'
+      '- ALWAYS return a verbal confirmation (2–3 sentences max, explain your creative choice) '
+      '+ embedded JSON block.\n'
+      '- JSON schema: {"patternName":string,"thought":string,"colors":[{"name":string,"rgb":[R,G,B,W]}],'
+      '"effect":{"name":string,"id":number,"direction":string,"isStatic":boolean},'
+      '"speed":number,"intensity":number,"wled":object}\n'
+      '- For saturated colors set W=0. Only use W>0 for warm/cool white.\n'
+      '- Do not explain the JSON. Embed it within the response text.\n\n'
+      '═══ COLOR-RESPECTING EFFECTS (SAFE) ═══\n'
+      '0:Solid, 2:Breathe, 12:Fade, 13:Theater, 15:Running, 17:Twinkle, '
+      '20:Sparkle, 28:Chase, 37:Candle, 38:Fire, 39:Fireworks, 41:Running Dual, '
+      '43:Tricolor Chase, 46:Lightning, 49:Fairy, 52:Fireworks Starburst, '
+      '76:Meteor, 79:Ripple, 80:Twinklefox, 87:Glitter, 95:Flow\n\n'
+      'NEVER use rainbow/random effects (fx 4,5,8,9,10,14,19,24,26,29,30,34,63,65) '
+      'unless user explicitly says "rainbow" or "random colors".\n\n'
+      '═══ MOOD → EFFECT MAPPING ═══\n'
+      'CALM/RELAXING: fx 0,2,12,75 | speed 30–80 | intensity 100–150\n'
+      'ROMANTIC/DATE NIGHT: fx 2,37,49,17 | speed 30–60 | intensity 100–150\n'
+      'ELEGANT/CLASSY: fx 2,17,87,49 | speed 40–80 | intensity 100–150\n'
+      'FESTIVE/PARTY: fx 39,52,28,15,20 | speed 150–220 | intensity 200–255\n'
+      'MAGICAL/FAIRY: fx 17,49,80,87,76 | speed 60–100 | intensity 150–200\n'
+      'SPOOKY/DRAMATIC: fx 76,37,38,46,48 | speed 60–120 | intensity 150–220\n'
+      'ENERGETIC/SPORTS: fx 28,15,41,39 | speed 150–220 | intensity 200–255\n'
+      'OCEAN/WATER: fx 95,79,75,67,59 | speed 40–100 | intensity 120–180\n\n'
+      '═══ CANONICAL COLOR PALETTES ═══\n'
+      '4th of July: [191,10,48,0] [255,255,255,0] [0,40,104,0] | fx:39 speed:150 ix:200\n'
+      'Christmas: [255,0,0,0] [0,255,0,0] [255,255,255,0] | fx:13 speed:100 ix:180\n'
+      'Halloween: [255,102,0,0] [148,0,211,0] [57,255,20,0] | fx:17 speed:80 ix:200\n'
+      'Valentines: [255,0,64,0] [255,105,180,0] [255,240,245,0] | fx:2 speed:60 ix:150\n'
+      'St Patricks: [0,158,96,0] [76,187,23,0] [255,215,0,0] | fx:15 speed:120 ix:180\n'
+      'Thanksgiving: [255,117,24,0] [159,0,63,0] [153,101,21,0] | fx:37 speed:60 ix:180\n'
+      'Chiefs: [227,24,55,0] [255,184,28,0] | fx:28 speed:150 ix:220\n'
+      'Royals: [0,70,135,0] [189,155,96,0] | fx:15 speed:120 ix:180\n'
+      'Cowboys: [0,53,148,0] [134,147,151,0] | fx:28 speed:140 ix:200\n\n'
+      'CONSISTENCY RULE: Same query = same canonical colors. '
+      'Only vary when user explicitly requests "brighter", "more subtle", "different shade".\n\n'
+      'USER OVERRIDES (highest priority):\n'
+      '- "only [colors]" → use EXCLUSIVELY those colors\n'
+      '- "with [color]" → include that color alongside canonical\n'
+      '- "no [color]" / "without [color]" → exclude completely, pick thematic replacement\n\n'
+      'SCHEDULE REQUESTS: If user asks to schedule/automate/set timers, do NOT generate '
+      'lighting JSON. Redirect them to the Schedule tab and offer to pick a pattern first.\n\n'
+      'WLED RGBW: Use [R,G,B,W] arrays. W=0 for saturated colors. W>0 only for whites.';
 
-    // Use provided temperature or default to 0.2 for consistency
-    // Higher temperatures (0.6-0.8) are used for creative/varied responses
-    final effectiveTemperature = temperature ?? 0.2;
+  /// Refinement system prompt for Haiku.
+  /// Precise parameter adjustment — preserve everything except what was asked.
+  static const String _kRefinementSystemPrompt =
+      'You are Lumina, modifying an EXISTING lighting pattern based on user feedback.\n\n'
+      'CRITICAL: Preserve all colors, effect type, and theme. '
+      'ONLY change the specific parameter requested.\n\n'
+      'Parameter mapping:\n'
+      '- "slower"/"less movement" → decrease sx by 30–50 (min 0)\n'
+      '- "faster"/"more movement" → increase sx by 30–50 (max 255)\n'
+      '- "brighter" → increase bri by 30–50 (max 255)\n'
+      '- "dimmer"/"more subtle" → decrease bri by 30–50 (min 30)\n'
+      '- "warmer" → shift colors toward orange/yellow, keep theme\n'
+      '- "cooler" → shift colors toward blue, keep theme\n'
+      '- "different effect" → change fx only, identical colors\n\n'
+      'Output: brief verbal confirmation + same JSON schema as original pattern.\n'
+      'Never use rainbow effects (fx 9,10) unless the current pattern already uses them.';
 
-    final body = {
-      'model': 'gpt-4o',
-      'temperature': effectiveTemperature,
-      'messages': [
-        {
-          'role': 'system',
-          'content': systemInstruction,
-        },
-        {
-          'role': 'user',
-          'content': userPrompt,
-        },
-      ],
-    };
+  // ─── Public API ─────────────────────────────────────────────────────────────
 
-    int attempt = 0;
-    while (true) {
-      attempt++;
-      try {
-        // Call Firebase Cloud Function instead of direct OpenAI API
-        final callable = _functions.httpsCallable('openaiProxy');
-        final result = await callable.call(body);
+  /// Routes a Tier-3 prompt to Haiku (fast) or Opus 4 (smart) based on
+  /// complexity classification. Returns the assistant's verbal + JSON response.
+  static Future<String> chat(
+    String userPrompt, {
+    String? contextBlock,
+    double? temperature,
+  }) async {
+    final tier = _classifyPromptTier(userPrompt);
+    final model = tier == _LuminaTier.fast ? _kHaiku : _kOpus;
+    final systemPrompt = tier == _LuminaTier.fast
+        ? _kFastSystemPrompt
+        : _kSmartSystemPrompt;
 
-        final rawData = result.data;
-        debugPrint('🤖 Lumina raw response type: ${rawData.runtimeType}');
-        debugPrint('🤖 Lumina raw response: $rawData');
+    debugPrint('🤖 Lumina Tier 3 → ${tier == _LuminaTier.fast ? "FAST (Haiku)" : "SMART (Opus 4)"} | "$userPrompt"');
 
-        // Handle the response - it may come back in different formats
-        Map<String, dynamic>? data;
-        if (rawData is Map<String, dynamic>) {
-          data = rawData;
-        } else if (rawData is Map) {
-          data = Map<String, dynamic>.from(rawData);
-        }
+    final effectiveTemp = temperature ?? (tier == _LuminaTier.smart ? 0.4 : 0.2);
 
-        if (data == null) {
-          throw Exception('OpenAI returned no data');
-        }
-
-        try {
-          // Try to get choices - may be at root level or nested
-          List? choices = data['choices'] as List?;
-          debugPrint('🤖 Lumina choices: $choices');
-
-          if (choices == null || choices.isEmpty) {
-            // Maybe the entire response IS the message content?
-            debugPrint('🤖 No choices found, checking data keys: ${data.keys.toList()}');
-          }
-
-          final first = choices != null && choices.isNotEmpty ? choices.first : null;
-          debugPrint('🤖 Lumina first choice: $first');
-
-          Map<String, dynamic>? message;
-          if (first is Map<String, dynamic>) {
-            message = first['message'] as Map<String, dynamic>?;
-          } else if (first is Map) {
-            final firstMap = Map<String, dynamic>.from(first);
-            message = firstMap['message'] is Map ? Map<String, dynamic>.from(firstMap['message']) : null;
-          }
-
-          debugPrint('🤖 Lumina message: $message');
-          final content = message?['content'] as String?;
-          debugPrint('🤖 Lumina content: $content');
-          if (content != null && content.trim().isNotEmpty) return content;
-        } catch (e, stack) {
-          debugPrint('Lumina chat parse error: $e');
-          debugPrint('Stack trace: $stack');
-        }
-
-        throw Exception('OpenAI chat returned empty message. Raw data keys: ${data.keys.toList()}');
-      } on FirebaseFunctionsException catch (e) {
-        debugPrint('Lumina Firebase function error: ${e.code} - ${e.message}');
-        if (attempt >= 3) {
-          throw Exception('Lumina AI failed: ${e.message}');
-        }
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
-      } catch (e) {
-        if (attempt >= 3) rethrow;
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
-      }
-    }
+    return _callClaude(
+      model: model,
+      systemPrompt: _injectContext(systemPrompt, contextBlock),
+      userMessage: userPrompt,
+      temperature: effectiveTemp,
+      label: tier == _LuminaTier.fast ? '⚡ Fast' : '🧠 Smart',
+    );
   }
 
-  /// Handles refinement requests that modify an existing pattern.
-  /// The AI is instructed to ONLY change the specific parameter requested
-  /// while preserving all other pattern attributes (colors, effect type, etc.).
+  /// Refinement always uses Haiku — precise parameter tweaks don't need Opus.
   static Future<String> chatRefinement(
     String refinementPrompt, {
     required Map<String, dynamic> currentPattern,
     String? contextBlock,
   }) async {
-    // Build a specialized system prompt for refinement
-    String systemInstruction =
-        'You are Lumina, the AI Lighting Controller for Nex-Gen LED. '
-        'You are modifying an EXISTING pattern based on user feedback.\n\n'
-        'CRITICAL RULES FOR REFINEMENT:\n'
-        '1. You MUST preserve the current pattern\'s colors, effect type, and overall theme.\n'
-        '2. ONLY modify the specific parameter the user requested.\n'
-        '3. Do NOT interpret refinement as a new search - this is an adjustment to the CURRENT pattern.\n\n'
-        'Parameter Mapping:\n'
-        '- "slower" / "less movement": DECREASE speed (sx) value by 30-50 points (min 0)\n'
-        '- "faster" / "more movement": INCREASE speed (sx) value by 30-50 points (max 255)\n'
-        '- "brighter": INCREASE brightness (bri) value by 30-50 (max 255)\n'
-        '- "dimmer" / "more subtle": DECREASE brightness (bri) value by 30-50 (min 30)\n'
-        '- "warmer": Shift colors toward orange/yellow tones while maintaining the theme\n'
-        '- "cooler": Shift colors toward blue tones while maintaining the theme\n'
-        '- "different effect": Change ONLY the fx value to a similar effect, keep colors identical\n\n'
-        'Output rules:\n'
-        '- Include the modified JSON object in your response alongside a short verbal confirmation.\n'
-        '- Use the same schema: {"patternName": string, "thought": string, "colors": [...], "effect": {...}, "speed": number, "intensity": number, "wled": object}.\n'
-        '- The "wled" object must be a valid WLED /json state payload.\n'
-        '- Keep verbal confirmations brief (e.g., "Slowed it down for you!").\n\n'
-        'WLED Effect Reference (fx values):\n'
-        '- 0: Solid (static, no movement)\n'
-        '- 2: Breathe (smooth fade in/out)\n'
-        '- 12: Theater Chase\n'
-        '- 41: Running (smooth chase)\n'
-        '- 43: Twinkle\n'
-        '- 52: Fireworks\n'
-        '- 65: Chase (moving dots)\n'
-        '- 70: Twinkle Fox\n'
-        '- 72: Sparkle\n'
-        '- 77: Meteor\n'
-        '- 95: Ripple\n'
-        '- 110: Flow\n\n'
-        'WARNING: Do NOT use rainbow effects (9, 10, 38, 96) unless the current pattern is already a rainbow pattern.\n'
-        'Rainbow effects override the color palette completely.\n';
+    debugPrint('🔧 Lumina Refinement → Haiku | "$refinementPrompt"');
 
-    if (contextBlock != null && contextBlock.trim().isNotEmpty) {
-      systemInstruction = '$systemInstruction\n\n$contextBlock';
-    }
-
-    // Serialize the current pattern for the AI
     final patternJson = jsonEncode(currentPattern);
+    final systemWithContext = _injectContext(_kRefinementSystemPrompt, contextBlock);
+
+    // Inject the current pattern as a prior assistant turn so Claude knows what's active
+    return _callClaude(
+      model: _kHaiku,
+      systemPrompt: systemWithContext,
+      userMessage: refinementPrompt,
+      temperature: 0.2,
+      label: '🔧 Refinement',
+      priorAssistantMessage:
+          'Here is the current pattern active on the lights:\n$patternJson',
+    );
+  }
+
+  /// Raw WLED JSON generation always uses Haiku — structured output only.
+  static Future<Map<String, dynamic>> generateWledJson(
+    String userPrompt, {
+    String? contextBlock,
+  }) async {
+    debugPrint('🎨 Lumina WLED JSON → Haiku | "$userPrompt"');
+
+    const system =
+        'You are Lumina. Translate the user intent into a strict WLED /json state payload. '
+        'Output ONLY a valid JSON object, no code fences, no commentary. '
+        'Use [R,G,B,W] color arrays. Set W=0 for saturated colors; W>0 only for whites. '
+        'Example: {"on":true,"bri":200,"seg":[{"id":0,"fx":28,"col":[[227,24,55,0],[255,184,28,0]],"sx":150,"ix":220}]}';
+
+    final systemWithContext = _injectContext(system, contextBlock);
+
+    final raw = await _callClaude(
+      model: _kHaiku,
+      systemPrompt: systemWithContext,
+      userMessage: userPrompt,
+      temperature: 0.1,
+      label: '🎨 WLED JSON',
+    );
+
+    final parsed = _tryParseJsonObject(raw);
+    if (parsed == null) {
+      throw Exception('Lumina WLED JSON: could not parse response → $raw');
+    }
+    return parsed;
+  }
+
+  // ─── Core Claude caller ──────────────────────────────────────────────────────
+
+  /// Calls the Firebase Cloud Function 'claudeProxy' which proxies to
+  /// Anthropic's /v1/messages endpoint. The API key lives only in Firebase.
+  static Future<String> _callClaude({
+    required String model,
+    required String systemPrompt,
+    required String userMessage,
+    required double temperature,
+    required String label,
+    String? priorAssistantMessage,
+  }) async {
+    // Build messages array
+    final messages = <Map<String, String>>[];
+    if (priorAssistantMessage != null) {
+      messages.add({'role': 'assistant', 'content': priorAssistantMessage});
+    }
+    messages.add({'role': 'user', 'content': userMessage});
 
     final body = {
-      'model': 'gpt-4o',
-      'temperature': 0.3, // Lower temperature for more predictable refinements
-      'messages': [
-        {
-          'role': 'system',
-          'content': systemInstruction,
-        },
-        {
-          'role': 'assistant',
-          'content': 'Here is the current pattern that is active on the lights:\n$patternJson',
-        },
-        {
-          'role': 'user',
-          'content': refinementPrompt,
-        },
-      ],
+      'model': model,
+      'max_tokens': 1024,
+      'temperature': temperature,
+      'system': systemPrompt,
+      'messages': messages,
     };
 
     int attempt = 0;
     while (true) {
       attempt++;
       try {
-        final callable = _functions.httpsCallable('openaiProxy');
+        final callable = _functions.httpsCallable('claudeProxy');
         final result = await callable.call(body);
 
         final rawData = result.data;
-        debugPrint('🔧 Lumina refinement raw response type: ${rawData.runtimeType}');
-        debugPrint('🔧 Lumina refinement raw response: $rawData');
+        debugPrint('$label raw response type: ${rawData.runtimeType}');
 
         Map<String, dynamic>? data;
         if (rawData is Map<String, dynamic>) {
@@ -409,170 +291,76 @@ class LuminaAI {
           data = Map<String, dynamic>.from(rawData);
         }
 
-        if (data == null) {
-          throw Exception('OpenAI returned no data');
-        }
+        if (data == null) throw Exception('Claude returned no data');
 
-        try {
-          List? choices = data['choices'] as List?;
-          final first = choices != null && choices.isNotEmpty ? choices.first : null;
-
-          Map<String, dynamic>? message;
-          if (first is Map<String, dynamic>) {
-            message = first['message'] as Map<String, dynamic>?;
-          } else if (first is Map) {
-            final firstMap = Map<String, dynamic>.from(first);
-            message = firstMap['message'] is Map ? Map<String, dynamic>.from(firstMap['message']) : null;
+        // Anthropic response shape: { content: [{ type: "text", text: "..." }] }
+        final contentArray = data['content'] as List?;
+        if (contentArray != null && contentArray.isNotEmpty) {
+          for (final block in contentArray) {
+            final blockMap = block is Map<String, dynamic>
+                ? block
+                : (block is Map ? Map<String, dynamic>.from(block) : null);
+            if (blockMap?['type'] == 'text') {
+              final text = blockMap!['text'] as String?;
+              if (text != null && text.trim().isNotEmpty) {
+                debugPrint('$label ✅ response length: ${text.length}');
+                return text;
+              }
+            }
           }
-
-          final content = message?['content'] as String?;
-          debugPrint('🔧 Lumina refinement content: $content');
-          if (content != null && content.trim().isNotEmpty) return content;
-        } catch (e, stack) {
-          debugPrint('Lumina refinement parse error: $e');
-          debugPrint('Stack trace: $stack');
         }
 
-        throw Exception('OpenAI refinement returned empty message. Raw data keys: ${data.keys.toList()}');
+        throw Exception('Claude returned empty content. Keys: ${data.keys.toList()}');
       } on FirebaseFunctionsException catch (e) {
-        debugPrint('Lumina Firebase function error: ${e.code} - ${e.message}');
-        if (attempt >= 3) {
-          throw Exception('Lumina AI refinement failed: ${e.message}');
-        }
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
+        debugPrint('$label Firebase error: ${e.code} - ${e.message}');
+        if (attempt >= 3) throw Exception('Lumina AI failed: ${e.message}');
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
       } catch (e) {
+        debugPrint('$label error (attempt $attempt): $e');
         if (attempt >= 3) rethrow;
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
       }
     }
   }
 
-  /// Generates a WLED-compatible JSON payload from a natural language prompt.
-  /// Uses JSON response format to ensure valid JSON output.
-  /// Same as [chat] but requests structured JSON only. The [contextBlock]
-  /// is appended to the system message for better grounding.
-  static Future<Map<String, dynamic>> generateWledJson(String userPrompt, {String? contextBlock}) async {
-    String system =
-        'You are Lumina, an assistant that translates user intents into strict WLED JSON payloads for the /json API. Output ONLY a valid JSON object as the final answer. Do not include code fences or commentary. Ensure the result follows WLED JSON structure. Use standard 4-element RGBW arrays [R,G,B,W]. For red send [[255,0,0,0]], for green send [[0,255,0,0]], for blue send [[0,0,255,0]]. Only use W>0 for warm/cool whites - set W=0 for saturated colors. Example: {"on":true,"bri":128,"seg":[{"id":0,"fx":12,"col":[[255,0,0,0],[0,255,0,0]]}]} (red and green). Prefer fx/pal combinations when effects are requested. The response MUST be a JSON object.';
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-    if (contextBlock != null && contextBlock.trim().isNotEmpty) {
-      system = '$system\n\n$contextBlock';
-    }
-
-    final body = {
-      'model': 'gpt-4o',
-      'response_format': {'type': 'json_object'},
-      'temperature': 0.2,
-      'messages': [
-        {
-          'role': 'system',
-          'content': system
-        },
-        {
-          'role': 'user',
-          'content': userPrompt,
-        }
-      ],
-    };
-
-    int attempt = 0;
-    while (true) {
-      attempt++;
-      try {
-        // Call Firebase Cloud Function instead of direct OpenAI API
-        final callable = _functions.httpsCallable('openaiProxy');
-        final result = await callable.call(body);
-
-        final rawData = result.data;
-        debugPrint('🤖 Lumina JSON raw response type: ${rawData.runtimeType}');
-        debugPrint('🤖 Lumina JSON raw response: $rawData');
-
-        Map<String, dynamic>? data;
-        if (rawData is Map<String, dynamic>) {
-          data = rawData;
-        } else if (rawData is Map) {
-          data = Map<String, dynamic>.from(rawData);
-        }
-
-        if (data == null) {
-          throw Exception('OpenAI returned no data');
-        }
-
-        Map<String, dynamic>? parsed;
-        try {
-          List? choices = data['choices'] as List?;
-          final first = choices != null && choices.isNotEmpty ? choices.first : null;
-
-          Map<String, dynamic>? message;
-          if (first is Map<String, dynamic>) {
-            message = first['message'] as Map<String, dynamic>?;
-          } else if (first is Map) {
-            final firstMap = Map<String, dynamic>.from(first);
-            message = firstMap['message'] is Map ? Map<String, dynamic>.from(firstMap['message']) : null;
-          }
-
-          final content = message?['content'] as String?;
-          debugPrint('🤖 Lumina JSON content: $content');
-          if (content != null) {
-            parsed = _tryParseJsonObject(content);
-          }
-        } catch (e) {
-          debugPrint('Lumina parse root error: $e');
-        }
-
-        if (parsed == null) {
-          throw Exception('Lumina returned no JSON object.');
-        }
-
-        // Basic validation: must look like a WLED payload (on/bri/seg at least)
-        if (!parsed.containsKey('on') && !parsed.containsKey('bri') && !parsed.containsKey('seg')) {
-          debugPrint('Lumina JSON lacks common WLED keys; proceeding anyway: $parsed');
-        }
-        return parsed;
-      } on FirebaseFunctionsException catch (e) {
-        debugPrint('Lumina Firebase function error: ${e.code} - ${e.message}');
-        if (attempt >= 3) {
-          throw Exception('Lumina AI failed: ${e.message}');
-        }
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
-      } catch (e) {
-        if (attempt >= 3) rethrow;
-        await Future.delayed(Duration(milliseconds: 300 * attempt));
-      }
-    }
+  static String _injectContext(String system, String? contextBlock) {
+    if (contextBlock == null || contextBlock.trim().isEmpty) return system;
+    return '$system\n\n$contextBlock';
   }
 
   static Map<String, dynamic>? _tryParseJsonObject(String content) {
-    // Fast path: try direct decode
     try {
       final obj = jsonDecode(content);
       if (obj is Map<String, dynamic>) return obj;
     } catch (_) {}
 
-    // Fallback: extract first JSON object substring
-    final maybe = _extractBalancedJsonObject(content);
-    if (maybe != null) {
-      try {
-        final obj = jsonDecode(maybe);
-        if (obj is Map<String, dynamic>) return obj;
-      } catch (_) {}
-    }
-    return null;
-  }
+    // Strip fences and retry
+    final stripped = content
+        .replaceAll(RegExp(r'```json\s*'), '')
+        .replaceAll(RegExp(r'```\s*'), '')
+        .trim();
+    try {
+      final obj = jsonDecode(stripped);
+      if (obj is Map<String, dynamic>) return obj;
+    } catch (_) {}
 
-  /// Extracts the first balanced JSON object substring in [text]. Returns null
-  /// if none found.
-  static String? _extractBalancedJsonObject(String text) {
-    final start = text.indexOf('{');
+    // Extract first balanced JSON object
+    final start = stripped.indexOf('{');
     if (start < 0) return null;
     int depth = 0;
-    for (int i = start; i < text.length; i++) {
-      final ch = text[i];
-      if (ch == '{') depth++;
-      if (ch == '}') {
+    for (int i = start; i < stripped.length; i++) {
+      if (stripped[i] == '{') depth++;
+      if (stripped[i] == '}') {
         depth--;
         if (depth == 0) {
-          return text.substring(start, i + 1);
+          try {
+            final sub = stripped.substring(start, i + 1);
+            final obj = jsonDecode(sub);
+            if (obj is Map<String, dynamic>) return obj;
+          } catch (_) {}
+          break;
         }
       }
     }

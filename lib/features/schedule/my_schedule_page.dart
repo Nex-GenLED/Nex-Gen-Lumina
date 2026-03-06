@@ -134,7 +134,8 @@ class MySchedulePage extends ConsumerWidget {
 class _SimplePattern {
   final String actionLabel;
   final String description;
-  const _SimplePattern(this.actionLabel, this.description);
+  final Map<String, dynamic>? wledPayload;
+  const _SimplePattern(this.actionLabel, this.description, [this.wledPayload]);
 }
 
 /// Unified Lumina AI card combining Autopilot controls and schedule prompt input.
@@ -257,12 +258,29 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
   // Simple pattern keywords (no AI needed)
   // -----------------------------------------------------------------------
 
+  static const _warmWhitePayload = {
+    'on': true, 'bri': 255,
+    'seg': [{'id': 0, 'on': true, 'bri': 255, 'col': [[255, 180, 107, 0]], 'fx': 0, 'sx': 128, 'ix': 128}],
+  };
+  static const _coolWhitePayload = {
+    'on': true, 'bri': 255,
+    'seg': [{'id': 0, 'on': true, 'bri': 255, 'col': [[200, 220, 255, 0]], 'fx': 0, 'sx': 128, 'ix': 128}],
+  };
+  static const _brightWhitePayload = {
+    'on': true, 'bri': 255,
+    'seg': [{'id': 0, 'on': true, 'bri': 255, 'col': [[255, 255, 255, 0]], 'fx': 0, 'sx': 128, 'ix': 128}],
+  };
+  static const _festivePayload = {
+    'on': true, 'bri': 255,
+    'seg': [{'id': 0, 'on': true, 'bri': 255, 'col': [[255, 0, 0, 0], [0, 255, 0, 0], [0, 0, 255, 0]], 'fx': 41, 'sx': 128, 'ix': 180}],
+  };
+
   static const _simplePatterns = <String, _SimplePattern>{
-    'warm white': _SimplePattern('Pattern: Warm White', 'warm white'),
-    'warm': _SimplePattern('Pattern: Warm White', 'warm white'),
-    'cool white': _SimplePattern('Pattern: Cool White', 'cool white'),
-    'bright white': _SimplePattern('Pattern: Bright White', 'bright white'),
-    'festive': _SimplePattern('Pattern: Festive', 'festive'),
+    'warm white': _SimplePattern('Pattern: Warm White', 'warm white', _warmWhitePayload),
+    'warm': _SimplePattern('Pattern: Warm White', 'warm white', _warmWhitePayload),
+    'cool white': _SimplePattern('Pattern: Cool White', 'cool white', _coolWhitePayload),
+    'bright white': _SimplePattern('Pattern: Bright White', 'bright white', _brightWhitePayload),
+    'festive': _SimplePattern('Pattern: Festive', 'festive', _festivePayload),
   };
 
   /// Checks if the pattern part of the request can be handled locally.
@@ -483,29 +501,38 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
     if (isNegativeConstraint && mentionsBright) {
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
+      wledPayload = {'on': true, 'bri': 51};
     } else if (brightnessMatch != null) {
       final brightness = int.tryParse(brightnessMatch.group(1)!) ?? 50;
       final clampedBrightness = brightness.clamp(1, 100);
       actionLabel = 'Brightness: $clampedBrightness%';
       patternDescription = 'set brightness to $clampedBrightness%';
+      wledPayload = {'on': true, 'bri': (clampedBrightness * 255 / 100).round()};
     } else if (lowerText.contains('dim') || lowerText.contains('night mode') || lowerText.contains('subtle')) {
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
+      wledPayload = {'on': true, 'bri': 51};
     } else if (lowerText.contains('off') || lowerText.contains('turn off')) {
       actionLabel = 'Turn Off';
       patternDescription = 'off';
+      wledPayload = {'on': false};
     } else if (lowerText.contains('turn on') && !_hasThemeKeywords(lowerText)) {
       actionLabel = 'Turn On';
       patternDescription = 'on';
+      wledPayload = {'on': true, 'bri': 255};
     } else if (isNegativeConstraint) {
       actionLabel = 'Brightness: 20%';
       patternDescription = 'dim to 20%';
+      wledPayload = {'on': true, 'bri': 51};
     } else {
       // Check for simple local patterns first
       final simple = _matchSimplePattern(lowerText);
       if (simple != null && !_hasThemeKeywords(lowerText)) {
         actionLabel = simple.actionLabel;
         patternDescription = simple.description;
+        wledPayload = simple.wledPayload != null
+            ? Map<String, dynamic>.from(simple.wledPayload!)
+            : null;
       } else {
         // ── Cloud AI: generate the actual themed pattern ──
         // Strip schedule timing words to isolate the pattern request
@@ -520,9 +547,10 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
           patternDescription = patternName.toLowerCase();
         } catch (e) {
           debugPrint('Cloud AI failed for schedule pattern: $e');
-          // Fall back to warm white on AI failure
+          // Fall back to warm white on AI failure — include a real payload
           actionLabel = 'Pattern: Warm White';
           patternDescription = 'warm white';
+          wledPayload = Map<String, dynamic>.from(_warmWhitePayload);
         }
       }
     }

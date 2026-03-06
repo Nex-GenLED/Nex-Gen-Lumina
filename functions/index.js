@@ -2,6 +2,8 @@ const { onCall, HttpsError, onRequest } = require("firebase-functions/v2/https")
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineString } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const { claudeProxy } = require('./src/claudeProxy');
+exports.claudeProxy = claudeProxy;
 
 admin.initializeApp();
 

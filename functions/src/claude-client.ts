@@ -61,7 +61,7 @@ export class ClaudeClientError extends Error {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MODEL = "claude-sonnet-4-5-20250929";
+const MODEL = "claude-haiku-4-5-20251001";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000; // 1s, 2s, 4s exponential backoff
 const DEFAULT_MAX_TOKENS = 1024;
