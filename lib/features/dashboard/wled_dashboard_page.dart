@@ -32,8 +32,10 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
-import 'package:nexgen_command/features/favorites/favorites_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
 import 'package:nexgen_command/features/dashboard/widgets/glass_action_button.dart';
+import 'package:nexgen_command/features/autopilot/learning_providers.dart' show favoritePatternsProvider;
+import 'package:nexgen_command/models/usage_analytics_models.dart' show FavoritePattern;
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -550,8 +552,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
             // Top overlay: Power button
             _buildPowerButton(context, ref, state),
+            // Quick-select preset chips floating over the hero
+            _buildPresetChips(context, ref),
             // Add Photo button (shown when no custom house image)
             _buildAddPhotoButton(context, ref),
+            // Now Playing bar above the control bar
+            _buildNowPlayingBar(context, ref, state),
             // Bottom overlay: Glass control bar (pattern + brightness)
             _buildControlBar(context, ref, state),
           ]),
@@ -615,6 +621,206 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPresetChips(BuildContext context, WidgetRef ref) {
+    return Positioned(
+      top: 68,
+      right: 12,
+      child: Consumer(builder: (context, ref, _) {
+        final favoritesAsync = ref.watch(favoritePatternsProvider);
+        final activePreset = ref.watch(activePresetLabelProvider);
+        return favoritesAsync.when(
+          data: (favorites) {
+            if (favorites.isEmpty) return const SizedBox.shrink();
+            final chips = favorites.take(4).toList();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (int i = 0; i < chips.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 5),
+                  _PresetChip(
+                    favorite: chips[i],
+                    isActive: activePreset == chips[i].patternName,
+                    onTap: () => _applyPresetChip(context, ref, chips[i]),
+                  ),
+                ],
+              ],
+            );
+          },
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+        );
+      }),
+    );
+  }
+
+  Future<void> _applyPresetChip(BuildContext context, WidgetRef ref, FavoritePattern favorite) async {
+    try {
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo == null) return;
+
+      var payload = favorite.patternData;
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isNotEmpty) {
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      }
+      final success = await repo.applyJson(payload);
+
+      if (!mounted) return;
+      if (success) {
+        try {
+          final preview = _extractPreviewFromPayload(payload);
+          ref.read(wledStateProvider.notifier).applyLocalPreview(
+            colors: preview.colors,
+            effectId: preview.effectId,
+            speed: preview.speed,
+            intensity: preview.intensity,
+            effectName: favorite.patternName,
+          );
+        } catch (_) {}
+
+        try {
+          ref.read(activePresetLabelProvider.notifier).state = favorite.patternName;
+        } catch (_) {}
+
+        try {
+          ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id);
+        } catch (_) {}
+
+        try {
+          if (mounted) {
+            ref.trackWledPayload(
+              payload: payload,
+              patternName: favorite.patternName,
+              source: 'favorite',
+            );
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('Preset chip apply error: $e');
+    }
+  }
+
+  Widget _buildNowPlayingBar(BuildContext context, WidgetRef ref, WledStateModel state) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 48,
+      child: Consumer(builder: (context, ref, _) {
+        final wledState = ref.watch(wledStateProvider);
+        final activePreset = ref.watch(activePresetLabelProvider);
+        final isOn = wledState.isOn;
+
+        // Resolve the display name
+        String effectName;
+        if (activePreset != null) {
+          effectName = activePreset;
+        } else if (wledState.supportsRgbw && wledState.warmWhite > 0) {
+          effectName = 'Warm White';
+        } else {
+          effectName = wledState.effectName;
+        }
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(14, 18, 10, 8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                const Color(0xFF050812).withValues(alpha: 0.80),
+              ],
+            ),
+          ),
+          child: Row(
+            children: [
+              // Left: NOW PLAYING label + effect name
+              Expanded(
+                child: isOn
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'NOW PLAYING',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.45),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            effectName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              // Right: power toggle circle
+              GestureDetector(
+                onTap: wledState.connected
+                    ? () async {
+                        final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+                        if (!shouldProceed) return;
+                        try {
+                          final current = ref.read(wledStateProvider);
+                          await ref.read(wledStateProvider.notifier).togglePower(!current.isOn);
+                          final currentIps = ref.read(activeAreaControllerIpsProvider);
+                          if (currentIps.isNotEmpty) {
+                            await Future.wait(currentIps.map((ip) async {
+                              try {
+                                final svc = WledService('http://$ip');
+                                return await svc.setState(on: !current.isOn);
+                              } catch (_) {
+                                return false;
+                              }
+                            }));
+                          }
+                        } catch (e) {
+                          debugPrint('Now Playing power toggle error: $e');
+                        }
+                      }
+                    : null,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.06),
+                    border: Border.all(
+                      color: isOn
+                          ? Colors.white.withValues(alpha: 0.30)
+                          : Colors.red.withValues(alpha: 0.35),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.power_settings_new,
+                    size: 18,
+                    color: isOn
+                        ? Colors.white.withValues(alpha: 0.85)
+                        : Colors.red.withValues(alpha: 0.65),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
     );
   }
 
@@ -1237,5 +1443,99 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         );
       }
     }
+  }
+}
+
+/// A single frosted preset chip for the hero overlay.
+class _PresetChip extends StatelessWidget {
+  final FavoritePattern favorite;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _PresetChip({
+    required this.favorite,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryColor = _extractPrimaryColor();
+
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF080C18).withValues(alpha: 0.60),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isActive
+                    ? Colors.white.withValues(alpha: 0.45)
+                    : Colors.white.withValues(alpha: 0.12),
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Glowing color dot
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: primaryColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: primaryColor.withValues(alpha: 0.6),
+                        blurRadius: 5,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 7),
+                // Label
+                Text(
+                  favorite.patternName,
+                  style: TextStyle(
+                    color: isActive
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.75),
+                    fontSize: 11,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _extractPrimaryColor() {
+    try {
+      final seg = favorite.patternData['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final col = (seg[0] as Map)['col'];
+        if (col is List && col.isNotEmpty) {
+          final c = col[0];
+          if (c is List && c.length >= 3) {
+            return Color.fromARGB(
+              255,
+              (c[0] as num).toInt().clamp(0, 255),
+              (c[1] as num).toInt().clamp(0, 255),
+              (c[2] as num).toInt().clamp(0, 255),
+            );
+          }
+        }
+      }
+    } catch (_) {}
+    return NexGenPalette.cyan;
   }
 }

@@ -136,7 +136,7 @@ class InputValidation {
 
   /// Validate URL (for webhook URL)
   ///
-  /// SECURITY: Ensure URL is properly formatted and uses HTTPS
+  /// Accepts both http and https — http is common for local DynDNS/router setups
   static String? validateWebhookUrl(String? input) {
     if (input == null || input.trim().isEmpty) {
       return null;
@@ -147,8 +147,8 @@ class InputValidation {
     try {
       final uri = Uri.parse(url);
 
-      // SECURITY: Only allow HTTPS for webhooks
-      if (uri.scheme != 'https') {
+      // Allow both http and https
+      if (uri.scheme != 'https' && uri.scheme != 'http') {
         return null;
       }
 

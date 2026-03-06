@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.d
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart' show showLuminaSheet;
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart' show LuminaSheetMode;
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
+import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 
 /// Helper to execute custom Lumina effects (ID >= 1000).
 /// Returns true if the effect was a custom effect and was executed.
@@ -208,6 +209,10 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
               const SizedBox(height: 8),
               pagePadding(child: const ChannelSelectorBar()),
               const SizedBox(height: 8),
+              // Roofline preview hero — only shown when a design card is selected
+              _ExploreRooflinePreview(
+                onDismiss: () => ref.read(explorePreviewProvider.notifier).state = null,
+              ),
               // Conditional rendering based on search state
               if (_isSearching)
                 Expanded(
@@ -1000,6 +1005,113 @@ class _LibraryFolderResultCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Animated roofline preview hero for the Explore page.
+///
+/// Watches [explorePreviewProvider]. When non-null, renders a house photo
+/// with an [AnimatedRooflineOverlay] showing the selected design's colors
+/// and effect. Collapses to zero height when null.
+class _ExploreRooflinePreview extends ConsumerWidget {
+  final VoidCallback onDismiss;
+  const _ExploreRooflinePreview({required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preview = ref.watch(explorePreviewProvider);
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: preview == null
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  height: 160,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // House photo background
+                      Image.asset(
+                        'assets/images/Demohomephoto.jpg',
+                        fit: BoxFit.cover,
+                        alignment: const Alignment(0, 0.3),
+                      ),
+                      // Roofline overlay
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          return AnimatedRooflineOverlay(
+                            previewColors: preview.colors,
+                            previewEffectId: preview.effectId,
+                            previewSpeed: preview.speed,
+                            brightness: preview.brightness,
+                            forceOn: true,
+                            targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
+                            useBoxFitCover: true,
+                          );
+                        },
+                      ),
+                      // Bottom gradient for label legibility
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: 48,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Color(0x00000000), Color(0xAA000000)],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Design name label
+                      if (preview.name.isNotEmpty)
+                        Positioned(
+                          left: 12,
+                          bottom: 8,
+                          right: 40,
+                          child: Text(
+                            preview.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      // Dismiss button
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: GestureDetector(
+                          onTap: onDismiss,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: const BoxDecoration(
+                              color: Color(0x66000000),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.close, color: Colors.white70, size: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
     );
   }
 }

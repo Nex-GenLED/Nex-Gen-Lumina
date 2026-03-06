@@ -226,6 +226,13 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
       data: (u) => u,
       orElse: () => null,
     );
+  // ADD THIS: populate controller when profile loads (handles async timing)
+   ref.listen(currentUserProfileProvider, (_, next) {
+    final url = next.maybeWhen(data: (u) => u?.webhookUrl, orElse: () => null);
+     if (url != null && url != _webhookUrlController.text) {
+     _webhookUrlController.text = url;
+   }
+ });
     final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
       data: (s) => s,
       orElse: () => ConnectivityStatus.local,

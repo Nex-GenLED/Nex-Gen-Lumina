@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:nexgen_command/features/ai/pixel_renderer.dart';
+import 'package:nexgen_command/features/ai/light_effect_animator.dart';
+import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/widgets/roofline_light_painter.dart';
 
 /// Renders discrete LED pixels along a user-defined path over a house photo.
 ///
@@ -9,13 +12,37 @@ import 'package:nexgen_command/features/ai/pixel_renderer.dart';
 ///
 /// The overlay adds a dark scrim (40% opacity) behind the pixels so the
 /// lights are the clear focal point.
-class RooflinePixelOverlay extends PixelRenderer {
+///
+/// Internally delegates all rendering to [RooflineLightPainter].
+class RooflinePixelOverlay extends StatefulWidget {
+  /// Base palette (repeats cyclically across pixels).
+  final List<Color> colors;
+
   /// Ordered path points in **normalized** coordinates (0.0–1.0 for both
   /// x and y, relative to the container size).
   ///
   /// The pixel strip follows this polyline path.  If empty, a default
   /// gentle-arc roofline shape is used.
   final List<Offset> pathPoints;
+
+  /// Which effect animation to run.
+  final EffectType effectType;
+
+  /// Normalized speed 0.0–1.0.
+  final double speed;
+
+  /// Normalized brightness 0.0–1.0.
+  final double brightness;
+
+  /// Number of virtual LED pixels.
+  final int pixelCount;
+
+  /// Whether to animate (false = static snapshot at t=0).
+  final bool animate;
+
+  /// Whether to draw the specular highlight on each pixel (kept for API
+  /// compatibility; the shared painter always renders its own highlight).
+  final bool specular;
 
   /// Pixel radius override. If null, scales with container width.
   final double? pixelRadius;
@@ -28,14 +55,14 @@ class RooflinePixelOverlay extends PixelRenderer {
 
   const RooflinePixelOverlay({
     super.key,
-    required super.colors,
+    required this.colors,
     this.pathPoints = const [],
-    super.effectType,
-    super.speed,
-    super.brightness,
-    super.pixelCount = 50,
-    super.animate,
-    super.specular,
+    this.effectType = EffectType.solid,
+    this.speed = 0.5,
+    this.brightness = 1.0,
+    this.pixelCount = 50,
+    this.animate = true,
+    this.specular = true,
     this.pixelRadius,
     this.scrimOpacity = 0.40,
     this.showScrim = true,
@@ -45,118 +72,117 @@ class RooflinePixelOverlay extends PixelRenderer {
   State<RooflinePixelOverlay> createState() => _RooflinePixelOverlayState();
 }
 
-class _RooflinePixelOverlayState
-    extends PixelRendererState<RooflinePixelOverlay> {
+class _RooflinePixelOverlayState extends State<RooflinePixelOverlay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
   @override
-  List<Offset> computePixelPositions(Size canvasSize) {
-    final count = widget.pixelCount;
-    if (count <= 0) return [];
-
-    // Use explicit path points or generate a default arc
-    final normPath = widget.pathPoints.isNotEmpty
-        ? widget.pathPoints
-        : _defaultArcPath();
-
-    if (normPath.length < 2) {
-      // Single point: place all pixels at that point
-      final pt = Offset(
-        normPath.first.dx * canvasSize.width,
-        normPath.first.dy * canvasSize.height,
-      );
-      return List.filled(count, pt);
-    }
-
-    // Compute cumulative segment lengths along the path
-    final segLengths = <double>[0.0];
-    for (int i = 1; i < normPath.length; i++) {
-      final a = Offset(
-        normPath[i - 1].dx * canvasSize.width,
-        normPath[i - 1].dy * canvasSize.height,
-      );
-      final b = Offset(
-        normPath[i].dx * canvasSize.width,
-        normPath[i].dy * canvasSize.height,
-      );
-      segLengths.add(segLengths.last + (b - a).distance);
-    }
-    final totalLength = segLengths.last;
-    if (totalLength < 1.0) {
-      return List.filled(count,
-          Offset(normPath.first.dx * canvasSize.width,
-              normPath.first.dy * canvasSize.height));
-    }
-
-    // Distribute pixels evenly along the path
-    return List.generate(count, (i) {
-      final t = count > 1 ? i / (count - 1) : 0.5;
-      final targetDist = t * totalLength;
-
-      // Find which segment this distance falls in
-      int segIdx = 0;
-      for (int s = 1; s < segLengths.length; s++) {
-        if (segLengths[s] >= targetDist) {
-          segIdx = s - 1;
-          break;
-        }
-        segIdx = s - 1;
-      }
-
-      final segStart = segLengths[segIdx];
-      final segEnd = segLengths[segIdx + 1];
-      final segT = segEnd > segStart
-          ? (targetDist - segStart) / (segEnd - segStart)
-          : 0.0;
-
-      final a = Offset(
-        normPath[segIdx].dx * canvasSize.width,
-        normPath[segIdx].dy * canvasSize.height,
-      );
-      final b = Offset(
-        normPath[segIdx + 1].dx * canvasSize.width,
-        normPath[segIdx + 1].dy * canvasSize.height,
-      );
-
-      return Offset.lerp(a, b, segT)!;
-    });
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    if (widget.animate) _controller.repeat();
   }
 
   @override
-  double getPixelRadius(Size canvasSize) {
-    if (widget.pixelRadius != null) return widget.pixelRadius!;
-    // Scale radius with container width: ~0.35% of width, clamped
-    return (canvasSize.width * 0.0035)
-        .clamp(3.0, 6.0);
+  void didUpdateWidget(covariant RooflinePixelOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animate && !_controller.isAnimating) {
+      _controller.repeat();
+    } else if (!widget.animate && _controller.isAnimating) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final effectId = _effectTypeToWledId(widget.effectType);
+    final category = categorizeEffect(effectId);
+    final needsAnimation = category != EffectCategory.solid;
+    final wledSpeed = (widget.speed * 255).round().clamp(0, 255);
+    final wledBrightness = (widget.brightness * 255).round().clamp(0, 255);
+
+    // Update animation duration based on effect
+    if (needsAnimation) {
+      final duration = speedToDurationForEffect(wledSpeed, category);
+      if (_controller.duration != duration) {
+        _controller.duration = duration;
+        if (!_controller.isAnimating && widget.animate) {
+          _controller.repeat();
+        }
+      }
+    } else {
+      _controller.stop();
+    }
+
+    // Build a RooflineMask from the normalized path points
+    final mask = widget.pathPoints.isNotEmpty
+        ? RooflineMask(points: widget.pathPoints, isManuallyDrawn: true)
+        : null;
+
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Dark scrim so pixels are the focal point
         if (widget.showScrim)
           DecoratedBox(
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: widget.scrimOpacity),
             ),
           ),
-
-        // Pixel canvas
-        buildPixelCanvas(),
+        RepaintBoundary(
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              return CustomPaint(
+                painter: RooflineLightPainter(
+                  colors: widget.colors,
+                  animationPhase: needsAnimation ? _controller.value : 0.0,
+                  effectId: effectId,
+                  speed: wledSpeed,
+                  intensity: 128,
+                  mask: mask,
+                  isOn: true,
+                  brightness: wledBrightness,
+                  ledCount: widget.pixelCount,
+                ),
+                size: Size.infinite,
+              );
+            },
+          ),
+        ),
       ],
     );
   }
 
-  /// Default gentle-arc roofline path when no explicit path is provided.
-  ///
-  /// Creates a peaked roofline shape typical of a residential home.
-  static List<Offset> _defaultArcPath() {
-    const points = 12;
-    return List.generate(points, (i) {
-      final t = i / (points - 1);
-      // Parabolic arc peaking at center
-      final y = 0.35 - 0.12 * 4 * t * (1 - t);
-      return Offset(0.08 + t * 0.84, y);
-    });
+  /// Map the simplified [EffectType] to a representative WLED effect ID so
+  /// [RooflineLightPainter] and [categorizeEffect] produce the right
+  /// rendering category.
+  static int _effectTypeToWledId(EffectType type) {
+    switch (type) {
+      case EffectType.solid:
+        return 0;
+      case EffectType.breathe:
+        return 2;
+      case EffectType.chase:
+        return 28;
+      case EffectType.twinkle:
+        return 49;
+      case EffectType.sparkle:
+        return 52;
+      case EffectType.rainbow:
+        return 9;
+      case EffectType.fade:
+        return 1;
+      case EffectType.gradient:
+        return 46;
+    }
   }
 }

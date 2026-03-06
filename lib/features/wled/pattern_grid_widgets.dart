@@ -1182,6 +1182,17 @@ class PatternCard extends ConsumerWidget {
         );
       } catch (_) {}
       ref.read(activePresetLabelProvider.notifier).state = pattern.name;
+      // Update Explore page roofline preview
+      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+        colors: _getColors(),
+        effectId: effectId,
+        speed: pattern.wledPayload['seg'] is List &&
+                (pattern.wledPayload['seg'] as List).isNotEmpty
+            ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
+            : 128,
+        brightness: pattern.wledPayload['bri'] as int? ?? 255,
+        name: pattern.name,
+      );
 
       if (context.mounted) {
         // Show pattern adjustment panel in a bottom sheet

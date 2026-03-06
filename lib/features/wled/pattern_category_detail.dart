@@ -107,6 +107,14 @@ class _GradientPatternCard extends ConsumerWidget {
           await repo.applyJson(payload);
           // Update the active preset label
           ref.read(activePresetLabelProvider.notifier).state = data.name;
+          // Update Explore page roofline preview
+          ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+            colors: data.colors,
+            effectId: data.effectId,
+            speed: data.speed,
+            brightness: data.brightness,
+            name: data.name,
+          );
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${data.name} applied!')));
           }
@@ -226,6 +234,14 @@ class _GradientResultTile extends ConsumerWidget {
 
       // Update the active preset label so home screen reflects the change
       ref.read(activePresetLabelProvider.notifier).state = data.name;
+      // Update Explore page roofline preview
+      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+        colors: data.colors,
+        effectId: data.effectId,
+        speed: data.speed,
+        brightness: data.brightness,
+        name: data.name,
+      );
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${data.name}')));

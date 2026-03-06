@@ -478,7 +478,7 @@ class _AutopilotQuickToggleState extends ConsumerState<_AutopilotQuickToggle> {
         lowerText.contains('every evening') || lowerText.contains('daily') ||
         lowerText.contains('every day')) {
       repeatDays = ['Daily'];
-    } else if (lowerText.contains('this week')) {
+    } else if (lowerText.contains('this week') || lowerText.contains('the week')) {
       repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     } else if (lowerText.contains('weeknight')) {
       repeatDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];

@@ -118,9 +118,9 @@ class RooflineLightPainter extends CustomPainter {
     }
 
     // Calculate effective LED count based on path length if not specified
-    // Use approximately 1 LED per 4 pixels for a balanced look
-    // Minimum 20 LEDs, maximum 150 to avoid performance issues
-    final effectiveLedCount = ledCount ?? (totalLength / 4).round().clamp(20, 150);
+    // Use approximately 1 LED per 8 pixels for a balanced look
+    // Minimum 10 LEDs, maximum 75 to avoid performance issues
+    final effectiveLedCount = ledCount ?? (totalLength / 8).round().clamp(10, 75);
 
     // Get positions along the path for each virtual LED
     final ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
@@ -146,6 +146,21 @@ class RooflineLightPainter extends CustomPainter {
         break;
       case EffectCategory.fire:
         _paintFirePath(canvas, ledPositions, brightness);
+        break;
+      case EffectCategory.explosive:
+        _paintExplosivePath(canvas, ledPositions, colors, brightness, effectiveLedCount);
+        break;
+      case EffectCategory.scanning:
+        _paintScanningPath(canvas, ledPositions, colors, brightness);
+        break;
+      case EffectCategory.dripping:
+        _paintDrippingPath(canvas, ledPositions, colors, brightness, effectiveLedCount);
+        break;
+      case EffectCategory.bouncing:
+        _paintBouncingPath(canvas, ledPositions, colors, brightness, effectiveLedCount);
+        break;
+      case EffectCategory.morphing:
+        _paintMorphingPath(canvas, ledPositions, colors, brightness);
         break;
     }
   }
@@ -198,32 +213,89 @@ class RooflineLightPainter extends CustomPainter {
     return colors[colorIndex];
   }
 
-  /// Draw a single crisp LED dot with optional glow halo.
+  /// Draw a single LED pixel with 3-pass rendering: fascia wash, tight halo,
+  /// and pixel node with emitter lens.
   void _drawLedDot(Canvas canvas, Offset pos, Color color, double brightness, {double radius = 3.0, bool showHalo = true}) {
-    // Skip fully transparent LEDs
     if (brightness <= 0.01) return;
 
-    final adjustedColor = color.withValues(alpha: brightness);
+    final r = (color.r * 255).round();
+    final g = (color.g * 255).round();
+    final b = (color.b * 255).round();
+    final luminance = math.sqrt(r * r + g * g + b * b) / 441.0 * brightness;
+    if (luminance < 0.02) return;
 
+    final dotRadius = radius;
+
+    // --- Pass 1: Fascia surface wash ---
     if (showHalo) {
-      // Subtle glow halo around the dot (larger, transparent ring)
-      final haloPaint = Paint()
-        ..color = adjustedColor.withValues(alpha: 0.3 * brightness)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-      canvas.drawCircle(pos, radius + 2, haloPaint);
+      final washRadius = 9.0 * dotRadius;
+      final washCenter = Offset(pos.dx, pos.dy + 1.5 * dotRadius);
+      final washGradient = RadialGradient(
+        colors: [
+          color.withValues(alpha: luminance * 0.22),
+          color.withValues(alpha: luminance * 0.10),
+          color.withValues(alpha: 0.0),
+        ],
+        stops: const [0.0, 0.35, 1.0],
+      );
+      final washRect = Rect.fromCircle(center: washCenter, radius: washRadius);
+      final washPaint = Paint()
+        ..shader = washGradient.createShader(washRect)
+        ..style = PaintingStyle.fill;
+
+      canvas.save();
+      // Scale 2.2x horizontally around the wash center
+      canvas.translate(washCenter.dx, washCenter.dy);
+      canvas.scale(2.2, 1.0);
+      canvas.translate(-washCenter.dx, -washCenter.dy);
+      canvas.drawCircle(washCenter, washRadius, washPaint);
+      canvas.restore();
     }
 
-    // Crisp filled LED dot - no blur, no BlendMode.screen
-    final dotPaint = Paint()
-      ..color = adjustedColor
+    // --- Pass 2: Tight halo ---
+    final haloRadius = 3.5 * dotRadius;
+    final haloGradient = RadialGradient(
+      colors: [
+        color.withValues(alpha: luminance * 0.9),
+        color.withValues(alpha: luminance * 0.45),
+        color.withValues(alpha: luminance * 0.12),
+        color.withValues(alpha: 0.0),
+      ],
+      stops: const [0.0, 0.3, 0.7, 1.0],
+    );
+    final haloRect = Rect.fromCircle(center: pos, radius: haloRadius);
+    final haloPaint = Paint()
+      ..shader = haloGradient.createShader(haloRect)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(pos, radius, dotPaint);
+    canvas.drawCircle(pos, haloRadius, haloPaint);
 
-    // Bright center highlight for "lit bulb" look
-    final highlightPaint = Paint()
-      ..color = Color.lerp(color, Colors.white, 0.4)!.withValues(alpha: 0.7 * brightness)
+    // --- Pass 3: Pixel node ---
+    final whiteR = (r + 60).clamp(0, 255);
+    final whiteG = (g + 60).clamp(0, 255);
+    final whiteB = (b + 60).clamp(0, 255);
+    final brightCenter = Color.fromARGB(255, whiteR, whiteG, whiteB);
+    final darkEdge = Color.fromARGB(
+      255,
+      (r * 0.4).round(),
+      (g * 0.4).round(),
+      (b * 0.4).round(),
+    );
+
+    final nodeGradient = RadialGradient(
+      colors: [brightCenter, color, darkEdge],
+      stops: const [0.0, 0.5, 1.0],
+    );
+    final nodeRect = Rect.fromCircle(center: pos, radius: dotRadius);
+    final nodePaint = Paint()
+      ..shader = nodeGradient.createShader(nodeRect)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(pos, radius * 0.4, highlightPaint);
+    canvas.drawCircle(pos, dotRadius, nodePaint);
+
+    // Emitter lens highlight
+    final lensPaint = Paint()
+      ..color = Colors.white.withValues(alpha: luminance * 0.95)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(pos, dotRadius * 0.35, lensPaint);
   }
 
   /// Generate a default gentle-arc roofline path when no custom mask exists.
@@ -378,6 +450,157 @@ class RooflineLightPainter extends CustomPainter {
       final flicker = (0.6 + posRandom.nextDouble() * 0.4) * (0.7 + transitionBlend * 0.3);
       final colorIndex = posRandom.nextInt(fireColors.length);
       _drawLedDot(canvas, positions[i], fireColors[colorIndex], brightness * flicker);
+    }
+  }
+
+  /// Paint explosive burst effect — random pixel groups fire each cycle with fast
+  /// attack and quadratic decay.
+  void _paintExplosivePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
+    final burstCycle = (animationPhase * 4).floor();
+    final random = math.Random(burstCycle);
+    final cyclePhase = (animationPhase * 4) % 1.0;
+
+    // Attack is first 15%, decay is remaining 85%
+    final burstBrightness = cyclePhase < 0.15
+        ? cyclePhase / 0.15
+        : math.pow(1.0 - (cyclePhase - 0.15) / 0.85, 2).toDouble();
+
+    // Pick which pixels fire this cycle (~25% of strip)
+    final burstCount = (effectiveLedCount * 0.25).ceil();
+    final burstIndices = <int>{};
+    for (int i = 0; i < burstCount; i++) {
+      burstIndices.add(random.nextInt(positions.length));
+    }
+
+    for (int i = 0; i < positions.length; i++) {
+      if (burstIndices.contains(i)) {
+        final color = _getColorForLed(i, colors);
+        _drawLedDot(canvas, positions[i], color, brightness * burstBrightness,
+            showHalo: burstBrightness > 0.5);
+      }
+    }
+  }
+
+  /// Paint scanning beam effect — single soft beam bouncing back and forth.
+  void _paintScanningPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
+    final total = positions.length;
+    if (total == 0) return;
+
+    final beamPos = math.sin(animationPhase * math.pi).abs() * (total - 1);
+    const beamWidth = 4.0;
+
+    for (int i = 0; i < total; i++) {
+      final dist = (i - beamPos).abs();
+      if (dist < beamWidth) {
+        final falloff = math.pow(math.max(0.0, 1.0 - dist / beamWidth), 2).toDouble();
+        final color = _getColorForLed(i, colors);
+        _drawLedDot(canvas, positions[i], color, brightness * falloff,
+            showHalo: falloff > 0.4);
+      }
+    }
+  }
+
+  /// Paint dripping effect — 3 drops traveling forward with exponential falloff
+  /// and dimming as they travel.
+  void _paintDrippingPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
+    final total = positions.length;
+    if (total == 0) return;
+
+    const dropCount = 3;
+    const tailLength = 8;
+    final stagger = total / dropCount;
+
+    for (int i = 0; i < total; i++) {
+      double maxIntensity = 0.0;
+      Color ledColor = colors.first;
+
+      for (int d = 0; d < dropCount; d++) {
+        final dropPos = (animationPhase * total + d * stagger) % (total * 1.2);
+        final dist = i - dropPos;
+
+        // Only light pixels behind the leading edge (trail)
+        if (dist >= 0 && dist < tailLength) {
+          final falloff = math.exp(-dist * 0.4);
+          final travelFade = math.max(0.0, 1.0 - dropPos / (total * 1.2));
+          final intensity = falloff * travelFade;
+          if (intensity > maxIntensity) {
+            maxIntensity = intensity;
+            ledColor = _getColorForLed(d, colors);
+          }
+        }
+      }
+
+      if (maxIntensity > 0.01) {
+        _drawLedDot(canvas, positions[i], ledColor, brightness * maxIntensity,
+            showHalo: maxIntensity > 0.5);
+      }
+    }
+  }
+
+  /// Paint bouncing balls effect — 3 balls with different speeds and phase
+  /// offsets bouncing along the strip.
+  void _paintBouncingPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
+    final total = positions.length;
+    if (total == 0) return;
+
+    const ballSpeeds = [1.1, 0.8, 1.4];
+    const ballOffsets = [0.0, 1.8, 3.4];
+    const ballRadius = 3.0;
+    // Ball 0 and 2 use color1, ball 1 uses color2
+    final ballColors = [
+      colors.first,
+      colors.length > 1 ? colors[1] : colors.first,
+      colors.first,
+    ];
+
+    // Accumulate brightness per pixel from all balls
+    final pixelBrightness = List.filled(total, 0.0);
+    final pixelColor = List.filled(total, colors.first);
+
+    for (int b = 0; b < 3; b++) {
+      final ballPos = math.sin(animationPhase * ballSpeeds[b] + ballOffsets[b]).abs() * (total - 1);
+
+      for (int i = 0; i < total; i++) {
+        final dist = (i - ballPos).abs();
+        if (dist < ballRadius) {
+          final falloff = math.pow(1.0 - dist / ballRadius, 2).toDouble();
+          if (falloff > pixelBrightness[i]) {
+            pixelBrightness[i] = falloff;
+            pixelColor[i] = ballColors[b];
+          }
+        }
+      }
+    }
+
+    for (int i = 0; i < total; i++) {
+      if (pixelBrightness[i] > 0.01) {
+        _drawLedDot(canvas, positions[i], pixelColor[i], brightness * pixelBrightness[i],
+            showHalo: pixelBrightness[i] > 0.4);
+      }
+    }
+  }
+
+  /// Paint morphing effect — 3 layered sine waves blending between two colors
+  /// along the strip.
+  void _paintMorphingPath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
+    final total = positions.length;
+    if (total == 0) return;
+
+    final color1 = colors.first;
+    final color2 = colors.length > 1 ? colors[1] : colors.first;
+
+    for (int i = 0; i < total; i++) {
+      final t = i / total;
+      final p1 = math.sin(t * math.pi * 3 + animationPhase * 1.3);
+      final p2 = math.sin(t * math.pi * 5 - animationPhase * 0.9 + 2.1);
+      final p3 = math.sin(t * math.pi * 1.5 + animationPhase * 0.5 + 4.2);
+
+      // Weighted sum normalized to 0–1
+      final raw = p1 * 0.5 + p2 * 0.3 + p3 * 0.2;
+      final blend = (raw + 1.0) / 2.0;
+
+      final color = Color.lerp(color2, color1, blend) ?? color1;
+      _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
 

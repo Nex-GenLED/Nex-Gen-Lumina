@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/effect_database.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
 
 /// Provider for the user's roofline mask configuration.
@@ -163,42 +164,52 @@ final previewEffectIdProvider = Provider<int?>((ref) {
 
 /// Effect categories for determining animation style
 enum EffectCategory {
-  solid,     // No animation, static color
-  breathe,   // Pulsing opacity
-  chase,     // Moving segment
-  rainbow,   // Color cycling
-  twinkle,   // Random sparkle
-  wave,      // Oscillating pattern
-  fire,      // Fire-like flickering
+  solid,      // No animation, static color
+  breathe,    // Pulsing opacity
+  chase,      // Moving segment
+  rainbow,    // Color cycling
+  twinkle,    // Random sparkle
+  wave,       // Oscillating pattern
+  fire,       // Fire-like flickering
+  explosive,  // Sudden bursts or flashes
+  scanning,   // Scanning back and forth
+  dripping,   // Dripping or falling motion
+  bouncing,   // Bouncing motion
+  morphing,   // Morphing/color-shifting
 }
 
-/// Helper to categorize WLED effects
+/// Helper to categorize WLED effects by consulting EffectDatabase.
 EffectCategory categorizeEffect(int effectId) {
-  // Solid/static
-  if (effectId == 0) return EffectCategory.solid;
+  final meta = EffectDatabase.getEffect(effectId);
+  if (meta == null) return EffectCategory.chase;
 
-  // Breathe/pulse effects
-  if (effectId == 2 || effectId == 25) return EffectCategory.breathe;
+  // Effects that override user colors get the rainbow renderer
+  if (!meta.respectsColors) return EffectCategory.rainbow;
 
-  // Chase effects
-  if ([28, 29, 30, 31, 32, 33, 47, 48].contains(effectId)) {
-    return EffectCategory.chase;
+  switch (meta.motionType) {
+    case MotionType.static:
+      return EffectCategory.solid;
+    case MotionType.pulsing:
+      return EffectCategory.breathe;
+    case MotionType.flowing:
+      return EffectCategory.wave;
+    case MotionType.chasing:
+      return EffectCategory.chase;
+    case MotionType.twinkling:
+      return EffectCategory.twinkle;
+    case MotionType.flickering:
+      return EffectCategory.fire;
+    case MotionType.explosive:
+      return EffectCategory.explosive;
+    case MotionType.scanning:
+      return EffectCategory.scanning;
+    case MotionType.dripping:
+      return EffectCategory.dripping;
+    case MotionType.bouncing:
+      return EffectCategory.bouncing;
+    case MotionType.morphing:
+      return EffectCategory.morphing;
   }
-
-  // Rainbow effects
-  if ([9, 10, 11, 12, 13, 14].contains(effectId)) return EffectCategory.rainbow;
-
-  // Twinkle/sparkle effects
-  if ([17, 43, 44, 45, 46, 51, 52].contains(effectId)) return EffectCategory.twinkle;
-
-  // Wave effects
-  if ([35, 36, 37, 67, 68].contains(effectId)) return EffectCategory.wave;
-
-  // Fire effects
-  if ([66, 94, 95].contains(effectId)) return EffectCategory.fire;
-
-  // Default to chase for animated effects
-  return EffectCategory.chase;
 }
 
 /// Convert WLED speed (0-255) to animation duration
@@ -232,6 +243,11 @@ Duration speedToDurationForEffect(int wledSpeed, EffectCategory category) {
     case EffectCategory.breathe:
     case EffectCategory.wave:
     case EffectCategory.solid:
+    case EffectCategory.explosive:
+    case EffectCategory.scanning:
+    case EffectCategory.dripping:
+    case EffectCategory.bouncing:
+    case EffectCategory.morphing:
       return baseDuration;
   }
 }
