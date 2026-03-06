@@ -2,6 +2,7 @@ import 'dart:math' show sqrt;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/app_colors.dart';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SECTION 1: ExploreDesignTokens
@@ -15,7 +16,7 @@ class ExploreDesignTokens {
   static const Color backgroundCard = Color(0x0FFFFFFF); // 6% white
   static const Color cardBorder = Color(0x1EFFFFFF); // 12% white
   static const Color cardBorderActive = Color(0x66FFFFFF);
-  static const Color textPrimary = Color(0xFFFFFFFF);
+  static const Color textPrimary = NexGenPalette.textHigh;
   static const Color textSecondary = Color(0xB3FFFFFF); // 70%
   static const Color textMuted = Color(0x66FFFFFF); // 40%
   static const Color accentBlue = Color(0xFF4FC3F7);

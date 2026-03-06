@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,16 @@ import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
 import 'package:go_router/go_router.dart';
+
+// ---------------------------------------------------------------------------
+// Brand color constants (visual-only)
+// ---------------------------------------------------------------------------
+
+const _kVoid = Color(0xFF07091A);
+const _kCarbon = Color(0xFF111527);
+const _kFrost = Color(0xFFDCF0FF);
+const _kPulse = Color(0xFF6E2FFF); // SMART layer
+const _kFast = Color(0xFF00FF9D); // FAST layer
 
 // ---------------------------------------------------------------------------
 // Public API: show the Lumina sheet
@@ -58,6 +69,242 @@ Future<void> showLuminaSheet(
 }
 
 // ---------------------------------------------------------------------------
+// Lumina Avatar — glowing cyan ✦ symbol
+// ---------------------------------------------------------------------------
+
+class _LuminaAvatar extends StatelessWidget {
+  final double size;
+  const _LuminaAvatar({this.size = 28});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: NexGenPalette.cyan.withValues(alpha: 0.13),
+        border: Border.all(
+          color: NexGenPalette.cyan.withValues(alpha: 0.35),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: NexGenPalette.cyan.withValues(alpha: 0.25),
+            blurRadius: 8,
+            spreadRadius: 0,
+          ),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          '✦',
+          style: TextStyle(
+            fontSize: size * 0.46,
+            color: NexGenPalette.cyan,
+            height: 1.1,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FAST / SMART layer pill
+// ---------------------------------------------------------------------------
+
+class _LayerPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool active;
+
+  const _LayerPill({
+    required this.label,
+    required this.color,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: 0.18) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2),
+          width: 1,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.35),
+                  blurRadius: 8,
+                  spreadRadius: 0,
+                ),
+              ]
+            : null,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: active ? color : color.withValues(alpha: 0.4),
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Three-dot thinking indicator
+// ---------------------------------------------------------------------------
+
+class _ThinkingDots extends StatefulWidget {
+  const _ThinkingDots();
+
+  @override
+  State<_ThinkingDots> createState() => _ThinkingDotsState();
+}
+
+class _ThinkingDotsState extends State<_ThinkingDots>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            // Staggered phase: each dot offset by 0.2
+            final phase = (_controller.value + i * 0.2) % 1.0;
+            // Sine wave for smooth pulse
+            final scale = 0.5 + 0.5 * math.sin(phase * math.pi);
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Opacity(
+                opacity: 0.35 + 0.65 * scale,
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: NexGenPalette.cyan,
+                    boxShadow: [
+                      BoxShadow(
+                        color: NexGenPalette.cyan.withValues(alpha: 0.5 * scale),
+                        blurRadius: 4 * scale,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Meta row: pattern name badge + effect name + color swatches
+// ---------------------------------------------------------------------------
+
+class _LightingMetaRow extends StatelessWidget {
+  final LuminaPatternPreview preview;
+  const _LightingMetaRow({required this.preview});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2, left: 36),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          // Pattern name badge
+          if (preview.patternName != null && preview.patternName!.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.25),
+                  width: 0.5,
+                ),
+              ),
+              child: Text(
+                preview.patternName!,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: NexGenPalette.cyan,
+                ),
+              ),
+            ),
+
+          // Effect name
+          if (preview.effectName != null && preview.effectName!.isNotEmpty)
+            Text(
+              preview.effectName!,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: _kFrost.withValues(alpha: 0.55),
+              ),
+            ),
+
+          // Color swatches
+          if (preview.colors.isNotEmpty)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: preview.colors.take(5).map((c) {
+                return Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(right: 3),
+                  decoration: BoxDecoration(
+                    color: c,
+                    borderRadius: BorderRadius.circular(2),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      width: 0.5,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sheet body (root widget inside the modal)
 // ---------------------------------------------------------------------------
 
@@ -86,6 +333,9 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
   // Pulse animation for mic button in listening state
   late final AnimationController _pulseAnim;
 
+  // Track whether text field has content (for send button glow)
+  bool _hasText = false;
+
   // DraggableScrollableSheet controller
   final DraggableScrollableController _dragController =
       DraggableScrollableController();
@@ -113,6 +363,11 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
+
+    _textController.addListener(() {
+      final hasText = _textController.text.trim().isNotEmpty;
+      if (hasText != _hasText) setState(() => _hasText = hasText);
+    });
 
     // If opened in listening mode, start mic after build
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -521,7 +776,8 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
             filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
             child: Container(
               decoration: BoxDecoration(
-                color: NexGenPalette.matteBlack.withValues(alpha: 0.85),
+                // 1. VOID background
+                color: _kVoid.withValues(alpha: 0.92),
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(24)),
                 border: Border(
@@ -570,7 +826,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
           width: 40,
           height: 4,
           decoration: BoxDecoration(
-            color: NexGenPalette.textMedium.withValues(alpha: 0.4),
+            color: _kFrost.withValues(alpha: 0.25),
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -605,44 +861,41 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 4),
-          // Greeting + branding
+          // Greeting + branding + layer pills
           Row(
             children: [
-              Image.asset(
-                'assets/images/Gemini_Generated_Image_n4fr1en4fr1en4fr.png',
-                height: 28,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.auto_awesome_rounded,
-                  color: NexGenPalette.cyan,
-                  size: 28,
-                ),
-              ),
+              const _LuminaAvatar(size: 28),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   '${_greeting()} — Lumina',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: NexGenPalette.textHigh,
+                        color: _kFrost,
                       ),
                 ),
               ),
-              if (sheetState.hasActiveSession)
+              // 9. Layer pills in header
+              _LayerPill(label: 'FAST', color: _kFast, active: sheetState.isThinking),
+              const SizedBox(width: 4),
+              _LayerPill(label: 'SMART', color: _kPulse, active: sheetState.isThinking),
+              if (sheetState.hasActiveSession) ...[
+                const SizedBox(width: 4),
                 IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                  color: NexGenPalette.textMedium,
+                  color: _kFrost.withValues(alpha: 0.5),
                   tooltip: 'Clear session',
                   onPressed: () {
                     ref.read(luminaSheetProvider.notifier).clearSession();
                   },
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 6),
           Text(
             'How can I light up your home?',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: NexGenPalette.textMedium,
+                  color: _kFrost.withValues(alpha: 0.55),
                 ),
           ),
           const SizedBox(height: 16),
@@ -674,11 +927,12 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
             label: Text(
               suggestions[i],
               style: const TextStyle(
-                color: NexGenPalette.textHigh,
+                color: _kFrost,
                 fontSize: 13,
               ),
             ),
-            backgroundColor: NexGenPalette.gunmetal,
+            // 2. CARBON surface
+            backgroundColor: _kCarbon,
             side: BorderSide(
               color: NexGenPalette.cyan.withValues(alpha: 0.3),
             ),
@@ -745,7 +999,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
               child: Text(
                 sheetState.transcription,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: NexGenPalette.textHigh,
+                      color: _kFrost,
                     ),
                 textAlign: TextAlign.center,
                 maxLines: 3,
@@ -809,27 +1063,24 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(
             children: [
-              Image.asset(
-                'assets/images/Gemini_Generated_Image_n4fr1en4fr1en4fr.png',
-                height: 24,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.auto_awesome_rounded,
-                  color: NexGenPalette.cyan,
-                  size: 24,
-                ),
-              ),
+              // 8. Avatar with ✦ symbol
+              const _LuminaAvatar(size: 24),
               const SizedBox(width: 8),
               Text(
                 'Lumina',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: NexGenPalette.textHigh,
+                      color: _kFrost,
                     ),
               ),
+              const SizedBox(width: 10),
+              // 9. Layer pills in expanded header — glow while thinking
+              _LayerPill(label: 'FAST', color: _kFast, active: sheetState.isThinking),
+              const SizedBox(width: 4),
+              _LayerPill(label: 'SMART', color: _kPulse, active: sheetState.isThinking),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                color: NexGenPalette.textMedium,
+                color: _kFrost.withValues(alpha: 0.5),
                 tooltip: 'Clear conversation',
                 onPressed: () {
                   ref.read(luminaSheetProvider.notifier).clearSession();
@@ -841,8 +1092,8 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
             ],
           ),
         ),
-        const Divider(
-          color: NexGenPalette.line,
+        Divider(
+          color: NexGenPalette.line.withValues(alpha: 0.4),
           height: 1,
           indent: 20,
           endIndent: 20,
@@ -883,27 +1134,15 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     );
   }
 
+  // 6. Three animated cyan dots instead of spinner
   Widget _buildThinkingIndicator() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: NexGenPalette.cyan.withValues(alpha: 0.6),
-            ),
-          ),
+          const _LuminaAvatar(size: 20),
           const SizedBox(width: 10),
-          Text(
-            'Lumina is thinking...',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: NexGenPalette.textMedium,
-                  fontStyle: FontStyle.italic,
-                ),
-          ),
+          const _ThinkingDots(),
         ],
       ),
     );
@@ -944,28 +1183,51 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Container(
         decoration: BoxDecoration(
-          color: NexGenPalette.gunmetal.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(24),
+          // 2. CARBON surface for input bar
+          color: _kCarbon,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _focusNode.hasFocus
                 ? NexGenPalette.cyan.withValues(alpha: 0.5)
-                : NexGenPalette.line,
+                : NexGenPalette.line.withValues(alpha: 0.4),
           ),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Row(
           children: [
+            // Mic button (left side)
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                _startListening();
+              },
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: NexGenPalette.cyan.withValues(alpha: 0.08),
+                ),
+                child: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none_rounded,
+                  color: NexGenPalette.cyan.withValues(alpha: 0.7),
+                  size: 18,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             Expanded(
               child: TextField(
                 controller: _textController,
                 focusNode: _focusNode,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: NexGenPalette.textHigh,
+                      // 3. FROST text
+                      color: _kFrost,
                     ),
                 decoration: InputDecoration(
                   hintText: 'Ask Lumina anything...',
                   hintStyle: TextStyle(
-                    color: NexGenPalette.textMedium.withValues(alpha: 0.6),
+                    color: _kFrost.withValues(alpha: 0.3),
                   ),
                   border: InputBorder.none,
                   isDense: true,
@@ -981,23 +1243,44 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
               ),
             ),
             const SizedBox(width: 4),
-            // Mic button
+            // 7. Rounded square send button with up arrow
             GestureDetector(
               onTap: () {
-                HapticFeedback.lightImpact();
-                _startListening();
+                if (_hasText) _sendMessage(_textController.text);
               },
-              child: Container(
-                width: 40,
-                height: 40,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: NexGenPalette.cyan.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: _hasText
+                      ? const LinearGradient(
+                          colors: [NexGenPalette.cyan, Color(0xFF00B8D4)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  color: _hasText ? null : _kCarbon,
+                  border: _hasText
+                      ? null
+                      : Border.all(
+                          color: NexGenPalette.line.withValues(alpha: 0.3),
+                        ),
+                  boxShadow: _hasText
+                      ? [
+                          BoxShadow(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                            blurRadius: 10,
+                            spreadRadius: 0,
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Icon(
-                  _isListening ? Icons.mic : Icons.mic_none_rounded,
-                  color: NexGenPalette.cyan,
-                  size: 22,
+                  Icons.arrow_upward_rounded,
+                  size: 18,
+                  color: _hasText ? _kVoid : _kFrost.withValues(alpha: 0.25),
                 ),
               ),
             ),
@@ -1029,13 +1312,13 @@ class _UserBubble extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 520),
               padding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
                   colors: [Color(0xFF0A1B4A), NexGenPalette.cyan],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.only(
+                borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   bottomLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -1077,30 +1360,27 @@ class _AssistantBubble extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.start,
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Lumina avatar
-          Container(
-            width: 28,
-            height: 28,
-            margin: const EdgeInsets.only(right: 8, top: 2),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: NexGenPalette.cyan.withValues(alpha: 0.15),
-            ),
-            child: const Icon(
-              Icons.auto_awesome_rounded,
-              color: NexGenPalette.cyan,
-              size: 16,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 8. Lumina avatar with ✦
+              const Padding(
+                padding: EdgeInsets.only(right: 8, top: 2),
+                child: _LuminaAvatar(size: 28),
+              ),
+              Flexible(
+                child: hasLightingSuggestion
+                    ? _buildResponseCard(context)
+                    : _buildPlainBubble(context),
+              ),
+            ],
           ),
-          Flexible(
-            child: hasLightingSuggestion
-                ? _buildResponseCard(context)
-                : _buildPlainBubble(context),
-          ),
+          // 10. Meta row after assistant messages with lighting data
+          if (hasLightingSuggestion) _LightingMetaRow(preview: preview!),
         ],
       ),
     );
@@ -1134,7 +1414,8 @@ class _AssistantBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 520),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal,
+        // 2. CARBON surface
+        color: _kCarbon,
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(4),
           topRight: Radius.circular(16),
@@ -1142,14 +1423,15 @@ class _AssistantBubble extends StatelessWidget {
           bottomRight: Radius.circular(16),
         ),
         border: Border.all(
-          color: NexGenPalette.line,
+          color: NexGenPalette.line.withValues(alpha: 0.3),
           width: 0.5,
         ),
       ),
       child: Text(
         text,
         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: NexGenPalette.textHigh,
+              // 3. FROST text
+              color: _kFrost,
             ),
       ),
     );

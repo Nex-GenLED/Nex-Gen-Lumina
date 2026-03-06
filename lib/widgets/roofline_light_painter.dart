@@ -316,31 +316,34 @@ class RooflineLightPainter extends CustomPainter {
     });
   }
 
-  /// Paint solid color along the roofline path - crisp discrete dots.
+  /// Paint solid color along the roofline path - every pixel is color1.
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
+    final color = colors.first;
     for (int i = 0; i < positions.length; i++) {
-      final color = _getColorForLed(i, colors);
       _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
 
-  /// Paint breathing effect along path - crisp dots with pulsing opacity.
+  /// Paint breathing effect along path - every pixel is color1, brightness pulsing.
   void _paintBreathePath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final breathePhase = math.sin(animationPhase * math.pi * 2);
     final breatheIntensity = 0.3 + (breathePhase + 1) / 2 * 0.7;
     final effectiveBrightness = brightness * breatheIntensity;
+    final color = colors.first;
 
     for (int i = 0; i < positions.length; i++) {
-      final color = _getColorForLed(i, colors);
       _drawLedDot(canvas, positions[i], color, effectiveBrightness);
     }
   }
 
-  /// Paint chase effect along path - crisp dots with trailing fade.
+  /// Paint chase effect along path - comet head is color1, background is
+  /// color2 at low opacity (or dark when only one color is provided).
   void _paintChasePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness, int effectiveLedCount) {
     final chaseLength = effectiveLedCount * 2 ~/ 5;
     final chasePosition = animationPhase * effectiveLedCount;
-    final hasBgColor = backgroundColor != const Color(0xFF000000);
+    final cometColor = colors.first;
+    final bgColor = colors.length > 1 ? colors[1] : backgroundColor;
+    final hasBg = bgColor != const Color(0xFF000000);
 
     for (int i = 0; i < positions.length; i++) {
       double distance = (i - chasePosition) % effectiveLedCount;
@@ -349,11 +352,9 @@ class RooflineLightPainter extends CustomPainter {
       if (distance < chaseLength) {
         final normalizedDist = distance / chaseLength;
         final trailFade = math.cos(normalizedDist * math.pi / 2);
-        final color = _getColorForLed(i, colors);
-        _drawLedDot(canvas, positions[i], color, brightness * trailFade, showHalo: trailFade > 0.5);
-      } else if (hasBgColor) {
-        // Show background color for non-active pixels
-        _drawLedDot(canvas, positions[i], backgroundColor, brightness * 0.6, showHalo: false);
+        _drawLedDot(canvas, positions[i], cometColor, brightness * trailFade, showHalo: trailFade > 0.5);
+      } else if (hasBg) {
+        _drawLedDot(canvas, positions[i], bgColor, brightness * 0.15, showHalo: false);
       }
     }
   }
@@ -385,15 +386,11 @@ class RooflineLightPainter extends CustomPainter {
     final random = math.Random(sparkleSet);
     final hasBgColor = backgroundColor != const Color(0xFF000000);
 
-    // Base layer: show all LEDs at background color (or dim action color)
+    // Base layer: show all LEDs at background color (or dim color1)
+    final baseColor = hasBgColor ? backgroundColor : colors.first;
+    final baseOpacity = hasBgColor ? 0.7 : 0.2;
     for (int i = 0; i < positions.length; i++) {
-      if (hasBgColor) {
-        _drawLedDot(canvas, positions[i], backgroundColor, brightness * 0.7, showHalo: false);
-      } else {
-        // Dim base dots when no BG color
-        final color = _getColorForLed(i, colors);
-        _drawLedDot(canvas, positions[i], color, brightness * 0.2, showHalo: false);
-      }
+      _drawLedDot(canvas, positions[i], baseColor, brightness * baseOpacity, showHalo: false);
     }
 
     // Sparkle transition for smooth fade
@@ -418,13 +415,26 @@ class RooflineLightPainter extends CustomPainter {
     }
   }
 
-  /// Paint wave effect along path - crisp dots with brightness oscillation.
+  /// Paint wipe/flowing effect along path — a moving boundary transitions
+  /// pixels from color2 to color1.  At phase 0 all pixels are color2,
+  /// at phase 1 all pixels are color1.
   void _paintWavePath(Canvas canvas, List<Offset> positions, List<Color> colors, double brightness) {
-    for (int i = 0; i < positions.length; i++) {
-      final waveValue = math.sin((i / positions.length + animationPhase) * math.pi * 1.5);
-      final ledBrightness = 0.4 + (waveValue + 1) / 2 * 0.6;
-      final color = _getColorForLed(i, colors);
-      _drawLedDot(canvas, positions[i], color, brightness * ledBrightness, showHalo: ledBrightness > 0.7);
+    final color1 = colors.first;
+    final color2 = colors.length > 1 ? colors[1] : color1.withValues(alpha: 0.15);
+    final total = positions.length;
+    if (total == 0) return;
+
+    // The wipe front position (0 = far left, total = far right)
+    final frontPos = animationPhase * total;
+    // Width of the soft transition zone (in LEDs)
+    const transitionWidth = 6.0;
+
+    for (int i = 0; i < total; i++) {
+      final distFromFront = i - frontPos;
+      // blend: 0 = fully color2, 1 = fully color1
+      final blend = (distFromFront / transitionWidth + 0.5).clamp(0.0, 1.0);
+      final color = Color.lerp(color1, color2, blend) ?? color1;
+      _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
 
@@ -472,10 +482,10 @@ class RooflineLightPainter extends CustomPainter {
       burstIndices.add(random.nextInt(positions.length));
     }
 
+    final burstColor = colors.first;
     for (int i = 0; i < positions.length; i++) {
       if (burstIndices.contains(i)) {
-        final color = _getColorForLed(i, colors);
-        _drawLedDot(canvas, positions[i], color, brightness * burstBrightness,
+        _drawLedDot(canvas, positions[i], burstColor, brightness * burstBrightness,
             showHalo: burstBrightness > 0.5);
       }
     }
@@ -489,12 +499,12 @@ class RooflineLightPainter extends CustomPainter {
     final beamPos = math.sin(animationPhase * math.pi).abs() * (total - 1);
     const beamWidth = 4.0;
 
+    final beamColor = colors.first;
     for (int i = 0; i < total; i++) {
       final dist = (i - beamPos).abs();
       if (dist < beamWidth) {
         final falloff = math.pow(math.max(0.0, 1.0 - dist / beamWidth), 2).toDouble();
-        final color = _getColorForLed(i, colors);
-        _drawLedDot(canvas, positions[i], color, brightness * falloff,
+        _drawLedDot(canvas, positions[i], beamColor, brightness * falloff,
             showHalo: falloff > 0.4);
       }
     }

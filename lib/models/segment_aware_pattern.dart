@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/app_colors.dart';
 
 /// Defines the type of segment-aware pattern template.
 ///
@@ -302,7 +303,7 @@ class SegmentAwarePattern {
       name: 'Gold Corner Accents',
       templateType: PatternTemplateType.cornerAccent,
       anchorColor: Color(0xFFFFD700), // Gold
-      spacedColor: Color(0xFF1A1A1A), // Near black (off)
+      spacedColor: NexGenPalette.gunmetal, // Near black (off)
       spacingCount: 0,
       anchorAlwaysOn: true,
       effectId: 0,

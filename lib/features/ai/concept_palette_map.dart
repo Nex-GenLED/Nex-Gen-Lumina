@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/effect_database.dart';
 
@@ -470,7 +471,7 @@ class ConceptPaletteMap {
     suggestedMood: PatternMood.energetic,
     suggestedEnergy: EnergyLevel.high,
     colors: [
-      NamedColor('Neon Cyan', Color(0xFF00F0FF)),
+      NamedColor('Neon Cyan', NexGenPalette.cyan),
       NamedColor('Electric Purple', Color(0xFF7C4DFF)),
       NamedColor('Toxic Green', Color(0xFF39FF14)),
       NamedColor('Hot Magenta', Color(0xFFFF00FF)),

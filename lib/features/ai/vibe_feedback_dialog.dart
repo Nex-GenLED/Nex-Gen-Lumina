@@ -105,7 +105,7 @@ class _EnhancedFeedbackDialogState extends State<_EnhancedFeedbackDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF2A2A2A),
+      backgroundColor: NexGenPalette.line,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),

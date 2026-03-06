@@ -187,13 +187,13 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
   sliderTheme: SliderThemeData(
     trackHeight: 6,
     trackShape: const NeonGradientSliderTrackShape(
-      inactiveTrackColor: Color(0xFF2A2A2A),
+      inactiveTrackColor: NexGenPalette.line,
       gradient: LinearGradient(colors: [NexGenPalette.cyan, NexGenPalette.cyan]),
     ),
     thumbColor: NexGenPalette.cyan,
     overlayColor: Colors.transparent, // No overlay per spec
     thumbShape: const NeonGlowThumbShape(radius: 10, glowColor: NexGenPalette.cyan, glowBlur: 18),
-    inactiveTrackColor: const Color(0xFF2A2A2A),
+    inactiveTrackColor: NexGenPalette.line,
   ),
   inputDecorationTheme: const InputDecorationTheme(
     filled: false,
@@ -210,7 +210,7 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
     thumbColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
     trackColor: MaterialStateProperty.resolveWith((states) {
       if (states.contains(MaterialState.selected)) return NexGenPalette.cyan.withValues(alpha: 0.25);
-      return const Color(0xFF2A2A2A);
+      return NexGenPalette.line;
     }),
   ),
   filledButtonTheme: FilledButtonThemeData(

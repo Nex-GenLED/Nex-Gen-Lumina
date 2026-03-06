@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -203,7 +204,7 @@ class SegmentPatternGenerator {
     int effectId = 0,
   }) {
     final segments = <SegmentAssignment>[];
-    final actualBaseColor = baseColor ?? const Color(0xFF2A2A2A).withOpacity(0.3);
+    final actualBaseColor = baseColor ?? NexGenPalette.line.withValues(alpha: 0.3);
 
     for (final segment in config.segments) {
       if (segment.architecturalRole == targetRole) {

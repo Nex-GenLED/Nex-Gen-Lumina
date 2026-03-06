@@ -874,7 +874,7 @@ class _NeighborhoodHeroPainter extends CustomPainter {
       );
 
       // House body
-      housePaint.color = const Color(0xFF2A2A2A);
+      housePaint.color = NexGenPalette.line;
       final houseRect = RRect.fromRectAndRadius(
         Rect.fromLTWH(x, y, houseWidth, houseWidth * 0.8),
         const Radius.circular(4),
@@ -903,7 +903,7 @@ class _NeighborhoodHeroPainter extends CustomPainter {
       }
 
       // Window
-      housePaint.color = const Color(0xFF1A1A1A);
+      housePaint.color = NexGenPalette.gunmetal;
       canvas.drawRect(
         Rect.fromLTWH(
           x + houseWidth * 0.3,
