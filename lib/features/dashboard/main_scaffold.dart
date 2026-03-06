@@ -42,9 +42,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
     ref.read(selectedTabIndexProvider.notifier).state = index;
   }
 
-  /// Quick tap on Lumina button → open compact sheet.
+  /// Quick tap on Lumina button → open full-screen Lumina AI chat.
   void _handleLuminaTap() {
-    showLuminaSheet(context, ref, mode: LuminaSheetMode.compact);
+    context.push('/lumina-ai');
   }
 
   /// Long-press on Lumina button → open listening sheet with haptic.

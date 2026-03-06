@@ -48,6 +48,7 @@ import 'package:nexgen_command/features/installer/media_access_code_screen.dart'
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 // Dashboard pages for branch wrappers
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
@@ -207,6 +208,12 @@ class AppRouter {
           final pattern = state.extra as EditablePattern?;
           return MaterialPage(child: EditPatternScreen(initialPattern: pattern));
         },
+      ),
+      GoRoute(
+        path: AppRoutes.luminaAI,
+        name: 'lumina-ai',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const NoTransitionPage(child: LuminaAIScreen()),
       ),
       GoRoute(
         path: AppRoutes.designStudio,
@@ -564,6 +571,7 @@ class AppRoutes {
   static const String luminaStudio = '/settings/studio';
   static const String geofenceSetup = '/settings/geofence';
   static const String remoteAccess = '/settings/remote-access';
+  static const String luminaAI = '/lumina-ai';
   static const String designStudio = '/design-studio';
   static const String editPattern = '/edit-pattern';
   static const String myDesigns = '/my-designs';
