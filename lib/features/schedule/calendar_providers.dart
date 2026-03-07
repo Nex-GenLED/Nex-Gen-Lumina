@@ -166,11 +166,14 @@ Rules:
     final dayStr = _dayName(today.weekday);
     final monthStr = _monthName(today.month);
 
-    final prompt =
-        '${_prefix}Today is $todayStr ($dayStr, $monthStr ${today.day}, ${today.year}).\n\n'
-        'User schedule request: $userRequest';
+    final systemContext =
+        '${_prefix}Today is $todayStr ($dayStr, $monthStr ${today.day}, ${today.year}).';
 
-    final raw = await LuminaBrain.chat(ref, prompt);
+    final raw = await LuminaBrain.chatCalendar(
+      ref,
+      systemContext,
+      'User schedule request: $userRequest',
+    );
 
     return _parseAiResponse(raw);
   }

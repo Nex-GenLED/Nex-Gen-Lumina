@@ -2,25 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/schedule/widgets/night_track_bar.dart';
 
 /// Compact 7-day schedule list for the dashboard/home screen.
-/// - Safe against empty data (shows a neutral message)
-/// - Includes a simple time axis header (Sunset .. Sunrise)
-/// - Each day renders a track with an active bar and centered label
-/// - Constrained height to avoid pushing bottom UI off-screen
+/// Merges both data sources:
+///   - calendarScheduleProvider (date-specific CalendarEntry overrides)
+///   - schedulesProvider (recurring ScheduleItem from Firestore)
+/// Calendar entries take priority over recurring schedules for the same day.
 class MiniScheduleList extends ConsumerWidget {
   final double height;
-  // height kept for backward compatibility but no longer constrains layout.
   const MiniScheduleList({super.key, this.height = 300});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final schedules = ref.watch(schedulesProvider);
+    final calEntries = ref.watch(calendarScheduleProvider);
 
-    // Data safety: empty list means nothing configured yet.
-    if (schedules.isEmpty) {
+    // If both sources are empty, show placeholder
+    if (schedules.isEmpty && calEntries.isEmpty) {
       return const Center(child: Text('No Schedule Set', style: TextStyle(color: Colors.grey)));
     }
 
@@ -61,7 +63,8 @@ class MiniScheduleList extends ConsumerWidget {
       return dl.any(keys.contains);
     }
 
-    List<ScheduleItem> itemsForDay(int weekdayIndex0Sun) => schedules.where((s) => s.enabled && appliesTo(s, weekdayIndex0Sun)).toList(growable: false);
+    List<ScheduleItem> recurringForDay(int weekdayIndex0Sun) =>
+        schedules.where((s) => s.enabled && appliesTo(s, weekdayIndex0Sun)).toList(growable: false);
 
     String labelFromAction(String actionLabel) {
       final a = actionLabel.trim();
@@ -73,7 +76,7 @@ class MiniScheduleList extends ConsumerWidget {
     }
 
     return Column(children: [
-      // Header (Time Axis) — match My Schedule page style
+      // Header (Time Axis)
       Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Row(children: [
@@ -108,7 +111,7 @@ class MiniScheduleList extends ConsumerWidget {
         ]),
       ),
 
-      // Days list — use ListView with shrinkWrap so the page can scroll, not this list
+      // Days list
       ListView.builder(
         itemCount: 7,
         shrinkWrap: true,
@@ -117,8 +120,46 @@ class MiniScheduleList extends ConsumerWidget {
           final d = days[i];
           final int weekdayIndex0Sun = d.weekday % 7; // Sun=0..Sat=6
           final isToday = i == 0;
-          final dayItems = itemsForDay(weekdayIndex0Sun);
-          final String barLabel = dayItems.isNotEmpty ? labelFromAction(dayItems.first.actionLabel) : 'No schedule';
+
+          // Check for a date-specific calendar entry first
+          final dateKey = calendarDateKey(d);
+          final CalendarEntry? calEntry = calEntries[dateKey];
+
+          // Fall back to recurring schedules
+          final dayItems = recurringForDay(weekdayIndex0Sun);
+
+          // Calendar entry overrides recurring schedule
+          String barLabel;
+          if (calEntry != null) {
+            barLabel = calEntry.brightness == 0
+                ? 'Off'
+                : calEntry.patternName;
+          } else if (dayItems.isNotEmpty) {
+            barLabel = labelFromAction(dayItems.first.actionLabel);
+          } else {
+            barLabel = 'No schedule';
+          }
+
+          // Build effective items list for NightTrackBar
+          // If we have a calendar entry, synthesize a ScheduleItem so the bar renders
+          final List<ScheduleItem> effectiveItems;
+          if (calEntry != null && calEntry.brightness > 0) {
+            effectiveItems = [
+              ScheduleItem(
+                id: 'cal_$dateKey',
+                timeLabel: calEntry.onTime ?? '17:30',
+                offTimeLabel: calEntry.offTime ?? '23:30',
+                repeatDays: const ['daily'],
+                actionLabel: calEntry.patternName,
+                enabled: true,
+              ),
+            ];
+          } else if (calEntry != null && calEntry.brightness == 0) {
+            // Explicitly off — show empty bar
+            effectiveItems = [];
+          } else {
+            effectiveItems = dayItems;
+          }
 
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -131,7 +172,7 @@ class MiniScheduleList extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              Expanded(child: SizedBox(height: 44, child: NightTrackBar(label: barLabel, items: dayItems))),
+              Expanded(child: SizedBox(height: 44, child: NightTrackBar(label: barLabel, items: effectiveItems))),
             ]),
           );
         },
