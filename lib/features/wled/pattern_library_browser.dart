@@ -76,7 +76,8 @@ class DesignLibraryBrowser extends ConsumerWidget {
                 crossAxisCount: 2,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
-                childAspectRatio: 2.8,
+                // CHANGE: was 2.8 — increased to 3.5 to reduce card height ~20 %
+                childAspectRatio: 3.5,
               ),
               itemCount: totalItems,
               itemBuilder: (context, index) {
@@ -1125,61 +1126,20 @@ class _SubCategoryChip extends StatelessWidget {
     required this.categoryId,
   });
 
-  /// Returns a hero icon for each sub-category type.
   IconData _heroIconForSubCategory(String subId) {
-    switch (subId) {
-      // Holidays
-      case 'sub_xmas':
-        return Icons.park; // Christmas tree
-      case 'sub_halloween':
-        return Icons.pest_control; // Spider/bug for spooky
-      case 'sub_july4':
-        return Icons.celebration; // Fireworks/celebration
-      case 'sub_easter':
-        return Icons.egg; // Easter egg
-      case 'sub_valentines':
-        return Icons.favorite; // Heart
-      case 'sub_st_patricks':
-        return Icons.local_florist; // Clover/flower
-      // Sports
-      case 'sub_kc':
-        return Icons.sports_football; // Football
-      case 'sub_seattle':
-        return Icons.sports_football;
-      case 'sub_rb_generic':
-      case 'sub_gy_generic':
-      case 'sub_ob_generic':
-        return Icons.emoji_events; // Trophy
-      // Seasonal
-      case 'sub_spring':
-        return Icons.local_florist; // Flowers
-      case 'sub_summer':
-        return Icons.wb_sunny; // Sun
-      case 'sub_autumn':
-        return Icons.park; // Falling leaves
-      case 'sub_winter':
-        return Icons.ac_unit; // Snowflake
-      // Architectural
-      case 'sub_warm_whites':
-        return Icons.wb_incandescent; // Warm bulb
-      case 'sub_cool_whites':
-        return Icons.light_mode; // Cool light
-      case 'sub_gold_accents':
-        return Icons.auto_awesome; // Sparkle/gold
-      case 'sub_security_floods':
-        return Icons.flashlight_on; // Flood light
-      // Party
-      case 'sub_birthday':
-        return Icons.cake; // Birthday cake
-      case 'sub_elegant_dinner':
-        return Icons.restaurant; // Dinner
-      case 'sub_rave':
-        return Icons.speaker; // Music/rave
-      case 'sub_baby_shower':
-        return Icons.child_friendly; // Baby
-      default:
-        return Icons.palette; // Default
-    }
+    if (subId.contains('warm') || subId.contains('white')) return Icons.lightbulb;
+    if (subId.contains('cool') || subId.contains('ice')) return Icons.ac_unit;
+    if (subId.contains('fire') || subId.contains('flame')) return Icons.local_fire_department;
+    if (subId.contains('ocean') || subId.contains('water')) return Icons.water;
+    if (subId.contains('forest') || subId.contains('nature')) return Icons.forest;
+    if (subId.contains('rain') || subId.contains('storm')) return Icons.thunderstorm;
+    if (subId.contains('sun') || subId.contains('gold')) return Icons.wb_sunny;
+    if (subId.contains('night') || subId.contains('star')) return Icons.nightlight_round;
+    if (subId.contains('party') || subId.contains('dance')) return Icons.music_note;
+    if (subId.contains('holiday') || subId.contains('festiv')) return Icons.celebration;
+    if (subId.contains('sport') || subId.contains('team')) return Icons.emoji_events;
+    if (subId.contains('flag') || subId.contains('patriot')) return Icons.flag;
+    return Icons.auto_awesome;
   }
 
   @override

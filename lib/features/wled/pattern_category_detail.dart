@@ -87,43 +87,39 @@ class _GradientPatternCard extends ConsumerWidget {
             )
           : null,
       child: InkWell(
-      onTap: () async {
-        // Check for active neighborhood sync before changing lights
-        final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-        if (!shouldProceed) return;
+        onTap: () async {
+          final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
+          if (!shouldProceed) return;
 
-        final repo = ref.read(wledRepositoryProvider);
-        if (repo == null) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
+          final repo = ref.read(wledRepositoryProvider);
+          if (repo == null) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
+            }
+            return;
           }
-          return;
-        }
-        try {
-          // Use the pattern's toWledPayload() method for proper effect/speed/intensity
-          var payload = data.toWledPayload();
-          final channels = ref.read(effectiveChannelIdsProvider);
-          if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-          await repo.applyJson(payload);
-          // Update the active preset label
-          ref.read(activePresetLabelProvider.notifier).state = data.name;
-          // Update Explore page roofline preview
-          ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-            colors: data.colors,
-            effectId: data.effectId,
-            speed: data.speed,
-            brightness: data.brightness,
-            name: data.name,
-          );
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${data.name} applied!')));
+          try {
+            var payload = data.toWledPayload();
+            final channels = ref.read(effectiveChannelIdsProvider);
+            if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+            await repo.applyJson(payload);
+            ref.read(activePresetLabelProvider.notifier).state = data.name;
+            ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+              colors: data.colors,
+              effectId: data.effectId,
+              speed: data.speed,
+              brightness: data.brightness,
+              name: data.name,
+            );
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${data.name} applied!')));
+            }
+          } catch (e) {
+            debugPrint('Apply gradient pattern failed: $e');
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
+            }
           }
-        } catch (e) {
-          debugPrint('Apply gradient pattern failed: $e');
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-          }
-        }
         },
         child: ClipRRect(
           borderRadius: br,
@@ -131,9 +127,7 @@ class _GradientPatternCard extends ConsumerWidget {
             width: 140,
             height: 140,
             child: Stack(children: [
-              // Animated flowing gradient background (speed based on pattern)
               Positioned.fill(child: LiveGradientStrip(colors: data.colors, speed: data.isStatic ? 0 : data.speed.toDouble())),
-              // Overlay for readability
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -145,12 +139,10 @@ class _GradientPatternCard extends ConsumerWidget {
                   ),
                 ),
               ),
-              // Border overlay (featured -> gold, otherwise standard line)
               if (!isFeatured)
                 Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(border: Border.all(color: NexGenPalette.line))))
               else
                 Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(border: Border.all(color: NexGenPalette.gold, width: 1.6)))),
-              // Effect badge with color behavior indicator (top-left)
               Positioned(
                 left: 8,
                 top: 8,
@@ -160,7 +152,6 @@ class _GradientPatternCard extends ConsumerWidget {
                   isStatic: data.isStatic,
                 ),
               ),
-              // Play icon bottom-right
               Positioned(
                 right: 8,
                 bottom: 8,
@@ -171,7 +162,6 @@ class _GradientPatternCard extends ConsumerWidget {
                   child: const Icon(Icons.play_arrow, color: Colors.black, size: 18),
                 ),
               ),
-              // Name and subtitle bottom-left
               Positioned(
                 left: 8,
                 right: 40,
@@ -204,13 +194,11 @@ class _GradientPatternCard extends ConsumerWidget {
   }
 }
 
-/// Vertical list result item used by the simulated AI search results
 class _GradientResultTile extends ConsumerWidget {
   final GradientPattern data;
   const _GradientResultTile({required this.data});
 
   Future<void> _apply(BuildContext context, WidgetRef ref) async {
-    // Check for active neighborhood sync before changing lights
     final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
     if (!shouldProceed) return;
 
@@ -222,19 +210,12 @@ class _GradientResultTile extends ConsumerWidget {
       return;
     }
     try {
-      // Use the pattern's toWledPayload() method for proper effect/speed/intensity
       var payload = data.toWledPayload();
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       final success = await repo.applyJson(payload);
-
-      if (!success) {
-        throw Exception('Device did not accept command');
-      }
-
-      // Update the active preset label so home screen reflects the change
+      if (!success) throw Exception('Device did not accept command');
       ref.read(activePresetLabelProvider.notifier).state = data.name;
-      // Update Explore page roofline preview
       ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
         colors: data.colors,
         effectId: data.effectId,
@@ -242,7 +223,6 @@ class _GradientResultTile extends ConsumerWidget {
         brightness: data.brightness,
         name: data.name,
       );
-
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${data.name}')));
       }
@@ -267,7 +247,6 @@ class _GradientResultTile extends ConsumerWidget {
           border: Border.all(color: NexGenPalette.line),
         ),
         child: Row(children: [
-          // Gradient preview
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Container(
@@ -337,7 +316,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
-      // Update the active preset label to show this pattern name
       ref.read(activePresetLabelProvider.notifier).state = _current.name;
       if (toast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playing: ${_current.name}')));
@@ -362,12 +340,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
       if (repo == null) return;
       try {
         var payload = <String, dynamic>{
-          'seg': [
-            {
-              'grp': _current.grouping,
-              'spc': _current.spacing,
-            }
-          ]
+          'seg': [{'grp': _current.grouping, 'spc': _current.spacing}]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
         if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
@@ -405,7 +378,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            // Preview swatch
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: Container(
@@ -444,7 +416,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
           ]),
           if (_expanded) ...[
             const SizedBox(height: 12),
-            // Speed slider
             Row(children: [
               const Icon(Icons.speed, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
@@ -455,17 +426,10 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   max: 255,
                   onChanged: (v) {
                     setState(() => _current = SmartPattern(
-                          id: _current.id,
-                          name: _current.name,
-                          colors: _current.colors,
-                          effectId: _current.effectId,
-                          speed: v.round().clamp(0, 255),
-                          intensity: _current.intensity,
-                          paletteId: _current.paletteId,
-                          reverse: _current.reverse,
-                          grouping: _current.grouping,
-                          spacing: _current.spacing,
-                        ));
+                          id: _current.id, name: _current.name, colors: _current.colors,
+                          effectId: _current.effectId, speed: v.round().clamp(0, 255),
+                          intensity: _current.intensity, paletteId: _current.paletteId,
+                          reverse: _current.reverse, grouping: _current.grouping, spacing: _current.spacing));
                     _scheduleDebouncedApply();
                   },
                 ),
@@ -474,12 +438,8 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               Text('${_current.speed}', style: Theme.of(context).textTheme.labelLarge),
             ]),
             const SizedBox(height: 6),
-            // Effect Strength slider (formerly Intensity)
             Row(children: [
-              Tooltip(
-                message: 'Effect Strength',
-                child: const Icon(Icons.tune, color: NexGenPalette.cyan),
-              ),
+              Tooltip(message: 'Effect Strength', child: const Icon(Icons.tune, color: NexGenPalette.cyan)),
               const SizedBox(width: 8),
               Expanded(
                 child: Slider(
@@ -488,17 +448,10 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   max: 255,
                   onChanged: (v) {
                     setState(() => _current = SmartPattern(
-                          id: _current.id,
-                          name: _current.name,
-                          colors: _current.colors,
-                          effectId: _current.effectId,
-                          speed: _current.speed,
-                          intensity: v.round().clamp(0, 255),
-                          paletteId: _current.paletteId,
-                          reverse: _current.reverse,
-                          grouping: _current.grouping,
-                          spacing: _current.spacing,
-                        ));
+                          id: _current.id, name: _current.name, colors: _current.colors,
+                          effectId: _current.effectId, speed: _current.speed,
+                          intensity: v.round().clamp(0, 255), paletteId: _current.paletteId,
+                          reverse: _current.reverse, grouping: _current.grouping, spacing: _current.spacing));
                     _scheduleDebouncedApply();
                   },
                 ),
@@ -507,7 +460,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               Text('${_current.intensity}', style: Theme.of(context).textTheme.labelLarge),
             ]),
             const SizedBox(height: 6),
-            // Direction toggle
             Row(children: [
               const Icon(Icons.swap_horiz, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
@@ -521,31 +473,22 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   onSelectionChanged: (s) {
                     final rev = s.isNotEmpty ? s.first : false;
                     setState(() => _current = SmartPattern(
-                          id: _current.id,
-                          name: _current.name,
-                          colors: _current.colors,
-                          effectId: _current.effectId,
-                          speed: _current.speed,
-                          intensity: _current.intensity,
-                          paletteId: _current.paletteId,
-                          reverse: rev,
-                          grouping: _current.grouping,
-                          spacing: _current.spacing,
-                        ));
+                          id: _current.id, name: _current.name, colors: _current.colors,
+                          effectId: _current.effectId, speed: _current.speed,
+                          intensity: _current.intensity, paletteId: _current.paletteId,
+                          reverse: rev, grouping: _current.grouping, spacing: _current.spacing));
                     _scheduleDebouncedApply();
                   },
                 ),
               ),
             ]),
             const SizedBox(height: 12),
-            // Pixel Layout section
             Row(children: [
               const Icon(Icons.grid_view, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
               Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall),
             ]),
             const SizedBox(height: 8),
-            // Bulb Grouping slider (gp)
             Row(children: [
               const Icon(Icons.blur_on, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
@@ -559,17 +502,10 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   onChanged: (v) {
                     final g = v.round().clamp(1, 10);
                     setState(() => _current = SmartPattern(
-                          id: _current.id,
-                          name: _current.name,
-                          colors: _current.colors,
-                          effectId: _current.effectId,
-                          speed: _current.speed,
-                          intensity: _current.intensity,
-                          paletteId: _current.paletteId,
-                          reverse: _current.reverse,
-                          grouping: g,
-                          spacing: _current.spacing,
-                        ));
+                          id: _current.id, name: _current.name, colors: _current.colors,
+                          effectId: _current.effectId, speed: _current.speed,
+                          intensity: _current.intensity, paletteId: _current.paletteId,
+                          reverse: _current.reverse, grouping: g, spacing: _current.spacing));
                     _scheduleDebouncedLayoutApply();
                   },
                 ),
@@ -578,7 +514,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               Text('${_current.grouping}', style: Theme.of(context).textTheme.labelLarge),
             ]),
             const SizedBox(height: 6),
-            // Spacing/Gaps slider (sp)
             Row(children: [
               const Icon(Icons.space_bar, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
@@ -592,17 +527,10 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   onChanged: (v) {
                     final s = v.round().clamp(0, 10);
                     setState(() => _current = SmartPattern(
-                          id: _current.id,
-                          name: _current.name,
-                          colors: _current.colors,
-                          effectId: _current.effectId,
-                          speed: _current.speed,
-                          intensity: _current.intensity,
-                          paletteId: _current.paletteId,
-                          reverse: _current.reverse,
-                          grouping: _current.grouping,
-                          spacing: s,
-                        ));
+                          id: _current.id, name: _current.name, colors: _current.colors,
+                          effectId: _current.effectId, speed: _current.speed,
+                          intensity: _current.intensity, paletteId: _current.paletteId,
+                          reverse: _current.reverse, grouping: _current.grouping, spacing: s));
                     _scheduleDebouncedLayoutApply();
                   },
                 ),
@@ -611,7 +539,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               Text('${_current.spacing}', style: Theme.of(context).textTheme.labelLarge),
             ]),
             const SizedBox(height: 10),
-            // Color Sequence Builder
             Row(children: [
               const Icon(Icons.palette, color: NexGenPalette.cyan),
               const SizedBox(width: 8),
@@ -619,7 +546,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
             ]),
             const SizedBox(height: 8),
             Builder(builder: (context) {
-              // Deduplicate base colors to present a clean picker (team colors only)
               final seen = <String>{};
               final baseColors = <List<int>>[];
               for (final rgb in _current.colors) {
@@ -635,13 +561,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   final repo = ref.read(wledRepositoryProvider);
                   if (repo == null) return;
                   try {
-                    var palPayload = <String, dynamic>{
-                      'seg': [
-                        {
-                          'pal': seq,
-                        }
-                      ]
-                    };
+                    var palPayload = <String, dynamic>{'seg': [{'pal': seq}]};
                     final channels = ref.read(effectiveChannelIdsProvider);
                     if (channels.isNotEmpty) palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
                     await repo.applyJson(palPayload);
@@ -652,7 +572,6 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
               );
             }),
             const SizedBox(height: 12),
-            // Footer actions
             Row(children: [
               TextButton.icon(
                 onPressed: () {
@@ -671,10 +590,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('${_current.name} saved to My Scenes'),
-                          action: SnackBarAction(
-                            label: 'View',
-                            onPressed: () => context.push('/explore/scenes'),
-                          ),
+                          action: SnackBarAction(label: 'View', onPressed: () => context.push('/explore/scenes')),
                         ),
                       );
                     } else {
@@ -710,7 +626,6 @@ class _EffectBadge extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Effect name badge
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
@@ -724,7 +639,6 @@ class _EffectBadge extends StatelessWidget {
             Text(text, style: Theme.of(context).textTheme.labelSmall),
           ]),
         ),
-        // Color behavior badge (if effect ID provided)
         if (behavior != null) ...[
           const SizedBox(width: 6),
           Tooltip(
@@ -739,10 +653,7 @@ class _EffectBadge extends StatelessWidget {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(_iconForBehavior(behavior), size: 12, color: behaviorColor),
                 const SizedBox(width: 4),
-                Text(
-                  behavior.shortName,
-                  style: TextStyle(color: behaviorColor, fontSize: 10, fontWeight: FontWeight.w500),
-                ),
+                Text(behavior.shortName, style: TextStyle(color: behaviorColor, fontSize: 10, fontWeight: FontWeight.w500)),
               ]),
             ),
           ),
@@ -753,27 +664,19 @@ class _EffectBadge extends StatelessWidget {
 
   IconData _iconForBehavior(ColorBehavior behavior) {
     switch (behavior) {
-      case ColorBehavior.usesSelectedColors:
-        return Icons.palette_outlined;
-      case ColorBehavior.blendsSelectedColors:
-        return Icons.gradient;
-      case ColorBehavior.generatesOwnColors:
-        return Icons.auto_awesome;
-      case ColorBehavior.usesPalette:
-        return Icons.color_lens_outlined;
+      case ColorBehavior.usesSelectedColors: return Icons.palette_outlined;
+      case ColorBehavior.blendsSelectedColors: return Icons.gradient;
+      case ColorBehavior.generatesOwnColors: return Icons.auto_awesome;
+      case ColorBehavior.usesPalette: return Icons.color_lens_outlined;
     }
   }
 
   Color _colorForBehavior(ColorBehavior behavior) {
     switch (behavior) {
-      case ColorBehavior.usesSelectedColors:
-        return NexGenPalette.cyan;
-      case ColorBehavior.blendsSelectedColors:
-        return const Color(0xFF64B5F6);
-      case ColorBehavior.generatesOwnColors:
-        return const Color(0xFFFFB74D);
-      case ColorBehavior.usesPalette:
-        return const Color(0xFFBA68C8);
+      case ColorBehavior.usesSelectedColors: return NexGenPalette.cyan;
+      case ColorBehavior.blendsSelectedColors: return const Color(0xFF64B5F6);
+      case ColorBehavior.generatesOwnColors: return const Color(0xFFFFB74D);
+      case ColorBehavior.usesPalette: return const Color(0xFFBA68C8);
     }
   }
 }
@@ -824,6 +727,10 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CategoryDetailScreen
+// ---------------------------------------------------------------------------
+
 /// Detail screen for a single Pattern Category showing Sub-Category folders
 /// with a featured card, Lumina AI search bar, and contextual color previews.
 class CategoryDetailScreen extends ConsumerWidget {
@@ -855,28 +762,28 @@ class CategoryDetailScreen extends ConsumerWidget {
         data: (subs) {
           if (subs.isEmpty) return const _CenteredText('No sub-categories yet');
 
-          final featured = _pickFeaturedSub(subs, categoryId);
-          final remaining = subs.where((s) => s.id != featured?.id).toList();
+          // ── CHANGE: Sort sports folders by league → conference → division ──
+          final orderedSubs = categoryId == 'cat_sports'
+              ? ([...subs]..sort((a, b) => _sportSubSortKey(a.id).compareTo(_sportSubSortKey(b.id))))
+              : subs;
+
+          final featured = _pickFeaturedSub(orderedSubs, categoryId);
+          final remaining = orderedSubs.where((s) => s.id != featured?.id).toList();
 
           return CustomScrollView(
             slivers: [
-              // Channel/Area selector for multi-segment devices
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: ChannelSelectorBar(),
                 ),
               ),
-
-              // Lumina AI contextual search bar
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: _LuminaCategorySearchBar(categoryName: title),
                 ),
               ),
-
-              // Featured card
               if (featured != null)
                 SliverToBoxAdapter(
                   child: Padding(
@@ -884,8 +791,6 @@ class CategoryDetailScreen extends ConsumerWidget {
                     child: _FeaturedSubCategoryCard(categoryId: categoryId, sub: featured),
                   ),
                 ),
-
-              // Section header
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -898,8 +803,6 @@ class CategoryDetailScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-
-              // Sub-folder grid
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 sliver: SliverGrid(
@@ -924,43 +827,35 @@ class CategoryDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// Pick the most seasonally relevant sub-folder as the featured card.
   static SubCategory? _pickFeaturedSub(List<SubCategory> subs, String categoryId) {
     if (subs.isEmpty) return null;
     final now = DateTime.now();
     final month = now.month;
     final day = now.day;
-
     String? targetId;
-
     switch (categoryId) {
       case 'cat_holiday':
-        // Pick the nearest upcoming holiday (within 2-week relevance window)
         targetId = _nearestHolidaySubId(month, day);
         break;
       case 'cat_season':
-        // Current season
-        if (month >= 3 && month <= 5) {
-          targetId = 'sub_spring';
-        } else if (month >= 6 && month <= 8) {
-          targetId = 'sub_summer';
-        } else if (month >= 9 && month <= 11) {
-          targetId = 'sub_autumn';
-        } else {
-          targetId = 'sub_winter';
-        }
+        if (month >= 3 && month <= 5) targetId = 'sub_spring';
+        else if (month >= 6 && month <= 8) targetId = 'sub_summer';
+        else if (month >= 9 && month <= 11) targetId = 'sub_autumn';
+        else targetId = 'sub_winter';
         break;
       case 'cat_sports':
-        targetId = 'sub_kc'; // Default featured sports
+        // Feature NFL in fall/winter, MLB in spring/summer, FIFA around World Cup
+        if (month >= 9 || month <= 1) targetId = 'sub_nfl';
+        else if (month >= 4 && month <= 9) targetId = 'sub_mlb';
+        else targetId = 'sub_kc';
         break;
       case 'cat_party':
-        targetId = 'sub_birthday'; // Most popular party type
+        targetId = 'sub_birthday';
         break;
       case 'cat_arch':
-        targetId = 'sub_warm_whites'; // Everyday default
+        targetId = 'sub_warm_whites';
         break;
     }
-
     if (targetId != null) {
       final match = subs.where((s) => s.id == targetId).firstOrNull;
       if (match != null) return match;
@@ -968,16 +863,13 @@ class CategoryDetailScreen extends ConsumerWidget {
     return subs.first;
   }
 
-  /// Determine the nearest upcoming holiday sub-category ID.
   static String? _nearestHolidaySubId(int month, int day) {
-    // Ordered by calendar date with 2-week pre-windows
     if (month == 2 && day <= 28) return 'sub_valentines';
     if (month == 3 && day <= 17) return 'sub_st_patricks';
     if ((month == 3 && day >= 15) || (month == 4 && day <= 25)) return 'sub_easter';
     if ((month == 6 && day >= 20) || (month == 7 && day <= 4)) return 'sub_july4';
     if ((month == 10 && day >= 1) || (month == 10 && day <= 31)) return 'sub_halloween';
     if (month == 12 || (month == 11 && day >= 20)) return 'sub_xmas';
-    // Default: next upcoming
     if (month >= 1 && month <= 2) return 'sub_valentines';
     if (month >= 5 && month <= 6) return 'sub_july4';
     if (month >= 8 && month <= 9) return 'sub_halloween';
@@ -989,7 +881,6 @@ class CategoryDetailScreen extends ConsumerWidget {
     final success = isPinned
         ? await notifier.unpinCategory(categoryId)
         : await notifier.pinCategory(categoryId);
-
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1017,8 +908,6 @@ class _LuminaCategorySearchBar extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          // Navigate to Lumina tab with category context pre-filled
-          // For now just show snackbar indicating the feature
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Ask Lumina about $categoryName...')),
           );
@@ -1029,10 +918,7 @@ class _LuminaCategorySearchBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: NexGenPalette.matteBlack.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: NexGenPalette.cyan.withValues(alpha: 0.25),
-              width: 0.5,
-            ),
+            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25), width: 0.5),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Row(
@@ -1042,11 +928,7 @@ class _LuminaCategorySearchBar extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Ask Lumina about $categoryName...',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.4),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                  ),
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13, fontWeight: FontWeight.w400),
                 ),
               ),
               Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white.withValues(alpha: 0.25)),
@@ -1059,7 +941,7 @@ class _LuminaCategorySearchBar extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Featured sub-category card (full-width, tall, with PixelStripPreview)
+// Featured sub-category card
 // ---------------------------------------------------------------------------
 class _FeaturedSubCategoryCard extends StatelessWidget {
   final String categoryId;
@@ -1092,21 +974,11 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
               stops: const [0.0, 0.35, 1.0],
             ),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: accentColor.withValues(alpha: 0.5),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withValues(alpha: 0.25),
-                blurRadius: 28,
-                offset: const Offset(0, 8),
-              ),
-            ],
+            border: Border.all(color: accentColor.withValues(alpha: 0.5), width: 1),
+            boxShadow: [BoxShadow(color: accentColor.withValues(alpha: 0.25), blurRadius: 28, offset: const Offset(0, 8))],
           ),
           child: Stack(
             children: [
-              // Radial glow
               Positioned(
                 top: -10,
                 right: 20,
@@ -1126,44 +998,25 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Content
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Top row: icon + name + badge
                     Row(
                       children: [
-                        Icon(
-                          heroIcon,
-                          size: 28,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(color: accentColor.withValues(alpha: 0.8), blurRadius: 16),
-                          ],
-                        ),
+                        Icon(heroIcon, size: 28, color: Colors.white,
+                            shadows: [Shadow(color: accentColor.withValues(alpha: 0.8), blurRadius: 16)]),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                sub.name,
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
+                              Text(sub.name,
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
                               const SizedBox(height: 2),
-                              Text(
-                                '50+ designs available',
-                                style: TextStyle(
-                                  color: accentColor.withValues(alpha: 0.8),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                              Text('50+ designs available',
+                                  style: TextStyle(color: accentColor.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.w500)),
                             ],
                           ),
                         ),
@@ -1177,14 +1030,7 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                'Featured',
-                                style: TextStyle(
-                                  color: accentColor,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                              Text('Featured', style: TextStyle(color: accentColor, fontSize: 11, fontWeight: FontWeight.w600)),
                               const SizedBox(width: 4),
                               Icon(Icons.auto_awesome, size: 12, color: accentColor),
                             ],
@@ -1193,28 +1039,14 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
                       ],
                     ),
                     const Spacer(),
-                    // PixelStripPreview
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: PixelStripPreview(
-                        colors: previewColors,
-                        pixelCount: 24,
-                        height: 42,
-                        animate: true,
-                        borderRadius: 10,
-                      ),
+                      child: PixelStripPreview(colors: previewColors, pixelCount: 24, height: 42, animate: true, borderRadius: 10),
                     ),
                     const SizedBox(height: 8),
-                    // Bottom row: explore prompt
                     Row(
                       children: [
-                        Text(
-                          'Tap to explore',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 11,
-                          ),
-                        ),
+                        Text('Tap to explore', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
                         const SizedBox(width: 4),
                         Icon(Icons.arrow_forward_ios, size: 10, color: Colors.white.withValues(alpha: 0.35)),
                       ],
@@ -1231,107 +1063,319 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Shared sub-category helpers (used by both featured and grid cards)
+// Shared sub-category helpers
 // ---------------------------------------------------------------------------
 
-/// Returns a hero icon for each sub-category type.
+/// Returns a sport/event-appropriate icon for each sub-category.
+/// Uses explicit ID matches first, then keyword detection so new league and
+/// team sub-IDs automatically pick up the correct sport icon.
 IconData _heroIconForSubCategory(String subId) {
+  // ── Holidays ──────────────────────────────────────────────────────────────
   switch (subId) {
-    case 'sub_xmas': return Icons.park;
-    case 'sub_halloween': return Icons.pest_control;
-    case 'sub_july4': return Icons.celebration;
-    case 'sub_easter': return Icons.egg;
-    case 'sub_valentines': return Icons.favorite;
-    case 'sub_st_patricks': return Icons.local_florist;
-    case 'sub_kc': return Icons.sports_football;
-    case 'sub_seattle': return Icons.sports_football;
+    case 'sub_xmas':          return Icons.park;
+    case 'sub_halloween':     return Icons.pest_control;
+    case 'sub_july4':         return Icons.celebration;
+    case 'sub_easter':        return Icons.egg;
+    case 'sub_valentines':    return Icons.favorite;
+    case 'sub_st_patricks':   return Icons.local_florist;
+    // ── Legacy city subs ───────────────────────────────────────────────────
+    case 'sub_kc':            return Icons.sports_football; // Chiefs + Royals city
+    case 'sub_seattle':       return Icons.sports_football;
     case 'sub_rb_generic':
     case 'sub_gy_generic':
-    case 'sub_ob_generic': return Icons.emoji_events;
-    case 'sub_spring': return Icons.local_florist;
-    case 'sub_summer': return Icons.wb_sunny;
-    case 'sub_autumn': return Icons.park;
-    case 'sub_winter': return Icons.ac_unit;
-    case 'sub_warm_whites': return Icons.wb_incandescent;
-    case 'sub_cool_whites': return Icons.light_mode;
-    case 'sub_gold_accents': return Icons.auto_awesome;
+    case 'sub_ob_generic':    return Icons.emoji_events;
+    // ── Seasons ────────────────────────────────────────────────────────────
+    case 'sub_spring':        return Icons.local_florist;
+    case 'sub_summer':        return Icons.wb_sunny;
+    case 'sub_autumn':        return Icons.park;
+    case 'sub_winter':        return Icons.ac_unit;
+    // ── Architectural ──────────────────────────────────────────────────────
+    case 'sub_warm_whites':   return Icons.wb_incandescent;
+    case 'sub_cool_whites':   return Icons.light_mode;
+    case 'sub_gold_accents':  return Icons.auto_awesome;
     case 'sub_security_floods': return Icons.flashlight_on;
-    case 'sub_birthday': return Icons.cake;
+    // ── Party ──────────────────────────────────────────────────────────────
+    case 'sub_birthday':      return Icons.cake;
     case 'sub_elegant_dinner': return Icons.restaurant;
-    case 'sub_rave': return Icons.speaker;
-    case 'sub_baby_shower': return Icons.child_friendly;
-    default: return Icons.palette;
+    case 'sub_rave':          return Icons.speaker;
+    case 'sub_baby_shower':   return Icons.child_friendly;
+    // ── Sports league roots ────────────────────────────────────────────────
+    case 'sub_mlb':           return Icons.sports_baseball;
+    case 'sub_nfl':           return Icons.sports_football;
+    case 'sub_nba':           return Icons.sports_basketball;
+    case 'sub_wnba':          return Icons.sports_basketball;
+    case 'sub_nhl':           return Icons.sports_hockey;
+    case 'sub_mls':           return Icons.sports_soccer;
+    case 'sub_nwsl':          return Icons.sports_soccer;
+    case 'sub_fifa':
+    case 'sub_world_cup':     return Icons.sports_soccer;
   }
+  // ── Keyword fallback — handles all division / team sub-IDs ────────────────
+  if (subId.contains('baseball') || subId.contains('mlb') ||
+      subId.contains('_al_') || subId.contains('_nl_')) {
+    return Icons.sports_baseball;
+  }
+  if (subId.contains('basketball') || subId.contains('nba') || subId.contains('wnba')) {
+    return Icons.sports_basketball;
+  }
+  if (subId.contains('hockey') || subId.contains('nhl') ||
+      subId.contains('atlantic') || subId.contains('metropolitan')) {
+    return Icons.sports_hockey;
+  }
+  if (subId.contains('soccer') || subId.contains('mls') || subId.contains('nwsl') ||
+      subId.contains('fifa') || subId.contains('world_cup')) {
+    return Icons.sports_soccer;
+  }
+  if (subId.contains('football') || subId.contains('nfl') ||
+      subId.contains('_afc') || subId.contains('_nfc')) {
+    return Icons.sports_football;
+  }
+  if (subId.contains('tennis'))  return Icons.sports_tennis;
+  if (subId.contains('golf'))    return Icons.sports_golf;
+  if (subId.contains('racing') || subId.contains('nascar')) return Icons.directions_car;
+  return Icons.palette;
 }
 
-/// Handpicked gradient pairs for each subcategory — curated for card aesthetics.
+/// Returns a numeric sort key so sports sub-folders render in the canonical
+/// league → conference → division order:
+///   MLB  AL (East→Central→West) → NL (East→Central→West)
+///   NFL  AFC (East→North→South→West) → NFC (East→North→South→West)
+///   NBA  Eastern → Western
+///   WNBA Eastern → Western
+///   NHL  Atlantic → Metropolitan → Central → Pacific
+///   MLS  Eastern → Western
+///   NWSL Eastern → Western
+///   FIFA / World Cup
+int _sportSubSortKey(String id) {
+  // MLB
+  if (id.contains('mlb') || id.contains('_al_') || id.contains('_nl_') || id.contains('baseball')) {
+    if (id.contains('al_east'))    return 110;
+    if (id.contains('al_central')) return 120;
+    if (id.contains('al_west'))    return 130;
+    if (id.contains('_al'))        return 105;
+    if (id.contains('nl_east'))    return 210;
+    if (id.contains('nl_central')) return 220;
+    if (id.contains('nl_west'))    return 230;
+    if (id.contains('_nl'))        return 205;
+    return 100; // MLB root
+  }
+  // NFL
+  if (id.contains('nfl') || id.contains('_afc') || id.contains('_nfc') || id.contains('football')) {
+    if (id.contains('afc_east'))  return 310;
+    if (id.contains('afc_north')) return 320;
+    if (id.contains('afc_south')) return 330;
+    if (id.contains('afc_west'))  return 340;
+    if (id.contains('afc'))       return 305;
+    if (id.contains('nfc_east'))  return 410;
+    if (id.contains('nfc_north')) return 420;
+    if (id.contains('nfc_south')) return 430;
+    if (id.contains('nfc_west'))  return 440;
+    if (id.contains('nfc'))       return 405;
+    return 300; // NFL root
+  }
+  // NBA
+  if (id.contains('nba') || id.contains('basketball')) {
+    if (id.contains('east')) return 510;
+    if (id.contains('west')) return 520;
+    return 500;
+  }
+  // WNBA
+  if (id.contains('wnba')) {
+    if (id.contains('east')) return 610;
+    if (id.contains('west')) return 620;
+    return 600;
+  }
+  // NHL
+  if (id.contains('nhl') || id.contains('hockey')) {
+    if (id.contains('atlantic'))                                   return 710;
+    if (id.contains('metropolitan') || id.contains('metro'))       return 720;
+    if (id.contains('central'))                                    return 730;
+    if (id.contains('pacific'))                                    return 740;
+    return 700;
+  }
+  // MLS
+  if (id.contains('mls') || id.contains('soccer')) {
+    if (id.contains('east')) return 810;
+    if (id.contains('west')) return 820;
+    return 800;
+  }
+  // NWSL
+  if (id.contains('nwsl')) {
+    if (id.contains('east')) return 910;
+    if (id.contains('west')) return 920;
+    return 900;
+  }
+  // FIFA / World Cup
+  if (id.contains('fifa') || id.contains('world_cup')) return 950;
+  // Legacy city subs
+  if (id == 'sub_kc')                return 1000;
+  if (id == 'sub_seattle')           return 1010;
+  // Generic color combos
+  if (id.contains('_generic'))       return 1100;
+  return 9999;
+}
+
+/// Handpicked gradient pairs for each sub-category — curated for card aesthetics.
+/// Includes league-level entries for new sports hierarchy.
 List<Color> _gradientForSubCategory(String subId) {
   switch (subId) {
-    case 'sub_xmas': return const [Color(0xFF2E7D32), Color(0xFFC62828)];
-    case 'sub_halloween': return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)];
-    case 'sub_july4': return const [Color(0xFFEF5350), Color(0xFF1565C0)];
-    case 'sub_easter': return const [Color(0xFFF8BBD0), Color(0xFFB39DDB)];
-    case 'sub_valentines': return const [Color(0xFFE91E63), Color(0xFFAD1457)];
+    // ── Holidays ─────────────────────────────────────────────────────────────
+    case 'sub_xmas':        return const [Color(0xFF2E7D32), Color(0xFFC62828)];
+    case 'sub_halloween':   return const [Color(0xFFFF6D00), Color(0xFF6A1B9A)];
+    case 'sub_july4':       return const [Color(0xFFEF5350), Color(0xFF1565C0)];
+    case 'sub_easter':      return const [Color(0xFFF8BBD0), Color(0xFFB39DDB)];
+    case 'sub_valentines':  return const [Color(0xFFE91E63), Color(0xFFAD1457)];
     case 'sub_st_patricks': return const [Color(0xFF43A047), Color(0xFF00C853)];
-    case 'sub_kc': return const [Color(0xFFD32F2F), Color(0xFFFFB300)];
-    case 'sub_seattle': return const [Color(0xFF1B5E20), Color(0xFF1565C0)];
-    case 'sub_rb_generic': return const [Color(0xFFD32F2F), Color(0xFF1565C0)];
-    case 'sub_gy_generic': return const [Color(0xFF2E7D32), Color(0xFFF9A825)];
-    case 'sub_ob_generic': return const [Color(0xFFEF6C00), Color(0xFF1565C0)];
-    case 'sub_spring': return const [Color(0xFF81C784), Color(0xFFF48FB1)];
-    case 'sub_summer': return const [Color(0xFFFFEE58), Color(0xFF29B6F6)];
-    case 'sub_autumn': return const [Color(0xFFFF8F00), Color(0xFF6D4C41)];
-    case 'sub_winter': return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
-    case 'sub_warm_whites': return const [Color(0xFFFFB74D), Color(0xFFFF8A65)];
-    case 'sub_cool_whites': return const [Color(0xFF90A4AE), Color(0xFFE0E0E0)];
-    case 'sub_gold_accents': return const [Color(0xFFFFD54F), Color(0xFFFFA000)];
+    // ── Legacy sports subs ────────────────────────────────────────────────────
+    case 'sub_kc':          return const [Color(0xFFD32F2F), Color(0xFFFFB300)];
+    case 'sub_seattle':     return const [Color(0xFF1B5E20), Color(0xFF1565C0)];
+    case 'sub_rb_generic':  return const [Color(0xFFD32F2F), Color(0xFF1565C0)];
+    case 'sub_gy_generic':  return const [Color(0xFF2E7D32), Color(0xFFF9A825)];
+    case 'sub_ob_generic':  return const [Color(0xFFEF6C00), Color(0xFF1565C0)];
+    // ── Seasons ───────────────────────────────────────────────────────────────
+    case 'sub_spring':      return const [Color(0xFF81C784), Color(0xFFF48FB1)];
+    case 'sub_summer':      return const [Color(0xFFFFEE58), Color(0xFF29B6F6)];
+    case 'sub_autumn':      return const [Color(0xFFFF8F00), Color(0xFF6D4C41)];
+    case 'sub_winter':      return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
+    // ── Architectural ─────────────────────────────────────────────────────────
+    case 'sub_warm_whites':   return const [Color(0xFFFFB74D), Color(0xFFFF8A65)];
+    case 'sub_cool_whites':   return const [Color(0xFF90A4AE), Color(0xFFE0E0E0)];
+    case 'sub_gold_accents':  return const [Color(0xFFFFD54F), Color(0xFFFFA000)];
     case 'sub_security_floods': return const [Color(0xFFE0E0E0), Color(0xFF4FC3F7)];
-    case 'sub_birthday': return const [Color(0xFF00E5FF), Color(0xFFFF4081)];
+    // ── Party ─────────────────────────────────────────────────────────────────
+    case 'sub_birthday':      return const [Color(0xFF00E5FF), Color(0xFFFF4081)];
     case 'sub_elegant_dinner': return const [Color(0xFFFFB74D), Color(0xFF5D4037)];
-    case 'sub_rave': return const [Color(0xFFAA00FF), Color(0xFF00E5FF)];
-    case 'sub_baby_shower': return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)];
-    default: return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
+    case 'sub_rave':          return const [Color(0xFFAA00FF), Color(0xFF00E5FF)];
+    case 'sub_baby_shower':   return const [Color(0xFF80DEEA), Color(0xFFF8BBD0)];
+    // ── Sports league roots ───────────────────────────────────────────────────
+    case 'sub_mlb':         return const [Color(0xFF1A237E), Color(0xFFB71C1C)]; // Navy/Red
+    case 'sub_nfl':         return const [Color(0xFF0D1B2A), Color(0xFF8B0000)]; // Dark/Crimson
+    case 'sub_nba':         return const [Color(0xFFEF6C00), Color(0xFF1565C0)]; // Orange/Blue
+    case 'sub_wnba':        return const [Color(0xFFEF6C00), Color(0xFF880E4F)]; // Orange/Magenta
+    case 'sub_nhl':         return const [Color(0xFF1A237E), Color(0xFFCFD8DC)]; // Navy/Silver
+    case 'sub_mls':         return const [Color(0xFF1B5E20), Color(0xFF212121)]; // Green/Black
+    case 'sub_nwsl':        return const [Color(0xFF1565C0), Color(0xFFAD1457)]; // Blue/Pink
+    case 'sub_fifa':
+    case 'sub_world_cup':   return const [Color(0xFFFFD700), Color(0xFF1565C0)]; // Gold/Blue
+    // ── MLB conferences ───────────────────────────────────────────────────────
+    case 'sub_mlb_al':
+    case 'sub_mlb_al_east':
+    case 'sub_mlb_al_central':
+    case 'sub_mlb_al_west':  return const [Color(0xFF1A237E), Color(0xFF0D47A1)];
+    case 'sub_mlb_nl':
+    case 'sub_mlb_nl_east':
+    case 'sub_mlb_nl_central':
+    case 'sub_mlb_nl_west':  return const [Color(0xFFB71C1C), Color(0xFF880E4F)];
+    // ── NFL conferences ───────────────────────────────────────────────────────
+    case 'sub_nfl_afc':
+    case 'sub_nfl_afc_east':
+    case 'sub_nfl_afc_north':
+    case 'sub_nfl_afc_south':
+    case 'sub_nfl_afc_west': return const [Color(0xFF1565C0), Color(0xFF0D1B2A)];
+    case 'sub_nfl_nfc':
+    case 'sub_nfl_nfc_east':
+    case 'sub_nfl_nfc_north':
+    case 'sub_nfl_nfc_south':
+    case 'sub_nfl_nfc_west': return const [Color(0xFF8B0000), Color(0xFF4A0000)];
+    // ── NHL divisions ─────────────────────────────────────────────────────────
+    case 'sub_nhl_atlantic':     return const [Color(0xFF1A237E), Color(0xFFCFD8DC)];
+    case 'sub_nhl_metropolitan': return const [Color(0xFF0D47A1), Color(0xFFB0BEC5)];
+    case 'sub_nhl_central':      return const [Color(0xFF004D40), Color(0xFFCFD8DC)];
+    case 'sub_nhl_pacific':      return const [Color(0xFF1B5E20), Color(0xFF80DEEA)];
+    // ── NBA conferences ───────────────────────────────────────────────────────
+    case 'sub_nba_east': return const [Color(0xFFEF6C00), Color(0xFF1565C0)];
+    case 'sub_nba_west': return const [Color(0xFF6A1B9A), Color(0xFFEF6C00)];
+    // ── MLS/NWSL conferences ──────────────────────────────────────────────────
+    case 'sub_mls_east': return const [Color(0xFF1B5E20), Color(0xFF0D47A1)];
+    case 'sub_mls_west': return const [Color(0xFF1B5E20), Color(0xFF4A148C)];
+    case 'sub_nwsl_east': return const [Color(0xFF1565C0), Color(0xFFFF4081)];
+    case 'sub_nwsl_west': return const [Color(0xFF4A148C), Color(0xFF1565C0)];
   }
+  return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
 }
 
-/// Handpicked accent color for each subcategory.
+/// Handpicked accent color for each sub-category.
 Color _accentForSubCategory(String subId) {
   switch (subId) {
-    case 'sub_xmas': return const Color(0xFF4CAF50);
-    case 'sub_halloween': return const Color(0xFFFF6D00);
-    case 'sub_july4': return const Color(0xFFEF5350);
-    case 'sub_easter': return const Color(0xFFF8BBD0);
-    case 'sub_valentines': return const Color(0xFFE91E63);
+    // ── Holidays ──────────────────────────────────────────────────────────────
+    case 'sub_xmas':        return const Color(0xFF4CAF50);
+    case 'sub_halloween':   return const Color(0xFFFF6D00);
+    case 'sub_july4':       return const Color(0xFFEF5350);
+    case 'sub_easter':      return const Color(0xFFF8BBD0);
+    case 'sub_valentines':  return const Color(0xFFE91E63);
     case 'sub_st_patricks': return const Color(0xFF00C853);
-    case 'sub_kc': return const Color(0xFFD32F2F);
-    case 'sub_seattle': return const Color(0xFF43A047);
-    case 'sub_rb_generic': return const Color(0xFFEF5350);
-    case 'sub_gy_generic': return const Color(0xFF66BB6A);
-    case 'sub_ob_generic': return const Color(0xFFEF6C00);
-    case 'sub_spring': return const Color(0xFFF48FB1);
-    case 'sub_summer': return const Color(0xFFFFEE58);
-    case 'sub_autumn': return const Color(0xFFFF8F00);
-    case 'sub_winter': return const Color(0xFF81D4FA);
-    case 'sub_warm_whites': return const Color(0xFFFFB74D);
-    case 'sub_cool_whites': return const Color(0xFF90A4AE);
-    case 'sub_gold_accents': return const Color(0xFFFFD54F);
+    // ── Legacy sports subs ────────────────────────────────────────────────────
+    case 'sub_kc':          return const Color(0xFFD32F2F);
+    case 'sub_seattle':     return const Color(0xFF43A047);
+    case 'sub_rb_generic':  return const Color(0xFFEF5350);
+    case 'sub_gy_generic':  return const Color(0xFF66BB6A);
+    case 'sub_ob_generic':  return const Color(0xFFEF6C00);
+    // ── Seasons ───────────────────────────────────────────────────────────────
+    case 'sub_spring':      return const Color(0xFFF48FB1);
+    case 'sub_summer':      return const Color(0xFFFFEE58);
+    case 'sub_autumn':      return const Color(0xFFFF8F00);
+    case 'sub_winter':      return const Color(0xFF81D4FA);
+    // ── Architectural ─────────────────────────────────────────────────────────
+    case 'sub_warm_whites':   return const Color(0xFFFFB74D);
+    case 'sub_cool_whites':   return const Color(0xFF90A4AE);
+    case 'sub_gold_accents':  return const Color(0xFFFFD54F);
     case 'sub_security_floods': return const Color(0xFF4FC3F7);
-    case 'sub_birthday': return const Color(0xFF00E5FF);
+    // ── Party ─────────────────────────────────────────────────────────────────
+    case 'sub_birthday':      return const Color(0xFF00E5FF);
     case 'sub_elegant_dinner': return const Color(0xFFFFB74D);
-    case 'sub_rave': return const Color(0xFFAA00FF);
-    case 'sub_baby_shower': return const Color(0xFF80DEEA);
-    default: return NexGenPalette.cyan;
+    case 'sub_rave':          return const Color(0xFFAA00FF);
+    case 'sub_baby_shower':   return const Color(0xFF80DEEA);
+    // ── Sports league roots ───────────────────────────────────────────────────
+    case 'sub_mlb':         return const Color(0xFFB71C1C);   // Red
+    case 'sub_nfl':         return const Color(0xFFFF6F00);   // Amber
+    case 'sub_nba':         return const Color(0xFFEF6C00);   // Orange
+    case 'sub_wnba':        return const Color(0xFFEF6C00);
+    case 'sub_nhl':         return const Color(0xFF81D4FA);   // Ice blue
+    case 'sub_mls':         return const Color(0xFF4CAF50);   // Green
+    case 'sub_nwsl':        return const Color(0xFF1976D2);   // Blue
+    case 'sub_fifa':
+    case 'sub_world_cup':   return const Color(0xFFFFD700);   // Gold
+    // ── MLB divisions ─────────────────────────────────────────────────────────
+    case 'sub_mlb_al':
+    case 'sub_mlb_al_east':
+    case 'sub_mlb_al_central':
+    case 'sub_mlb_al_west': return const Color(0xFF42A5F5);
+    case 'sub_mlb_nl':
+    case 'sub_mlb_nl_east':
+    case 'sub_mlb_nl_central':
+    case 'sub_mlb_nl_west': return const Color(0xFFEF5350);
+    // ── NFL divisions ─────────────────────────────────────────────────────────
+    case 'sub_nfl_afc':
+    case 'sub_nfl_afc_east':
+    case 'sub_nfl_afc_north':
+    case 'sub_nfl_afc_south':
+    case 'sub_nfl_afc_west': return const Color(0xFF42A5F5);
+    case 'sub_nfl_nfc':
+    case 'sub_nfl_nfc_east':
+    case 'sub_nfl_nfc_north':
+    case 'sub_nfl_nfc_south':
+    case 'sub_nfl_nfc_west': return const Color(0xFFEF5350);
+    // ── NHL divisions ─────────────────────────────────────────────────────────
+    case 'sub_nhl_atlantic':     return const Color(0xFF81D4FA);
+    case 'sub_nhl_metropolitan': return const Color(0xFF90CAF9);
+    case 'sub_nhl_central':      return const Color(0xFF80CBC4);
+    case 'sub_nhl_pacific':      return const Color(0xFF80DEEA);
+    // ── NBA/MLS/NWSL conferences ──────────────────────────────────────────────
+    case 'sub_nba_east':  return const Color(0xFFEF6C00);
+    case 'sub_nba_west':  return const Color(0xFFAA00FF);
+    case 'sub_mls_east':  return const Color(0xFF43A047);
+    case 'sub_mls_west':  return const Color(0xFF6A1B9A);
+    case 'sub_nwsl_east': return const Color(0xFF1976D2);
+    case 'sub_nwsl_west': return const Color(0xFF880E4F);
   }
+  return NexGenPalette.cyan;
 }
 
-/// Get representative palette colors for a subcategory's PixelStripPreview.
-/// Uses themeColors from the model if available, otherwise falls back to
-/// the gradient colors with some interpolation for visual richness.
+/// Get representative palette colors for a sub-category's PixelStripPreview.
 List<Color> _previewColorsForSub(SubCategory sub) {
   if (sub.themeColors.isNotEmpty) return sub.themeColors;
   final g = _gradientForSubCategory(sub.id);
   if (g.length < 2) return g;
-  // Create a richer palette by interpolating between the two gradient stops
   return [
     g[0],
     Color.lerp(g[0], g[1], 0.35)!,
@@ -1341,7 +1385,7 @@ List<Color> _previewColorsForSub(SubCategory sub) {
 }
 
 // ---------------------------------------------------------------------------
-// Enhanced sub-category grid card with mini PixelStripPreview + design count
+// Enhanced sub-category grid card
 // ---------------------------------------------------------------------------
 class _SubCategoryCard extends StatelessWidget {
   final String categoryId;
@@ -1373,21 +1417,11 @@ class _SubCategoryCard extends StatelessWidget {
               stops: const [0.0, 0.4, 1.0],
             ),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: accentColor.withValues(alpha: 0.4),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withValues(alpha: 0.2),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            border: Border.all(color: accentColor.withValues(alpha: 0.4), width: 1),
+            boxShadow: [BoxShadow(color: accentColor.withValues(alpha: 0.2), blurRadius: 20, offset: const Offset(0, 6))],
           ),
           child: Stack(
             children: [
-              // Radial glow behind icon
               Positioned(
                 top: 8,
                 left: 0,
@@ -1410,13 +1444,11 @@ class _SubCategoryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Content
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Hero icon
                     Expanded(
                       child: Center(
                         child: Icon(
@@ -1424,19 +1456,12 @@ class _SubCategoryCard extends StatelessWidget {
                           size: 44,
                           color: Colors.white,
                           shadows: [
-                            Shadow(
-                              color: accentColor.withValues(alpha: 0.8),
-                              blurRadius: 24,
-                            ),
-                            Shadow(
-                              color: gradientColors[0].withValues(alpha: 0.5),
-                              blurRadius: 16,
-                            ),
+                            Shadow(color: accentColor.withValues(alpha: 0.8), blurRadius: 24),
+                            Shadow(color: gradientColors[0].withValues(alpha: 0.5), blurRadius: 16),
                           ],
                         ),
                       ),
                     ),
-                    // Mini PixelStripPreview
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: PixelStripPreview(
@@ -1449,7 +1474,6 @@ class _SubCategoryCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    // Sub-category name
                     Text(
                       sub.name,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -1462,24 +1486,15 @@ class _SubCategoryCard extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 2),
-                    // Design count + arrow
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           '50+ designs',
-                          style: TextStyle(
-                            color: accentColor.withValues(alpha: 0.7),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: TextStyle(color: accentColor.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(width: 3),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          color: accentColor.withValues(alpha: 0.6),
-                          size: 8,
-                        ),
+                        Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.6), size: 8),
                       ],
                     ),
                   ],
@@ -1514,7 +1529,6 @@ class _PatternItemCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
       onTap: () async {
-        // Check for active neighborhood sync before changing lights
         final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
         if (!shouldProceed) return;
 
@@ -1530,9 +1544,7 @@ class _PatternItemCard extends ConsumerWidget {
           final channels = ref.read(effectiveChannelIdsProvider);
           if (channels.isNotEmpty) itemPayload = applyChannelFilter(itemPayload, channels, ref.read(deviceChannelsProvider));
           await repo.applyJson(itemPayload);
-          // Update the active preset label
           ref.read(activePresetLabelProvider.notifier).state = item.name;
-          // Attempt immediate local reflection similar to Scenes card
           final notifier = ref.read(wledStateProvider.notifier);
           final bri = item.wledPayload['bri'];
           if (bri is int) notifier.setBrightness(bri);
@@ -1562,7 +1574,6 @@ class _PatternItemCard extends ConsumerWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         child: Stack(children: [
-          // Animated gradient preview from the item's palette
           Positioned.fill(child: _ItemLiveGradient(colors: _extractColorsFromItem(item), speed: 128)),
           Positioned.fill(
             child: DecoratedBox(
@@ -1570,10 +1581,7 @@ class _PatternItemCard extends ConsumerWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    NexGenPalette.matteBlack.withValues(alpha: 0.08),
-                    NexGenPalette.matteBlack.withValues(alpha: 0.65),
-                  ],
+                  colors: [NexGenPalette.matteBlack.withValues(alpha: 0.08), NexGenPalette.matteBlack.withValues(alpha: 0.65)],
                 ),
                 border: Border.all(color: NexGenPalette.line),
               ),
@@ -1593,103 +1601,26 @@ class _PatternItemCard extends ConsumerWidget {
 }
 
 /// Compact pattern item card for 4-column grid layout.
-/// Shows a smaller preview with effect name and color slot indicator.
 class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
   const _CompactPatternItemCard({required this.item, required this.themeColors});
 
-  /// Get how many color slots this effect actually uses.
-  /// Returns 0 if the effect generates its own colors / uses palette.
-  ///
-  /// Effect IDs aligned with WledEffectsCatalog (WLED 0.14+ firmware).
-  /// Effects that use selected colors all receive 3 slots so all palette
-  /// colors are sent — WLED ignores extras harmlessly.
   static int _getColorSlotsForEffect(int effectId) {
-    // Effects that ignore user colors entirely (generate own or use palette).
-    // Sourced from WledEffectsCatalog: generatesOwnColors + usesPalette.
     const autoColorEffects = {
-      // generatesOwnColors
-      4,   // Wipe Random
-      5,   // Random Colors
-      7,   // Dynamic
-      8,   // Colorloop
-      9,   // Rainbow
-      14,  // Theater Rainbow
-      19,  // Dissolve Rnd
-      24,  // Strobe Rainbow
-      26,  // Blink Rainbow
-      29,  // Chase Random
-      30,  // Chase Rainbow
-      32,  // Chase Flash Rnd
-      33,  // Rainbow Runner
-      34,  // Colorful
-      35,  // Traffic Light
-      36,  // Sweep Random
-      38,  // Aurora
-      45,  // Fire Flicker
-      63,  // Pride 2015
-      66,  // Fire 2012
-      88,  // Candle
-      94,  // Sinelon Rainbow
-      99,  // Ripple Rainbow
-      101, // Pacifica
-      104, // Sunrise
-      116, // TV Simulator
-      117, // Dynamic Smooth
-      // usesPalette
-      39,  // Stream
-      42,  // Fireworks
-      43,  // Rain
-      61,  // Stream 2
-      64,  // Juggle
-      65,  // Palette
-      67,  // Colorwaves
-      68,  // Bpm
-      69,  // Fill Noise
-      70,  // Noise 1
-      71,  // Noise 2
-      72,  // Noise 3
-      73,  // Noise 4
-      74,  // Colortwinkles
-      75,  // Lake
-      79,  // Ripple
-      80,  // Twinklefox
-      81,  // Twinklecat
-      89,  // Fireworks Starburst
-      90,  // Fireworks 1D
-      92,  // Sinelon
-      93,  // Sinelon Dual
-      97,  // Plasma
-      105, // Phased
-      106, // Twinkleup
-      107, // Noise Pal
-      108, // Sine
-      109, // Phased Noise
-      110, // Flow
-      115, // Blends
-      128, // Pixels
+      4, 5, 7, 8, 9, 14, 19, 24, 26, 29, 30, 32, 33, 34, 35, 36, 38, 45, 63, 66, 88,
+      94, 99, 101, 104, 116, 117, 39, 42, 43, 61, 64, 65, 67, 68, 69, 70, 71, 72, 73,
+      74, 75, 79, 80, 81, 89, 90, 92, 93, 97, 105, 106, 107, 108, 109, 110, 115, 128,
     };
-
     if (autoColorEffects.contains(effectId)) return 0;
-
-    // All remaining effects that use/blend selected colors get 3 slots.
-    // WLED's col array supports up to 3 colors per segment and safely
-    // ignores slots an effect doesn't use, so sending all 3 is harmless
-    // and ensures multi-color palettes display correctly.
     return 3;
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final effectId = PatternRepository.effectIdFromPayload(item.wledPayload) ?? 0;
-    final colorSlots = _getColorSlotsForEffect(effectId);
     final extractedColors = _extractColorsFromItem(item);
-
-    // Always show all palette colors in preview so users see the full colorway.
     final displayColors = extractedColors;
-
-    // Get effect name for display
     final effectName = _getEffectDisplayName(effectId);
 
     return InkWell(
@@ -1704,7 +1635,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Realistic effect preview strip (takes 60% of height)
             Expanded(
               flex: 3,
               child: ClipRRect(
@@ -1716,7 +1646,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
                 ),
               ),
             ),
-            // Text section (takes 40% of height)
             Expanded(
               flex: 2,
               child: Container(
@@ -1726,9 +1655,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      displayColors.isNotEmpty
-                          ? displayColors.first.withValues(alpha: 0.15)
-                          : NexGenPalette.cyan.withValues(alpha: 0.1),
+                      displayColors.isNotEmpty ? displayColors.first.withValues(alpha: 0.15) : NexGenPalette.cyan.withValues(alpha: 0.1),
                       NexGenPalette.matteBlack,
                     ],
                   ),
@@ -1738,21 +1665,14 @@ class _CompactPatternItemCard extends ConsumerWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Pattern name
                     Text(
                       item.name,
-                      style: const TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        height: 1.1,
-                      ),
+                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.white, height: 1.1),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 2),
-                    // Effect type badge
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
@@ -1763,11 +1683,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
                       ),
                       child: Text(
                         effectName,
-                        style: TextStyle(
-                          fontSize: 7,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white.withValues(alpha: 0.9),
-                        ),
+                        style: TextStyle(fontSize: 7, fontWeight: FontWeight.w500, color: Colors.white.withValues(alpha: 0.9)),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1782,37 +1698,17 @@ class _CompactPatternItemCard extends ConsumerWidget {
     );
   }
 
-  /// Get a user-friendly effect name from the effect ID
   static String _getEffectDisplayName(int effectId) {
     const effectNames = {
-      0: 'Solid',
-      1: 'Blink',
-      2: 'Breathe',
-      3: 'Wipe',
-      6: 'Sweep',
-      10: 'Scan',
-      12: 'Fade',
-      22: 'Running',
-      23: 'Chase',
-      37: 'Fill Noise',
-      43: 'Theater',
-      46: 'Twinkle',
-      49: 'Fire',
-      51: 'Gradient',
-      52: 'Loading',
-      63: 'Palette',
-      65: 'Colorwave',
-      67: 'Ripple',
-      73: 'Pacifica',
-      76: 'Fireworks',
-      78: 'Meteor',
-      108: 'Meteor',
-      120: 'Sparkle',
+      0: 'Solid', 1: 'Blink', 2: 'Breathe', 3: 'Wipe', 6: 'Sweep', 10: 'Scan',
+      12: 'Fade', 22: 'Running', 23: 'Chase', 37: 'Fill Noise', 43: 'Theater',
+      46: 'Twinkle', 49: 'Fire', 51: 'Gradient', 52: 'Loading', 63: 'Palette',
+      65: 'Colorwave', 67: 'Ripple', 73: 'Pacifica', 76: 'Fireworks', 78: 'Meteor',
+      108: 'Meteor', 120: 'Sparkle',
     };
     return effectNames[effectId] ?? 'Effect';
   }
 
-  /// Extract speed from WLED payload
   static double _getSpeedFromPayload(Map<String, dynamic> payload) {
     try {
       final seg = payload['seg'];
@@ -1824,11 +1720,10 @@ class _CompactPatternItemCard extends ConsumerWidget {
         }
       }
     } catch (_) {}
-    return 128; // Default speed
+    return 128;
   }
 
   Future<void> _handleTap(BuildContext context, WidgetRef ref, int effectId, List<Color> extractedColors) async {
-    // Check for active neighborhood sync before changing lights
     final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
     if (!shouldProceed) return;
 
@@ -1840,7 +1735,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
       return;
     }
 
-    // For Solid effect (ID 0), show color picker if multiple colors available
     if (effectId == 0 && themeColors.length > 1) {
       if (context.mounted) {
         final selectedColor = await _showSolidColorPicker(context, themeColors);
@@ -1851,12 +1745,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
       return;
     }
 
-    // Send all palette colors to WLED. Previously this showed a color
-    // assignment dialog that forced users to drop colors when the effect
-    // used fewer slots than available, causing 3-color palettes to lose
-    // their 3rd color on 2-color effects. WLED safely ignores extra
-    // colors in the col array, so sending all is harmless and ensures
-    // the full colorway is applied.
     try {
       var applyPayload = Map<String, dynamic>.from(item.wledPayload);
       final channels = ref.read(effectiveChannelIdsProvider);
@@ -1902,27 +1790,8 @@ class _CompactPatternItemCard extends ConsumerWidget {
     );
   }
 
-  Future<List<Color>?> _showColorAssignmentDialog(
-    BuildContext context,
-    List<Color> availableColors,
-    int slots,
-    int effectId,
-  ) async {
-    return showModalBottomSheet<List<Color>>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => _ColorAssignmentSheet(
-        availableColors: availableColors,
-        slots: slots,
-        effectId: effectId,
-      ),
-    );
-  }
-
   Future<void> _applyPatternWithColor(BuildContext context, WidgetRef ref, WledRepository repo, Color color) async {
     try {
-      // Create payload with selected color
       var payload = Map<String, dynamic>.from(item.wledPayload);
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
@@ -1971,10 +1840,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Helper widgets used by the extracted classes above
+// Helper bottom sheets
 // ---------------------------------------------------------------------------
 
-/// Bottom sheet for picking a solid color when using Solid effect.
 class _SolidColorPickerSheet extends StatelessWidget {
   final List<Color> colors;
   const _SolidColorPickerSheet({required this.colors});
@@ -1998,36 +1866,25 @@ class _SolidColorPickerSheet extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 'Choose Solid Color',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: NexGenPalette.textHigh,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh, fontWeight: FontWeight.w600),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             'Solid effect displays a single color. Select which color to use:',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: NexGenPalette.textMedium,
-            ),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
           ),
           const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: colors.map((color) => _ColorPickerTile(
-              color: color,
-              onTap: () => Navigator.pop(context, color),
-            )).toList(),
+            children: colors.map((color) => _ColorPickerTile(color: color, onTap: () => Navigator.pop(context, color))).toList(),
           ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
+            child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ),
         ],
       ),
@@ -2035,16 +1892,11 @@ class _SolidColorPickerSheet extends StatelessWidget {
   }
 }
 
-/// Bottom sheet for assigning colors to effect slots.
 class _ColorAssignmentSheet extends StatefulWidget {
   final List<Color> availableColors;
   final int slots;
   final int effectId;
-  const _ColorAssignmentSheet({
-    required this.availableColors,
-    required this.slots,
-    required this.effectId,
-  });
+  const _ColorAssignmentSheet({required this.availableColors, required this.slots, required this.effectId});
 
   @override
   State<_ColorAssignmentSheet> createState() => _ColorAssignmentSheetState();
@@ -2056,9 +1908,7 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
   @override
   void initState() {
     super.initState();
-    // Pre-fill with first N colors
     _assignedColors = widget.availableColors.take(widget.slots).toList();
-    // Pad if needed
     while (_assignedColors.length < widget.slots) {
       _assignedColors.add(widget.availableColors.first);
     }
@@ -2076,7 +1926,6 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
   @override
   Widget build(BuildContext context) {
     final effectName = kEffectNames[widget.effectId] ?? 'Effect ${widget.effectId}';
-
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -2095,10 +1944,7 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
               Expanded(
                 child: Text(
                   'Assign Colors for $effectName',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: NexGenPalette.textHigh,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -2106,12 +1952,9 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
           const SizedBox(height: 8),
           Text(
             'This effect uses ${widget.slots} color${widget.slots > 1 ? 's' : ''}. Assign colors to each slot:',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: NexGenPalette.textMedium,
-            ),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
           ),
           const SizedBox(height: 16),
-          // Slot assignment rows
           ...List.generate(widget.slots, (slotIndex) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -2119,13 +1962,7 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
                 children: [
                   SizedBox(
                     width: 80,
-                    child: Text(
-                      _getSlotLabel(slotIndex),
-                      style: const TextStyle(
-                        color: NexGenPalette.textMedium,
-                        fontSize: 13,
-                      ),
-                    ),
+                    child: Text(_getSlotLabel(slotIndex), style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
                   ),
                   Expanded(
                     child: SingleChildScrollView(
@@ -2134,11 +1971,7 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
                         children: widget.availableColors.map((color) {
                           final isSelected = _assignedColors[slotIndex] == color;
                           return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _assignedColors[slotIndex] = color;
-                              });
-                            },
+                            onTap: () => setState(() => _assignedColors[slotIndex] = color),
                             child: Container(
                               width: 36,
                               height: 36,
@@ -2150,17 +1983,9 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
                                   color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
                                   width: isSelected ? 3 : 1,
                                 ),
-                                boxShadow: isSelected ? [
-                                  BoxShadow(
-                                    color: NexGenPalette.cyan.withValues(alpha: 0.4),
-                                    blurRadius: 8,
-                                    spreadRadius: 1,
-                                  ),
-                                ] : null,
+                                boxShadow: isSelected ? [BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1)] : null,
                               ),
-                              child: isSelected
-                                  ? const Icon(Icons.check, color: Colors.white, size: 18)
-                                  : null,
+                              child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 18) : null,
                             ),
                           );
                         }).toList(),
@@ -2172,30 +1997,19 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
             );
           }),
           const SizedBox(height: 8),
-          // Preview strip
           Container(
             height: 24,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(colors: _assignedColors),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: LinearGradient(colors: _assignedColors)),
           ),
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-              ),
+              Expanded(child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
                   onPressed: () => Navigator.pop(context, _assignedColors),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan,
-                  ),
+                  style: FilledButton.styleFrom(backgroundColor: NexGenPalette.cyan),
                   child: const Text('Apply'),
                 ),
               ),
@@ -2207,7 +2021,6 @@ class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
   }
 }
 
-/// Color picker tile for the solid color picker.
 class _ColorPickerTile extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
@@ -2225,23 +2038,14 @@ class _ColorPickerTile extends StatelessWidget {
           color: color,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: NexGenPalette.line, width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.4),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 2))],
         ),
-        child: const Center(
-          child: Icon(Icons.touch_app, color: Colors.white54, size: 20),
-        ),
+        child: const Center(child: Icon(Icons.touch_app, color: Colors.white54, size: 20)),
       ),
     );
   }
 }
 
-/// Wrapper to keep LiveGradientStrip lightweight in item cards.
 class _ItemLiveGradient extends StatelessWidget {
   final List<Color> colors;
   final double speed;
@@ -2251,18 +2055,16 @@ class _ItemLiveGradient extends StatelessWidget {
   Widget build(BuildContext context) => LiveGradientStrip(colors: colors, speed: speed);
 }
 
-/// Realistic effect preview that animates based on the WLED effect type.
-/// Shows users what the effect will look like on their lighting system.
+// ---------------------------------------------------------------------------
+// Effect preview strip (unchanged)
+// ---------------------------------------------------------------------------
+
 class _EffectPreviewStrip extends StatefulWidget {
   final List<Color> colors;
   final int effectId;
   final double speed;
 
-  const _EffectPreviewStrip({
-    required this.colors,
-    required this.effectId,
-    this.speed = 128,
-  });
+  const _EffectPreviewStrip({required this.colors, required this.effectId, this.speed = 128});
 
   @override
   State<_EffectPreviewStrip> createState() => _EffectPreviewStripState();
@@ -2277,22 +2079,13 @@ class _EffectPreviewStripState extends State<_EffectPreviewStrip>
   @override
   void initState() {
     super.initState();
-    // Map speed (0-255) to animation duration
     final durationMs = (3000 - (widget.speed / 255) * 2500).clamp(500, 5000).round();
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: durationMs),
-    );
-
-    // Initialize twinkle state for popcorn/sparkle effects
+    _controller = AnimationController(vsync: this, duration: Duration(milliseconds: durationMs));
     for (int i = 0; i < 20; i++) {
       _twinkleOpacities.add(0.0);
       _twinkleColorIndices.add(i % widget.colors.length);
     }
-
-    if (widget.effectId != 0) {
-      _controller.repeat();
-    }
+    if (widget.effectId != 0) _controller.repeat();
   }
 
   @override
@@ -2307,11 +2100,7 @@ class _EffectPreviewStripState extends State<_EffectPreviewStrip>
       animation: _controller,
       builder: (context, child) {
         return CustomPaint(
-          painter: _EffectPainter(
-            colors: widget.colors,
-            effectId: widget.effectId,
-            progress: _controller.value,
-          ),
+          painter: _EffectPainter(colors: widget.colors, effectId: widget.effectId, progress: _controller.value),
           size: Size.infinite,
         );
       },
@@ -2319,130 +2108,55 @@ class _EffectPreviewStripState extends State<_EffectPreviewStrip>
   }
 }
 
-/// Custom painter that draws realistic effect previews
 class _EffectPainter extends CustomPainter {
   final List<Color> colors;
   final int effectId;
   final double progress;
 
-  _EffectPainter({
-    required this.colors,
-    required this.effectId,
-    required this.progress,
-  });
+  _EffectPainter({required this.colors, required this.effectId, required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
     if (colors.isEmpty) return;
-
     final paint = Paint()..style = PaintingStyle.fill;
-    final ledCount = 30; // Simulated LED count for preview
+    const ledCount = 30;
     final ledWidth = size.width / ledCount;
     final ledHeight = size.height;
 
     switch (_getEffectType(effectId)) {
-      case _EffectType.solid:
-        _paintSolid(canvas, size, paint);
-        break;
-      case _EffectType.breathing:
-        _paintBreathing(canvas, size, paint);
-        break;
-      case _EffectType.chase:
-        _paintChase(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.wipe:
-        _paintWipe(canvas, size, paint);
-        break;
-      case _EffectType.sparkle:
-        _paintSparkle(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.scan:
-        _paintScan(canvas, size, paint, ledWidth, ledHeight);
-        break;
-      case _EffectType.fade:
-        _paintFade(canvas, size, paint);
-        break;
-      case _EffectType.gradient:
-        _paintGradient(canvas, size, paint);
-        break;
-      case _EffectType.theater:
-        _paintTheater(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.running:
-        _paintRunning(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.twinkle:
-        _paintTwinkle(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.fire:
-        _paintFire(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.meteor:
-        _paintMeteor(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
-      case _EffectType.wave:
-        _paintWave(canvas, size, paint, ledCount, ledWidth, ledHeight);
-        break;
+      case _EffectType.solid:     _paintSolid(canvas, size, paint); break;
+      case _EffectType.breathing: _paintBreathing(canvas, size, paint); break;
+      case _EffectType.chase:     _paintChase(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.wipe:      _paintWipe(canvas, size, paint); break;
+      case _EffectType.sparkle:   _paintSparkle(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.scan:      _paintScan(canvas, size, paint, ledWidth, ledHeight); break;
+      case _EffectType.fade:      _paintFade(canvas, size, paint); break;
+      case _EffectType.gradient:  _paintGradient(canvas, size, paint); break;
+      case _EffectType.theater:   _paintTheater(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.running:   _paintRunning(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.twinkle:   _paintTwinkle(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.fire:      _paintFire(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.meteor:    _paintMeteor(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
+      case _EffectType.wave:      _paintWave(canvas, size, paint, ledCount, ledWidth, ledHeight); break;
     }
   }
 
   _EffectType _getEffectType(int effectId) {
     switch (effectId) {
       case 0: return _EffectType.solid;
-      case 1: // Blink
-      case 2: // Breathe
-        return _EffectType.breathing;
-      case 3: // Wipe
-      case 4: // Wipe Random
-        return _EffectType.wipe;
-      case 6: // Sweep
-      case 10: // Scan
-      case 11: // Dual Scan
-      case 13: // Scanner
-      case 14: // Dual Scanner
-        return _EffectType.scan;
-      case 12: // Fade
-      case 18: // Dissolve
-        return _EffectType.fade;
-      case 22: // Running 2
-      case 23: // Chase
-      case 24: // Chase Rainbow
-      case 25: // Running Dual
-      case 41: // Running
-      case 42: // Running 2
-        return _EffectType.running;
-      case 43: // Theater Chase
-      case 44: // Theater Chase Rainbow
-        return _EffectType.theater;
-      case 37: // Fill Noise
-      case 46: // Twinklefox
-      case 47: // Twinklecat
-        return _EffectType.twinkle;
-      case 51: // Gradient
-      case 63: // Palette
-      case 65: // Colorwaves
-        return _EffectType.gradient;
-      case 49: // Fire 2012
-      case 54: // Fire Flicker
-      case 74: // Candle
-      case 75: // Fire
-        return _EffectType.fire;
-      case 78: // Meteor Rainbow
-      case 108: // Meteor
-      case 109: // Meteor Smooth
-        return _EffectType.meteor;
-      case 52: // Loading
-      case 67: // Ripple
-      case 70: // Lake
-      case 73: // Pacifica
-        return _EffectType.wave;
-      case 76: // Fireworks
-      case 77: // Rain
-      case 120: // Sparkle
-      case 121: // Sparkle+
-        return _EffectType.sparkle;
-      default:
-        return _EffectType.chase; // Default to chase for unknown effects
+      case 1: case 2: return _EffectType.breathing;
+      case 3: case 4: return _EffectType.wipe;
+      case 6: case 10: case 11: case 13: case 14: return _EffectType.scan;
+      case 12: case 18: return _EffectType.fade;
+      case 22: case 23: case 24: case 25: case 41: case 42: return _EffectType.running;
+      case 43: case 44: return _EffectType.theater;
+      case 37: case 46: case 47: return _EffectType.twinkle;
+      case 51: case 63: case 65: return _EffectType.gradient;
+      case 49: case 54: case 74: case 75: return _EffectType.fire;
+      case 78: case 108: case 109: return _EffectType.meteor;
+      case 52: case 67: case 70: case 73: return _EffectType.wave;
+      case 76: case 77: case 120: case 121: return _EffectType.sparkle;
+      default: return _EffectType.chase;
     }
   }
 
@@ -2452,16 +2166,14 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintBreathing(Canvas canvas, Size size, Paint paint) {
-    // Smooth sine wave breathing
     final breathValue = (sin(progress * 2 * pi) + 1) / 2;
     paint.color = colors.first.withValues(alpha: 0.3 + breathValue * 0.7);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
   }
 
   void _paintChase(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    final chaseLength = 5;
+    const chaseLength = 5;
     final chasePos = (progress * ledCount).floor();
-
     for (int i = 0; i < ledCount; i++) {
       final distFromChase = (i - chasePos + ledCount) % ledCount;
       if (distFromChase < chaseLength) {
@@ -2477,53 +2189,35 @@ class _EffectPainter extends CustomPainter {
 
   void _paintWipe(Canvas canvas, Size size, Paint paint) {
     final wipePos = progress * size.width;
-    // First color (wiped area)
     paint.color = colors.first;
     canvas.drawRect(Rect.fromLTWH(0, 0, wipePos, size.height), paint);
-    // Second color (unwiped area)
     paint.color = colors.length > 1 ? colors[1] : colors.first.withValues(alpha: 0.3);
     canvas.drawRect(Rect.fromLTWH(wipePos, 0, size.width - wipePos, size.height), paint);
   }
 
   void _paintSparkle(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Background
     paint.color = colors.last.withValues(alpha: 0.15);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-    // Sparkles - use progress to create pseudo-random positions
-    final sparkleCount = 8;
+    const sparkleCount = 8;
     for (int i = 0; i < sparkleCount; i++) {
       final seed = (progress * 1000 + i * 137).floor() % ledCount;
       final colorIdx = i % colors.length;
       final fadePhase = ((progress * 3 + i * 0.3) % 1.0);
       final opacity = fadePhase < 0.5 ? fadePhase * 2 : (1 - fadePhase) * 2;
-
       paint.color = colors[colorIdx].withValues(alpha: opacity.clamp(0.0, 1.0));
       final x = seed * ledWidth;
-      // Draw as small circle for sparkle effect
       canvas.drawCircle(Offset(x + ledWidth / 2, size.height / 2), ledWidth * 0.8, paint);
     }
   }
 
   void _paintScan(Canvas canvas, Size size, Paint paint, double ledWidth, double ledHeight) {
-    // Background
     paint.color = colors.last.withValues(alpha: 0.1);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-    // Scanning bar that bounces
     final bounce = (sin(progress * 2 * pi) + 1) / 2;
     final scanPos = bounce * (size.width - ledWidth * 3);
     final scanWidth = ledWidth * 3;
-
-    // Glow behind scan bar
     final glowGradient = LinearGradient(
-      colors: [
-        colors.first.withValues(alpha: 0.0),
-        colors.first.withValues(alpha: 0.5),
-        colors.first,
-        colors.first.withValues(alpha: 0.5),
-        colors.first.withValues(alpha: 0.0),
-      ],
+      colors: [colors.first.withValues(alpha: 0.0), colors.first.withValues(alpha: 0.5), colors.first, colors.first.withValues(alpha: 0.5), colors.first.withValues(alpha: 0.0)],
     );
     paint.shader = glowGradient.createShader(Rect.fromLTWH(scanPos - scanWidth, 0, scanWidth * 3, ledHeight));
     canvas.drawRect(Rect.fromLTWH(scanPos - scanWidth, 0, scanWidth * 3, ledHeight), paint);
@@ -2531,38 +2225,29 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintFade(Canvas canvas, Size size, Paint paint) {
-    // Smooth color fade between colors
     final colorCount = colors.length;
     final colorProgress = progress * colorCount;
     final currentIdx = colorProgress.floor() % colorCount;
     final nextIdx = (currentIdx + 1) % colorCount;
     final blendFactor = colorProgress - colorProgress.floor();
-
     final blendedColor = Color.lerp(colors[currentIdx], colors[nextIdx], blendFactor)!;
     paint.color = blendedColor;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
   }
 
   void _paintGradient(Canvas canvas, Size size, Paint paint) {
-    // Flowing gradient
     final offset = progress * 2;
     final extendedColors = [...colors, ...colors];
     final stops = List.generate(extendedColors.length, (i) => (i / (extendedColors.length - 1) + offset) % 2 / 2);
     stops.sort();
-
-    final gradient = LinearGradient(
-      colors: extendedColors,
-      stops: stops,
-    );
+    final gradient = LinearGradient(colors: extendedColors, stops: stops);
     paint.shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
     paint.shader = null;
   }
 
   void _paintTheater(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Theater chase - every 3rd LED lit, shifting
     final offset = (progress * 3).floor() % 3;
-
     for (int i = 0; i < ledCount; i++) {
       final isLit = (i + offset) % 3 == 0;
       final colorIdx = ((i + offset) ~/ 3) % colors.length;
@@ -2572,10 +2257,8 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintRunning(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Running lights - segments of color moving
     final segmentLength = ledCount ~/ colors.length;
     final offset = (progress * ledCount).floor();
-
     for (int i = 0; i < ledCount; i++) {
       final adjustedI = (i + offset) % ledCount;
       final colorIdx = (adjustedI ~/ segmentLength) % colors.length;
@@ -2585,19 +2268,15 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintTwinkle(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Base gradient
     final gradient = LinearGradient(colors: colors);
     paint.shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
     paint.shader = null;
-
-    // Twinkle overlay - bright spots that fade in/out
-    final twinkleCount = 6;
+    const twinkleCount = 6;
     for (int i = 0; i < twinkleCount; i++) {
       final seed = (i * 17 + 7) % ledCount;
       final phase = ((progress * 2 + i * 0.2) % 1.0);
       final brightness = (sin(phase * 2 * pi) + 1) / 2;
-
       paint.color = Colors.white.withValues(alpha: brightness * 0.7);
       final x = seed * ledWidth + ledWidth / 2;
       canvas.drawCircle(Offset(x, size.height / 2), ledWidth * 0.6, paint);
@@ -2605,29 +2284,21 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintFire(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Fire effect with orange/red/yellow flickering
     final fireColors = colors.isNotEmpty ? colors : [Colors.red, Colors.orange, Colors.yellow];
-
     for (int i = 0; i < ledCount; i++) {
-      // Create pseudo-random flicker based on position and time
       final flicker = (sin(progress * 10 + i * 0.5) + sin(progress * 7 + i * 0.3)) / 4 + 0.5;
       final colorIdx = ((flicker * fireColors.length).floor()).clamp(0, fireColors.length - 1);
       final brightness = 0.5 + flicker * 0.5;
-
       paint.color = fireColors[colorIdx].withValues(alpha: brightness.clamp(0.0, 1.0));
       canvas.drawRect(Rect.fromLTWH(i * ledWidth, 0, ledWidth + 1, ledHeight), paint);
     }
   }
 
   void _paintMeteor(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Background
     paint.color = Colors.black.withValues(alpha: 0.8);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-    // Meteor with tail
     final meteorPos = (progress * (ledCount + 10)).floor() - 5;
-    final tailLength = 8;
-
+    const tailLength = 8;
     for (int i = 0; i < tailLength; i++) {
       final pos = meteorPos - i;
       if (pos >= 0 && pos < ledCount) {
@@ -2640,7 +2311,6 @@ class _EffectPainter extends CustomPainter {
   }
 
   void _paintWave(Canvas canvas, Size size, Paint paint, int ledCount, double ledWidth, double ledHeight) {
-    // Smooth wave pattern
     for (int i = 0; i < ledCount; i++) {
       final waveOffset = sin(progress * 2 * pi + i * 0.3);
       final brightness = (waveOffset + 1) / 2;
@@ -2652,28 +2322,11 @@ class _EffectPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EffectPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.effectId != effectId ||
-        oldDelegate.colors != colors;
+    return oldDelegate.progress != progress || oldDelegate.effectId != effectId || oldDelegate.colors != colors;
   }
 }
 
-enum _EffectType {
-  solid,
-  breathing,
-  chase,
-  wipe,
-  sparkle,
-  scan,
-  fade,
-  gradient,
-  theater,
-  running,
-  twinkle,
-  fire,
-  meteor,
-  wave,
-}
+enum _EffectType { solid, breathing, chase, wipe, sparkle, scan, fade, gradient, theater, running, twinkle, fire, meteor, wave }
 
 List<Color> _extractColorsFromItem(PatternItem item) {
   try {
