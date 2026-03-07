@@ -996,7 +996,20 @@ Rules:
 
     return null;
   }
-
+/// Direct calendar bypass — skips ALL tier matching (holiday, team, semantic cache).
+  /// [systemContext] is used as the sole system prompt — no lighting instructions injected.
+  /// [userMessage] contains the date facts + user request only.
+  static Future<String> chatCalendar(
+    WidgetRef ref,
+    String systemContext,
+    String userMessage,
+  ) async {
+    return LuminaAI.chatDirect(
+      userMessage,
+      systemPrompt: systemContext,
+      temperature: 0.1,
+    );
+  }
   /// Returns true if the query is about scheduling or time-based automation,
   /// NOT a sports team reference. Prevents "sunset" from fuzzy-matching "suns".
   static bool _isScheduleOrTimeQuery(String query) {

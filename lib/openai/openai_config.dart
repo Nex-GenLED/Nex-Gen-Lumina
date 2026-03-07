@@ -29,15 +29,9 @@ const _kOpus   = 'claude-opus-4-6';
 enum _LuminaTier { fast, smart }
 
 /// Classifies a Tier-3 prompt as fast (Haiku) or smart (Opus 4).
-///
-/// Fast: short, direct, unambiguous commands the model just needs to
-///       format as JSON — no design thinking required.
-/// Smart: mood, theme, multi-zone scene design, event-based requests,
-///        anything open-ended that benefits from real reasoning.
 _LuminaTier _classifyPromptTier(String prompt) {
   final t = prompt.toLowerCase().trim();
 
-  // Smart triggers — anything requiring creativity or design judgment
   final smartPatterns = [
     RegExp(r'\b(vibe|mood|feel|feeling|scene|aesthetic)\b'),
     RegExp(r'\b(surprise|suggest|recommend|help me|design|create a scene|what should)\b'),
@@ -49,7 +43,6 @@ _LuminaTier _classifyPromptTier(String prompt) {
     RegExp(r"\b(make it|give me|show me|i want|i'd like|can you)\b"),
   ];
 
-  // Fast triggers — simple, atomic commands
   final fastPatterns = [
     RegExp(r'^(turn\s+)?(lights?\s+)?(on|off)$'),
     RegExp(r'^(set\s+)?(brightness|dim|brighten)'),
@@ -58,14 +51,10 @@ _LuminaTier _classifyPromptTier(String prompt) {
     RegExp(r'\b(brighter|dimmer|slower|faster|more subtle|tone it down)\b'),
   ];
 
-  // Word count heuristic — long prompts almost always need Opus
   final wordCount = t.split(RegExp(r'\s+')).length;
   if (wordCount > 12) return _LuminaTier.smart;
-
   if (smartPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.smart;
   if (fastPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.fast;
-
-  // Default: short ambiguous prompts go fast; medium go smart
   return wordCount <= 5 ? _LuminaTier.fast : _LuminaTier.smart;
 }
 
@@ -77,8 +66,6 @@ class LuminaAI {
 
   // ─── System prompts ─────────────────────────────────────────────────────────
 
-  /// Fast-layer system prompt for Haiku.
-  /// Tight, output-focused. No prose, just structured execution.
   static const String _kFastSystemPrompt =
       'You are Lumina Fast — the command executor for Nex-Gen LED permanent exterior '
       'lighting systems. You translate direct user commands into WLED JSON payloads.\n\n'
@@ -98,8 +85,6 @@ class LuminaAI {
       'NEVER use rainbow/random effects (fx 4,5,8,9,10,14,19,24,26,29,30,34,63,65) '
       'unless user explicitly says "rainbow" or "random colors".';
 
-  /// Smart-layer system prompt for Opus 4.
-  /// Full design intelligence, canonical palettes, mood mapping, roofline awareness.
   static const String _kSmartSystemPrompt =
       'You are Lumina, the AI Lighting Designer for Nex-Gen LED permanent exterior '
       'lighting systems. You think like a professional lighting designer.\n\n'
@@ -149,8 +134,6 @@ class LuminaAI {
       'lighting JSON. Redirect them to the Schedule tab and offer to pick a pattern first.\n\n'
       'WLED RGBW: Use [R,G,B,W] arrays. W=0 for saturated colors. W>0 only for whites.';
 
-  /// Refinement system prompt for Haiku.
-  /// Precise parameter adjustment — preserve everything except what was asked.
   static const String _kRefinementSystemPrompt =
       'You are Lumina, modifying an EXISTING lighting pattern based on user feedback.\n\n'
       'CRITICAL: Preserve all colors, effect type, and theme. '
@@ -168,8 +151,7 @@ class LuminaAI {
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 
-  /// Routes a Tier-3 prompt to Haiku (fast) or Opus 4 (smart) based on
-  /// complexity classification. Returns the assistant's verbal + JSON response.
+  /// Routes a Tier-3 prompt to Haiku (fast) or Opus 4 (smart).
   static Future<String> chat(
     String userPrompt, {
     String? contextBlock,
@@ -194,6 +176,24 @@ class LuminaAI {
     );
   }
 
+  /// Direct call — bypasses tier routing and uses [systemPrompt] as the SOLE
+  /// system instruction. No Lumina lighting prompts are injected.
+  /// Use this for calendar, schedule, and any non-lighting AI features.
+  static Future<String> chatDirect(
+    String userMessage, {
+    required String systemPrompt,
+    double temperature = 0.1,
+  }) async {
+    debugPrint('📅 Lumina Direct → Haiku | "$userMessage"');
+    return _callClaude(
+      model: _kHaiku,
+      systemPrompt: systemPrompt,
+      userMessage: userMessage,
+      temperature: temperature,
+      label: '📅 Direct',
+    );
+  }
+
   /// Refinement always uses Haiku — precise parameter tweaks don't need Opus.
   static Future<String> chatRefinement(
     String refinementPrompt, {
@@ -205,7 +205,6 @@ class LuminaAI {
     final patternJson = jsonEncode(currentPattern);
     final systemWithContext = _injectContext(_kRefinementSystemPrompt, contextBlock);
 
-    // Inject the current pattern as a prior assistant turn so Claude knows what's active
     return _callClaude(
       model: _kHaiku,
       systemPrompt: systemWithContext,
@@ -249,8 +248,6 @@ class LuminaAI {
 
   // ─── Core Claude caller ──────────────────────────────────────────────────────
 
-  /// Calls the Firebase Cloud Function 'claudeProxy' which proxies to
-  /// Anthropic's /v1/messages endpoint. The API key lives only in Firebase.
   static Future<String> _callClaude({
     required String model,
     required String systemPrompt,
@@ -259,7 +256,6 @@ class LuminaAI {
     required String label,
     String? priorAssistantMessage,
   }) async {
-    // Build messages array
     final messages = <Map<String, String>>[];
     if (priorAssistantMessage != null) {
       messages.add({'role': 'assistant', 'content': priorAssistantMessage});
@@ -293,7 +289,6 @@ class LuminaAI {
 
         if (data == null) throw Exception('Claude returned no data');
 
-        // Anthropic response shape: { content: [{ type: "text", text: "..." }] }
         final contentArray = data['content'] as List?;
         if (contentArray != null && contentArray.isNotEmpty) {
           for (final block in contentArray) {
@@ -336,7 +331,6 @@ class LuminaAI {
       if (obj is Map<String, dynamic>) return obj;
     } catch (_) {}
 
-    // Strip fences and retry
     final stripped = content
         .replaceAll(RegExp(r'```json\s*'), '')
         .replaceAll(RegExp(r'```\s*'), '')
@@ -346,7 +340,6 @@ class LuminaAI {
       if (obj is Map<String, dynamic>) return obj;
     } catch (_) {}
 
-    // Extract first balanced JSON object
     final start = stripped.indexOf('{');
     if (start < 0) return null;
     int depth = 0;
