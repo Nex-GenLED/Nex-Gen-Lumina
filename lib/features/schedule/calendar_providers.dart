@@ -143,15 +143,19 @@ Required JSON format:
 }
 
 Rules:
-• For ranges (e.g. "every Friday in April"), include one entry per matching day.
+• YOU MUST ALWAYS include at least one entry in "changes" with a valid "date" in YYYY-MM-DD format.
+• For relative dates like "next week", "this weekend", "tomorrow", etc., calculate the actual calendar dates from today's date (provided below) and list EACH date explicitly.
+• "next week" means the 7 days of the following Monday–Sunday week. "nightly" or "every night" means every day in the range.
+• For ranges (e.g. "every Friday in April", "nightly next week"), include one entry PER matching day.
 • For "off" / "turn off": set color to null and brightness to 0.
-• onTime / offTime use 24-hour format ("18:00", "23:30"). null is valid.
+• onTime / offTime use 24-hour format ("18:00", "23:30"). Use "sunset" or "17:30" for sunset, "sunrise" or "06:30" for sunrise. null is also valid.
 • "brightness" is 0–100.
-• Available patterns and their hex colors:
+• Common patterns and their hex colors:
     Warm White #FFE8C0 | Ocean Pulse #00C2FF | Ember Glow #FF6B35
     Aurora #9B6DFF | KC Chiefs Red #E31837 | Spring Bloom #FF9ECD
     Independence Blue #0033A0 | Harvest Moon #FF8C00
     Winter Frost #B0E0FF | FIFA Green #00A86B | Off null
+• You are NOT limited to the patterns above. If the user requests a team, theme, or design not listed (e.g. "Royals", "Lakers", "patriotic"), create a descriptive pattern name and pick an appropriate hex color. For sports teams, use their official primary color.
 
 ''';
 
