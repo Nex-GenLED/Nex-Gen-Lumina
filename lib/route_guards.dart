@@ -107,9 +107,33 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.dashboard;
   }
 
-  // Allow link routes and installer routes without further checks
-  if (isLinkRoute || isInstallerRoute || state.matchedLocation == AppRoutes.welcome) {
+  // Allow link routes, installer routes, and first-run without further checks
+  final isFirstRunRoute = state.matchedLocation == AppRoutes.firstRun;
+  if (isLinkRoute || isInstallerRoute || isFirstRunRoute ||
+      state.matchedLocation == AppRoutes.welcome) {
     return null;
+  }
+
+  // First-run check: redirect to onboarding if welcomeCompleted == false
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (userDoc.exists) {
+      final data = userDoc.data()!;
+      final welcomeCompleted = data['welcome_completed'] as bool? ?? true;
+      final role = data['installation_role'] as String?;
+      // Only redirect primary/subUser roles (not installers/admins)
+      if (!welcomeCompleted &&
+          role != 'installer' &&
+          role != 'admin' &&
+          role != 'unlinked') {
+        return AppRoutes.firstRun;
+      }
+    }
+  } catch (e) {
+    debugPrint('Redirect: Error checking welcome_completed: $e');
   }
 
   // For protected routes (dashboard, settings, etc.), verify installation access

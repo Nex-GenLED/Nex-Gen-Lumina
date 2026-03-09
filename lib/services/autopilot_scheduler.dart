@@ -569,6 +569,11 @@ class AutopilotScheduler {
       trigger: AutopilotTrigger.custom,
       type: FeedbackType.rejected,
     );
+
+    // Persist rejection and deprioritize after 3 rejections
+    await _ref
+        .read(autopilotSettingsServiceProvider)
+        .recordPatternRejection(suggestion.patternName);
   }
 
   /// Force regeneration of the schedule.

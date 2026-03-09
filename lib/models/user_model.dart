@@ -177,6 +177,23 @@ class UserModel {
   /// Whether score celebrations (LED animations) are enabled via autopilot
   final bool scoreCelebrations;
 
+  /// Patterns the user has rejected via autopilot suggestions.
+  /// Each entry: { 'pattern_name': String, 'count': int, 'last_rejected_at': Timestamp }
+  final List<Map<String, dynamic>> rejectedPatterns;
+
+  /// Pattern names that have been rejected 3+ times and should be deprioritized.
+  final List<String> deprioritizedPatterns;
+
+  /// Profile type: 'residential' or 'commercial'
+  final String profileType;
+
+  /// Commercial only — manager email for Monday morning digest
+  final String? managerEmail;
+
+  /// Happy hour lock windows where autopilot must not change lighting.
+  /// Each entry: { 'startHour': int, 'endHour': int, 'days': List<String> }
+  final List<Map<String, dynamic>> happyHourLocks;
+
   /// User's saved schedules for automation
   final List<ScheduleItem> schedules;
 
@@ -256,6 +273,11 @@ class UserModel {
     this.autoDetectGameDays = true,
     this.preGameLighting = true,
     this.scoreCelebrations = true,
+    this.rejectedPatterns = const [],
+    this.deprioritizedPatterns = const [],
+    this.profileType = 'residential',
+    this.managerEmail,
+    this.happyHourLocks = const [],
     this.schedules = const [],
     // Installation access control
     this.installationId,
@@ -366,6 +388,20 @@ class UserModel {
       autoDetectGameDays: (json['auto_detect_game_days'] as bool?) ?? true,
       preGameLighting: (json['pre_game_lighting'] as bool?) ?? true,
       scoreCelebrations: (json['score_celebrations'] as bool?) ?? true,
+      rejectedPatterns: (json['rejected_patterns'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .toList() ??
+          const [],
+      deprioritizedPatterns: (json['deprioritized_patterns'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      profileType: (json['profile_type'] as String?) ?? 'residential',
+      managerEmail: json['manager_email'] as String?,
+      happyHourLocks: (json['happy_hour_locks'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .toList() ??
+          const [],
       schedules: (json['schedules'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map((e) => ScheduleItem.fromJson(e))
@@ -457,6 +493,11 @@ class UserModel {
       'auto_detect_game_days': autoDetectGameDays,
       'pre_game_lighting': preGameLighting,
       'score_celebrations': scoreCelebrations,
+      'rejected_patterns': rejectedPatterns,
+      'deprioritized_patterns': deprioritizedPatterns,
+      'profile_type': profileType,
+      if (managerEmail != null) 'manager_email': managerEmail,
+      'happy_hour_locks': happyHourLocks,
       'schedules': schedules.map((e) => e.toJson()).toList(),
       // Installation access control
       if (installationId != null) 'installation_id': installationId,
@@ -522,6 +563,11 @@ class UserModel {
     bool? autoDetectGameDays,
     bool? preGameLighting,
     bool? scoreCelebrations,
+    List<Map<String, dynamic>>? rejectedPatterns,
+    List<String>? deprioritizedPatterns,
+    String? profileType,
+    String? managerEmail,
+    List<Map<String, dynamic>>? happyHourLocks,
     List<ScheduleItem>? schedules,
     // Installation access control
     String? installationId,
@@ -585,6 +631,11 @@ class UserModel {
       autoDetectGameDays: autoDetectGameDays ?? this.autoDetectGameDays,
       preGameLighting: preGameLighting ?? this.preGameLighting,
       scoreCelebrations: scoreCelebrations ?? this.scoreCelebrations,
+      rejectedPatterns: rejectedPatterns ?? this.rejectedPatterns,
+      deprioritizedPatterns: deprioritizedPatterns ?? this.deprioritizedPatterns,
+      profileType: profileType ?? this.profileType,
+      managerEmail: managerEmail ?? this.managerEmail,
+      happyHourLocks: happyHourLocks ?? this.happyHourLocks,
       schedules: schedules ?? this.schedules,
       // Installation access control
       installationId: installationId ?? this.installationId,

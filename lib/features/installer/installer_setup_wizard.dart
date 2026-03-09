@@ -447,7 +447,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       case InstallerWizardStep.handoff:
         return HandoffScreen(
           onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
-          onNext: _completeSetup,
+          onNext: (draft) {
+            ref.read(installerPreferenceDraftProvider.notifier).state = draft;
+            _completeSetup();
+          },
         );
     }
   }
@@ -470,6 +473,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   Future<void> _completeSetup() async {
     final customerInfo = ref.read(installerCustomerInfoProvider);
     final session = ref.read(installerSessionProvider);
+    final draft = ref.read(installerPreferenceDraftProvider);
 
     if (session == null) {
       _showError('Installer session expired. Please re-enter your PIN.');
@@ -526,6 +530,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         systemConfig['installationPhotoUrl'] = photoUrl;
       }
 
+      // Add installer preference draft
+      if (draft != null) {
+        systemConfig['preferenceDraft'] = draft.toMap();
+      }
+
       // 4. Create Installation document
       final installationRef = FirebaseFirestore.instance.collection('installations').doc();
 
@@ -554,7 +563,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
       await installationRef.set(installation.toJson());
 
-      // 5. Create UserModel with Primary role
+      // 5. Create UserModel with Primary role + installer preference draft
       final userModel = UserModel(
         id: userId,
         email: customerInfo.email.trim().toLowerCase(),
@@ -568,6 +577,21 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         installationRole: InstallationRole.primary,
         primaryUserId: userId,
         linkedAt: DateTime.now(),
+        // Auto-Pilot preferences from installer handoff
+        sportsTeams: draft?.sportsTeams ?? const [],
+        sportsTeamPriority: draft?.sportsTeams ?? const [],
+        favoriteHolidays: draft?.favoriteHolidays ?? const [],
+        vibeLevel: draft?.vibeLevel ?? 0.5,
+        changeToleranceLevel: draft?.changeToleranceLevel ?? 2,
+        autonomyLevel: draft?.autonomyLevel ?? 1,
+        profileType: draft?.profileType ?? 'residential',
+        managerEmail: draft?.managerEmail,
+        autopilotEnabled: true,
+        weeklySchedulePreviewEnabled: true,
+        autoDetectGameDays: true,
+        preGameLighting: true,
+        scoreCelebrations: true,
+        welcomeCompleted: false,
       );
 
       await FirebaseFirestore.instance.collection('users').doc(userId).set(userModel.toJson());

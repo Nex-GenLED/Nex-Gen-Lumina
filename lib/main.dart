@@ -8,10 +8,12 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
+import 'package:timezone/data/latest.dart' as tz;
 
 /// Main entry point for the application
 ///
@@ -40,6 +42,12 @@ Future<void> main() async {
   }
   // SECURITY: Initialize encryption service for sensitive data
   await EncryptionService.initialize();
+
+  // Initialize timezone database for autopilot scheduling
+  tz.initializeTimeZones();
+
+  // Wire navigator key for notification deep-link navigation
+  NotificationsService.navigatorKey = AppRouter.rootNavigatorKey;
 
   // Initialize local notifications (no prompts on web)
   await NotificationsService.init();
@@ -77,6 +85,8 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     // Voice services will be initialized after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeVoiceServices();
+      // Check for today's game-day items and start monitoring
+      BackgroundLearningService.startTodayGameDayMonitoring(ref);
     });
   }
 
@@ -141,6 +151,13 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Auto-regenerate autopilot schedule when it becomes stale
+    ref.listen<bool>(needsScheduleRegenerationProvider, (prev, next) {
+      if (next == true) {
+        BackgroundLearningService.runAutopilotRegenIfNeeded(ref);
+      }
+    });
+
     return MaterialApp.router(
       title: 'Lumina',
       debugShowCheckedModeBanner: false,

@@ -146,6 +146,7 @@ class _SuggestionTile extends StatefulWidget {
 
 class _SuggestionTileState extends State<_SuggestionTile> {
   bool _isApplying = false;
+  bool _reasonExpanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -181,13 +182,9 @@ class _SuggestionTileState extends State<_SuggestionTile> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.suggestion.reason,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 13,
-              ),
-            ),
+            _buildTriggerChip(),
+            const SizedBox(height: 4),
+            _buildExpandableReason(),
             const SizedBox(height: 4),
             Row(
               children: [
@@ -284,6 +281,76 @@ class _SuggestionTileState extends State<_SuggestionTile> {
     );
   }
 
+  Widget _buildTriggerChip() {
+    final reason = widget.suggestion.reason.toLowerCase();
+    final String label;
+    final Color chipColor;
+
+    if (reason.contains('game') || reason.contains('playoff')) {
+      label = '\u{1F3C8} Game Day';
+      chipColor = Colors.red;
+    } else if (reason.contains('holiday')) {
+      label = '\u{1F386} Holiday';
+      chipColor = const Color(0xFFFFD700); // gold
+    } else if (reason.contains('sunset') || reason.contains('evening')) {
+      label = '\u{1F305} Evening';
+      chipColor = Colors.orange;
+    } else {
+      label = '\u2728 AI Pick';
+      chipColor = NexGenPalette.cyan;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: chipColor),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 10, color: chipColor, fontWeight: FontWeight.w500),
+      ),
+    );
+  }
+
+  Widget _buildExpandableReason() {
+    final reason = widget.suggestion.reason;
+    final needsTruncation = reason.length > 60;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topLeft,
+      child: GestureDetector(
+        onTap: needsTruncation
+            ? () => setState(() => _reasonExpanded = !_reasonExpanded)
+            : null,
+        child: RichText(
+          text: TextSpan(
+            style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            children: [
+              TextSpan(
+                text: (!_reasonExpanded && needsTruncation)
+                    ? '${reason.substring(0, 60)}... '
+                    : reason,
+              ),
+              if (needsTruncation && !_reasonExpanded)
+                const TextSpan(
+                  text: 'more',
+                  style: TextStyle(color: NexGenPalette.cyan, fontWeight: FontWeight.w500),
+                ),
+              if (needsTruncation && _reasonExpanded)
+                const TextSpan(
+                  text: ' less',
+                  style: TextStyle(color: NexGenPalette.cyan, fontWeight: FontWeight.w500),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildConfidenceIndicator() {
     final confidence = widget.suggestion.confidenceScore;
     final color = confidence >= 0.7
@@ -292,24 +359,56 @@ class _SuggestionTileState extends State<_SuggestionTile> {
             ? Colors.orange
             : Colors.red;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.psychology,
-          size: 14,
-          color: color,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          '${(confidence * 100).toStringAsFixed(0)}%',
-          style: TextStyle(
-            fontSize: 12,
-            color: color,
-            fontWeight: FontWeight.w500,
+    final explanation = confidence >= 0.7
+        ? 'High confidence \u2014 based on a holiday or sports event matching your saved teams'
+        : confidence >= 0.4
+            ? 'Moderate confidence \u2014 based on seasonal patterns or recent usage habits'
+            : 'Low confidence \u2014 exploratory suggestion, feel free to skip';
+
+    return GestureDetector(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.psychology, color: color, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '${(confidence * 100).toStringAsFixed(0)}% Confidence',
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ],
+            ),
+            content: Text(explanation, style: const TextStyle(fontSize: 14)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Got it'),
+              ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.psychology,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '${(confidence * 100).toStringAsFixed(0)}%',
+            style: TextStyle(
+              fontSize: 12,
+              color: color,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

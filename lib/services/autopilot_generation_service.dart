@@ -114,6 +114,37 @@ class AutopilotGenerationService {
       suggestions.addAll(dailyDefaults);
     }
 
+    // Apply deprioritization penalty for patterns rejected 3+ times
+    final deprioritized = profile.deprioritizedPatterns;
+    if (deprioritized.isNotEmpty) {
+      for (var i = 0; i < suggestions.length; i++) {
+        if (deprioritized.contains(suggestions[i].patternName)) {
+          debugPrint('⬇️ Deprioritizing pattern: ${suggestions[i].patternName} (user rejected 3x)');
+          suggestions[i] = suggestions[i].copyWith(
+            confidenceScore: suggestions[i].confidenceScore * 0.3,
+          );
+        }
+      }
+    }
+
+    // Enforce happy hour locks — delay items that fall within locked windows
+    final happyHourLocks = profile.happyHourLocks;
+    if (happyHourLocks.isNotEmpty) {
+      for (var i = 0; i < suggestions.length; i++) {
+        final item = suggestions[i];
+        final lockDelay = _happyHourDelay(item.scheduledTime, happyHourLocks);
+        if (lockDelay != null) {
+          debugPrint(
+            'AutopilotGeneration: Delaying "${item.patternName}" past happy hour lock to $lockDelay',
+          );
+          suggestions[i] = item.copyWith(
+            scheduledTime: lockDelay,
+            reason: '${item.reason} (delayed: happy hour lock)',
+          );
+        }
+      }
+    }
+
     // Sort by scheduled time
     suggestions.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
 
@@ -574,6 +605,33 @@ class AutopilotGenerationService {
     if (vibeLevel < 0.5) return 'Moderate';
     if (vibeLevel < 0.7) return 'Vibrant';
     return 'Bold and energetic';
+  }
+
+  static const _dayAbbreviations = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  /// Returns a delayed DateTime if [time] falls within a happy hour lock
+  /// window on that weekday, or null if no lock applies.
+  DateTime? _happyHourDelay(
+    DateTime time,
+    List<Map<String, dynamic>> locks,
+  ) {
+    final dayAbbr = _dayAbbreviations[time.weekday - 1];
+
+    for (final lock in locks) {
+      final startHour = (lock['startHour'] as num?)?.toInt();
+      final endHour = (lock['endHour'] as num?)?.toInt();
+      final days = (lock['days'] as List?)?.map((e) => e.toString()).toList();
+
+      if (startHour == null || endHour == null || days == null) continue;
+      if (!days.contains(dayAbbr)) continue;
+
+      if (time.hour >= startHour && time.hour < endHour) {
+        // Delay to endHour + 15 minutes
+        return DateTime(time.year, time.month, time.day, endHour, 15);
+      }
+    }
+
+    return null;
   }
 }
 

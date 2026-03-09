@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
 
 /// Session timeout duration (30 minutes of inactivity)
 const Duration kInstallerSessionTimeout = Duration(minutes: 30);
@@ -489,6 +490,9 @@ final installerLinkedControllersProvider = StateProvider<Set<String>>((ref) => {
 
 /// Provider for installation photo URL
 final installerPhotoUrlProvider = StateProvider<String?>((ref) => null);
+
+/// Provider for the installer preference draft collected during handoff
+final installerPreferenceDraftProvider = StateProvider<InstallerPreferenceDraft?>((ref) => null);
 
 /// Notifier for managing zones during Commercial mode setup
 class InstallerZonesNotifier extends StateNotifier<List<ZoneModel>> {

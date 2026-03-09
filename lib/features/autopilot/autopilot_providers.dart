@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -9,6 +10,7 @@ import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
+import 'package:nexgen_command/services/autopilot_notification_service.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 
 /// Provider for the user's autopilot enabled state.
@@ -18,6 +20,24 @@ final autopilotEnabledProvider = Provider<bool>((ref) {
   return profileAsync.maybeWhen(
     data: (profile) => profile?.autopilotEnabled ?? false,
     orElse: () => false,
+  );
+});
+
+/// Whether the current user has a commercial profile type.
+final isCommercialProfileProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.profileType == 'commercial',
+    orElse: () => false,
+  );
+});
+
+/// Happy hour lock windows from the user profile.
+final happyHourLocksProvider = Provider<List<Map<String, dynamic>>>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.happyHourLocks ?? const [],
+    orElse: () => const [],
   );
 });
 
@@ -209,6 +229,10 @@ class AutopilotSettingsService {
     if (enabled) {
       // Generate and populate schedules when autopilot is enabled
       await generateAndPopulateSchedules();
+    } else {
+      // Cancel weekly brief notification when autopilot is disabled
+      final notificationService = _ref.read(autopilotNotificationServiceProvider);
+      await notificationService.cancelWeeklyBrief();
     }
   }
 
@@ -235,8 +259,10 @@ class AutopilotSettingsService {
 
       debugPrint('AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
 
-      // Convert to regular ScheduleItem format
-      final scheduleItems = autopilotItems.map((item) => _convertToScheduleItem(item)).toList();
+      // Convert to regular ScheduleItem format (using user's IANA timezone for display)
+      final scheduleItems = autopilotItems
+          .map((item) => _convertToScheduleItem(item, ianaTimezone: profile.timeZone))
+          .toList();
 
       // Add to user's schedules (merge with existing)
       final schedulesNotifier = _ref.read(schedulesProvider.notifier);
@@ -245,6 +271,13 @@ class AutopilotSettingsService {
       // Mark schedule as generated
       await markScheduleGenerated();
 
+      // Schedule the weekly brief notification
+      final notificationService = _ref.read(autopilotNotificationServiceProvider);
+      await notificationService.scheduleWeeklyBrief(
+        profile: profile,
+        schedule: autopilotItems,
+      );
+
       debugPrint('AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
     } catch (e) {
       debugPrint('AutopilotSettingsService: Failed to generate schedules: $e');
@@ -252,9 +285,12 @@ class AutopilotSettingsService {
   }
 
   /// Convert an AutopilotScheduleItem to a regular ScheduleItem.
-  ScheduleItem _convertToScheduleItem(AutopilotScheduleItem item) {
+  ScheduleItem _convertToScheduleItem(AutopilotScheduleItem item, {String? ianaTimezone}) {
+    // Resolve display time in the user's timezone
+    final localTime = _toLocalTime(item.scheduledTime, ianaTimezone);
+
     // Format time label
-    String timeLabel = _formatTime(item.scheduledTime);
+    String timeLabel = _formatTime(localTime);
 
     // Add trigger context to time label for special triggers
     if (item.trigger == AutopilotTrigger.sunset) {
@@ -273,7 +309,7 @@ class AutopilotSettingsService {
     List<String> repeatDays = item.repeatDays;
     if (repeatDays.isEmpty) {
       // One-time event - use the date as the "repeat" indicator
-      repeatDays = [_formatDate(item.scheduledTime)];
+      repeatDays = [_formatDate(localTime)];
     }
 
     // Build action label
@@ -291,6 +327,18 @@ class AutopilotSettingsService {
       enabled: true,
       wledPayload: item.wledPayload,
     );
+  }
+
+  /// Convert a UTC time to the user's IANA timezone, falling back to device local.
+  DateTime _toLocalTime(DateTime utcTime, String? ianaTimezone) {
+    if (ianaTimezone == null || ianaTimezone.isEmpty) return utcTime.toLocal();
+    try {
+      final location = tz.getLocation(ianaTimezone);
+      return tz.TZDateTime.from(utcTime, location);
+    } catch (_) {
+      // Invalid IANA identifier — fall back to device local
+      return utcTime.toLocal();
+    }
   }
 
   /// Format time as "h:mm AM/PM"
@@ -395,6 +443,56 @@ class AutopilotSettingsService {
     await _updateProfile((p) => p.copyWith(
           scoreCelebrations: enabled,
           updatedAt: DateTime.now(),
+        ));
+  }
+
+  /// Record a pattern rejection and deprioritize after 3 rejections.
+  Future<void> recordPatternRejection(String patternName) async {
+    final profileAsync = _ref.read(currentUserProfileProvider);
+    final profile = profileAsync.maybeWhen(
+      data: (p) => p,
+      orElse: () => null,
+    );
+    if (profile == null) return;
+
+    final now = DateTime.now();
+    final rejected = List<Map<String, dynamic>>.from(
+      profile.rejectedPatterns.map((e) => Map<String, dynamic>.from(e)),
+    );
+
+    // Find existing entry for this pattern
+    final idx = rejected.indexWhere(
+      (e) => e['pattern_name'] == patternName,
+    );
+
+    int newCount;
+    if (idx >= 0) {
+      newCount = ((rejected[idx]['count'] as num?) ?? 0).toInt() + 1;
+      rejected[idx] = {
+        'pattern_name': patternName,
+        'count': newCount,
+        'last_rejected_at': now.toIso8601String(),
+      };
+    } else {
+      newCount = 1;
+      rejected.add({
+        'pattern_name': patternName,
+        'count': 1,
+        'last_rejected_at': now.toIso8601String(),
+      });
+    }
+
+    // Deprioritize if rejected 3+ times
+    var deprioritized = profile.deprioritizedPatterns;
+    if (newCount >= 3 && !deprioritized.contains(patternName)) {
+      deprioritized = [...deprioritized, patternName];
+      debugPrint('AutopilotSettingsService: Deprioritizing "$patternName" (rejected ${newCount}x)');
+    }
+
+    await _updateProfile((p) => p.copyWith(
+          rejectedPatterns: rejected,
+          deprioritizedPatterns: deprioritized,
+          updatedAt: now,
         ));
   }
 

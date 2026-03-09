@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/theme.dart';
@@ -133,28 +135,35 @@ class FavoritesGrid extends ConsumerWidget {
   }
 }
 
-/// Empty slot placeholder for the 2x2 grid
+/// Empty slot placeholder for the 2x2 grid — tapping navigates to Explore
 class _EmptySlot extends StatelessWidget {
   const _EmptySlot();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => context.push(AppRoutes.explore),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-          width: 1,
-          strokeAlign: BorderSide.strokeAlignInside,
-        ),
-      ),
-      child: Center(
-        child: Icon(
-          Icons.add_rounded,
-          color: Colors.white.withOpacity(0.2),
-          size: 24,
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.1),
+              width: 1,
+              strokeAlign: BorderSide.strokeAlignInside,
+            ),
+          ),
+          child: Center(
+            child: Icon(
+              Icons.add_rounded,
+              color: Colors.white.withOpacity(0.2),
+              size: 24,
+            ),
+          ),
         ),
       ),
     );

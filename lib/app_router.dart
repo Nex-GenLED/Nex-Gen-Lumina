@@ -49,6 +49,8 @@ import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.d
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
+import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 // Dashboard pages for branch wrappers
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
@@ -93,7 +95,9 @@ class AppRouter {
   static final _authListenable = AuthStateListenable();
 
   // Navigator keys for StatefulShellRoute branches
-  static final _rootNavigatorKey = GlobalKey<NavigatorState>();
+  /// Root navigator key — exposed for notification deep-link navigation.
+  static final rootNavigatorKey = GlobalKey<NavigatorState>();
+  static GlobalKey<NavigatorState> get _rootNavigatorKey => rootNavigatorKey;
   static final _homeNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'home');
   static final _scheduleNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'schedule');
   static final _exploreNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'explore');
@@ -181,6 +185,13 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: WelcomeWizardPage()),
       ),
+      // ===== FIRST-RUN ONBOARDING (root navigator) =====
+      GoRoute(
+        path: AppRoutes.firstRun,
+        name: 'first-run',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const NoTransitionPage(child: FirstRunScreen()),
+      ),
       // ===== SETUP / FULLSCREEN MODAL ROUTES (root navigator) =====
       GoRoute(
         path: AppRoutes.controllerSetupWizard,
@@ -214,6 +225,18 @@ class AppRouter {
         name: 'lumina-ai',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: LuminaAIScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.autopilotSchedule,
+        name: 'autopilot-schedule',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final initialDate = state.extra as DateTime?;
+          return MaterialPage(
+            fullscreenDialog: true,
+            child: AutopilotScheduleScreen(initialDate: initialDate),
+          );
+        },
       ),
       GoRoute(
         path: AppRoutes.designStudio,
@@ -602,6 +625,7 @@ class AppRoutes {
   static const String joinWithCode = '/join-with-code';
   static const String systemDeactivated = '/system-deactivated';
   static const String subUsers = '/settings/users';
+  static const String autopilotSchedule = '/autopilot-schedule';
   // Demo experience routes
   static const String demoWelcome = '/demo';
   static const String demoProfile = '/demo/profile';
@@ -612,4 +636,6 @@ class AppRoutes {
   static const String demoExplore = '/demo/explore';
   static const String demoLumina = '/demo/lumina';
   static const String demoComplete = '/demo/complete';
+  // First-run onboarding (post-installer handoff)
+  static const String firstRun = '/first-run';
 }

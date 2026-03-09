@@ -320,13 +320,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _QuickActionButton(icon: Icons.explore_outlined, label: 'Explore', onTap: () => context.push(AppRoutes.designStudio)),
-                  const SizedBox(width: 10),
-                  _QuickActionButton(icon: Icons.calendar_month_outlined, label: 'Schedule', onTap: () => context.go(AppRoutes.schedule)),
-                  const SizedBox(width: 10),
-                  _QuickActionButton(icon: Icons.groups_outlined, label: 'Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
-                  const SizedBox(width: 10),
-                  _QuickActionButton(icon: Icons.settings_suggest_outlined, label: 'System', onTap: () => context.go(AppRoutes.settings)),
+                  _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+                  const SizedBox(width: 12),
+                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
                 ],
               ),
             ),
@@ -1780,40 +1776,48 @@ class _SkySlot {
   const _SkySlot(this.startHour, this.colors, this.opacity, this.label);
 }
 
-class _QuickActionButton extends StatelessWidget {
+class _FeatureButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
 
-  const _QuickActionButton({required this.icon, required this.label, required this.onTap});
+  const _FeatureButton({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: NexGenPalette.line),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 22, color: NexGenPalette.cyan),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: NexGenPalette.textMedium,
-                  letterSpacing: 0.4,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+            decoration: BoxDecoration(
+              color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 20, color: NexGenPalette.cyan),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: NexGenPalette.textPrimary,
+                      letterSpacing: 0.3,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

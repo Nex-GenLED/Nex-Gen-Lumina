@@ -1,6 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
+import 'package:nexgen_command/services/sports_alert_service.dart';
 import 'package:nexgen_command/services/suggestion_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -116,6 +120,49 @@ class BackgroundLearningService {
     final hoursSinceLastRun = now.difference(_lastDailyRun!).inHours;
 
     return hoursSinceLastRun >= 20; // Run if it's been 20+ hours
+  }
+
+  /// Check if autopilot schedule is stale and regenerate if needed.
+  ///
+  /// This must be called from a Riverpod-aware context (e.g. a
+  /// ConsumerWidget) because BackgroundLearningService itself is a plain
+  /// singleton with no access to the provider graph.
+  static Future<void> runAutopilotRegenIfNeeded(WidgetRef ref) async {
+    try {
+      final enabled = ref.read(autopilotEnabledProvider);
+      final needsRegen = ref.read(needsScheduleRegenerationProvider);
+
+      if (enabled && needsRegen) {
+        debugPrint('🔄 Autopilot: regenerating stale schedule...');
+        await ref
+            .read(autopilotSettingsServiceProvider)
+            .generateAndPopulateSchedules();
+      }
+    } catch (e) {
+      debugPrint('❌ Autopilot regen check failed: $e');
+    }
+  }
+
+  /// Check today's autopilot schedule for game-day items and start monitoring.
+  ///
+  /// Must be called from a Riverpod-aware context.
+  static Future<void> startTodayGameDayMonitoring(WidgetRef ref) async {
+    try {
+      final enabled = ref.read(autopilotEnabledProvider);
+      if (!enabled) return;
+
+      final scheduleAsync = ref.read(weeklyScheduleProvider);
+      final schedule = scheduleAsync.maybeWhen(
+        data: (items) => items,
+        orElse: () => <dynamic>[],
+      );
+      if (schedule.isEmpty) return;
+
+      final sportsService = ref.read(sportsAlertServiceProvider);
+      await sportsService.checkAndStartTodayGames(schedule.cast());
+    } catch (e) {
+      debugPrint('❌ Game-day monitoring startup failed: $e');
+    }
   }
 
   /// Manual trigger for testing

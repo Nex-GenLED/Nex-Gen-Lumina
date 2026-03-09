@@ -1,9 +1,16 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 
 class NotificationsService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
+
+  /// Global navigator key used for deep-link navigation from notification taps.
+  /// Must be set to the same key used by GoRouter (called from main.dart).
+  static GlobalKey<NavigatorState>? navigatorKey;
 
   static Future<void> init() async {
     if (_initialized) return;
@@ -11,10 +18,36 @@ class NotificationsService {
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
       const iosInit = DarwinInitializationSettings();
       const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
-      await _plugin.initialize(initSettings);
+      await _plugin.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: _onNotificationResponse,
+      );
       _initialized = true;
     } catch (e) {
       debugPrint('Notifications init failed: $e');
+    }
+  }
+
+  /// Handle notification tap responses (deep links).
+  static void _onNotificationResponse(NotificationResponse response) {
+    try {
+      final payload = response.payload;
+      if (payload == null || payload.isEmpty) return;
+
+      debugPrint('Notification tapped with payload: $payload');
+
+      // Autopilot weekly brief payload is an ISO date string (e.g. "2026-03-16")
+      final date = DateTime.tryParse(payload);
+      if (date != null) {
+        // Navigate to autopilot schedule with that date pre-selected
+        final context = navigatorKey?.currentContext;
+        if (context != null) {
+          context.push(AppRoutes.autopilotSchedule, extra: date);
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Notification response handler failed: $e');
     }
   }
 
