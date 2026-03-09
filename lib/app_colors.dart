@@ -81,6 +81,11 @@ class AppNeon {
 }
 
 /// Nex-Gen Premium palette (Dark-first)
+/// Bottom padding to prevent content from being hidden behind the glass dock
+/// nav bar overlay. Use as bottom padding on scrollable content within the
+/// main shell (e.g. ListView, GridView, CustomScrollView).
+const kBottomNavBarPadding = 100.0;
+
 class NexGenPalette {
   // Base
   static const matteBlack = Color(0xFF07091A); // VOID

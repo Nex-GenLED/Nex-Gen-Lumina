@@ -128,6 +128,7 @@ class ThemeSelectionScreen extends ConsumerWidget {
                             const SizedBox(height: 12),
                             Expanded(
                               child: GridView.builder(
+                                padding: EdgeInsets.only(bottom: kBottomNavBarPadding),
                                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: 3,
                                   crossAxisSpacing: 10,

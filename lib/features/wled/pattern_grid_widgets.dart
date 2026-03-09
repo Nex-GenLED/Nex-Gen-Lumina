@@ -42,7 +42,7 @@ class LibraryNodeGrid extends StatelessWidget {
 
     if (allPalettes) {
       return ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
         itemCount: children.length,
         itemBuilder: (context, index) {
           final node = children[index];
@@ -59,7 +59,7 @@ class LibraryNodeGrid extends StatelessWidget {
 
     // Folders: 2-column grid with hero cards
     return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
@@ -108,6 +108,9 @@ class LibraryNodeCard extends StatelessWidget {
     }
 
     // Sports folders
+    if (id == 'league_soccer' || id == 'league_mls' || id == 'league_nwsl' ||
+        id == 'league_epl' || id == 'league_la_liga' || id == 'league_bundesliga' ||
+        id == 'league_serie_a' || id == 'league_ligue_1') return Icons.sports_soccer;
     if (id.startsWith('league_')) return Icons.sports;
     if (id.contains('ncaa')) return Icons.school_outlined;
     if (id.startsWith('conf_')) return Icons.groups_outlined;
@@ -183,9 +186,15 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_nba') return const Color(0xFFC9082A);
     if (id == 'league_mlb') return const Color(0xFF041E42);
     if (id == 'league_nhl') return const Color(0xFF000000);
-    if (id == 'league_mls') return const Color(0xFF3A5A40);
+    if (id == 'league_mls') return const Color(0xFF005293);
     if (id == 'league_wnba') return const Color(0xFFFF6F00);
-    if (id == 'league_nwsl') return const Color(0xFF0D47A1);
+    if (id == 'league_nwsl') return const Color(0xFF00A3AD);
+    if (id == 'league_soccer') return const Color(0xFF00D4FF);
+    if (id == 'league_epl') return const Color(0xFF3D195B);
+    if (id == 'league_la_liga') return const Color(0xFFFF6B35);
+    if (id == 'league_bundesliga') return const Color(0xFFD4020D);
+    if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
+    if (id == 'league_ligue_1') return const Color(0xFF003189);
 
     // Holiday colors
     if (id == 'holiday_christmas') return const Color(0xFFC62828);
@@ -249,6 +258,14 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'season_summer') return const Color(0xFFFFC107);
     if (id == 'season_autumn') return const Color(0xFFFF5722);
     if (id == 'season_winter') return const Color(0xFF03A9F4);
+    if (id == 'league_soccer') return const Color(0xFF00D4FF);
+    if (id == 'league_epl') return const Color(0xFF3D195B);
+    if (id == 'league_la_liga') return const Color(0xFFFF6B35);
+    if (id == 'league_bundesliga') return const Color(0xFFD4020D);
+    if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
+    if (id == 'league_ligue_1') return const Color(0xFF003189);
+    if (id == 'league_mls') return const Color(0xFF005293);
+    if (id == 'league_nwsl') return const Color(0xFF00A3AD);
     if (id.startsWith('league_')) return const Color(0xFF1976D2);
     if (id.startsWith('franchise_')) return const Color(0xFF6A1B9A);
     if (id.startsWith('ncaa') || id.startsWith('conf_')) return const Color(0xFF1A237E);
@@ -285,9 +302,15 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_nba') return const [Color(0xFFE53935), Color(0xFF880E4F)];
     if (id == 'league_mlb') return const [Color(0xFF1976D2), Color(0xFF041E42)];
     if (id == 'league_nhl') return const [Color(0xFF424242), Color(0xFF000000)];
-    if (id == 'league_mls') return const [Color(0xFF66BB6A), Color(0xFF2E7D32)];
+    if (id == 'league_mls') return const [Color(0xFF005293), Color(0xFF003060)];
     if (id == 'league_wnba') return const [Color(0xFFFF8F00), Color(0xFFE65100)];
-    if (id == 'league_nwsl') return const [Color(0xFF42A5F5), Color(0xFF0D47A1)];
+    if (id == 'league_nwsl') return const [Color(0xFF00A3AD), Color(0xFF006D75)];
+    if (id == 'league_soccer') return const [Color(0xFF00D4FF), Color(0xFF0088AA)];
+    if (id == 'league_epl') return const [Color(0xFF3D195B), Color(0xFF280E3B)];
+    if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
+    if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
+    if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
+    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
 
     // Holiday gradients (matching _SubCategoryCard)
     if (id == 'holiday_christmas') return const [Color(0xFF2E7D32), Color(0xFFC62828)];
@@ -371,7 +394,15 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_nba') return const [Color(0xFFE53935), Color(0xFF880E4F)];
     if (id == 'league_mlb') return const [Color(0xFF1976D2), Color(0xFF041E42)];
     if (id == 'league_nhl') return const [Color(0xFF424242), Color(0xFF000000)];
-    if (id == 'league_mls') return const [Color(0xFF66BB6A), Color(0xFF2E7D32)];
+    if (id == 'league_mls') return const [Color(0xFF005293), Color(0xFF003060)];
+    if (id == 'league_wnba') return const [Color(0xFFFF8F00), Color(0xFFE65100)];
+    if (id == 'league_nwsl') return const [Color(0xFF00A3AD), Color(0xFF006D75)];
+    if (id == 'league_soccer') return const [Color(0xFF00D4FF), Color(0xFF0088AA)];
+    if (id == 'league_epl') return const [Color(0xFF3D195B), Color(0xFF280E3B)];
+    if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
+    if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
+    if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
+    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
     if (id.startsWith('league_')) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
     // Franchises
     if (id.startsWith('franchise_')) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
@@ -712,7 +743,7 @@ class PalettePatternGrid extends ConsumerWidget {
                       ),
                     )
                   : GridView.builder(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.only(left: 12, top: 12, right: 12, bottom: kBottomNavBarPadding),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 4,
                         crossAxisSpacing: 8,

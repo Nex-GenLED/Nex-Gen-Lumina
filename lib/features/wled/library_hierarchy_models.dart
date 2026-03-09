@@ -187,6 +187,13 @@ class LeagueFolderIds {
   static const String nhl = 'league_nhl';
   static const String mls = 'league_mls';
   static const String wnba = 'league_wnba';
+  static const String nwsl = 'league_nwsl';
+  static const String soccer = 'league_soccer';
+  static const String epl = 'league_epl';
+  static const String laLiga = 'league_la_liga';
+  static const String bundesliga = 'league_bundesliga';
+  static const String serieA = 'league_serie_a';
+  static const String ligue1 = 'league_ligue_1';
   static const String ncaaFootball = 'ncaa_football';
   static const String ncaaBasketball = 'ncaa_basketball';
   static const String golf = 'league_golf';

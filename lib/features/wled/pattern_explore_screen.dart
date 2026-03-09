@@ -4,14 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
-import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/pattern_library_browser.dart';
-import 'package:nexgen_command/features/wled/pattern_category_detail.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart' show showLuminaSheet;
@@ -131,27 +129,6 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Watch smart personalized recommendations (async) and user profile for greeting
-    final recsAsync = ref.watch(smartRecommendedPatternsProvider);
-    final recs = recsAsync.maybeWhen(
-      data: (patterns) => patterns,
-      orElse: () => ref.read(recommendedPatternsProvider), // Fallback to sync provider while loading
-    );
-    final profileAsync = ref.watch(currentUserProfileProvider);
-    String greetingTitle() {
-      const fallback = 'Your Quick Picks';
-      final profile = profileAsync.maybeWhen(data: (u) => u, orElse: () => null);
-      if (profile == null) return fallback;
-      final name = profile.displayName.trim();
-      if (name.isEmpty) return fallback;
-      final hour = DateTime.now().hour;
-      if (hour >= 17 || hour < 5) {
-        final first = name.split(' ').first;
-        return 'Good Evening, $first';
-      }
-      return fallback;
-    }
-
     final categoriesAsync = ref.watch(patternCategoriesProvider);
 
     return Scaffold(
@@ -251,15 +228,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                         child: pagePadding(child: const MySavedDesignsSection()),
                       ),
 
-                      // 2. Your Quick Picks section
-                      SliverToBoxAdapter(
-                        child: pagePadding(
-                          child: PatternCategoryRow(title: greetingTitle(), patterns: recs, query: '', isFeatured: true),
-                        ),
-                      ),
-                      const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
-                      // 3. Recent Patterns section
+                      // 2. Recent Patterns section
                       SliverToBoxAdapter(
                         child: pagePadding(child: const RecentPatternsSection()),
                       ),
@@ -319,7 +288,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                       ),
 
                       // Bottom padding
-                      const SliverToBoxAdapter(child: SizedBox(height: 120)),
+                      SliverToBoxAdapter(child: SizedBox(height: kBottomNavBarPadding)),
                     ],
                   ),
                 ),

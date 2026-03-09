@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -22,7 +27,9 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
-import 'package:nexgen_command/features/schedule/widgets/mini_schedule_list.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -33,7 +40,6 @@ import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
-import 'package:nexgen_command/features/dashboard/widgets/glass_action_button.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart' show favoritePatternsProvider;
 import 'package:nexgen_command/models/usage_analytics_models.dart' show FavoritePattern;
 
@@ -95,11 +101,31 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
   bool _syncWarningAcknowledged = false;
+  Timer? _skyRefreshTimer;
+  final TextEditingController _luminaCtrl = TextEditingController();
+  bool _luminaLoading = false;
+  bool _luminaListening = false;
+  late final stt.SpeechToText _luminaSpeech;
+
+  _SkyTheme get _currentSkyTheme => _getSkyTheme(DateTime.now());
 
   @override
   void initState() {
     super.initState();
+    _luminaSpeech = stt.SpeechToText();
+    _skyRefreshTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => setState(() {}),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
+  }
+
+  @override
+  void dispose() {
+    _luminaCtrl.dispose();
+    _luminaSpeech.stop();
+    _skyRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<bool> _checkSyncWarning() async {
@@ -287,32 +313,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, 100),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _buildHeroSection(context, ref, state, profileAsync),
+            _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
-            const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: ChannelSelectorBar(),
-            ),
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  Expanded(
-                    child: GlassActionButton(
-                      icon: Icons.palette,
-                      label: 'Design Studio',
-                      onTap: () => context.push(AppRoutes.designStudio),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GlassActionButton(
-                      icon: Icons.groups_outlined,
-                      label: 'Neighborhood Sync',
-                      onTap: () => context.go(AppRoutes.neighborhoodSync),
-                    ),
-                  ),
+                  _QuickActionButton(icon: Icons.explore_outlined, label: 'Explore', onTap: () => context.push(AppRoutes.designStudio)),
+                  const SizedBox(width: 10),
+                  _QuickActionButton(icon: Icons.calendar_month_outlined, label: 'Schedule', onTap: () => context.go(AppRoutes.schedule)),
+                  const SizedBox(width: 10),
+                  _QuickActionButton(icon: Icons.groups_outlined, label: 'Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
+                  const SizedBox(width: 10),
+                  _QuickActionButton(icon: Icons.settings_suggest_outlined, label: 'System', onTap: () => context.go(AppRoutes.settings)),
                 ],
               ),
             ),
@@ -321,14 +335,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             const SizedBox(height: 16),
             _buildFavoritesSection(context, ref),
             const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('My Schedule'.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium, letterSpacing: 1.1)),
-                const SizedBox(height: 10),
-                const MiniScheduleList(height: 300),
-              ]),
-            ),
+            _buildTonightCard(context, ref),
           ]),
         ),
       ]),
@@ -440,6 +447,147 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
+  void _toggleLuminaVoice() {
+    if (_luminaListening) {
+      _luminaSpeech.stop();
+      setState(() => _luminaListening = false);
+      return;
+    }
+    _luminaSpeech.initialize().then((available) {
+      if (!available || !mounted) return;
+      setState(() => _luminaListening = true);
+      _luminaSpeech.listen(
+        onResult: (result) {
+          setState(() {
+            _luminaCtrl.text = result.recognizedWords;
+            if (result.finalResult) _luminaListening = false;
+          });
+        },
+        listenMode: stt.ListenMode.confirmation,
+        pauseFor: const Duration(seconds: 2),
+        partialResults: true,
+      );
+    });
+  }
+
+  Future<void> _submitLuminaCommand() async {
+    final text = _luminaCtrl.text.trim();
+    if (text.isEmpty || _luminaLoading) return;
+    setState(() => _luminaLoading = true);
+    try {
+      final result = await LuminaBrain.chat(ref, text);
+      if (mounted && result.isNotEmpty) {
+        // If the result looks like a pattern name (short, no markdown), set as active preset
+        if (result.length < 60 && !result.contains('\n') && !result.startsWith('{')) {
+          ref.read(activePresetLabelProvider.notifier).state = result;
+        }
+      }
+    } catch (e) {
+      debugPrint('Lumina command error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _luminaLoading = false);
+        _luminaCtrl.clear();
+      }
+    }
+  }
+
+  Widget _buildLuminaBar(BuildContext context, WidgetRef ref) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            NexGenPalette.cyan.withValues(alpha: 0.08),
+            NexGenPalette.violet.withValues(alpha: 0.06),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3), width: 1),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [NexGenPalette.violet, NexGenPalette.cyan]),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.4), blurRadius: 8),
+              ],
+            ),
+            child: const Icon(Icons.auto_awesome_rounded, color: Colors.black, size: 14),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _luminaCtrl,
+              minLines: 1,
+              maxLines: 2,
+              style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
+              decoration: const InputDecoration(
+                hintText: 'Tell Lumina what to do\u2026',
+                hintStyle: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
+              ),
+              onSubmitted: (_) => _submitLuminaCommand(),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: _toggleLuminaVoice,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _luminaListening
+                    ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                    : Colors.white.withValues(alpha: 0.06),
+                border: Border.all(
+                  color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.line,
+                ),
+              ),
+              child: Icon(
+                _luminaListening ? Icons.mic : Icons.mic_none,
+                size: 16,
+                color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.violet,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          _luminaLoading
+              ? const SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Padding(
+                    padding: EdgeInsets.all(6),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
+                  ),
+                )
+              : GestureDetector(
+                  onTap: _submitLuminaCommand,
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: const BoxDecoration(
+                      color: NexGenPalette.cyan,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.black),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeroSection(BuildContext context, WidgetRef ref, WledStateModel state, AsyncValue profileAsync) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -457,6 +605,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, 0.3))
             else if (!profileAsync.isLoading)
               Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.3)),
+            // Sky color overlay — sits above photo, below controls
+            Positioned.fill(
+              child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
+            ),
             if (state.isOn)
               Positioned.fill(
                 child: LayoutBuilder(
@@ -487,6 +639,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 ),
               ),
             ),
+            // Ambient LED glow at bottom edge reflecting active WLED color
+            if (state.isOn)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _AmbientLedGlow(
+                  color: state.displayColors.isNotEmpty
+                      ? state.displayColors.first
+                      : const Color(0xFF00D4FF),
+                ),
+              ),
             _buildPresetChips(context, ref),
             _buildAddPhotoButton(context, ref),
             // Now Playing bar — owns the full bottom chrome including brightness + tune
@@ -985,6 +1149,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   ref.read(activePresetLabelProvider.notifier).state = 'Custom';
                                 },
                               ),
+                              const Divider(height: 24),
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: ChannelSelectorBar(),
+                              ),
                               const SizedBox(height: 16),
                               SizedBox(
                                 width: double.infinity,
@@ -1141,6 +1310,108 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
+  Widget _buildTonightCard(BuildContext context, WidgetRef ref) {
+    return Consumer(builder: (context, ref, _) {
+      final schedules = ref.watch(schedulesProvider);
+      final calEntries = ref.watch(calendarScheduleProvider);
+      final today = DateTime.now();
+      final todayKey = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      final calEntry = calEntries[todayKey];
+      final wd = today.weekday % 7;
+      final recurring = schedules.where((s) {
+        if (!s.enabled) return false;
+        final dl = s.repeatDays.map((e) => e.toLowerCase()).toSet();
+        if (dl.contains('daily')) return true;
+        const map = {
+          0: {'sun', 'sunday'},
+          1: {'mon', 'monday'},
+          2: {'tue', 'tues', 'tuesday'},
+          3: {'wed', 'wednesday'},
+          4: {'thu', 'thurs', 'thursday'},
+          5: {'fri', 'friday'},
+          6: {'sat', 'saturday'},
+        };
+        return (map[wd] ?? {}).any(dl.contains);
+      }).toList();
+      final first = recurring.isNotEmpty ? recurring.first : null;
+
+      final patternName = calEntry?.patternName ??
+          (first != null
+              ? (first.actionLabel.contains(':') ? first.actionLabel.split(':').last.trim() : first.actionLabel)
+              : null);
+      final onTime = calEntry?.onTime ?? first?.timeLabel;
+      final offTime = calEntry?.offTime ?? first?.offTimeLabel;
+      final accentColor = calEntry?.color ?? NexGenPalette.cyan;
+
+      final bool hasSchedule = patternName != null || onTime != null;
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: GestureDetector(
+          onTap: () => context.go(AppRoutes.schedule),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: hasSchedule ? accentColor.withValues(alpha: 0.35) : NexGenPalette.line),
+              boxShadow: hasSchedule ? [BoxShadow(color: accentColor.withValues(alpha: 0.12), blurRadius: 12)] : null,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: hasSchedule ? accentColor.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.06),
+                    border: Border.all(color: hasSchedule ? accentColor.withValues(alpha: 0.4) : NexGenPalette.line),
+                  ),
+                  child: Icon(
+                    hasSchedule ? Icons.schedule_rounded : Icons.add_alarm_rounded,
+                    size: 18,
+                    color: hasSchedule ? accentColor : NexGenPalette.textMedium,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TONIGHT',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white.withValues(alpha: 0.4),
+                          letterSpacing: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        hasSchedule
+                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → $offTime' : ''}'
+                            : 'No schedule — tap to add one',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: hasSchedule ? NexGenPalette.textHigh : NexGenPalette.textMedium,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, size: 18, color: NexGenPalette.textMedium),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
   Future<void> _showSavePatternDialog(BuildContext context, WidgetRef ref, WledStateModel state) async {
     final nameController = TextEditingController();
 
@@ -1243,6 +1514,61 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       }
     }
   }
+
+  static _SkyTheme _getSkyTheme(DateTime now) {
+    final hour = now.hour;
+    final minuteFraction = now.minute / 59.0;
+
+    // Define time slot boundaries and their themes
+    final slots = <_SkySlot>[
+      _SkySlot(0, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
+      _SkySlot(5, [const Color(0xFF1A0533), const Color(0xFF8B3A62), const Color(0xFFE8855A)], 0.75, 'Dawn'),
+      _SkySlot(7, [const Color(0xFF1A6BAD), const Color(0xFF7EC8E3), const Color(0xFFFFD89B)], 0.55, 'Morning'),
+      _SkySlot(10, [const Color(0xFF2980B9), const Color(0xFF87CEEB)], 0.35, 'Midday'),
+      _SkySlot(15, [const Color(0xFF1A6BAD), const Color(0xFFFFB347)], 0.50, 'Afternoon'),
+      _SkySlot(18, [const Color(0xFFFF6B35), const Color(0xFFFF4500), const Color(0xFF8B1A8B)], 0.72, 'Sunset'),
+      _SkySlot(20, [const Color(0xFF2C1654), const Color(0xFF0D0D2B)], 0.85, 'Dusk'),
+      _SkySlot(22, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
+    ];
+
+    // Find current and next slot
+    int currentIdx = 0;
+    for (int i = slots.length - 1; i >= 0; i--) {
+      if (hour >= slots[i].startHour) {
+        currentIdx = i;
+        break;
+      }
+    }
+
+    final current = slots[currentIdx];
+    final next = currentIdx + 1 < slots.length ? slots[currentIdx + 1] : slots[0];
+
+    // Calculate how far through the current slot we are
+    final slotDurationHours = (next.startHour > current.startHour)
+        ? next.startHour - current.startHour
+        : (24 - current.startHour + next.startHour);
+    final hoursIntoSlot = (hour - current.startHour + (hour < current.startHour ? 24 : 0));
+    final t = ((hoursIntoSlot + minuteFraction) / slotDurationHours).clamp(0.0, 1.0);
+
+    // Lerp colors
+    final maxColors = current.colors.length > next.colors.length
+        ? current.colors.length
+        : next.colors.length;
+    final lerpedColors = List<Color>.generate(maxColors, (i) {
+      final c1 = current.colors[i.clamp(0, current.colors.length - 1)];
+      final c2 = next.colors[i.clamp(0, next.colors.length - 1)];
+      return Color.lerp(c1, c2, t)!;
+    });
+
+    final lerpedOpacity = current.opacity + (next.opacity - current.opacity) * t;
+    final label = t < 0.5 ? current.label : next.label;
+
+    return _SkyTheme(
+      skyColors: lerpedColors,
+      overlayOpacity: lerpedOpacity,
+      label: label,
+    );
+  }
 }
 
 /// A single frosted preset chip for the hero overlay.
@@ -1329,5 +1655,168 @@ class _PresetChip extends StatelessWidget {
       }
     } catch (_) {}
     return NexGenPalette.cyan;
+  }
+}
+
+/// Animated sky gradient overlay that fades from top to vertical midpoint.
+/// Uses AnimatedContainer with a 90-second duration so transitions are very gradual.
+class _SkyGradientOverlay extends StatelessWidget {
+  final _SkyTheme skyTheme;
+
+  const _SkyGradientOverlay({required this.skyTheme});
+
+  @override
+  Widget build(BuildContext context) {
+    final overlayColors = skyTheme.skyColors
+        .map((c) => c.withValues(alpha: skyTheme.overlayOpacity))
+        .toList();
+
+    // Build stops: evenly distribute sky colors, then end with transparent at 1.0
+    final totalStops = overlayColors.length + 1;
+    final stops = <double>[
+      for (int i = 0; i < overlayColors.length; i++)
+        i / (totalStops - 1),
+      1.0,
+    ];
+
+    return AnimatedContainer(
+      duration: const Duration(seconds: 90),
+      curve: Curves.linear,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.center,
+          colors: [...overlayColors, Colors.transparent],
+          stops: stops,
+        ),
+      ),
+    );
+  }
+}
+
+/// Pulsing ambient LED glow at the bottom edge of the hero image.
+/// Oscillates opacity between 0.4 and 0.7 over 3 seconds using a sine curve.
+class _AmbientLedGlow extends StatefulWidget {
+  final Color color;
+
+  const _AmbientLedGlow({required this.color});
+
+  @override
+  State<_AmbientLedGlow> createState() => _AmbientLedGlowState();
+}
+
+class _AmbientLedGlowState extends State<_AmbientLedGlow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        // Sine curve: oscillate opacity between 0.4 and 0.7
+        final t = _controller.value;
+        final sine = math.sin(t * math.pi); // 0→1→0 half sine over forward pass
+        final opacity = 0.4 + 0.3 * sine;
+
+        return Container(
+          height: 18,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.transparent,
+                widget.color.withValues(alpha: 0.6 * opacity / 0.7),
+                Colors.transparent,
+              ],
+              stops: const [0.0, 0.5, 1.0],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: widget.color.withValues(alpha: opacity),
+                blurRadius: 16,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SkyTheme {
+  final List<Color> skyColors;
+  final double overlayOpacity;
+  final String label;
+
+  const _SkyTheme({
+    required this.skyColors,
+    required this.overlayOpacity,
+    required this.label,
+  });
+}
+
+class _SkySlot {
+  final int startHour;
+  final List<Color> colors;
+  final double opacity;
+  final String label;
+
+  const _SkySlot(this.startHour, this.colors, this.opacity, this.label);
+}
+
+class _QuickActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickActionButton({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: NexGenPalette.line),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: NexGenPalette.cyan),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: NexGenPalette.textMedium,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -1,11 +1,15 @@
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/data/ncaa_conferences.dart';
+import 'package:nexgen_command/data/team_color_database.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/golf_library_builder.dart';
 
 /// Builds the sports hierarchy from existing SportsTeamsDatabase.
 /// Bridges pro leagues and NCAA conferences into LibraryNode structure.
 class SportsLibraryBuilder {
+  /// Soccer parent folder ID
+  static const String soccerFolderId = 'league_soccer';
+
   /// League folder IDs and display names
   static const Map<String, String> _leagueNames = {
     'NFL': 'NFL',
@@ -13,35 +17,68 @@ class SportsLibraryBuilder {
     'MLB': 'MLB',
     'NHL': 'NHL',
     'MLS': 'MLS',
+    'EPL': 'Premier League',
+    'LA_LIGA': 'La Liga',
+    'BUNDESLIGA': 'Bundesliga',
+    'SERIE_A': 'Serie A',
+    'LIGUE_1': 'Ligue 1',
     'WNBA': 'WNBA',
     'NWSL': 'NWSL',
   };
 
-  /// League sort order
+  /// League sort order (top-level leagues under Sports)
   static const Map<String, int> _leagueSortOrder = {
     'NFL': 0,
     'NBA': 1,
     'MLB': 2,
     'NHL': 3,
-    'MLS': 4,
     'WNBA': 5,
     'NWSL': 6,
+  };
+
+  /// Sort order for soccer sub-leagues (under the Soccer parent folder)
+  static const Map<String, int> _soccerSortOrder = {
+    'MLS': 0,
+    'EPL': 1,
+    'LA_LIGA': 2,
+    'BUNDESLIGA': 3,
+    'SERIE_A': 4,
+    'LIGUE_1': 5,
+    'NWSL': 6,
+  };
+
+  /// Leagues nested under the Soccer parent folder
+  static const Set<String> _soccerLeagues = {
+    'MLS', 'EPL', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A', 'LIGUE_1', 'NWSL',
   };
 
   /// Build all league folder nodes
   static List<LibraryNode> getLeagueFolders() {
     final folders = <LibraryNode>[];
 
+    // Soccer parent folder
+    folders.add(const LibraryNode(
+      id: soccerFolderId,
+      name: 'Soccer',
+      nodeType: LibraryNodeType.folder,
+      parentId: LibraryCategoryIds.sports,
+      sortOrder: 4,
+      metadata: {'icon': 'soccer', 'isSoccerParent': true},
+    ));
+
     for (final entry in _leagueNames.entries) {
       final leagueId = entry.key;
       final leagueName = entry.value;
+      final isSoccer = _soccerLeagues.contains(leagueId);
 
       folders.add(LibraryNode(
         id: 'league_${leagueId.toLowerCase()}',
         name: leagueName,
         nodeType: LibraryNodeType.folder,
-        parentId: LibraryCategoryIds.sports,
-        sortOrder: _leagueSortOrder[leagueId] ?? 99,
+        parentId: isSoccer ? soccerFolderId : LibraryCategoryIds.sports,
+        sortOrder: isSoccer
+            ? (_soccerSortOrder[leagueId] ?? 99)
+            : (_leagueSortOrder[leagueId] ?? 99),
         metadata: {'league': leagueId},
       ));
     }
@@ -106,6 +143,55 @@ class SportsLibraryBuilder {
     return 'team_${league.toLowerCase()}_$sanitizedName';
   }
 
+  /// Mapping from TeamColorDatabase league strings to our folder IDs.
+  static const Map<String, String> _soccerLeagueFolderIds = {
+    'EPL': 'league_epl',
+    'La Liga': 'league_la_liga',
+    'Bundesliga': 'league_bundesliga',
+    'Serie A': 'league_serie_a',
+    'Ligue 1': 'league_ligue_1',
+  };
+
+  /// Build palette nodes for international soccer teams from TeamColorDatabase.
+  static List<LibraryNode> getInternationalSoccerNodes() {
+    final nodes = <LibraryNode>[];
+    final teamsByLeague = <String, List<UnifiedTeamEntry>>{};
+
+    for (final team in TeamColorDatabase.allTeams) {
+      if (_soccerLeagueFolderIds.containsKey(team.league)) {
+        teamsByLeague.putIfAbsent(team.league, () => []).add(team);
+      }
+    }
+
+    for (final entry in teamsByLeague.entries) {
+      final league = entry.key;
+      final teams = entry.value;
+      final parentId = _soccerLeagueFolderIds[league]!;
+
+      for (var i = 0; i < teams.length; i++) {
+        final team = teams[i];
+        final folderId = league.toLowerCase().replaceAll(' ', '_');
+
+        nodes.add(LibraryNode(
+          id: 'team_${folderId}_${team.id}',
+          name: team.officialName,
+          description: team.city,
+          nodeType: LibraryNodeType.palette,
+          parentId: parentId,
+          themeColors: team.colors.map((c) => c.toColor()).toList(),
+          sortOrder: i,
+          metadata: {
+            'league': team.league,
+            'city': team.city,
+            'teamName': team.officialName,
+          },
+        ));
+      }
+    }
+
+    return nodes;
+  }
+
   /// Build the complete sports hierarchy including pro leagues, NCAA, and golf
   static List<LibraryNode> buildFullSportsHierarchy() {
     final nodes = <LibraryNode>[];
@@ -113,8 +199,11 @@ class SportsLibraryBuilder {
     // Pro league folders
     nodes.addAll(getLeagueFolders());
 
-    // Pro team palettes
+    // Pro team palettes (domestic leagues via SportsTeamsDatabase)
     nodes.addAll(getTeamPaletteNodes());
+
+    // International soccer teams (via TeamColorDatabase)
+    nodes.addAll(getInternationalSoccerNodes());
 
     // NCAA folders and schools
     nodes.addAll(NcaaConferences.getNcaaFolders());

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -15,7 +14,7 @@ import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
-import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show pagePadding, gap, executeCustomEffectIfNeeded;
+import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
 
 /// Browse Design Library section with category cards
 class DesignLibraryBrowser extends ConsumerWidget {
@@ -24,7 +23,6 @@ class DesignLibraryBrowser extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final categoriesAsync = ref.watch(patternCategoriesProvider);
-    final selectedMood = ref.watch(selectedMoodFilterProvider);
     final designsAsync = ref.watch(designsStreamProvider);
 
     // Check if user has saved designs
@@ -38,31 +36,27 @@ class DesignLibraryBrowser extends ConsumerWidget {
         // Section header
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
           children: [
             Text(
               'Browse Design Library',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFDCF0FF),
               ),
             ),
             Text(
               'Explore all categories',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: NexGenPalette.textSecondary,
+              style: TextStyle(
+                fontSize: 12,
+                color: const Color(0xFFDCF0FF).withValues(alpha: 0.50),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        // Global mood selector - pre-filter patterns when navigating
-        GlobalMoodSelector(
-          selectedMood: selectedMood,
-          onMoodSelected: (mood) {
-            ref.read(selectedMoodFilterProvider.notifier).state = mood;
-          },
-        ),
-        const SizedBox(height: 16),
         // Category grid
         categoriesAsync.when(
           data: (categories) {
@@ -74,10 +68,9 @@ class DesignLibraryBrowser extends ConsumerWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                // CHANGE: was 2.8 — increased to 3.5 to reduce card height ~20 %
-                childAspectRatio: 3.5,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.55,
               ),
               itemCount: totalItems,
               itemBuilder: (context, index) {
@@ -216,8 +209,6 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
 
   const _DesignLibraryCategoryCard({required this.category});
 
-  /// Returns a single hero icon that represents the category.
-  /// For seasonal category, returns dynamic icon based on current season.
   IconData _heroIconForCategory(String categoryId) {
     switch (categoryId) {
       case 'cat_arch':
@@ -227,7 +218,12 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
       case 'cat_sports':
         return Icons.emoji_events;
       case 'cat_season':
-        return _getSeasonalIcon();
+        final now = DateTime.now();
+        final m = now.month, d = now.day;
+        if ((m == 3 && d >= 20) || m == 4 || m == 5 || (m == 6 && d < 21)) return Icons.local_florist;
+        if ((m == 6 && d >= 21) || m == 7 || m == 8 || (m == 9 && d < 23)) return Icons.wb_sunny;
+        if ((m == 9 && d >= 23) || m == 10 || m == 11 || (m == 12 && d < 21)) return Icons.park;
+        return Icons.ac_unit;
       case 'cat_party':
         return Icons.cake;
       case 'cat_security':
@@ -241,132 +237,22 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
     }
   }
 
-  /// Returns the appropriate seasonal icon based on current date.
-  IconData _getSeasonalIcon() {
-    final now = DateTime.now();
-    final month = now.month;
-    final day = now.day;
-
-    // Spring: March 20 - June 20
-    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
-      return Icons.local_florist;
-    }
-    // Summer: June 21 - September 22
-    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
-      return Icons.wb_sunny;
-    }
-    // Fall: September 23 - December 20
-    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
-      return Icons.park;
-    }
-    // Winter: December 21 - March 19
-    return Icons.ac_unit;
-  }
-
-  /// Returns gradient colors for each category background.
-  List<Color> _gradientForCategory(String categoryId) {
-    switch (categoryId) {
-      case 'cat_arch':
-        // Warm amber to burnt orange
-        return const [Color(0xFFFFB347), Color(0xFFFF7043)];
-      case 'cat_holiday':
-        // Festive red to deep magenta
-        return const [Color(0xFFFF4444), Color(0xFFC2185B)];
-      case 'cat_sports':
-        // Championship gold to orange
-        return const [Color(0xFFFFD700), Color(0xFFFF9800)];
-      case 'cat_season':
-        return _getSeasonalGradient();
-      case 'cat_party':
-        // Party pink to purple
-        return const [Color(0xFFFF69B4), Color(0xFF9C27B0)];
-      case 'cat_security':
-        // Alert blue to deep blue
-        return const [Color(0xFF4FC3F7), Color(0xFF1565C0)];
-      case 'cat_movies':
-        // Cinema purple to deep violet
-        return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
-      case 'cat_nature':
-        // Forest green to teal
-        return const [Color(0xFF4CAF50), Color(0xFF00897B)];
-      default:
-        return [NexGenPalette.cyan, NexGenPalette.cyan.withValues(alpha: 0.5)];
-    }
-  }
-
-  /// Returns seasonal gradient based on current date.
-  List<Color> _getSeasonalGradient() {
-    final now = DateTime.now();
-    final month = now.month;
-    final day = now.day;
-
-    // Spring: Fresh greens and pinks
-    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
-      return const [Color(0xFF81C784), Color(0xFFF8BBD9)];
-    }
-    // Summer: Sunny yellow to ocean blue
-    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
-      return const [Color(0xFFFFEB3B), Color(0xFF29B6F6)];
-    }
-    // Fall: Warm orange to burgundy
-    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
-      return const [Color(0xFFFF9800), Color(0xFF8D6E63)];
-    }
-    // Winter: Icy blue to deep purple
-    return const [Color(0xFF81D4FA), Color(0xFF7E57C2)];
-  }
-
-  /// Returns accent color for each category (used for icon highlights and glow).
-  Color _accentForCategory(String categoryId) {
-    switch (categoryId) {
-      case 'cat_arch':
-        return const Color(0xFFFFB347); // Warm amber
-      case 'cat_holiday':
-        return const Color(0xFFFF4444); // Festive red
-      case 'cat_sports':
-        return const Color(0xFFFFD700); // Championship gold
-      case 'cat_season':
-        return _getSeasonalAccentColor();
-      case 'cat_party':
-        return const Color(0xFFFF69B4); // Party pink
-      case 'cat_security':
-        return const Color(0xFF4FC3F7); // Alert blue
-      case 'cat_movies':
-        return const Color(0xFFE040FB); // Cinema purple
-      case 'cat_nature':
-        return const Color(0xFF4CAF50); // Forest green
-      default:
-        return NexGenPalette.cyan;
-    }
-  }
-
-  /// Returns seasonal accent color based on current date.
-  Color _getSeasonalAccentColor() {
-    final now = DateTime.now();
-    final month = now.month;
-    final day = now.day;
-
-    // Spring: Fresh pink
-    if ((month == 3 && day >= 20) || month == 4 || month == 5 || (month == 6 && day < 21)) {
-      return const Color(0xFFF8BBD9);
-    }
-    // Summer: Sunny yellow
-    if ((month == 6 && day >= 21) || month == 7 || month == 8 || (month == 9 && day < 23)) {
-      return const Color(0xFFFFEB3B);
-    }
-    // Fall: Warm orange
-    if ((month == 9 && day >= 23) || month == 10 || month == 11 || (month == 12 && day < 21)) {
-      return const Color(0xFFFF9800);
-    }
-    // Winter: Icy blue
-    return const Color(0xFF81D4FA);
+  /// Accent color derived from the category name string.
+  Color _accentForName(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('architectural') || n.contains('white')) return const Color(0xFFDCF0FF);
+    if (n.contains('holiday')) return const Color(0xFFFF3C3C);
+    if (n.contains('season')) return const Color(0xFFFF8C00);
+    if (n.contains('game') || n.contains('fan')) return const Color(0xFF00D4FF);
+    if (n.contains('sport') || n.contains('team') || n.contains('soccer') ||
+        n.contains('football') || n.contains('baseball')) return const Color(0xFF6E2FFF);
+    return const Color(0xFF00D4FF);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final heroIcon = _heroIconForCategory(category.id);
-    final accentColor = _accentForCategory(category.id);
-    final gradientColors = _gradientForCategory(category.id);
+    final accent = _accentForName(category.name);
     final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
     final isPinned = pinnedIds.contains(category.id);
 
@@ -379,102 +265,101 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
             extra: {'name': category.name},
           );
         },
-        splashColor: accentColor.withValues(alpha: 0.10),
-        highlightColor: accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
+        splashColor: accent.withValues(alpha: 0.12),
+        highlightColor: accent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                gradientColors[0].withValues(alpha: 0.12),
-                NexGenPalette.matteBlack.withValues(alpha: 0.98),
-              ],
-              stops: const [0.0, 1.0],
-            ),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: accentColor.withValues(alpha: 0.20),
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accentColor.withValues(alpha: 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            color: const Color(0xFF111527),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accent.withValues(alpha: 0.25), width: 1),
           ),
+          clipBehavior: Clip.antiAlias,
           child: Stack(
             children: [
-              // Content
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    // Compact icon with subtle glow ring
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: accentColor.withValues(alpha: 0.12),
-                        border: Border.all(
-                          color: accentColor.withValues(alpha: 0.25),
-                          width: 0.5,
-                        ),
-                      ),
-                      child: Icon(
-                        heroIcon,
-                        size: 16,
-                        color: accentColor,
-                        shadows: [
-                          Shadow(
-                            color: accentColor.withValues(alpha: 0.5),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
+              // Radial accent glow from bottom-center upward
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment.bottomCenter,
+                      radius: 0.9,
+                      colors: [
+                        accent.withValues(alpha: 0.0),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.6],
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        category.name,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(
-                      Icons.arrow_forward_ios,
-                      color: accentColor.withValues(alpha: 0.4),
-                      size: 10,
-                    ),
+                  ),
+                ),
+              ),
+
+              // Centered icon
+              Center(
+                child: Icon(
+                  heroIcon,
+                  size: 36,
+                  color: accent.withValues(alpha: 0.85),
+                  shadows: [
+                    Shadow(color: accent.withValues(alpha: 0.4), blurRadius: 16),
                   ],
                 ),
               ),
-              // Pin button
+
+              // Category name — bottom-left
               Positioned(
-                right: 2,
-                top: 2,
+                left: 12,
+                bottom: 14,
+                right: 30,
+                child: Text(
+                  category.name,
+                  style: const TextStyle(
+                    color: Color(0xFFDCF0FF),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+
+              // Pin button — top-right
+              Positioned(
+                right: 4,
+                top: 4,
                 child: GestureDetector(
                   onTap: () => _togglePin(context, ref, isPinned),
                   child: Container(
-                    padding: const EdgeInsets.all(3),
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
+                      color: Colors.black.withValues(alpha: 0.45),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                      color: isPinned ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.7),
-                      size: 12,
+                      color: isPinned ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.6),
+                      size: 13,
                     ),
+                  ),
+                ),
+              ),
+
+              // Glowing LED strip along the bottom edge
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.70),
+                        blurRadius: 12,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
                   ),
                 ),
               ),
