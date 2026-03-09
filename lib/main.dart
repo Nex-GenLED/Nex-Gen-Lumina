@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -40,6 +41,11 @@ Future<void> main() async {
     debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
+  // Seed reviewer account for App Store review (no-op if already exists)
+  ReviewerSeedService.ensureReviewerAccount().catchError((e) {
+    debugPrint('Reviewer seed failed: $e');
+  });
+
   // SECURITY: Initialize encryption service for sensitive data
   await EncryptionService.initialize();
 

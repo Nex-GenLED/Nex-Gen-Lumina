@@ -483,6 +483,22 @@ class DemoSchedulePresets {
       patternImageUrl: null,
     ));
 
+    // Add sports schedule if zip code maps to a known market
+    if (zipCode != null && zipCode.length >= 3) {
+      final prefix = zipCode.substring(0, 3);
+      final market = _marketZipPrefixes[prefix];
+      if (market != null) {
+        schedules.add(DemoScheduleItem(
+          id: 'demo-sports',
+          timeLabel: '2 hrs before kickoff',
+          offTimeLabel: 'Post-game',
+          repeatDays: const ['Sun'],
+          patternName: '${market.teams.first} Game Day',
+          patternImageUrl: null,
+        ));
+      }
+    }
+
     // Add holiday-specific schedule if applicable
     final holiday = _getUpcomingHoliday(currentDate);
     if (holiday != null) {
@@ -536,6 +552,22 @@ class _HolidayInfo {
 
   const _HolidayInfo(this.patternName, this.holidayName);
 }
+
+class _MarketInfo {
+  final String marketName;
+  final List<String> teams;
+
+  const _MarketInfo(this.marketName, this.teams);
+}
+
+const Map<String, _MarketInfo> _marketZipPrefixes = {
+  '641': _MarketInfo('Kansas City', ['Chiefs', 'Royals', 'Sporting KC']),
+  '640': _MarketInfo('Kansas City', ['Chiefs', 'Royals', 'Sporting KC']),
+  '631': _MarketInfo('St. Louis', ['Cardinals', 'Blues', 'City SC']),
+  '630': _MarketInfo('St. Louis', ['Cardinals', 'Blues', 'City SC']),
+  '980': _MarketInfo('Seattle', ['Seahawks', 'Mariners', 'Sounders']),
+  '981': _MarketInfo('Seattle', ['Seahawks', 'Mariners', 'Sounders']),
+};
 
 /// Curated patterns for the demo explore screen.
 class DemoCuratedPatterns {

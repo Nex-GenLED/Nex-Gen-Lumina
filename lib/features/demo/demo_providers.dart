@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/demo/demo_lead_service.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
 
 // =============================================================================
@@ -217,36 +218,45 @@ final demoRooflineNotifierProvider =
 // Demo Analytics Tracking
 // =============================================================================
 
-/// Tracks demo analytics events.
+/// Tracks demo analytics events via [DemoLeadService].
 class DemoAnalytics {
-  /// Track when demo starts.
+  static DemoLeadService? _service;
+
+  /// Initialize with a [DemoLeadService] instance.
+  /// Called from [DemoSessionNotifier.startDemo].
+  static void init(DemoLeadService service) => _service = service;
+
   static void trackDemoStart() {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(event: 'demo_start');
   }
 
-  /// Track step completion.
   static void trackStepCompleted(DemoStep step, Duration timeSpent) {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(
+      event: 'step_completed',
+      data: {'step': step.name, 'durationSeconds': timeSpent.inSeconds},
+    );
   }
 
-  /// Track pattern viewed.
   static void trackPatternViewed(String patternId) {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(
+      event: 'pattern_viewed',
+      data: {'patternId': patternId},
+    );
   }
 
-  /// Track consultation request.
   static void trackConsultationRequested() {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(event: 'consultation_requested');
   }
 
-  /// Track demo completed.
   static void trackDemoCompleted() {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(event: 'demo_completed');
   }
 
-  /// Track account conversion.
   static void trackAccountCreated(String leadId) {
-    // Will be implemented to write to Firestore /demo_analytics
+    _service?.logAnalyticsEvent(
+      event: 'account_created',
+      data: {'leadId': leadId},
+    );
   }
 }
 
@@ -274,7 +284,9 @@ class DemoSessionNotifier extends Notifier<bool> {
     ref.read(demoExperienceActiveProvider.notifier).state = true;
     state = true;
 
-    // Track analytics
+    // Initialize analytics with lead service and track start
+    final leadService = ref.read(demoLeadServiceProvider);
+    DemoAnalytics.init(leadService);
     DemoAnalytics.trackDemoStart();
   }
 

@@ -55,6 +55,7 @@ import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart';
 // Demo experience imports
+import 'package:nexgen_command/features/demo/demo_code_screen.dart';
 import 'package:nexgen_command/features/demo/demo_welcome_screen.dart';
 import 'package:nexgen_command/features/demo/demo_profile_screen.dart';
 import 'package:nexgen_command/features/demo/demo_photo_screen.dart';
@@ -142,6 +143,12 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: JoinWithCodeScreen()),
       ),
       // ===== DEMO ROUTES (root navigator) =====
+      GoRoute(
+        path: AppRoutes.demoCode,
+        name: 'demo-code',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(child: DemoCodeScreen()),
+      ),
       GoRoute(
         path: AppRoutes.demoWelcome,
         name: 'demo-welcome',
@@ -627,6 +634,7 @@ class AppRoutes {
   static const String subUsers = '/settings/users';
   static const String autopilotSchedule = '/autopilot-schedule';
   // Demo experience routes
+  static const String demoCode = '/demo-code';
   static const String demoWelcome = '/demo';
   static const String demoProfile = '/demo/profile';
   static const String demoPhoto = '/demo/photo';

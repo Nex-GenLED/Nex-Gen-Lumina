@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
 import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
+import 'package:nexgen_command/theme.dart';
 
 /// Lumina Login Screen (complete rewrite)
 /// - Gradient background (black -> midnight blue)
@@ -25,6 +27,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
+  int _logoTapCount = 0;
+  bool _showReviewerButton = false;
 
   @override
   void dispose() {
@@ -227,7 +231,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Icon(Icons.hub, size: 60, color: Colors.cyanAccent),
+                  GestureDetector(
+                    onTap: () {
+                      _logoTapCount++;
+                      if (_logoTapCount >= 5 && !_showReviewerButton) {
+                        setState(() => _showReviewerButton = true);
+                      }
+                    },
+                    child: const Icon(Icons.hub, size: 60, color: Colors.cyanAccent),
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'LUMINA',
@@ -371,7 +383,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         // Demo Experience link
                         Center(
                           child: TextButton.icon(
-                            onPressed: _loading ? null : () => context.push(AppRoutes.demoWelcome),
+                            onPressed: _loading ? null : () => context.push(AppRoutes.demoCode),
                             icon: Icon(
                               Icons.play_circle_outline,
                               size: 18,
@@ -387,6 +399,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ),
                         ),
+                        if (_showReviewerButton)
+                          Center(
+                            child: TextButton(
+                              onPressed: () {
+                                _emailCtrl.text = ReviewerSeedService.reviewerEmail;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Review credentials applied'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                'App Store Review',
+                                style: GoogleFonts.montserrat(
+                                  color: NexGenPalette.textMedium,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ),
                       ]),
                     ),
                   ),

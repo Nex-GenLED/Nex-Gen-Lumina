@@ -19,6 +19,7 @@ import 'package:nexgen_command/services/lumina_backend_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
 
 /// Connectivity status provider that checks if user is on home network.
 /// Uses the user's saved homeSsid from their profile.
@@ -57,6 +58,15 @@ final isRemoteModeProvider = Provider<bool>((ref) {
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   final isDemo = ref.watch(demoModeProvider);
   if (isDemo) return DemoWledRepository();
+
+  // Reviewer account always uses demo repository (no real hardware needed)
+  final userId = ref.watch(authStateProvider).maybeWhen(
+    data: (user) => user?.uid,
+    orElse: () => null,
+  );
+  if (userId == ReviewerSeedService.reviewerUserId) {
+    return DemoWledRepository();
+  }
 
   final ip = ref.watch(selectedDeviceIpProvider);
   if (ip == null) return null;
