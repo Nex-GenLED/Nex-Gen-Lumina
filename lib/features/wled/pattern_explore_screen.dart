@@ -260,7 +260,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                               crossAxisCount: 2,
                               mainAxisSpacing: 12,
                               crossAxisSpacing: 12,
-                              childAspectRatio: 1.4,
+                              childAspectRatio: 1.65,
                             ),
                             delegate: SliverChildBuilderDelegate(
                               (context, index) => _FolderHeroCard(
@@ -410,15 +410,16 @@ class _FolderHeroCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Emoji — upper center area
+              // Emoji — vertically centered
               Positioned(
-                top: 8,
+                top: 0,
+                bottom: 36,
                 left: 0,
                 right: 0,
                 child: Center(
                   child: Text(
                     emoji,
-                    style: const TextStyle(fontSize: 32),
+                    style: const TextStyle(fontSize: 30),
                   ),
                 ),
               ),
@@ -426,7 +427,7 @@ class _FolderHeroCard extends StatelessWidget {
               Positioned(
                 left: 12,
                 right: 12,
-                bottom: 12,
+                bottom: 10,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,

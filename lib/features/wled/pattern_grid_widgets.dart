@@ -8,7 +8,6 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -440,98 +439,131 @@ class LibraryNodeCard extends StatelessWidget {
     }
   }
 
-  /// Build a subfolder card with gradient top area, color swatch dots, and info bottom
+  /// Build a subfolder card with gradient background, glow orb, icon, and pixel strip
   Widget _buildFolderCard(BuildContext context) {
     final gradientColors = _getGradientForNode();
+    final accentColor = _getFolderThemeColor();
+    final icon = _iconForNode();
     final previewColors = node.themeColors ?? node.previewColors;
-    // Show up to 3 preview color dots
-    final dotColors = previewColors != null && previewColors.isNotEmpty
-        ? previewColors.take(3).toList()
-        : gradientColors;
+    final stripColors = previewColors != null && previewColors.isNotEmpty
+        ? _expandGradient(previewColors.take(2).toList())
+        : _expandGradient(gradientColors);
 
-    return GestureDetector(
-      onTap: () {
-        final accentColor = _getFolderThemeColor();
-        context.push('/explore/library/${node.id}', extra: {
-          'name': node.name,
-          'accentColor': accentColor.toARGB32(),
-          'gradient0': gradientColors[0].toARGB32(),
-          'gradient1': gradientColors[1].toARGB32(),
-        });
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: gradientColors.first.withValues(alpha: 0.4)),
-          color: const Color(0xFF1A1A2E),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Top area — gradient with color swatch dots
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              child: Container(
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: gradientColors,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.push('/explore/library/${node.id}', extra: {
+            'name': node.name,
+            'accentColor': accentColor.toARGB32(),
+            'gradient0': gradientColors[0].toARGB32(),
+            'gradient1': gradientColors[1].toARGB32(),
+          });
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                gradientColors[0].withValues(alpha: 0.3),
+                gradientColors[1].withValues(alpha: 0.15),
+                NexGenPalette.matteBlack.withValues(alpha: 0.95),
+              ],
+              stops: const [0.0, 0.45, 1.0],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accentColor.withValues(alpha: 0.4)),
+            boxShadow: [
+              BoxShadow(
+                color: gradientColors[0].withValues(alpha: 0.15),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              // Glow orb — top-right
+              Positioned(
+                top: -10,
+                right: -10,
+                child: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        gradientColors[0].withValues(alpha: 0.25),
+                        gradientColors[1].withValues(alpha: 0.08),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (int i = 0; i < dotColors.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 6),
-                      ColorSwatchDot(color: dotColors[i], size: 16),
-                    ],
-                  ],
-                ),
               ),
-            ),
-            // Bottom area — name + count
-            Expanded(
-              child: Padding(
+              // Content
+              Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Icon with glow
+                    Icon(
+                      icon,
+                      size: 28,
+                      color: Colors.white,
+                      shadows: [
+                        Shadow(color: accentColor.withValues(alpha: 0.7), blurRadius: 18),
+                        Shadow(color: gradientColors[0].withValues(alpha: 0.4), blurRadius: 10),
+                      ],
+                    ),
+                    const Spacer(),
+                    // Color gradient bar
+                    Container(
+                      height: 6,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(3),
+                        gradient: LinearGradient(
+                          colors: gradientColors,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Name
                     Text(
                       node.name,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontSize: 13,
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Row(
                       children: [
                         Text(
                           'Tap to explore',
                           style: TextStyle(
-                            color: ExploreDesignTokens.textMuted,
-                            fontSize: 11,
+                            color: accentColor.withValues(alpha: 0.6),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const Spacer(),
-                        Icon(
-                          Icons.chevron_right,
-                          size: 16,
-                          color: Colors.white.withValues(alpha: 0.3),
-                        ),
+                        const SizedBox(width: 3),
+                        Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.5), size: 8),
                       ],
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

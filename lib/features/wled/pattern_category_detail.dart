@@ -810,7 +810,7 @@ class CategoryDetailScreen extends ConsumerWidget {
                     crossAxisCount: 3,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
-                    childAspectRatio: 1.1,
+                    childAspectRatio: 1.3,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (_, i) => _SubCategoryCard(categoryId: categoryId, sub: remaining[i]),
@@ -1456,79 +1456,73 @@ class _SubCategoryCard extends StatelessWidget {
           ),
           child: Stack(
             children: [
+              // Glow orb — offset top-right for depth
               Positioned(
-                top: 8,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          gradientColors[0].withValues(alpha: 0.3),
-                          gradientColors[1].withValues(alpha: 0.1),
-                          Colors.transparent,
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
+                top: -8,
+                right: -8,
+                child: Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        gradientColors[0].withValues(alpha: 0.3),
+                        gradientColors[1].withValues(alpha: 0.1),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
                     ),
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Center(
-                        child: Icon(
-                          heroIcon,
-                          size: 44,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(color: accentColor.withValues(alpha: 0.8), blurRadius: 24),
-                            Shadow(color: gradientColors[0].withValues(alpha: 0.5), blurRadius: 16),
-                          ],
+                    // Icon — top-left with glow
+                    Icon(
+                      heroIcon,
+                      size: 26,
+                      color: Colors.white,
+                      shadows: [
+                        Shadow(color: accentColor.withValues(alpha: 0.7), blurRadius: 16),
+                        Shadow(color: gradientColors[0].withValues(alpha: 0.4), blurRadius: 10),
+                      ],
+                    ),
+                    const Spacer(),
+                    // Color gradient bar
+                    Container(
+                      height: 5,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2.5),
+                        gradient: LinearGradient(
+                          colors: gradientColors,
                         ),
                       ),
                     ),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: PixelStripPreview(
-                        colors: previewColors,
-                        pixelCount: 8,
-                        height: 18,
-                        animate: false,
-                        borderRadius: 6,
-                        backgroundColor: NexGenPalette.matteBlack.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
+                    // Name
                     Text(
                       sub.name,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          '50+ designs',
-                          style: TextStyle(color: accentColor.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
+                          'Explore',
+                          style: TextStyle(color: accentColor.withValues(alpha: 0.6), fontSize: 9, fontWeight: FontWeight.w500),
                         ),
-                        const SizedBox(width: 3),
-                        Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.6), size: 8),
+                        const SizedBox(width: 2),
+                        Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.5), size: 7),
                       ],
                     ),
                   ],
