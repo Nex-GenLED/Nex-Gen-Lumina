@@ -19,50 +19,58 @@ workflows:
           cd ios && pod install
       - name: Build Unsigned IPA
         script: |
-          # 1. Build the iOS app — capture full output for diagnostics
-          flutter build ios --release --no-codesign --verbose 2>&1 | tee /tmp/flutter_build.log | tail -200
+          # 1. Generate Flutter build files without building (avoids code signing check)
+          flutter build ios --release --no-codesign --config-only
 
-          # 2. Locate the .app bundle
-          APP_PATH="build/ios/iphoneos/Runner.app"
-          if [ ! -d "$APP_PATH" ]; then
-            echo "Not found at $APP_PATH, checking Release path..."
-            APP_PATH="build/ios/Release-iphoneos/Runner.app"
-          fi
+          # 2. Build with xcodebuild directly, fully disabling code signing
+          cd ios
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ONLY_ACTIVE_ARCH=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            -resultBundlePath ../build/ios/result.xcresult \
+            BUILD_DIR="../build/ios" \
+            clean build 2>&1 | tail -60
+          cd ..
 
+          # 3. Locate the .app bundle
+          APP_PATH="build/ios/Release-iphoneos/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found. Searching for .app bundles:"
+            echo "ERROR: Runner.app not found at $APP_PATH"
+            echo "Searching for .app bundles:"
             find build -name "*.app" -type d 2>/dev/null
-            echo "--- Build directory listing ---"
             ls -R build/ios/ 2>/dev/null | head -40
-            echo "--- Xcode build errors from log ---"
-            grep -i "error:" /tmp/flutter_build.log | tail -30
-            echo "--- Xcode build warnings ---"
-            grep -i "warning:.*error\|fatal\|failed\|undefined\|linker" /tmp/flutter_build.log | tail -20
             exit 1
           fi
 
-          # 3. Verify the executable exists inside the bundle
+          # 4. Verify the executable exists
           if [ ! -f "$APP_PATH/Runner" ]; then
             echo "ERROR: Runner executable not found inside app bundle"
-            echo "Bundle contents:"
             ls -la "$APP_PATH"
             exit 1
           fi
 
-          echo "App bundle found with contents:"
-          ls -la "$APP_PATH"
+          echo "App bundle OK:"
+          ls -la "$APP_PATH/Runner"
 
-          # 4. Ad-hoc sign all binaries for AltStore/Sideloadly compatibility
-          echo "Ad-hoc signing app bundle..."
-          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
-
+          # 5. Ad-hoc sign for AltStore/Sideloadly compatibility
+          echo "Ad-hoc signing..."
           find "$APP_PATH/Frameworks" -name "*.framework" -type d | while read framework; do
-            echo "Signing framework: $framework"
             /usr/bin/codesign --force --deep --sign - "$framework"
           done
+          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
           echo "Ad-hoc signing complete"
 
-          # 5. Package into IPA
+          # 6. Package into IPA
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
