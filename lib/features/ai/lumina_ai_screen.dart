@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
 import 'package:go_router/go_router.dart';
@@ -174,7 +175,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     try {
       final sheetState = ref.read(luminaSheetProvider);
 
-      // Route through the two-tier command pipeline
       final result = await LuminaCommandRouter.route(
         ref,
         prompt,
@@ -188,7 +188,16 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         return;
       }
 
-      // Apply WLED payload to lights if available
+      // ── Schedule detection ────────────────────────────────────────────────
+      // When the AI returns a multi-day schedule plan, we apply night 1 as a
+      // live preview and route the full plan to the scheduling system.
+      if (result.wledPayload != null &&
+          result.wledPayload!['isSchedule'] == true) {
+        await _handleScheduleResult(result);
+        return;
+      }
+
+      // ── Normal single-pattern apply ───────────────────────────────────────
       LuminaPatternPreview? preview;
       if (result.wledPayload != null) {
         preview = _extractPreview(result.wledPayload!);
@@ -244,12 +253,85 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     _scrollToEnd();
   }
 
+  /// Handles a smart schedule result from the AI.
+  ///
+  /// 1. Applies the FIRST occurrence as a live preview so the user
+  ///    immediately sees something on their lights.
+  /// 2. Routes the full schedule to [AutopilotScheduler.importSmartSchedule].
+  ///    Night 1 is already applied — the scheduler marks it approved and
+  ///    queues/suggests nights 2+ based on the user's autonomy level.
+  /// 3. Posts the conversational response card to the chat thread.
+  Future<void> _handleScheduleResult(LuminaCommandResult result) async {
+    final payload = result.wledPayload!;
+    final schedule = payload['schedule'] as List<dynamic>?;
+    final dayCount = payload['dayCount'] as int? ?? 0;
+    final hasVariety = payload['hasVariety'] as bool? ?? false;
+    final controller = ref.read(luminaSheetProvider.notifier);
+
+    debugPrint('📅 Smart schedule: $dayCount days, hasVariety=$hasVariety');
+
+    // Step 1 — Apply night 1 as immediate live preview
+    if (schedule != null && schedule.isNotEmpty) {
+      final firstWled =
+          (schedule.first as Map<String, dynamic>?)?['wled'] as Map<String, dynamic>?;
+      if (firstWled != null) {
+        final repo = ref.read(wledRepositoryProvider);
+        if (repo != null) {
+          try {
+            await repo.applyJson(firstWled);
+            debugPrint('📅 Night 1 preview applied to lights');
+          } catch (e) {
+            debugPrint('📅 Night 1 preview apply failed: $e');
+          }
+        }
+      }
+    }
+
+    // Step 2 — Hand full plan off to AutopilotScheduler.
+    // Night 1 is already applied above; the scheduler marks it approved so
+    // the check loop never re-fires it. Nights 2+ are queued as suggestions
+    // (autonomy level 1) or auto-scheduled (autonomy level 2).
+    try {
+      await ref.read(autopilotSchedulerProvider).importSmartSchedule(payload);
+      debugPrint('📅 Imported $dayCount-night schedule into AutopilotScheduler');
+    } catch (e) {
+      debugPrint('📅 Schedule import failed: $e');
+    }
+
+    // Step 3 — Build preview strip from night 1 colors for the response card
+    LuminaPatternPreview? preview;
+    if (schedule != null && schedule.isNotEmpty) {
+      final first = schedule.first as Map<String, dynamic>?;
+      if (first != null) {
+        final firstWled = first['wled'] as Map<String, dynamic>?;
+        if (firstWled != null) preview = _extractPreview(firstWled);
+      }
+    }
+    preview ??= result.previewColors.isNotEmpty
+        ? LuminaPatternPreview(colors: result.previewColors)
+        : null;
+
+    // Set the preset label to the full schedule name
+    final scheduleLabel = payload['patternName'] as String?;
+    if (scheduleLabel != null && mounted) {
+      ref.read(activePresetLabelProvider.notifier).state = scheduleLabel;
+    }
+
+    // Step 4 — Post response card to chat thread
+    controller.addAssistantMessage(
+      result.responseText,
+      preview: preview,
+      wledPayload: payload,
+    );
+
+    _scrollToEnd();
+  }
+
   void _handleNavigation(LuminaCommandResult result) {
     final params = result.command?.parameters ?? {};
     final route = params['route'] as String?;
     final tabIndex = params['tabIndex'] as int?;
 
-    // Navigate away from this screen
     Navigator.of(context).pop();
 
     if (tabIndex != null) {
@@ -442,29 +524,20 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       backgroundColor: _kVoid,
       body: Column(
         children: [
-          // Safe area top spacing
           SizedBox(height: MediaQuery.of(context).padding.top),
-
-          // Custom header row
           _buildHeader(sheetState),
-
           Divider(
             color: NexGenPalette.line.withValues(alpha: 0.4),
             height: 1,
             indent: 20,
             endIndent: 20,
           ),
-
-          // Message list (or empty state)
           Expanded(
             child: sheetState.messages.isEmpty
                 ? _buildEmptyState(sheetState)
                 : _buildMessageList(sheetState),
           ),
-
-          // Input bar pinned to bottom
           _buildInputBar(sheetState),
-
           SizedBox(height: bottomInset > 0 ? 8 : bottomPadding + 8),
         ],
       ),
@@ -480,14 +553,11 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Row(
         children: [
-          // Back button
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, size: 22),
             color: _kFrost.withValues(alpha: 0.8),
             onPressed: () => Navigator.of(context).pop(),
           ),
-
-          // Center title block
           Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -513,8 +583,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
               ],
             ),
           ),
-
-          // Layer pills + clear button
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -551,7 +619,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
   }
 
   // -------------------------------------------------------------------------
-  // Empty state (no messages yet)
+  // Empty state
   // -------------------------------------------------------------------------
 
   Widget _buildEmptyState(LuminaSheetState sheetState) {
@@ -594,7 +662,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       itemCount:
           sheetState.messages.length + (sheetState.isThinking ? 1 : 0),
       itemBuilder: (context, i) {
-        // Thinking indicator
         if (i == sheetState.messages.length && sheetState.isThinking) {
           return _buildThinkingIndicator();
         }
@@ -698,7 +765,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Row(
           children: [
-            // Mic button (left side)
             GestureDetector(
               onTap: () {
                 HapticFeedback.lightImpact();
@@ -745,7 +811,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
               ),
             ),
             const SizedBox(width: 4),
-            // Send button
             GestureDetector(
               onTap: () {
                 if (_hasText) _sendMessage(_textController.text);
@@ -922,9 +987,7 @@ class _ThinkingDotsState extends State<_ThinkingDots>
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: List.generate(3, (i) {
-            // Staggered phase: each dot offset by 0.2
             final phase = (_controller.value + i * 0.2) % 1.0;
-            // Sine wave for smooth pulse
             final scale = 0.5 + 0.5 * math.sin(phase * math.pi);
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -970,7 +1033,6 @@ class _LightingMetaRow extends StatelessWidget {
         runSpacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          // Pattern name badge
           if (preview.patternName != null && preview.patternName!.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -991,8 +1053,6 @@ class _LightingMetaRow extends StatelessWidget {
                 ),
               ),
             ),
-
-          // Effect name
           if (preview.effectName != null && preview.effectName!.isNotEmpty)
             Text(
               preview.effectName!,
@@ -1002,8 +1062,6 @@ class _LightingMetaRow extends StatelessWidget {
                 color: _kFrost.withValues(alpha: 0.55),
               ),
             ),
-
-          // Color swatches
           if (preview.colors.isNotEmpty)
             Row(
               mainAxisSize: MainAxisSize.min,

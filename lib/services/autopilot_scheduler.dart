@@ -1,5 +1,6 @@
 import 'dart:async';
-
+import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
@@ -576,7 +577,7 @@ class AutopilotScheduler {
         .recordPatternRejection(suggestion.patternName);
   }
 
-  /// Force regeneration of the schedule.
+/// Force regeneration of the schedule.
   Future<void> forceRegenerate() async {
     final profile = _getCurrentProfile();
     if (profile == null) return;
@@ -585,6 +586,148 @@ class AutopilotScheduler {
     _ref.read(autopilotSuggestionsProvider.notifier).clearAll();
 
     await _regenerateSchedule(profile);
+  }
+
+  /// Import a Lumina AI smart schedule plan into the autopilot system.
+  ///
+  /// Called from [LuminaAIScreen] immediately after the AI returns an
+  /// `isSchedule: true` payload. Each occurrence in the plan becomes an
+  /// [AutopilotScheduleItem] that is:
+  ///   - Added to [_activeSchedule] for the normal check loop
+  ///   - Surfaced as a suggestion OR auto-applied, based on [autonomyLevel]
+  ///
+  /// Night 1 is intentionally NOT applied here — [LuminaAIScreen] already
+  /// applied it as a live preview before calling this method.
+  Future<void> importSmartSchedule(Map<String, dynamic> payload) async {
+    final profile = _getCurrentProfile();
+    if (profile == null) {
+      debugPrint('AutopilotScheduler.importSmartSchedule: no profile');
+      return;
+    }
+
+    final scheduleList = payload['schedule'] as List<dynamic>?;
+    if (scheduleList == null || scheduleList.isEmpty) {
+      debugPrint('AutopilotScheduler.importSmartSchedule: empty schedule');
+      return;
+    }
+
+    final autonomyLevel = profile.autonomyLevel ?? 1;
+    final suggestionsNotifier = _ref.read(autopilotSuggestionsProvider.notifier);
+    const uuid = Uuid();
+
+    final newItems = <AutopilotScheduleItem>[];
+
+    for (int i = 0; i < scheduleList.length; i++) {
+      final entry = scheduleList[i] as Map<String, dynamic>;
+
+      final dateStr = entry['date'] as String?;
+      if (dateStr == null) continue;
+      final baseDate = DateTime.tryParse(dateStr);
+      if (baseDate == null) continue;
+
+      final startTriggerName = entry['startTrigger'] as String? ?? 'sunset';
+      final scheduledTime = _resolveScheduledTime(baseDate, startTriggerName);
+
+      final patternName = entry['patternName'] as String? ?? 'Lumina Schedule';
+      final wled = entry['wled'] as Map<String, dynamic>? ?? {};
+      final effectName = entry['effectName'] as String? ?? 'Effect';
+      final dayName = entry['dayName'] as String? ?? 'Night ${i + 1}';
+      final endTriggerName = entry['endTrigger'] as String? ?? 'sunrise';
+
+      final reason = 'Lumina AI: $effectName on $dayName '
+          '($startTriggerName → $endTriggerName)';
+
+      final item = AutopilotScheduleItem(
+        id: uuid.v4(),
+        scheduledTime: scheduledTime,
+        repeatDays: const [],
+        patternName: patternName,
+        reason: reason,
+        trigger: AutopilotTrigger.custom,
+        confidenceScore: 1.0,
+        wledPayload: wled,
+        createdAt: DateTime.now(),
+      );
+
+      newItems.add(item);
+    }
+
+    if (newItems.isEmpty) return;
+
+    // Night 0 was already applied as live preview — mark it approved so
+    // the check loop doesn't re-apply it.
+    final markedItems = newItems.asMap().entries.map((e) {
+      if (e.key == 0) {
+        return e.value.copyWith(isApproved: true, wasAutoApplied: true);
+      }
+      return e.value;
+    }).toList();
+
+    // Remove any existing Lumina-AI-imported items to avoid duplicates,
+    // then append the new plan.
+    _activeSchedule.removeWhere((s) => s.reason.startsWith('Lumina AI:'));
+    _activeSchedule.addAll(markedItems);
+
+    _addActivityLogEntry(AutopilotActivityEntry(
+      timestamp: DateTime.now(),
+      type: ActivityEntryType.patternApplied,
+      source: 'LuminaAI',
+      message: 'Smart schedule imported: ${markedItems.length} nights '
+          'of ${payload['themeName'] ?? 'theme'}',
+    ));
+
+    debugPrint(
+      'AutopilotScheduler: Imported ${markedItems.length} Lumina AI schedule '
+      'items (autonomyLevel=$autonomyLevel)',
+    );
+
+    // Night 1+ surface as suggestions or schedule for auto-apply
+    for (int i = 1; i < markedItems.length; i++) {
+      final item = markedItems[i];
+
+      if (autonomyLevel == 2) {
+        await _scheduleForApplication(item);
+      } else {
+        suggestionsNotifier.addSuggestion(
+          AutopilotSuggestion(
+            id: item.id,
+            patternName: item.patternName,
+            reason: item.reason,
+            scheduledTime: item.scheduledTime,
+            repeatDays: item.repeatDays,
+            wledPayload: item.wledPayload,
+            confidenceScore: item.confidenceScore,
+            createdAt: item.createdAt,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Resolve a concrete [DateTime] from a date + trigger name.
+  ///
+  /// Uses fixed approximations until a solar time library is integrated.
+  ///   sunset  ≈ 20:00 local
+  ///   dusk    ≈ 20:30 local
+  ///   sunrise ≈ 06:00 local
+  ///   dawn    ≈ 05:30 local
+  ///   allDay  ≈ 00:00 local
+  ///
+  /// TODO: replace with actual solar time calculation using device location.
+  DateTime _resolveScheduledTime(DateTime baseDate, String triggerName) {
+    switch (triggerName.toLowerCase()) {
+      case 'sunset':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 20, 0);
+      case 'dusk':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 20, 30);
+      case 'sunrise':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 6, 0);
+      case 'dawn':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 5, 30);
+      case 'allday':
+      default:
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 0, 0);
+    }
   }
 
   /// Get the current active schedule.
