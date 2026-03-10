@@ -173,7 +173,7 @@ class CompoundCommandDetector {
   // Connector / filler words to clean up after stripping
   static final _fillerPattern = RegExp(
     r'\b(for\s+me|give\s+me\s+(a\s+)?|set\s+up\s+(a\s+)?|schedule\s+(a\s+)?|'
-    r'can\s+you\s+|please\s+|i\s+want\s+(a\s+)?|i\'d\s+like\s+(a\s+)?)\b',
+    r"can\s+you\s+|please\s+|i\s+want\s+(a\s+)?|i'd\s+like\s+(a\s+)?)\b",
     caseSensitive: false,
   );
 

@@ -15,7 +15,7 @@ import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
-import 'package:nexgen_command/features/autopilot/autopilot_scheduler.dart';
+import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
 import 'package:go_router/go_router.dart';
