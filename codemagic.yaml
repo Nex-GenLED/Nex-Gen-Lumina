@@ -19,8 +19,8 @@ workflows:
           cd ios && pod install
       - name: Build Unsigned IPA
         script: |
-          # 1. Build the iOS app (let errors surface — no || true)
-          flutter build ios --release --no-codesign --verbose 2>&1 | tail -80
+          # 1. Build the iOS app — capture full output for diagnostics
+          flutter build ios --release --no-codesign --verbose 2>&1 | tee /tmp/flutter_build.log | tail -200
 
           # 2. Locate the .app bundle
           APP_PATH="build/ios/iphoneos/Runner.app"
@@ -34,6 +34,10 @@ workflows:
             find build -name "*.app" -type d 2>/dev/null
             echo "--- Build directory listing ---"
             ls -R build/ios/ 2>/dev/null | head -40
+            echo "--- Xcode build errors from log ---"
+            grep -i "error:" /tmp/flutter_build.log | tail -30
+            echo "--- Xcode build warnings ---"
+            grep -i "warning:.*error\|fatal\|failed\|undefined\|linker" /tmp/flutter_build.log | tail -20
             exit 1
           fi
 
