@@ -19,21 +19,34 @@ workflows:
           cd ios && pod install
       - name: Build Unsigned IPA
         script: |
-          # 1. Build iOS app with Flutter (no code signing)
-          flutter build ios --release --no-codesign
+          # 1. Generate Flutter build files without building
+          flutter build ios --release --config-only --no-codesign
 
-          # 2. Locate the .app bundle
-          APP_PATH="build/ios/iphoneos/Runner.app"
+          # 2. Build with xcodebuild directly, forcing signing off
+          cd ios
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath ../build/Runner.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            archive
+          cd ..
+
+          # 3. Locate the .app bundle inside the archive
+          APP_PATH="build/Runner.xcarchive/Products/Applications/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
-            APP_PATH="build/ios/Release-iphoneos/Runner.app"
-          fi
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found"
-            find build -name "*.app" -type d 2>/dev/null
+            echo "ERROR: Runner.app not found in archive"
+            find build/Runner.xcarchive -name "*.app" -type d 2>/dev/null
             exit 1
           fi
 
-          # 3. Verify the executable exists
+          # 4. Verify the executable exists
           if [ ! -f "$APP_PATH/Runner" ]; then
             echo "ERROR: Runner executable not found inside app bundle"
             ls -la "$APP_PATH"
@@ -43,7 +56,7 @@ workflows:
           echo "App bundle OK:"
           ls -la "$APP_PATH/Runner"
 
-          # 4. Ad-hoc sign for AltStore/Sideloadly compatibility
+          # 5. Ad-hoc sign for AltStore/Sideloadly compatibility
           echo "Ad-hoc signing..."
           find "$APP_PATH/Frameworks" -name "*.framework" -type d | while read framework; do
             /usr/bin/codesign --force --deep --sign - "$framework"
@@ -51,7 +64,7 @@ workflows:
           /usr/bin/codesign --force --deep --sign - "$APP_PATH"
           echo "Ad-hoc signing complete"
 
-          # 5. Package into IPA
+          # 6. Package into IPA
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
