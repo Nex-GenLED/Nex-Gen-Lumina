@@ -219,6 +219,14 @@ class UserModel {
   /// Invitation token used to link this account (for audit trail).
   final String? invitationToken;
 
+  // ========== White Preferences ==========
+
+  /// User's preferred primary white (RGBW map from WhitePreset.toJson())
+  final Map<String, dynamic>? preferredWhitePrimary;
+
+  /// User's preferred complement white (RGBW map from WhitePreset.toJson())
+  final Map<String, dynamic>? preferredWhiteComplement;
+
   UserModel({
     required this.id,
     required String email,
@@ -286,6 +294,9 @@ class UserModel {
     this.linkedAt,
     this.subUserPermissions,
     this.invitationToken,
+    // White preferences
+    this.preferredWhitePrimary,
+    this.preferredWhiteComplement,
   })  :
         // SECURITY: Validate and sanitize all user inputs
         email = InputValidation.validateEmail(email) ?? email,
@@ -418,6 +429,9 @@ class UserModel {
           ? SubUserPermissions.fromJson(json['sub_user_permissions'] as Map<String, dynamic>)
           : null,
       invitationToken: json['invitation_token'] as String?,
+      // White preferences
+      preferredWhitePrimary: json['preferred_white_primary'] as Map<String, dynamic>?,
+      preferredWhiteComplement: json['preferred_white_complement'] as Map<String, dynamic>?,
     );
   }
 
@@ -506,6 +520,9 @@ class UserModel {
       if (linkedAt != null) 'linked_at': Timestamp.fromDate(linkedAt!),
       if (subUserPermissions != null) 'sub_user_permissions': subUserPermissions!.toJson(),
       if (invitationToken != null) 'invitation_token': invitationToken,
+      // White preferences
+      if (preferredWhitePrimary != null) 'preferred_white_primary': preferredWhitePrimary,
+      if (preferredWhiteComplement != null) 'preferred_white_complement': preferredWhiteComplement,
     };
   }
 
@@ -576,6 +593,9 @@ class UserModel {
     DateTime? linkedAt,
     SubUserPermissions? subUserPermissions,
     String? invitationToken,
+    // White preferences
+    Map<String, dynamic>? preferredWhitePrimary,
+    Map<String, dynamic>? preferredWhiteComplement,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -644,6 +664,9 @@ class UserModel {
       linkedAt: linkedAt ?? this.linkedAt,
       subUserPermissions: subUserPermissions ?? this.subUserPermissions,
       invitationToken: invitationToken ?? this.invitationToken,
+      // White preferences
+      preferredWhitePrimary: preferredWhitePrimary ?? this.preferredWhitePrimary,
+      preferredWhiteComplement: preferredWhiteComplement ?? this.preferredWhiteComplement,
     );
   }
 

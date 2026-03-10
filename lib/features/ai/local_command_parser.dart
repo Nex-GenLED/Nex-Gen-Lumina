@@ -458,7 +458,7 @@ class LocalCommandParser {
             {
               'fx': 0,
               'col': [
-                [r, g, b]
+                [r, g, b, 0]
               ],
             }
           ],

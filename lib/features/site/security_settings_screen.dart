@@ -130,7 +130,7 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Security')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           Text('Change Password', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),

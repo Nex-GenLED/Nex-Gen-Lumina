@@ -17,6 +17,8 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 
 /// Full-screen Edit Pattern screen modeled after the native controller app.
 ///
@@ -851,13 +853,13 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   }
 
   Widget _buildSpeedSlider() {
-    return _buildParameterSlider(
-      icon: Icons.bolt,
-      label: 'SPEED',
-      value: _pattern.speed.toDouble(),
-      max: 255,
-      displayValue: '${(_pattern.speed / 255 * 10).round()}',
-      onChanged: (v) => _updatePattern(_pattern.copyWith(speed: v.round())),
+    return EffectSpeedSlider(
+      rawSpeed: _pattern.speed,
+      effectId: _pattern.effectId,
+      initialExtended: getSpeedProfile(_pattern.effectId)
+          .mapRawToSlider(_pattern.speed)
+          .needsExtended,
+      onChanged: (raw) => _updatePattern(_pattern.copyWith(speed: raw)),
     );
   }
 

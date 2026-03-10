@@ -11,6 +11,10 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+const String _kGeofencePromptShownKey = 'geofence_location_prompt_shown';
+const String _kGeofenceDeniedExplKey = 'geofence_denied_explanation_shown';
 
 class GeofenceConfig {
   final double centerLat;
@@ -59,30 +63,107 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
     return GeofenceState.initial();
   }
 
-  Future<void> ensurePermissionsWithDialog(BuildContext context) async {
-    // Explain why we need Always Allow
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enable Always Allow Location'),
-        content: const Text('To trigger "Welcome Home" reliably, we need background location access so your arrival is detected even when the app is closed.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continue')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+  /// Returns true if location permission is sufficient to start monitoring.
+  /// Does NOT prompt — use [ensurePermissionsWithDialog] for interactive requests.
+  Future<bool> hasLocationPermission() async {
+    final perm = await Geolocator.checkPermission();
+    return perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse;
+  }
 
+  /// Shows the "Always Allow" upgrade dialog, but only when contextually
+  /// appropriate (user is enabling geofencing). Respects prior responses:
+  ///  - Already "always" → silent success
+  ///  - Already "whileInUse" → ask once to upgrade, accept if declined
+  ///  - "denied" → one-time explanation, then open settings
+  ///  - "deniedForever" → never prompt again
+  Future<void> ensurePermissionsWithDialog(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
     LocationPermission perm = await Geolocator.checkPermission();
+
+    // Already have background location — nothing to do
+    if (perm == LocationPermission.always) return;
+
+    // Permanently denied — never prompt, user must go to Settings manually
     if (perm == LocationPermission.deniedForever) return;
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    // On iOS, request "Always" by requesting again after whileInUse.
+
+    // "While in use" — ask once to upgrade to Always for geofencing
     if (perm == LocationPermission.whileInUse) {
+      final alreadyAsked = prefs.getBool(_kGeofencePromptShownKey) ?? false;
+      if (alreadyAsked) return; // Already asked once, accept "while in use"
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Enable Background Location'),
+          content: const Text(
+            'To trigger "Welcome Home" reliably, we need background '
+            'location access so your arrival is detected even when '
+            'the app is closed.\n\n'
+            'You can change this later in Settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+
+      await prefs.setBool(_kGeofencePromptShownKey, true);
+      if (confirmed != true) return;
+
+      // On iOS, requesting again after whileInUse escalates to Always
+      perm = await Geolocator.requestPermission();
+      return;
+    }
+
+    // Permission is "denied" (not yet determined or previously denied)
+    if (perm == LocationPermission.denied) {
+      final alreadyExplained =
+          prefs.getBool(_kGeofenceDeniedExplKey) ?? false;
+      if (alreadyExplained) return; // Only explain once per denial
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Location Access Needed'),
+          content: const Text(
+            'Geofence features like "Welcome Home" need location '
+            'access to detect when you arrive. Grant location '
+            'permission to enable this feature.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Skip'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Grant Access'),
+            ),
+          ],
+        ),
+      );
+
+      await prefs.setBool(_kGeofenceDeniedExplKey, true);
+      if (confirmed != true) return;
+
       perm = await Geolocator.requestPermission();
     }
+  }
+
+  /// Resets prompt flags so the dialog can be shown again (e.g. after
+  /// the user revokes permission and re-enables geofencing).
+  static Future<void> resetPromptFlags() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kGeofencePromptShownKey);
+    await prefs.remove(_kGeofenceDeniedExplKey);
   }
 
   Future<void> start() async {
@@ -201,9 +282,9 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
             'sx': 200,
             'ix': 180,
             'col': [
-              [255, 0, 0],
-              [0, 255, 0],
-              [0, 0, 255]
+              [255, 0, 0, 0],
+              [0, 255, 0, 0],
+              [0, 0, 255, 0]
             ]
           }
         ]

@@ -81,10 +81,18 @@ class AppNeon {
 }
 
 /// Nex-Gen Premium palette (Dark-first)
-/// Bottom padding to prevent content from being hidden behind the glass dock
-/// nav bar overlay. Use as bottom padding on scrollable content within the
-/// main shell (e.g. ListView, GridView, CustomScrollView).
-const kBottomNavBarPadding = 100.0;
+/// Visual height of the glass dock nav bar content (excluding device bottom inset).
+const kNavBarContentHeight = 100.0;
+
+/// Total height of the nav bar including the device's bottom safe-area inset.
+/// Use as bottom padding on scrollable content within the main shell
+/// (e.g. ListView, GridView, CustomScrollView) so that the last item
+/// scrolls fully above the nav bar overlay.
+double navBarTotalHeight(BuildContext context) =>
+    kNavBarContentHeight + MediaQuery.of(context).padding.bottom;
+
+/// Legacy alias — prefer [navBarTotalHeight] for device-aware padding.
+const kBottomNavBarPadding = kNavBarContentHeight;
 
 class NexGenPalette {
   // Base

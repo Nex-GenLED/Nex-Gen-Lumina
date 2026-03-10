@@ -23,8 +23,13 @@ class EspnApiService {
   // ---------------------------------------------------------------------------
 
   /// Fetch all live / today's games for a [sport].
+  ///
+  /// For college sports, appends the ESPN groups parameter to filter the
+  /// scoreboard to the correct division (e.g. FBS-only for college football).
   Future<List<GameState>> fetchLiveGames(SportType sport) async {
-    final url = '$kEspnBaseUrl/${sport.espnSportPath}/scoreboard';
+    final groups = sport.espnGroupsParam;
+    final qs = groups != null ? '?groups=$groups' : '';
+    final url = '$kEspnBaseUrl/${sport.espnSportPath}/scoreboard$qs';
     final json = await _fetchJson(url);
     if (json == null) return const [];
 

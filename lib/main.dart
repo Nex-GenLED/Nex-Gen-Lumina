@@ -10,6 +10,7 @@ import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_notification_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -57,6 +58,13 @@ Future<void> main() async {
 
   // Initialize local notifications (no prompts on web)
   await NotificationsService.init();
+
+  // Initialize FCM for Neighborhood Sync push notifications (no-op on web)
+  if (!kIsWeb) {
+    SyncNotificationService().initialize().catchError((e) {
+      debugPrint('FCM initialization failed: $e');
+    });
+  }
 
   // Register sports alerts background service (Android foreground + iOS BGFetch)
   if (!kIsWeb) {

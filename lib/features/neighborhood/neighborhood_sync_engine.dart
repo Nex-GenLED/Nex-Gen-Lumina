@@ -325,16 +325,16 @@ class NeighborhoodSyncEngine {
         return;
       }
 
-      // Get current member to check for member-specific colors
+      // Get current member to check for member-specific overrides
       final currentMember = _ref.read(currentUserMemberProvider);
       final memberId = currentMember?.oderId ?? '';
 
-      // Get colors for this specific member (handles Complement Mode)
-      final memberColors = command.getColorsForMember(memberId);
+      // Resolve the pattern for this specific member (handles per-house assignments,
+      // complement mode color overrides, or falls back to global fields)
+      final memberPattern = command.getPatternForMember(memberId);
 
-      // Build WLED JSON payload with member-specific colors
-      final colorArrays = memberColors.map((c) {
-        // Convert int color to RGB array
+      // Build WLED JSON payload with member-specific pattern
+      final colorArrays = memberPattern.colors.map((c) {
         final r = (c >> 16) & 0xFF;
         final g = (c >> 8) & 0xFF;
         final b = c & 0xFF;
@@ -353,12 +353,12 @@ class NeighborhoodSyncEngine {
 
       final payload = {
         'on': true,
-        'bri': command.brightness,
+        'bri': memberPattern.brightness,
         'seg': [
           {
-            'fx': command.effectId,
-            'sx': command.speed,
-            'ix': command.intensity,
+            'fx': memberPattern.effectId,
+            'sx': memberPattern.speed,
+            'ix': memberPattern.intensity,
             'col': colorArrays.take(3).toList(),
           }
         ],
@@ -367,16 +367,18 @@ class NeighborhoodSyncEngine {
       final success = await wledRepo.applyJson(payload);
 
       if (success) {
-        debugPrint('Pattern applied successfully');
-        if (command.isComplementMode) {
-          debugPrint('Complement Mode: Applied colors ${memberColors.map((c) => '0x${c.toRadixString(16)}')} for member $memberId');
+        debugPrint('Pattern applied successfully: ${memberPattern.name}');
+        if (command.hasPerHouseAssignments) {
+          debugPrint('Per-house assignment: effect=${memberPattern.effectId}, '
+              'colors=${memberPattern.colors.map((c) => '0x${c.toRadixString(16)}')}');
+        } else if (command.isComplementMode) {
+          debugPrint('Complement Mode: Applied colors ${memberPattern.colors.map((c) => '0x${c.toRadixString(16)}')} for member $memberId');
         }
 
-        // Update local state metadata with member-specific colors
-        final colors = command.getColorObjectsForMember(memberId);
+        // Update local state metadata
         _ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-          colorSequence: colors,
-          effectName: command.patternName,
+          colorSequence: memberPattern.colorObjects,
+          effectName: memberPattern.name,
         );
       } else {
         debugPrint('Failed to apply pattern');

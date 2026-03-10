@@ -186,7 +186,7 @@ class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
                 child: SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, navBarTotalHeight(context)),
                     child: _ControlsCard(
                       radius: _radiusMeters,
                       actions: _actions,

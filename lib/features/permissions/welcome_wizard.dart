@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/whites/preferred_white_selection_page.dart';
 
 /// Key stored in SharedPreferences to mark the welcome wizard as completed locally
 const String kWelcomeCompletedKey = 'welcome_completed_v1';
@@ -87,14 +89,14 @@ Future<void> resetWelcomeWizard() async {
   }
 }
 
-class WelcomeWizardPage extends StatefulWidget {
+class WelcomeWizardPage extends ConsumerStatefulWidget {
   const WelcomeWizardPage({super.key});
 
   @override
-  State<WelcomeWizardPage> createState() => _WelcomeWizardPageState();
+  ConsumerState<WelcomeWizardPage> createState() => _WelcomeWizardPageState();
 }
 
-class _WelcomeWizardPageState extends State<WelcomeWizardPage> {
+class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
   final PageController _controller = PageController();
   bool _requesting = false;
 
@@ -138,14 +140,14 @@ class _WelcomeWizardPageState extends State<WelcomeWizardPage> {
     }
   }
 
-  Future<void> _requestCameraAndFinish() async {
+  Future<void> _requestCameraAndContinue() async {
     setState(() => _requesting = true);
     try {
       final status = await Permission.camera.request();
       debugPrint('Camera permission: $status');
-      await markWelcomeCompleted();
       if (!mounted) return;
-      context.go(AppRoutes.discovery);
+      // Advance to the white selection page
+      _controller.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     } catch (e) {
       debugPrint('Camera permission request error: $e');
       if (!mounted) return;
@@ -153,6 +155,14 @@ class _WelcomeWizardPageState extends State<WelcomeWizardPage> {
     } finally {
       if (mounted) setState(() => _requesting = false);
     }
+  }
+
+  Future<void> _finishWizard() async {
+    try {
+      await markWelcomeCompleted();
+    } catch (_) {}
+    if (!mounted) return;
+    context.go(AppRoutes.discovery);
   }
 
   @override
@@ -178,8 +188,13 @@ class _WelcomeWizardPageState extends State<WelcomeWizardPage> {
             title: 'Camera Access',
             description: 'To map your home for effects, we use the camera in AR.',
             buttonText: 'Grant Camera',
-            onPressed: _requestCameraAndFinish,
+            onPressed: _requestCameraAndContinue,
             loading: _requesting,
+          ),
+          // Step 3: Preferred White selection
+          PreferredWhiteSelectionPage(
+            isOnboarding: true,
+            onComplete: _finishWizard,
           ),
         ],
       ),

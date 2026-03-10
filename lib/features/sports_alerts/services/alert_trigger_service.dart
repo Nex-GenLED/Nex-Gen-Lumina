@@ -126,6 +126,7 @@ class AlertTriggerService {
     return switch (eventType) {
       AlertEventType.touchdown || AlertEventType.goal =>
         const Duration(seconds: 15),
+      AlertEventType.soccerGoal => const Duration(seconds: 20),
       AlertEventType.fieldGoal => const Duration(seconds: 8),
       AlertEventType.safety => const Duration(seconds: 6),
       AlertEventType.run => const Duration(seconds: 6),
@@ -206,6 +207,9 @@ class AlertTriggerService {
 
       case AlertEventType.clutchBasket:
         await _animateClutchBasket(team, svc);
+
+      case AlertEventType.soccerGoal:
+        await _animateSoccerGoal(team, svc);
 
       case AlertEventType.turnover:
         // Phase 2 — no animation yet.
@@ -345,6 +349,57 @@ class AlertTriggerService {
     await Future<void>.delayed(const Duration(seconds: 5));
   }
 
+  /// Soccer Goal: 20s total.
+  /// Slow Build Chase (6s) → Peak Flash (4s) → Celebration Running (6s) → Slow Fade (4s).
+  /// Goals are rare in soccer — the celebration is deliberately longer and
+  /// builds from a slow chase into a dramatic strobe peak before fading.
+  Future<void> _animateSoccerGoal(TeamColors team, WledService svc) async {
+    final colors = _teamColorArray(team);
+    final primary = colorToRgbw(team.primary);
+
+    // Phase 1: Slow Build Chase — Chase effect (fx:28) at moderate speed
+    await svc.applyJson({
+      'on': true,
+      'bri': 180,
+      'seg': [
+        {'id': 0, 'fx': 28, 'sx': 100, 'ix': 200, 'col': colors},
+      ],
+    });
+    await Future<void>.delayed(const Duration(seconds: 6));
+
+    // Phase 2: Peak Flash — Strobe Mega (fx:23) at max brightness
+    await svc.applyJson({
+      'bri': 255,
+      'seg': [
+        {'id': 0, 'fx': 23, 'sx': 200, 'ix': 255, 'col': colors},
+      ],
+    });
+    await Future<void>.delayed(const Duration(seconds: 4));
+
+    // Phase 3: Celebration — Running Lights (fx:63) with both team colors
+    await svc.applyJson({
+      'seg': [
+        {'id': 0, 'fx': 63, 'sx': 140, 'ix': 220, 'col': colors},
+      ],
+    });
+    await Future<void>.delayed(const Duration(seconds: 6));
+
+    // Phase 4: Slow Fade — Breathe (fx:2) at low speed for fade-out
+    await svc.applyJson({
+      'bri': 120,
+      'seg': [
+        {
+          'id': 0,
+          'fx': 2,
+          'sx': 40,
+          'ix': 200,
+          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
+        },
+      ],
+    });
+    await Future<void>.delayed(const Duration(seconds: 4));
+  }
+
   // ---------------------------------------------------------------------------
   // Color helpers
   // ---------------------------------------------------------------------------
@@ -400,15 +455,17 @@ class AlertTriggerService {
       AlertEventType.quarterEndWinning => 'Winning!',
       AlertEventType.clutchBasket => 'Clutch Basket!',
       AlertEventType.turnover => 'Turnover!',
+      AlertEventType.soccerGoal => 'GOOOOOL!',
     };
     return '${team.teamName} $action $emoji';
   }
 
   static String _sportEmoji(SportType sport) => switch (sport) {
-        SportType.nfl => '\u{1F3C8}',
-        SportType.nba => '\u{1F3C0}',
+        SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
+        SportType.nba || SportType.ncaaMB => '\u{1F3C0}',
         SportType.mlb => '\u{26BE}',
         SportType.nhl => '\u{1F3D2}',
-        SportType.mls => '\u{26BD}',
+        SportType.mls || SportType.fifa || SportType.championsLeague =>
+          '\u{26BD}',
       };
 }

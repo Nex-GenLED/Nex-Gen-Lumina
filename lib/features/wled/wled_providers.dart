@@ -19,6 +19,7 @@ import 'package:nexgen_command/services/lumina_backend_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 
 /// Connectivity status provider that checks if user is on home network.
@@ -515,6 +516,10 @@ class WledNotifier extends Notifier<WledStateModel> {
         // Ignore errors if enforcement service not available
         debugPrint('Could not record manual override: $e');
       }
+
+      // Auto-pause Neighborhood Sync — user's local action always takes priority.
+      // This runs fire-and-forget so it never delays the user's command.
+      SyncWarningDialog.autoPauseIfInSync(ref);
     }
 
     _posting = true;

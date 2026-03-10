@@ -182,14 +182,36 @@ class ScoreMonitorService {
           timestamp: now,
         ));
 
+      case SportType.ncaaFB:
+        events.addAll(_diffNcaaFB(delta, config, current, now));
+
+      case SportType.ncaaMB:
+        events.addAll(
+          _diffNcaaMB(delta, config, current, now, previous),
+        );
+
       case SportType.nhl:
-      case SportType.mls:
-        // Goals come in +1 increments; emit one event per goal.
+        // Hockey goals: +1 increments, use goal event (15s animation).
         for (var i = 0; i < delta; i++) {
           events.add(ScoreAlertEvent(
             teamSlug: config.teamSlug,
             sport: config.sport,
             eventType: AlertEventType.goal,
+            pointsScored: 1,
+            gameId: current.gameId,
+            timestamp: now,
+          ));
+        }
+
+      case SportType.mls:
+      case SportType.fifa:
+      case SportType.championsLeague:
+        // Soccer goals: +1 increments, use soccerGoal event (20s animation).
+        for (var i = 0; i < delta; i++) {
+          events.add(ScoreAlertEvent(
+            teamSlug: config.teamSlug,
+            sport: config.sport,
+            eventType: AlertEventType.soccerGoal,
             pointsScored: 1,
             gameId: current.gameId,
             timestamp: now,
@@ -260,6 +282,62 @@ class ScoreMonitorService {
     ];
   }
 
+  /// NCAA FBS Football: reuse NFL scoring logic (same TD/FG/safety patterns).
+  List<ScoreAlertEvent> _diffNcaaFB(
+    int delta,
+    ScoreAlertConfig config,
+    GameState current,
+    DateTime now,
+  ) {
+    final AlertEventType type;
+    switch (delta) {
+      case 3:
+        type = AlertEventType.fieldGoal;
+      case 2:
+        type = AlertEventType.safety;
+      case 6:
+      case 8: // TD + 2-pt conversion
+      case 7: // TD + extra point (rare single-poll jump)
+        type = AlertEventType.touchdown;
+      default:
+        type = AlertEventType.touchdown;
+    }
+
+    return [
+      ScoreAlertEvent(
+        teamSlug: config.teamSlug,
+        sport: config.sport,
+        eventType: type,
+        pointsScored: delta,
+        gameId: current.gameId,
+        timestamp: now,
+      ),
+    ];
+  }
+
+  /// NCAA D1 Men's Basketball: emit only during clutch time
+  /// (last 5 min of 2nd half or OT, margin ≤8).
+  List<ScoreAlertEvent> _diffNcaaMB(
+    int delta,
+    ScoreAlertConfig config,
+    GameState current,
+    DateTime now,
+    GameState previous,
+  ) {
+    if (!current.isCollegeBasketballClutchTime) return const [];
+
+    return [
+      ScoreAlertEvent(
+        teamSlug: config.teamSlug,
+        sport: config.sport,
+        eventType: AlertEventType.clutchBasket,
+        pointsScored: delta,
+        gameId: current.gameId,
+        timestamp: now,
+      ),
+    ];
+  }
+
   // ---------------------------------------------------------------------------
   // Sensitivity filter
   // ---------------------------------------------------------------------------
@@ -279,13 +357,16 @@ class ScoreMonitorService {
           // in non-clutch contexts, but we keep them as they're still notable).
           return e.eventType == AlertEventType.touchdown ||
               e.eventType == AlertEventType.goal ||
+              e.eventType == AlertEventType.soccerGoal ||
               e.eventType == AlertEventType.run ||
               e.eventType == AlertEventType.clutchBasket ||
               e.eventType == AlertEventType.quarterEndWinning;
 
         case AlertSensitivity.clutchOnly:
           // Only emit if the game is in a clutch situation.
+          // Supports both NBA and NCAA basketball clutch time.
           return current.isClutchTime ||
+              current.isCollegeBasketballClutchTime ||
               e.eventType == AlertEventType.quarterEndWinning;
 
         case AlertSensitivity.allEvents:

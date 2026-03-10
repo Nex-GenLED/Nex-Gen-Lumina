@@ -91,7 +91,7 @@ class CanonicalTheme {
     // Pure white or near-white should stay clean
     if (r > 240 && g > 240 && b > 240) {
       // Keep it as clean white - WLED will use W channel if available
-      return [255, 255, 255];
+      return [255, 255, 255, 0];
     }
 
     // ============ SPECIAL CASE: DARK NAVY/BLUE ============
@@ -104,7 +104,7 @@ class CanonicalTheme {
       final newB = 255;
       final newG = (g * boostFactor * 0.3).round().clamp(0, 80); // Keep green low
       final newR = 0; // Remove any red to prevent purple
-      return [newR, newG, newB];
+      return [newR, newG, newB, 0];
     }
 
     // ============ RED-DOMINANT COLORS ============
@@ -119,14 +119,14 @@ class CanonicalTheme {
       // Keep some green if it's orange-ish, but remove blue
       final cleanB = 0; // Always remove blue from reds - it causes pink
       final cleanG = g > noiseThreshold ? g : 0;
-      return [r, cleanG, cleanB];
+      return [r, cleanG, cleanB, 0];
     }
 
     // ============ ORANGE COLORS ============
     // Detect if this is primarily an "orange" color (high R, medium G, low B)
     if (r > dominantThreshold && g > 60 && g < 220 && b < noiseThreshold) {
       // Orange - ensure blue stays at zero
-      return [r, g, 0];
+      return [r, g, 0, 0];
     }
 
     // ============ BLUE-DOMINANT COLORS ============
@@ -138,18 +138,18 @@ class CanonicalTheme {
       final cleanG = (g > b * 0.5) ? g : (g > noiseThreshold ? (g * 0.5).round() : 0);
       // Boost blue if it's dark
       final boostB = b < 150 ? (b * 1.7).round().clamp(0, 255) : b;
-      return [cleanR, cleanG, boostB];
+      return [cleanR, cleanG, boostB, 0];
     }
 
     // ============ GREEN-DOMINANT COLORS ============
     // Pure greens display well, but ensure they're clean
     if (g > dominantThreshold && r < g * 0.5 && b < g * 0.5) {
-      return [0, g, 0]; // Pure green
+      return [0, g, 0, 0]; // Pure green
     }
 
     // For other colors (purples, cyans, etc.), return as-is
     // These generally display well on LEDs
-    return [r, g, b];
+    return [r, g, b, 0];
   }
 }
 

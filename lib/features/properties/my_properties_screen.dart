@@ -298,7 +298,7 @@ class _PropertiesList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       itemCount: properties.length,
       itemBuilder: (context, index) {
         final property = properties[index];

@@ -567,3 +567,12 @@ final autopilotActivityLogProvider = Provider<List<AutopilotActivityEntry>>((ref
   final scheduler = ref.watch(autopilotSchedulerProvider);
   return scheduler.activityLog;
 });
+
+// ── Neighborhood Sync Event Integration ──────────────────────────────────
+
+/// Whether autopilot-triggered neighborhood sync events are enabled.
+final autopilotSyncEventsEnabledProvider = Provider<bool>((ref) {
+  final autopilotOn = ref.watch(autopilotEnabledProvider);
+  final autoDetectGames = ref.watch(autoDetectGameDaysProvider);
+  return autopilotOn && autoDetectGames;
+});

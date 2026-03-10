@@ -31,7 +31,7 @@ class UserProfileScreen extends ConsumerWidget {
               final email = user.email ?? model?.email ?? '';
               final photoUrl = model?.photoUrl ?? user.photoURL;
               return ListView(
-                padding: EdgeInsets.zero,
+                padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
                 children: [
                   _ProfileHeader(
                     name: displayName,

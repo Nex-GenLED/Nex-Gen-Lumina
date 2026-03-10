@@ -209,7 +209,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           // ── Main scroll area ────────────────────────────────────────────
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(14, 16, 14, 100),
+              padding: EdgeInsets.fromLTRB(14, 16, 14, navBarTotalHeight(context)),
               children: [
                 // ── Lumina AI card (with fixed schedule creation) ──
                 const _LuminaAICard(),
@@ -1409,11 +1409,7 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
   bool _listening = false;
 
   static const _quickActions = [
-    'Every Friday in April → Ember Glow',
     'July 4th → Independence Blue 100%',
-    'Turn off all of October',
-    'Weekends in June → Ocean Pulse',
-    'Halloween week → orange 9pm–midnight',
     'Christmas week → red and green',
   ];
 

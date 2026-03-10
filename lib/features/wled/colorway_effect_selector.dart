@@ -5,12 +5,14 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
@@ -46,7 +48,7 @@ class _ColorwayEffectSelectorPageState
     // Initialize selector state with defaults
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(selectorEffectIdProvider.notifier).state = 0;
-      ref.read(selectorSpeedProvider.notifier).state = 128;
+      ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state = 128;
       ref.read(selectorColorGroupProvider.notifier).state = 1;
       ref.read(selectorMotionTypeProvider.notifier).state = null;
@@ -223,160 +225,181 @@ class _ColorwayEffectSelectorPageState
             colorBehavior: colorFilter,
           );
 
-    // This widget is embedded in the library browser, so no Scaffold needed
-    return Column(
-      children: [
-        // Channel/Area selector — lets user choose which areas receive the pattern
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: ChannelSelectorBar(),
+    // This widget is embedded in the library browser, so no Scaffold needed.
+    // Use CustomScrollView so the entire page scrolls (preview, sliders, effects).
+    return CustomScrollView(
+      slivers: [
+        // Channel/Area selector
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: ChannelSelectorBar(),
+          ),
         ),
 
         // Apply button row
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              // Color palette preview
-              Expanded(
-                child: Row(
-                  children: [
-                    for (final color in _paletteColors.take(3))
-                      Container(
-                        width: 24,
-                        height: 24,
-                        margin: const EdgeInsets.only(right: 4),
-                        decoration: BoxDecoration(
-                          color: color,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: NexGenPalette.line),
+        SliverToBoxAdapter(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                // Color palette preview
+                Expanded(
+                  child: Row(
+                    children: [
+                      for (final color in _paletteColors.take(3))
+                        Container(
+                          width: 24,
+                          height: 24,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: NexGenPalette.line),
+                          ),
                         ),
-                      ),
-                  ],
-                ),
-              ),
-              // Open in full pattern editor
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: IconButton(
-                  onPressed: () {
-                    final effectId = ref.read(selectorEffectIdProvider);
-                    final speed = ref.read(selectorSpeedProvider);
-                    final intensity = ref.read(selectorIntensityProvider);
-                    final pattern = EditablePattern.fromGradientColors(
-                      id: widget.paletteNode.id,
-                      name: widget.paletteNode.name,
-                      colors: _paletteColors,
-                      effectId: effectId,
-                      speed: speed,
-                      intensity: intensity,
-                    );
-                    context.push(AppRoutes.editPattern, extra: pattern);
-                  },
-                  icon: const Icon(Icons.tune, size: 22),
-                  tooltip: 'Open in Pattern Editor',
-                  style: IconButton.styleFrom(
-                    foregroundColor: NexGenPalette.textMedium,
+                    ],
                   ),
                 ),
-              ),
-              // Apply button
-              ElevatedButton.icon(
-                onPressed: _applyPattern,
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text('Apply'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NexGenPalette.cyan,
-                  foregroundColor: NexGenPalette.matteBlack,
-                  minimumSize: const Size(0, 40),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                // Open in full pattern editor
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    onPressed: () {
+                      final effectId = ref.read(selectorEffectIdProvider);
+                      final speed = ref.read(selectorSpeedProvider);
+                      final intensity = ref.read(selectorIntensityProvider);
+                      final pattern = EditablePattern.fromGradientColors(
+                        id: widget.paletteNode.id,
+                        name: widget.paletteNode.name,
+                        colors: _paletteColors,
+                        effectId: effectId,
+                        speed: speed,
+                        intensity: intensity,
+                      );
+                      context.push(AppRoutes.editPattern, extra: pattern);
+                    },
+                    icon: const Icon(Icons.tune, size: 22),
+                    tooltip: 'Open in Pattern Editor',
+                    style: IconButton.styleFrom(
+                      foregroundColor: NexGenPalette.textMedium,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+                // Apply button
+                ElevatedButton.icon(
+                  onPressed: _applyPattern,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Apply'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: NexGenPalette.matteBlack,
+                    minimumSize: const Size(0, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
 
         // Roofline preview (house image + LED pixel overlay)
-        _buildRooflinePreview(effectId, speed),
+        SliverToBoxAdapter(child: _buildRooflinePreview(effectId, speed)),
 
-        const SizedBox(height: 8),
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
         // Color layout selector (conditional)
-        if (showColorLayout) _buildColorLayoutSelector(colorGroup),
+        if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
 
-        // Speed slider
-        _buildSlider(
-          label: 'Speed',
-          value: speed,
-          onChanged: (v) {
-            ref.read(selectorSpeedProvider.notifier).state = v.round();
-            _sendToWled();
-          },
-        ),
-
-        // Intensity slider
-        _buildSlider(
-          label: 'Intensity',
-          value: intensity,
-          onChanged: (v) {
-            ref.read(selectorIntensityProvider.notifier).state = v.round();
-            _sendToWled();
-          },
-        ),
-
-        const SizedBox(height: 8),
-
-        // Motion type filter chips
-        _buildMotionFilterRow(motionFilter),
-
-        const SizedBox(height: 6),
-
-        // Color behavior filter chips
-        _buildColorFilterRow(colorFilter),
-
-        const SizedBox(height: 8),
-
-        // Section header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Text(
-                showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
-                style: TextStyle(
-                  color: NexGenPalette.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              if (!showingTopPicks) ...[
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    ref.read(selectorMotionTypeProvider.notifier).state = null;
-                    ref.read(selectorColorBehaviorProvider.notifier).state = null;
-                  },
-                  child: Text(
-                    'Clear filters',
-                    style: TextStyle(
-                      color: NexGenPalette.cyan,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ],
-            ],
+        // Speed slider (per-effect profile with non-linear curve)
+        SliverToBoxAdapter(
+          child: EffectSpeedSlider(
+            rawSpeed: speed,
+            effectId: effectId,
+            onChanged: (raw) {
+              ref.read(selectorSpeedProvider.notifier).state = raw;
+              _sendToWled();
+            },
           ),
         ),
 
-        const SizedBox(height: 6),
+        // Intensity slider
+        SliverToBoxAdapter(
+          child: _buildSlider(
+            label: 'Intensity',
+            value: intensity,
+            onChanged: (v) {
+              ref.read(selectorIntensityProvider.notifier).state = v.round();
+              _sendToWled();
+            },
+          ),
+        ),
 
-        // Effect grid
-        Expanded(
-          child: _buildEffectGrid(displayEffects, effectId),
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+        // Motion type filter chips
+        SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 6)),
+
+        // Color behavior filter chips
+        SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+        // Section header
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Text(
+                  showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
+                  style: TextStyle(
+                    color: NexGenPalette.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                if (!showingTopPicks) ...[
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () {
+                      ref.read(selectorMotionTypeProvider.notifier).state = null;
+                      ref.read(selectorColorBehaviorProvider.notifier).state = null;
+                    },
+                    child: Text(
+                      'Clear filters',
+                      style: TextStyle(
+                        color: NexGenPalette.cyan,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 6)),
+
+        // Effect list
+        SliverPadding(
+          padding: EdgeInsets.only(left: 16, right: 16, bottom: navBarTotalHeight(context)),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final effect = displayEffects[index];
+                final isSelected = effect.id == effectId;
+                return _buildEffectTile(effect, isSelected);
+              },
+              childCount: displayEffects.length,
+            ),
+          ),
         ),
       ],
     );
@@ -571,34 +594,6 @@ class _ColorwayEffectSelectorPageState
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Effect Grid
-  // ---------------------------------------------------------------------------
-
-  Widget _buildEffectGrid(List<WledEffect> effects, int selectedEffectId) {
-    if (effects.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'No effects match these filters',
-            style: TextStyle(color: NexGenPalette.textSecondary),
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.only(left: 16, right: 16, bottom: kBottomNavBarPadding),
-      itemCount: effects.length,
-      itemBuilder: (context, index) {
-        final effect = effects[index];
-        final isSelected = effect.id == selectedEffectId;
-        return _buildEffectTile(effect, isSelected);
-      },
-    );
-  }
-
   Widget _buildEffectTile(WledEffect effect, bool isSelected) {
     // Color behavior badge text
     final badgeText = effect.colorBehavior.shortName;
@@ -612,6 +607,9 @@ class _ColorwayEffectSelectorPageState
     return InkWell(
       onTap: () {
         ref.read(selectorEffectIdProvider.notifier).state = effect.id;
+        // Reset speed to this effect's profile default for best experience
+        ref.read(selectorSpeedProvider.notifier).state =
+            getSpeedProfile(effect.id).rawDefault;
         _sendToWled();
       },
       borderRadius: BorderRadius.circular(10),

@@ -68,6 +68,32 @@ class GameState {
     return minutes < 2;
   }
 
+  /// NCAA MBB clutch time: last 5 minutes of 2nd half or overtime,
+  /// with a margin of 8 points or fewer.
+  bool get isCollegeBasketballClutchTime {
+    if (status != GameStatus.inProgress) return false;
+
+    final p = period;
+    if (p == null) return false;
+
+    final periodNum = int.tryParse(p);
+    // 2nd half = 2, overtime periods = 3+
+    final isLateGame = (periodNum != null && periodNum >= 2);
+    if (!isLateGame) return false;
+
+    final margin = (homeScore - awayScore).abs();
+    if (margin > 8) return false;
+
+    final c = clock;
+    if (c == null) return true;
+
+    final parts = c.split(':');
+    if (parts.length != 2) return true;
+
+    final minutes = int.tryParse(parts[0]) ?? 0;
+    return minutes < 5;
+  }
+
   GameState copyWith({
     String? gameId,
     String? homeTeam,

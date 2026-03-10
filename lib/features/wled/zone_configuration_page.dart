@@ -31,7 +31,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           // Header section
           Text('My Areas', style: Theme.of(context).textTheme.titleLarge),

@@ -101,7 +101,7 @@ class _LuminaStudioScreenState extends ConsumerState<LuminaStudioScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         title: const Text('Lumina Studio'),
       ),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+      body: ListView(padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)), children: [
         _buildStepHeader(context),
         const SizedBox(height: 12),
         if (_step == 0) _buildStepArea(context),

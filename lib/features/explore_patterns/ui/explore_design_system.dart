@@ -86,6 +86,52 @@ const Map<String, FolderTheme> kFolderThemes = {
     gradientColors: [Color(0xFF7B61FF), Color(0xFFFF4081)],
     emoji: '🎬',
   ),
+  // ── Soccer sub-folder themes ────────────────────────────────────────────
+  'soccer': FolderTheme(
+    gradientColors: [Color(0xFF00D4FF), Color(0xFF0088AA)],
+    emoji: '\u{26BD}',
+  ),
+  'mls': FolderTheme(
+    gradientColors: [Color(0xFF005293), Color(0xFF003060)],
+    emoji: '\u{26BD}',
+  ),
+  'premier league': FolderTheme(
+    gradientColors: [Color(0xFF3D195B), Color(0xFF280E3B)],
+    emoji: '\u{26BD}',
+  ),
+  'la liga': FolderTheme(
+    gradientColors: [Color(0xFFFF6B35), Color(0xFFCC4400)],
+    emoji: '\u{26BD}',
+  ),
+  'bundesliga': FolderTheme(
+    gradientColors: [Color(0xFFD4020D), Color(0xFF8B0000)],
+    emoji: '\u{26BD}',
+  ),
+  'serie a': FolderTheme(
+    gradientColors: [Color(0xFF1B4FBB), Color(0xFF0D2D6B)],
+    emoji: '\u{26BD}',
+  ),
+  'nwsl': FolderTheme(
+    gradientColors: [Color(0xFF00A3AD), Color(0xFF006D75)],
+    emoji: '\u{26BD}',
+  ),
+  'champions league': FolderTheme(
+    gradientColors: [Color(0xFF0D47A1), Color(0xFF1A237E)],
+    emoji: '\u{1F3C6}',
+  ),
+  'fifa world cup 2026': FolderTheme(
+    gradientColors: [Color(0xFFD4AF37), Color(0xFF1565C0)],
+    emoji: '\u{1F30D}',
+  ),
+  // ── NCAA folder themes ──────────────────────────────────────────────────
+  'college football': FolderTheme(
+    gradientColors: [Color(0xFFB71C1C), Color(0xFF8B0000)],
+    emoji: '\u{1F3C8}',
+  ),
+  'college basketball': FolderTheme(
+    gradientColors: [Color(0xFFFF8F00), Color(0xFFE65100)],
+    emoji: '\u{1F3C0}',
+  ),
 };
 
 const FolderTheme kDefaultFolderTheme = FolderTheme(

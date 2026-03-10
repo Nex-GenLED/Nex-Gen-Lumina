@@ -164,11 +164,6 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                 ),
                 actions: [
                   IconButton(
-                    onPressed: () => context.push('/explore/scenes'),
-                    icon: const Icon(Icons.layers_outlined, color: Colors.white),
-                    tooltip: 'My Scenes',
-                  ),
-                  IconButton(
                     onPressed: () {},
                     icon: Icon(Icons.search, color: ExploreDesignTokens.textSecondary),
                     tooltip: 'Search',
@@ -288,7 +283,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                       ),
 
                       // Bottom padding
-                      SliverToBoxAdapter(child: SizedBox(height: kBottomNavBarPadding)),
+                      SliverToBoxAdapter(child: SizedBox(height: navBarTotalHeight(context))),
                     ],
                   ),
                 ),

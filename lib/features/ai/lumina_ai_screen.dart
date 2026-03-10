@@ -8,6 +8,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart' show activePresetLabelProvider;
+import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
@@ -204,9 +205,12 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                     );
               }
               final label = preview?.patternName ??
-                  result.command?.parameters['patternName'] as String? ??
-                  'Lumina Pattern';
-              ref.read(activePresetLabelProvider.notifier).state = label;
+                  result.command?.parameters['patternName'] as String?;
+              if (label != null) {
+                ref.read(activePresetLabelProvider.notifier).state = label;
+              } else {
+                ref.read(activePresetLabelProvider.notifier).clear();
+              }
             }
           } catch (e) {
             debugPrint('Apply from Lumina screen failed: $e');
@@ -408,10 +412,15 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                 effectName: preview.effectName,
               );
         }
-        final label = preview?.patternName ?? 'Lumina Pattern';
-        ref.read(activePresetLabelProvider.notifier).state = label;
+        final label = preview?.patternName;
+        if (label != null) {
+          ref.read(activePresetLabelProvider.notifier).state = label;
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
+        final displayLabel = ref.read(displayPatternNameProvider);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$label applied!')),
+          SnackBar(content: Text('$displayLabel applied!')),
         );
       }
     } catch (e) {

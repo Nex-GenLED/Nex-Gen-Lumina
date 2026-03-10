@@ -27,64 +27,61 @@ class GlassDockNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     final selected = NexGenPalette.cyan;
     const unselected = Color(0xFF808080);
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                DockItem(
-                  label: 'Home',
-                  icon: Icons.home_filled,
-                  active: index == 0,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(0),
-                ),
-                DockItem(
-                  label: 'Schedule',
-                  icon: Icons.schedule_rounded,
-                  active: index == 1,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(1),
-                ),
-                LuminaNavButton(
-                  onTap: () => onLuminaTap?.call(),
-                  onLongPress: onLuminaLongPress,
-                  isListening: isVoiceListening,
-                  hasActiveSession: hasActiveSession,
-                ),
-                DockItem(
-                  label: 'Explore',
-                  icon: Icons.explore_rounded,
-                  active: index == 2,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(2),
-                ),
-                DockItem(
-                  label: 'System',
-                  icon: Icons.tune_rounded,
-                  active: index == 3,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(3),
-                ),
-              ],
-            ),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(14, 8, 14, 8 + bottomInset),
+          decoration: const BoxDecoration(
+            color: NexGenPalette.gunmetal90,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              DockItem(
+                label: 'Home',
+                icon: Icons.home_filled,
+                active: index == 0,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(0),
+              ),
+              DockItem(
+                label: 'Schedule',
+                icon: Icons.schedule_rounded,
+                active: index == 1,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(1),
+              ),
+              LuminaNavButton(
+                onTap: () => onLuminaTap?.call(),
+                onLongPress: onLuminaLongPress,
+                isListening: isVoiceListening,
+                hasActiveSession: hasActiveSession,
+              ),
+              DockItem(
+                label: 'Explore',
+                icon: Icons.explore_rounded,
+                active: index == 2,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(2),
+              ),
+              DockItem(
+                label: 'System',
+                icon: Icons.tune_rounded,
+                active: index == 3,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(3),
+              ),
+            ],
           ),
         ),
       ),

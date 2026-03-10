@@ -193,7 +193,8 @@ class LeagueFolderIds {
   static const String laLiga = 'league_la_liga';
   static const String bundesliga = 'league_bundesliga';
   static const String serieA = 'league_serie_a';
-  static const String ligue1 = 'league_ligue_1';
+  static const String championsLeague = 'league_champions_league';
+  static const String fifaWorldCup = 'league_fifa_world_cup';
   static const String ncaaFootball = 'ncaa_football';
   static const String ncaaBasketball = 'ncaa_basketball';
   static const String golf = 'league_golf';

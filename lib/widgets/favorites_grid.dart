@@ -252,6 +252,7 @@ class _FavoritePatternCard extends ConsumerWidget {
     final patternColors = _extractPatternColors();
     final textColor = _textColorFor(patternColors);
     final isSystemDefault = favorite.id.startsWith('system_');
+    final isWhiteSlot = favorite.id.startsWith('white_');
 
     return Material(
       color: Colors.transparent,
@@ -307,8 +308,17 @@ class _FavoritePatternCard extends ConsumerWidget {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // White slot pin icon
+                      if (isWhiteSlot) ...[
+                        Icon(
+                          Icons.push_pin_rounded,
+                          size: 14,
+                          color: textColor.withOpacity(0.8),
+                        ),
+                        const SizedBox(width: 5),
+                      ]
                       // System default star icon
-                      if (isSystemDefault) ...[
+                      else if (isSystemDefault) ...[
                         Icon(
                           Icons.star_rounded,
                           size: 16,

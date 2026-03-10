@@ -22,7 +22,7 @@ class ManageControllersPage extends ConsumerWidget {
         label: const Text('Add Controller'),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         child: asyncList.when(
           data: (items) {
             if (items.isEmpty) {

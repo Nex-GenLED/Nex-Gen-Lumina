@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/auth/forgot_password_page.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
 import 'package:nexgen_command/features/users/sub_users_screen.dart';
+import 'package:nexgen_command/features/whites/preferred_white_selection_page.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/discovery/discovery_page.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart';
@@ -37,7 +38,6 @@ import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.d
 import 'package:nexgen_command/features/design/my_designs_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
-import 'package:nexgen_command/features/scenes/my_scenes_screen.dart';
 import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart';
 import 'package:nexgen_command/features/properties/my_properties_screen.dart';
 import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
@@ -403,13 +403,6 @@ class AppRouter {
                       );
                     },
                   ),
-                  // /explore/scenes — saved scenes list
-                  GoRoute(
-                    path: 'scenes',
-                    name: 'my-scenes',
-                    parentNavigatorKey: _exploreNavigatorKey,
-                    pageBuilder: (context, state) => _exploreFadeSlide(state: state, child: const MyScenesScreen()),
-                  ),
                   // /explore/:categoryId — pattern category detail (wildcard LAST)
                   GoRoute(
                     path: ':categoryId',
@@ -554,6 +547,12 @@ class AppRouter {
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
                   ),
+                  GoRoute(
+                    path: 'my-whites',
+                    name: 'my-whites',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(child: PreferredWhiteSelectionPage()),
+                  ),
                   // Note: roofline-editor is intentionally a root-level fullscreen route,
                   // not nested here. See the root GoRoute for /settings/roofline-editor.
                 ],
@@ -605,7 +604,6 @@ class AppRoutes {
   static const String designStudio = '/design-studio';
   static const String editPattern = '/edit-pattern';
   static const String myDesigns = '/my-designs';
-  static const String myScenes = '/explore/scenes';
   static const String voiceAssistants = '/settings/voice-assistants';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
@@ -632,6 +630,7 @@ class AppRoutes {
   static const String joinWithCode = '/join-with-code';
   static const String systemDeactivated = '/system-deactivated';
   static const String subUsers = '/settings/users';
+  static const String myWhites = '/settings/my-whites';
   static const String autopilotSchedule = '/autopilot-schedule';
   // Demo experience routes
   static const String demoCode = '/demo-code';

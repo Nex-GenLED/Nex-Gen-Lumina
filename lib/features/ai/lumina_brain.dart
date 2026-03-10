@@ -379,17 +379,17 @@ class LuminaBrain {
     for (var i = 0; i < team.colors.length; i++) {
       final tc = team.colors[i];
       // Prefer LED-optimized values when available
-      final rgb = i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b];
+      final rgb = i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b, 0];
       colorsArray.add({
         'name': tc.name,
-        'rgb': [...rgb, 0], // append W=0 for RGBW
+        'rgb': rgb.length >= 4 ? rgb : [...rgb, 0], // ensure RGBW
       });
     }
 
     // WLED segment colors
     final segCol = <List<int>>[];
     for (var i = 0; i < team.colors.length; i++) {
-      final rgb = i < ledRgb.length ? ledRgb[i] : [team.colors[i].r, team.colors[i].g, team.colors[i].b];
+      final rgb = i < ledRgb.length ? ledRgb[i] : [team.colors[i].r, team.colors[i].g, team.colors[i].b, 0];
       segCol.add(rgb);
     }
 
@@ -401,7 +401,7 @@ class LuminaBrain {
           'id': 0,
           'on': true,
           'bri': 255,
-          'col': segCol.isEmpty ? [[255, 255, 255]] : segCol,
+          'col': segCol.isEmpty ? [[255, 255, 255, 0]] : segCol,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,

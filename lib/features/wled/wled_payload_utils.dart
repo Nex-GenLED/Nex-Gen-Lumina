@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/utils/rgbw_validation.dart';
 
 /// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
 ///
@@ -91,6 +92,22 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       s.putIfAbsent('grp', () => 1);
       s.putIfAbsent('spc', () => 0);
       s.putIfAbsent('of', () => 0);
+    }
+
+    // RGBW validation: ensure all color arrays have 4 channels [R, G, B, W]
+    final col = s['col'];
+    if (col is List && col.isNotEmpty) {
+      s['col'] = validateRgbwList(col, source: 'normalizeWledPayload');
+    }
+
+    // Also validate per-pixel 'i' arrays
+    final iArray = s['i'];
+    if (iArray is List) {
+      for (int j = 0; j < iArray.length; j++) {
+        if (iArray[j] is List) {
+          iArray[j] = validateRgbw(iArray[j] as List, source: 'normalizeWledPayload i[$j]');
+        }
+      }
     }
 
     normalizedSegs.add(s);

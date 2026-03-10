@@ -57,7 +57,7 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
 
           // Home Assistant section (all platforms)
           _buildHomeAssistantSection(context),
-          const SizedBox(height: 80),
+          SizedBox(height: navBarTotalHeight(context)),
         ],
       ),
     );

@@ -15,6 +15,20 @@ exports.processLuminaCommand = processLuminaCommand;
 const { processScheduleCommand } = require("./lib/processScheduleCommand");
 exports.processScheduleCommand = processScheduleCommand;
 
+// Import TypeScript-compiled Neighborhood Sync notification sender
+const { sendSyncNotification } = require("./lib/sendSyncNotification");
+exports.sendSyncNotification = sendSyncNotification;
+
+// Import TypeScript-compiled Sync Session lifecycle functions (background service)
+const { initiateSyncSession } = require("./lib/initiateSyncSession");
+exports.initiateSyncSession = initiateSyncSession;
+
+const { endSyncSession } = require("./lib/endSyncSession");
+exports.endSyncSession = endSyncSession;
+
+const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
+exports.triggerSyncFailover = triggerSyncFailover;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

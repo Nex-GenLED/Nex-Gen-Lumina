@@ -21,9 +21,10 @@ class SportsLibraryBuilder {
     'LA_LIGA': 'La Liga',
     'BUNDESLIGA': 'Bundesliga',
     'SERIE_A': 'Serie A',
-    'LIGUE_1': 'Ligue 1',
     'WNBA': 'WNBA',
     'NWSL': 'NWSL',
+    'CHAMPIONS_LEAGUE': 'Champions League',
+    'FIFA_WORLD_CUP': 'FIFA World Cup 2026',
   };
 
   /// League sort order (top-level leagues under Sports)
@@ -33,7 +34,6 @@ class SportsLibraryBuilder {
     'MLB': 2,
     'NHL': 3,
     'WNBA': 5,
-    'NWSL': 6,
   };
 
   /// Sort order for soccer sub-leagues (under the Soccer parent folder)
@@ -43,13 +43,14 @@ class SportsLibraryBuilder {
     'LA_LIGA': 2,
     'BUNDESLIGA': 3,
     'SERIE_A': 4,
-    'LIGUE_1': 5,
-    'NWSL': 6,
+    'NWSL': 5,
+    'CHAMPIONS_LEAGUE': 6,
+    'FIFA_WORLD_CUP': 7,
   };
 
   /// Leagues nested under the Soccer parent folder
   static const Set<String> _soccerLeagues = {
-    'MLS', 'EPL', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A', 'LIGUE_1', 'NWSL',
+    'MLS', 'EPL', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A', 'NWSL', 'CHAMPIONS_LEAGUE', 'FIFA_WORLD_CUP',
   };
 
   /// Build all league folder nodes
@@ -149,7 +150,7 @@ class SportsLibraryBuilder {
     'La Liga': 'league_la_liga',
     'Bundesliga': 'league_bundesliga',
     'Serie A': 'league_serie_a',
-    'Ligue 1': 'league_ligue_1',
+    'Champions League': 'league_champions_league',
   };
 
   /// Build palette nodes for international soccer teams from TeamColorDatabase.

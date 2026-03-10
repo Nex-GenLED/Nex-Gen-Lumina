@@ -181,7 +181,7 @@ class SiriActivityTypes {
 /// Predefined color shortcuts for Siri
 class SiriColorPresets {
   static const Map<String, Map<String, int>> colors = {
-    'Warm White': {'r': 255, 'g': 180, 'b': 100, 'w': 150},
+    'Warm White': {'r': 255, 'g': 180, 'b': 100, 'w': 255},
     'Cool White': {'r': 255, 'g': 255, 'b': 255, 'w': 255},
     'Daylight': {'r': 255, 'g': 240, 'b': 220, 'w': 200},
     'Red': {'r': 255, 'g': 0, 'b': 0, 'w': 0},

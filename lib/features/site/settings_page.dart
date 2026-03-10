@@ -60,7 +60,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           _UserProfileEntry(),
           // Keep spacing after profile entry
@@ -76,6 +76,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ],
           // Unified System & Device Management entry
           const _SystemManagementButton(),
+          const SizedBox(height: 16),
+          const _MyWhitesCard(),
           const SizedBox(height: 16),
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
@@ -472,6 +474,22 @@ class _UserProfileEntry extends ConsumerWidget {
         subtitle: Text(email),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => context.push('/settings/profile'),
+      ),
+    );
+  }
+}
+
+class _MyWhitesCard extends StatelessWidget {
+  const _MyWhitesCard();
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: Icon(Icons.lightbulb_outline, color: Colors.amber[200]),
+        title: const Text('My Whites'),
+        subtitle: const Text('Set your go-to white lighting for everyday use.'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => context.push(AppRoutes.myWhites),
       ),
     );
   }

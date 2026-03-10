@@ -63,10 +63,12 @@
         <string>location</string>
         <string>fetch</string>
         <string>processing</string>
+        <string>remote-notification</string>
     </array>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>com.nexgenled.lumina.sportscheck</string>
+        <string>com.nexgenled.lumina.syncEventCheck</string>
     </array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required for AR spatial mapping of your lights.</string>

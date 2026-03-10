@@ -14,8 +14,10 @@ import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
 class LibraryNodeGrid extends StatelessWidget {
@@ -41,7 +43,7 @@ class LibraryNodeGrid extends StatelessWidget {
 
     if (allPalettes) {
       return ListView.builder(
-        padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
+        padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
         itemCount: children.length,
         itemBuilder: (context, index) {
           final node = children[index];
@@ -58,7 +60,7 @@ class LibraryNodeGrid extends StatelessWidget {
 
     // Folders: 2-column grid with hero cards
     return GridView.builder(
-      padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
+      padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
@@ -109,7 +111,8 @@ class LibraryNodeCard extends StatelessWidget {
     // Sports folders
     if (id == 'league_soccer' || id == 'league_mls' || id == 'league_nwsl' ||
         id == 'league_epl' || id == 'league_la_liga' || id == 'league_bundesliga' ||
-        id == 'league_serie_a' || id == 'league_ligue_1') return Icons.sports_soccer;
+        id == 'league_serie_a' || id == 'league_champions_league' ||
+        id == 'league_fifa_world_cup') return Icons.sports_soccer;
     if (id.startsWith('league_')) return Icons.sports;
     if (id.contains('ncaa')) return Icons.school_outlined;
     if (id.startsWith('conf_')) return Icons.groups_outlined;
@@ -193,7 +196,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const Color(0xFFFF6B35);
     if (id == 'league_bundesliga') return const Color(0xFFD4020D);
     if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
-    if (id == 'league_ligue_1') return const Color(0xFF003189);
+    if (id == 'league_champions_league') return const Color(0xFF0D47A1);
+    if (id == 'league_fifa_world_cup') return const Color(0xFFD4AF37);
 
     // Holiday colors
     if (id == 'holiday_christmas') return const Color(0xFFC62828);
@@ -262,7 +266,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const Color(0xFFFF6B35);
     if (id == 'league_bundesliga') return const Color(0xFFD4020D);
     if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
-    if (id == 'league_ligue_1') return const Color(0xFF003189);
+    if (id == 'league_champions_league') return const Color(0xFF0D47A1);
+    if (id == 'league_fifa_world_cup') return const Color(0xFFD4AF37);
     if (id == 'league_mls') return const Color(0xFF005293);
     if (id == 'league_nwsl') return const Color(0xFF00A3AD);
     if (id.startsWith('league_')) return const Color(0xFF1976D2);
@@ -309,7 +314,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
     if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
     if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
-    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
+    if (id == 'league_champions_league') return const [Color(0xFF0D47A1), Color(0xFF1A237E)];
+    if (id == 'league_fifa_world_cup') return const [Color(0xFFD4AF37), Color(0xFF1565C0)];
 
     // Holiday gradients (matching _SubCategoryCard)
     if (id == 'holiday_christmas') return const [Color(0xFF2E7D32), Color(0xFFC62828)];
@@ -401,7 +407,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
     if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
     if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
-    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
+    if (id == 'league_champions_league') return const [Color(0xFF0D47A1), Color(0xFF1A237E)];
+    if (id == 'league_fifa_world_cup') return const [Color(0xFFD4AF37), Color(0xFF1565C0)];
     if (id.startsWith('league_')) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
     // Franchises
     if (id.startsWith('franchise_')) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
@@ -775,7 +782,7 @@ class PalettePatternGrid extends ConsumerWidget {
                       ),
                     )
                   : GridView.builder(
-                      padding: const EdgeInsets.only(left: 12, top: 12, right: 12, bottom: kBottomNavBarPadding),
+                      padding: EdgeInsets.only(left: 12, top: 12, right: 12, bottom: navBarTotalHeight(context)),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 4,
                         crossAxisSpacing: 8,
@@ -1492,18 +1499,20 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 ],
               ),
               const SizedBox(height: 20),
-              // Speed slider (hide for static effects)
+              // Speed slider with per-effect profile (hide for static effects)
               if (!isStatic) ...[
-                _buildSliderRow(
-                  icon: Icons.speed,
-                  label: 'Speed',
-                  value: _speed.toDouble(),
-                  onChanged: (v) {
-                    setState(() => _speed = v.round());
+                EffectSpeedSlider(
+                  rawSpeed: _speed,
+                  effectId: _effectId,
+                  initialExtended: getSpeedProfile(_effectId)
+                      .mapRawToSlider(_speed)
+                      .needsExtended,
+                  onChanged: (raw) {
+                    setState(() => _speed = raw);
                     _applyChange({'sx': _speed});
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
               ],
               // Intensity slider
               _buildSliderRow(

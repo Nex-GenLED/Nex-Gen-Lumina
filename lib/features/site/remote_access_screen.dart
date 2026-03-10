@@ -256,7 +256,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           // Status card
           _buildStatusCard(connectivityStatus, isRemote, isEnabled),

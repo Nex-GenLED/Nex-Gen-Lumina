@@ -1,10 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
 import 'package:nexgen_command/services/sports_alert_service.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/neighborhood/services/autopilot_sync_trigger.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/services/suggestion_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -163,6 +167,66 @@ class BackgroundLearningService {
     } catch (e) {
       debugPrint('❌ Game-day monitoring startup failed: $e');
     }
+  }
+
+  /// Start autopilot sync event monitoring for neighborhood groups.
+  ///
+  /// Must be called from a Riverpod-aware context.
+  static Future<void> startSyncEventMonitoring(WidgetRef ref) async {
+    try {
+      final syncEnabled = ref.read(autopilotSyncEventsEnabledProvider);
+      if (!syncEnabled) return;
+
+      final trigger = ref.read(autopilotSyncTriggerProvider);
+      final groupId = ref.read(activeNeighborhoodIdProvider);
+      if (groupId == null) return;
+
+      debugPrint('🔄 Starting autopilot sync event monitoring...');
+      await trigger.startMonitoring(groupId);
+
+      // Also persist user context for background service
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        await saveSyncUserUid(uid);
+        await saveSyncGroupId(groupId);
+      }
+
+      // Listen for background service session events (app in foreground)
+      _listenForBackgroundSessionEvents();
+    } catch (e) {
+      debugPrint('❌ Sync event monitoring startup failed: $e');
+    }
+  }
+
+  /// Listen for session events from the background service isolate.
+  /// When the background worker initiates a session while the app is closed,
+  /// these messages arrive if the user later opens the app mid-session.
+  static void _listenForBackgroundSessionEvents() {
+    final service = FlutterBackgroundService();
+
+    service.on('syncSessionStarted').listen((data) {
+      if (data == null) return;
+      debugPrint(
+        '[BackgroundLearning] Background session started: '
+        '${data['eventName']} (${data['sessionId']})',
+      );
+      // The UI will automatically pick up the session change via
+      // activeSyncEventSessionProvider which streams from Firestore.
+    });
+
+    service.on('syncSessionEnded').listen((data) {
+      if (data == null) return;
+      debugPrint(
+        '[BackgroundLearning] Background session ended: ${data['sessionId']}',
+      );
+    });
+
+    service.on('syncCelebration').listen((data) {
+      if (data == null) return;
+      debugPrint(
+        '[BackgroundLearning] Background celebration: ${data['eventName']}',
+      );
+    });
   }
 
   /// Manual trigger for testing

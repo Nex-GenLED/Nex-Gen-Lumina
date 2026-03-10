@@ -15,24 +15,20 @@ enum SyncWarningResult {
   continueAnyway,
 }
 
-/// A dialog that warns users when they're about to change their lights
-/// during an active neighborhood sync.
+/// Handles Neighborhood Sync override behavior.
 ///
-/// Usage:
-/// ```dart
-/// final result = await SyncWarningDialog.show(context, ref);
-/// if (result == SyncWarningResult.cancel) return;
-/// if (result == SyncWarningResult.pauseAndContinue) {
-///   await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
-/// }
-/// // Proceed with the light change...
-/// ```
+/// RULE: Any direct user action on their own system (power toggle, pattern
+/// change, color change, brightness adjustment, etc.) immediately overrides
+/// the current sync — no dialog, no blocking. The device executes the user's
+/// command first, then the sync state is updated silently.
 class SyncWarningDialog extends ConsumerWidget {
   const SyncWarningDialog({super.key});
 
   /// Shows the sync warning dialog if the user is in an active sync.
   /// Returns null if no active sync (safe to proceed).
   /// Returns the user's choice if in active sync.
+  ///
+  /// NOTE: In most cases prefer [checkAndProceed] which auto-pauses silently.
   static Future<SyncWarningResult?> showIfNeeded(
     BuildContext context,
     WidgetRef ref,
@@ -49,43 +45,62 @@ class SyncWarningDialog extends ConsumerWidget {
       return null;
     }
 
-    // Show the warning dialog
-    return showDialog<SyncWarningResult>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const SyncWarningDialog(),
-    );
+    // Auto-pause silently and return pauseAndContinue — no dialog shown.
+    // User's lights, user's control.
+    await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
+    debugPrint('Auto-paused Neighborhood Sync for local user action');
+    return SyncWarningResult.pauseAndContinue;
   }
 
-  /// Helper method that handles the common pattern of checking sync
-  /// and optionally pausing before executing an action.
+  /// Non-blocking sync check. Always returns true (user action always proceeds).
   ///
-  /// Returns true if the action should proceed, false if cancelled.
+  /// If the user is actively participating in a Neighborhood Sync, this
+  /// silently pauses their participation so the local action takes effect
+  /// immediately. Other houses continue their sync unaffected.
   static Future<bool> checkAndProceed(
     BuildContext context,
     WidgetRef ref, {
     VoidCallback? onPaused,
   }) async {
-    final result = await showIfNeeded(context, ref);
+    final syncStatus = ref.read(userSyncStatusProvider);
 
-    // No active sync - proceed
-    if (result == null) return true;
-
-    // User cancelled
-    if (result == SyncWarningResult.cancel) return false;
-
-    // User wants to pause first
-    if (result == SyncWarningResult.pauseAndContinue) {
-      await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
-      onPaused?.call();
+    // Not in sync or already paused — just proceed
+    if (!syncStatus.isInActiveSync || syncStatus.isPaused) {
+      return true;
     }
 
-    // Either pauseAndContinue or continueAnyway - proceed
+    // Auto-pause silently — no dialog, no blocking
+    try {
+      await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
+      debugPrint('Auto-paused Neighborhood Sync for local user action');
+      onPaused?.call();
+    } catch (e) {
+      debugPrint('Failed to auto-pause sync: $e');
+      // Still proceed — user action always takes priority
+    }
+
     return true;
+  }
+
+  /// Standalone function to auto-pause sync from non-widget contexts (e.g., WledNotifier).
+  /// Call this from providers/services that don't have BuildContext.
+  static Future<void> autoPauseIfInSync(Ref ref) async {
+    try {
+      final syncStatus = ref.read(userSyncStatusProvider);
+      if (!syncStatus.isInActiveSync || syncStatus.isPaused) return;
+
+      await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
+      debugPrint('Auto-paused Neighborhood Sync (provider-level override)');
+    } catch (e) {
+      // Silent fail — never block the user's action
+      debugPrint('Auto-pause sync failed (non-critical): $e');
+    }
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // This dialog is kept for backward compatibility but is no longer shown
+    // by checkAndProceed. It can still be used for explicit confirmation flows.
     final syncStatus = ref.watch(userSyncStatusProvider);
     final theme = Theme.of(context);
 
@@ -100,11 +115,7 @@ class SyncWarningDialog extends ConsumerWidget {
       ),
       title: Row(
         children: [
-          Icon(
-            Icons.sync,
-            color: Colors.orange,
-            size: 28,
-          ),
+          const Icon(Icons.sync, color: Colors.orange, size: 28),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -120,7 +131,6 @@ class SyncWarningDialog extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Current sync info
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -132,11 +142,7 @@ class SyncWarningDialog extends ConsumerWidget {
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.home_outlined,
-                  color: Colors.orange,
-                  size: 20,
-                ),
+                const Icon(Icons.home_outlined, color: Colors.orange, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
@@ -163,53 +169,28 @@ class SyncWarningDialog extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'You are currently participating in a neighborhood sync. '
-            'Changing your lights will disrupt the coordinated pattern.',
+            'Your sync participation has been paused so your '
+            'local changes can take effect. Other homes in your '
+            'group will continue their sync.',
             style: theme.textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Would you like to temporarily pause your participation?',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
           ),
         ],
       ),
       actions: [
-        // Cancel button
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(SyncWarningResult.cancel),
-          child: const Text('Cancel'),
-        ),
-        // Continue without pausing (breaks sync)
         TextButton(
           onPressed: () => Navigator.of(context).pop(SyncWarningResult.continueAnyway),
-          child: Text(
-            'Continue Anyway',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            ),
-          ),
-        ),
-        // Pause and continue (recommended)
-        FilledButton.icon(
-          onPressed: () => Navigator.of(context).pop(SyncWarningResult.pauseAndContinue),
-          icon: const Icon(Icons.pause, size: 18),
-          label: const Text('Pause & Continue'),
-          style: FilledButton.styleFrom(
-            backgroundColor: Colors.orange,
-          ),
+          child: const Text('OK'),
         ),
       ],
-      actionsAlignment: MainAxisAlignment.spaceBetween,
       actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     );
   }
 }
 
-/// A banner widget that can be shown at the top of screens to indicate
-/// the user is in an active neighborhood sync.
+/// A banner widget shown at the top of screens indicating sync status.
+///
+/// When the user is actively syncing: shows status info.
+/// When the user has paused (via local override): shows a one-tap "Rejoin" button.
 class ActiveSyncBanner extends ConsumerWidget {
   final VoidCallback? onTap;
 
@@ -230,13 +211,18 @@ class ActiveSyncBanner extends ConsumerWidget {
     final isPaused = syncStatus.isPaused;
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: isPaused
+          ? () async {
+              // One-tap rejoin
+              await ref.read(neighborhoodNotifierProvider.notifier).resumeMySync();
+            }
+          : onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: isPaused
-                ? [Colors.grey.shade700, Colors.grey.shade600]
+                ? [Colors.cyan.shade700, Colors.cyan.shade600]
                 : [Colors.orange.shade700, Colors.orange.shade600],
           ),
         ),
@@ -245,7 +231,7 @@ class ActiveSyncBanner extends ConsumerWidget {
           child: Row(
             children: [
               Icon(
-                isPaused ? Icons.pause_circle : Icons.sync,
+                isPaused ? Icons.sync_disabled : Icons.sync,
                 color: Colors.white,
                 size: 20,
               ),
@@ -257,7 +243,7 @@ class ActiveSyncBanner extends ConsumerWidget {
                   children: [
                     Text(
                       isPaused
-                          ? 'Sync Paused'
+                          ? 'Neighborhood Sync is active'
                           : 'Neighborhood Sync Active',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.white,
@@ -266,7 +252,7 @@ class ActiveSyncBanner extends ConsumerWidget {
                     ),
                     Text(
                       isPaused
-                          ? 'Tap to resume participation'
+                          ? 'You left sync — Tap to rejoin'
                           : '${syncStatus.activeGroup?.name ?? "Group"} - ${syncStatus.activePatternName ?? "Pattern"}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.white.withValues(alpha: 0.8),
@@ -276,11 +262,28 @@ class ActiveSyncBanner extends ConsumerWidget {
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right,
-                color: Colors.white.withValues(alpha: 0.7),
-                size: 20,
-              ),
+              if (isPaused)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Rejoin',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              else
+                Icon(
+                  Icons.chevron_right,
+                  color: Colors.white.withValues(alpha: 0.7),
+                  size: 20,
+                ),
             ],
           ),
         ),
@@ -303,30 +306,37 @@ class SyncStatusChip extends ConsumerWidget {
 
     final isPaused = syncStatus.isPaused;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isPaused ? Colors.grey : Colors.orange,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isPaused ? Icons.pause : Icons.sync,
-            color: Colors.white,
-            size: 14,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            isPaused ? 'Paused' : 'Syncing',
-            style: const TextStyle(
+    return GestureDetector(
+      onTap: isPaused
+          ? () async {
+              await ref.read(neighborhoodNotifierProvider.notifier).resumeMySync();
+            }
+          : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isPaused ? Colors.cyan.shade700 : Colors.orange,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isPaused ? Icons.sync_disabled : Icons.sync,
               color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+              size: 14,
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Text(
+              isPaused ? 'Rejoin Sync' : 'Syncing',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

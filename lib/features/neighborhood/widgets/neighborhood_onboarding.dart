@@ -91,7 +91,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
             // Action buttons
             _buildActionButtons(),
 
-            const SizedBox(height: 24),
+            SizedBox(height: navBarTotalHeight(context)),
           ],
         ),
       ),

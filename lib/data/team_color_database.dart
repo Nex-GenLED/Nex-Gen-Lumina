@@ -66,6 +66,9 @@ class UnifiedTeamEntry {
   /// Country (optional -- defaults to USA for domestic leagues).
   final String? country;
 
+  /// ESPN team identifier for cross-referencing with the live score system.
+  final String? espnTeamId;
+
   /// All search-friendly aliases (lowercased).
   final List<String> aliases;
 
@@ -88,6 +91,7 @@ class UnifiedTeamEntry {
     required this.league,
     this.state,
     this.country,
+    this.espnTeamId,
     this.aliases = const [],
     this.colors = const [],
     this.suggestedEffects = const [12, 41, 65, 0],
@@ -118,34 +122,34 @@ class UnifiedTeamEntry {
   /// 3. Dark blues → washed out, so boost
   /// 4. Whites → keep pure
   static List<int> _optimizeForLed(int r, int g, int b) {
-    if (r > 240 && g > 240 && b > 240) return [255, 255, 255];
+    if (r > 240 && g > 240 && b > 240) return [255, 255, 255, 0];
 
     if (b > 50 && r < 30 && g < 80 && b > r && b > g) {
       final boostFactor = 255.0 / b;
-      return [0, (g * boostFactor * 0.3).round().clamp(0, 80), 255];
+      return [0, (g * boostFactor * 0.3).round().clamp(0, 80), 255, 0];
     }
 
     const dominantThreshold = 150;
     const noiseThreshold = 50;
 
     if (r > dominantThreshold && g < r * 0.6 && b < r * 0.6) {
-      return [r, g > noiseThreshold ? g : 0, 0];
+      return [r, g > noiseThreshold ? g : 0, 0, 0];
     }
 
     if (r > dominantThreshold && g > 60 && g < 220 && b < noiseThreshold) {
-      return [r, g, 0];
+      return [r, g, 0, 0];
     }
 
     if (b > 80 && b > r && b > g) {
       final cleanG = (g > b * 0.5) ? g : (g > noiseThreshold ? (g * 0.5).round() : 0);
-      return [0, cleanG, b < 150 ? (b * 1.7).round().clamp(0, 255) : b];
+      return [0, cleanG, b < 150 ? (b * 1.7).round().clamp(0, 255) : b, 0];
     }
 
     if (g > dominantThreshold && r < g * 0.5 && b < g * 0.5) {
-      return [0, g, 0];
+      return [0, g, 0, 0];
     }
 
-    return [r, g, b];
+    return [r, g, b, 0];
   }
 }
 
@@ -281,6 +285,7 @@ class TeamColorDatabase {
       ..._laLigaTeams,
       ..._bundesligaTeams,
       ..._serieATeams,
+      ..._fifaWorldCupTeams,
     ];
   }
 
@@ -643,6 +648,7 @@ class TeamColorDatabase {
     required String country,
     required List<TeamColor> colors,
     required List<String> aliases,
+    String? espnTeamId,
     List<int> suggestedEffects = const [12, 41, 65, 0],
   }) {
     return UnifiedTeamEntry(
@@ -651,6 +657,7 @@ class TeamColorDatabase {
       city: city,
       league: league,
       country: country,
+      espnTeamId: espnTeamId,
       aliases: aliases.map((a) => a.toLowerCase()).toList(),
       colors: colors,
       suggestedEffects: suggestedEffects,
@@ -1625,5 +1632,82 @@ class TeamColorDatabase {
       ],
       aliases: ['frosinone', 'frosinone calcio', 'canarini', 'ciociari'],
     ),
+  ];
+
+  // =======================================================================
+  //  FIFA World Cup 2026 — National Teams
+  // =======================================================================
+  static final List<UnifiedTeamEntry> _fifaWorldCupTeams = [
+    // --- HOST NATIONS ---
+    _intl(id: 'fifa_usa', name: 'United States', city: 'Washington D.C.', league: 'FIFA World Cup', country: 'United States', espnTeamId: 'USA', colors: [TeamColor.hex('USA Navy', 0xFF002868), TeamColor.hex('USA Red', 0xFFBF0A30), TeamColor.hex('USA White', 0xFFFFFFFF)], aliases: ['usa', 'united states', 'usmnt', 'us soccer', 'us men', 'team usa', 'american soccer']),
+    _intl(id: 'fifa_mexico', name: 'Mexico', city: 'Mexico City', league: 'FIFA World Cup', country: 'Mexico', espnTeamId: 'MEX', colors: [TeamColor.hex('Mexico Green', 0xFF006847), TeamColor.hex('Mexico Red', 0xFFCE1126), TeamColor.hex('Mexico White', 0xFFFFFFFF)], aliases: ['mexico', 'el tri', 'seleccion mexicana', 'mexican soccer']),
+    _intl(id: 'fifa_canada', name: 'Canada', city: 'Ottawa', league: 'FIFA World Cup', country: 'Canada', espnTeamId: 'CAN', colors: [TeamColor.hex('Canada Red', 0xFFFF0000), TeamColor.hex('Canada White', 0xFFFFFFFF)], aliases: ['canada', 'les rouges', 'canmnt', 'canadian soccer']),
+
+    // --- SOUTH AMERICA ---
+    _intl(id: 'fifa_brazil', name: 'Brazil', city: 'Brasília', league: 'FIFA World Cup', country: 'Brazil', espnTeamId: 'BRA', colors: [TeamColor.hex('Brazil Yellow', 0xFFFFDF00), TeamColor.hex('Brazil Green', 0xFF009739), TeamColor.hex('Brazil Blue', 0xFF002776)], aliases: ['brazil', 'brasil', 'seleção', 'selecao', 'canarinho', 'brazilian soccer']),
+    _intl(id: 'fifa_argentina', name: 'Argentina', city: 'Buenos Aires', league: 'FIFA World Cup', country: 'Argentina', espnTeamId: 'ARG', colors: [TeamColor.hex('Argentina Blue', 0xFF75AADB), TeamColor.hex('Argentina White', 0xFFFFFFFF)], aliases: ['argentina', 'la albiceleste', 'afa', 'argentine soccer']),
+    _intl(id: 'fifa_uruguay', name: 'Uruguay', city: 'Montevideo', league: 'FIFA World Cup', country: 'Uruguay', espnTeamId: 'URU', colors: [TeamColor.hex('Uruguay Blue', 0xFF5CBFEB), TeamColor.hex('Uruguay White', 0xFFFFFFFF)], aliases: ['uruguay', 'la celeste', 'uruguayan soccer']),
+    _intl(id: 'fifa_colombia', name: 'Colombia', city: 'Bogotá', league: 'FIFA World Cup', country: 'Colombia', espnTeamId: 'COL', colors: [TeamColor.hex('Colombia Yellow', 0xFFFCD116), TeamColor.hex('Colombia Blue', 0xFF003893), TeamColor.hex('Colombia Red', 0xFFCE1126)], aliases: ['colombia', 'los cafeteros', 'colombian soccer']),
+    _intl(id: 'fifa_ecuador', name: 'Ecuador', city: 'Quito', league: 'FIFA World Cup', country: 'Ecuador', espnTeamId: 'ECU', colors: [TeamColor.hex('Ecuador Yellow', 0xFFFFD100), TeamColor.hex('Ecuador Blue', 0xFF034EA2)], aliases: ['ecuador', 'la tri', 'ecuadorian soccer']),
+    _intl(id: 'fifa_paraguay', name: 'Paraguay', city: 'Asunción', league: 'FIFA World Cup', country: 'Paraguay', espnTeamId: 'PAR', colors: [TeamColor.hex('Paraguay Red', 0xFFDA121A), TeamColor.hex('Paraguay Blue', 0xFF0038A8)], aliases: ['paraguay', 'la albirroja', 'paraguayan soccer']),
+    _intl(id: 'fifa_peru', name: 'Peru', city: 'Lima', league: 'FIFA World Cup', country: 'Peru', espnTeamId: 'PER', colors: [TeamColor.hex('Peru Red', 0xFFD91023), TeamColor.hex('Peru White', 0xFFFFFFFF)], aliases: ['peru', 'la blanquirroja', 'peruvian soccer']),
+    _intl(id: 'fifa_chile', name: 'Chile', city: 'Santiago', league: 'FIFA World Cup', country: 'Chile', espnTeamId: 'CHI', colors: [TeamColor.hex('Chile Red', 0xFFD52B1E), TeamColor.hex('Chile Blue', 0xFF0039A6)], aliases: ['chile', 'la roja', 'chilean soccer']),
+    _intl(id: 'fifa_bolivia', name: 'Bolivia', city: 'La Paz', league: 'FIFA World Cup', country: 'Bolivia', espnTeamId: 'BOL', colors: [TeamColor.hex('Bolivia Green', 0xFF007A33), TeamColor.hex('Bolivia Yellow', 0xFFFFD700), TeamColor.hex('Bolivia Red', 0xFFD52B1E)], aliases: ['bolivia', 'la verde', 'bolivian soccer']),
+    _intl(id: 'fifa_venezuela', name: 'Venezuela', city: 'Caracas', league: 'FIFA World Cup', country: 'Venezuela', espnTeamId: 'VEN', colors: [TeamColor.hex('Venezuela Maroon', 0xFF8B0000), TeamColor.hex('Venezuela Yellow', 0xFFFFD700)], aliases: ['venezuela', 'la vinotinto', 'venezuelan soccer']),
+
+    // --- CONCACAF ---
+    _intl(id: 'fifa_costa_rica', name: 'Costa Rica', city: 'San José', league: 'FIFA World Cup', country: 'Costa Rica', espnTeamId: 'CRC', colors: [TeamColor.hex('Costa Rica Red', 0xFFCE1126), TeamColor.hex('Costa Rica Blue', 0xFF002B7F)], aliases: ['costa rica', 'los ticos', 'costa rican soccer']),
+    _intl(id: 'fifa_honduras', name: 'Honduras', city: 'Tegucigalpa', league: 'FIFA World Cup', country: 'Honduras', espnTeamId: 'HON', colors: [TeamColor.hex('Honduras Blue', 0xFF0073CF), TeamColor.hex('Honduras White', 0xFFFFFFFF)], aliases: ['honduras', 'los catrachos', 'honduran soccer']),
+    _intl(id: 'fifa_panama', name: 'Panama', city: 'Panama City', league: 'FIFA World Cup', country: 'Panama', espnTeamId: 'PAN', colors: [TeamColor.hex('Panama Red', 0xFFDA121A), TeamColor.hex('Panama Blue', 0xFF003DA5)], aliases: ['panama', 'los canaleros', 'panamanian soccer']),
+    _intl(id: 'fifa_jamaica', name: 'Jamaica', city: 'Kingston', league: 'FIFA World Cup', country: 'Jamaica', espnTeamId: 'JAM', colors: [TeamColor.hex('Jamaica Green', 0xFF009B3A), TeamColor.hex('Jamaica Gold', 0xFFFED100)], aliases: ['jamaica', 'reggae boyz', 'jamaican soccer']),
+
+    // --- EUROPE ---
+    _intl(id: 'fifa_england', name: 'England', city: 'London', league: 'FIFA World Cup', country: 'England', espnTeamId: 'ENG', colors: [TeamColor.hex('England White', 0xFFFFFFFF), TeamColor.hex('England Red', 0xFFCF081F)], aliases: ['england', 'three lions', 'english soccer', 'the lions']),
+    _intl(id: 'fifa_france', name: 'France', city: 'Paris', league: 'FIFA World Cup', country: 'France', espnTeamId: 'FRA', colors: [TeamColor.hex('France Blue', 0xFF002395), TeamColor.hex('France Red', 0xFFED2939), TeamColor.hex('France White', 0xFFFFFFFF)], aliases: ['france', 'les bleus', 'french soccer', 'equipe de france']),
+    _intl(id: 'fifa_germany', name: 'Germany', city: 'Berlin', league: 'FIFA World Cup', country: 'Germany', espnTeamId: 'GER', colors: [TeamColor.hex('Germany Black', 0xFF000000), TeamColor.hex('Germany Red', 0xFFDD0000), TeamColor.hex('Germany Gold', 0xFFFFCE00)], aliases: ['germany', 'die mannschaft', 'german soccer', 'dfb']),
+    _intl(id: 'fifa_spain', name: 'Spain', city: 'Madrid', league: 'FIFA World Cup', country: 'Spain', espnTeamId: 'ESP', colors: [TeamColor.hex('Spain Red', 0xFFAA151B), TeamColor.hex('Spain Yellow', 0xFFF1BF00)], aliases: ['spain', 'la roja', 'la furia roja', 'spanish soccer']),
+    _intl(id: 'fifa_portugal', name: 'Portugal', city: 'Lisbon', league: 'FIFA World Cup', country: 'Portugal', espnTeamId: 'POR', colors: [TeamColor.hex('Portugal Green', 0xFF006600), TeamColor.hex('Portugal Red', 0xFFFF0000)], aliases: ['portugal', 'selecção', 'portuguese soccer', 'a seleção']),
+    _intl(id: 'fifa_netherlands', name: 'Netherlands', city: 'Amsterdam', league: 'FIFA World Cup', country: 'Netherlands', espnTeamId: 'NED', colors: [TeamColor.hex('Netherlands Orange', 0xFFFF6600), TeamColor.hex('Netherlands White', 0xFFFFFFFF)], aliases: ['netherlands', 'holland', 'dutch', 'oranje', 'dutch soccer']),
+    _intl(id: 'fifa_belgium', name: 'Belgium', city: 'Brussels', league: 'FIFA World Cup', country: 'Belgium', espnTeamId: 'BEL', colors: [TeamColor.hex('Belgium Red', 0xFFED2939), TeamColor.hex('Belgium Yellow', 0xFFFDDA24), TeamColor.hex('Belgium Black', 0xFF000000)], aliases: ['belgium', 'red devils', 'belgian soccer', 'les diables rouges']),
+    _intl(id: 'fifa_croatia', name: 'Croatia', city: 'Zagreb', league: 'FIFA World Cup', country: 'Croatia', espnTeamId: 'CRO', colors: [TeamColor.hex('Croatia Red', 0xFFFF0000), TeamColor.hex('Croatia Blue', 0xFF171796)], aliases: ['croatia', 'vatreni', 'the blazers', 'croatian soccer']),
+    _intl(id: 'fifa_denmark', name: 'Denmark', city: 'Copenhagen', league: 'FIFA World Cup', country: 'Denmark', espnTeamId: 'DEN', colors: [TeamColor.hex('Denmark Red', 0xFFC60C30), TeamColor.hex('Denmark White', 0xFFFFFFFF)], aliases: ['denmark', 'danish dynamite', 'danish soccer']),
+    _intl(id: 'fifa_switzerland', name: 'Switzerland', city: 'Bern', league: 'FIFA World Cup', country: 'Switzerland', espnTeamId: 'SUI', colors: [TeamColor.hex('Swiss Red', 0xFFFF0000), TeamColor.hex('Swiss White', 0xFFFFFFFF)], aliases: ['switzerland', 'nati', 'swiss soccer', 'la nati']),
+    _intl(id: 'fifa_austria', name: 'Austria', city: 'Vienna', league: 'FIFA World Cup', country: 'Austria', espnTeamId: 'AUT', colors: [TeamColor.hex('Austria Red', 0xFFED2939), TeamColor.hex('Austria White', 0xFFFFFFFF)], aliases: ['austria', 'das team', 'austrian soccer']),
+    _intl(id: 'fifa_serbia', name: 'Serbia', city: 'Belgrade', league: 'FIFA World Cup', country: 'Serbia', espnTeamId: 'SRB', colors: [TeamColor.hex('Serbia Red', 0xFFC6363C), TeamColor.hex('Serbia Blue', 0xFF0C4076)], aliases: ['serbia', 'orlovi', 'serbian soccer', 'the eagles']),
+    _intl(id: 'fifa_poland', name: 'Poland', city: 'Warsaw', league: 'FIFA World Cup', country: 'Poland', espnTeamId: 'POL', colors: [TeamColor.hex('Poland Red', 0xFFDC143C), TeamColor.hex('Poland White', 0xFFFFFFFF)], aliases: ['poland', 'bialo-czerwoni', 'polish soccer']),
+    _intl(id: 'fifa_scotland', name: 'Scotland', city: 'Glasgow', league: 'FIFA World Cup', country: 'Scotland', espnTeamId: 'SCO', colors: [TeamColor.hex('Scotland Blue', 0xFF003399), TeamColor.hex('Scotland White', 0xFFFFFFFF)], aliases: ['scotland', 'tartan army', 'scottish soccer']),
+    _intl(id: 'fifa_wales', name: 'Wales', city: 'Cardiff', league: 'FIFA World Cup', country: 'Wales', espnTeamId: 'WAL', colors: [TeamColor.hex('Wales Red', 0xFFFF0000), TeamColor.hex('Wales Green', 0xFF00AB39)], aliases: ['wales', 'the dragons', 'welsh soccer', 'cymru']),
+    _intl(id: 'fifa_ukraine', name: 'Ukraine', city: 'Kyiv', league: 'FIFA World Cup', country: 'Ukraine', espnTeamId: 'UKR', colors: [TeamColor.hex('Ukraine Blue', 0xFF005BBB), TeamColor.hex('Ukraine Yellow', 0xFFFFD500)], aliases: ['ukraine', 'zbirna', 'ukrainian soccer']),
+    _intl(id: 'fifa_sweden', name: 'Sweden', city: 'Stockholm', league: 'FIFA World Cup', country: 'Sweden', espnTeamId: 'SWE', colors: [TeamColor.hex('Sweden Blue', 0xFF006AA7), TeamColor.hex('Sweden Yellow', 0xFFFECC00)], aliases: ['sweden', 'blågult', 'swedish soccer']),
+    _intl(id: 'fifa_norway', name: 'Norway', city: 'Oslo', league: 'FIFA World Cup', country: 'Norway', espnTeamId: 'NOR', colors: [TeamColor.hex('Norway Red', 0xFFEF2B2D), TeamColor.hex('Norway Blue', 0xFF002868)], aliases: ['norway', 'norwegian soccer', 'drengene']),
+    _intl(id: 'fifa_turkey', name: 'Turkey', city: 'Istanbul', league: 'FIFA World Cup', country: 'Turkey', espnTeamId: 'TUR', colors: [TeamColor.hex('Turkey Red', 0xFFE30A17), TeamColor.hex('Turkey White', 0xFFFFFFFF)], aliases: ['turkey', 'türkiye', 'ay-yildizlilar', 'turkish soccer']),
+    _intl(id: 'fifa_slovenia', name: 'Slovenia', city: 'Ljubljana', league: 'FIFA World Cup', country: 'Slovenia', espnTeamId: 'SVN', colors: [TeamColor.hex('Slovenia Blue', 0xFF005DA4), TeamColor.hex('Slovenia White', 0xFFFFFFFF)], aliases: ['slovenia', 'slovenian soccer']),
+    _intl(id: 'fifa_czech_republic', name: 'Czech Republic', city: 'Prague', league: 'FIFA World Cup', country: 'Czech Republic', espnTeamId: 'CZE', colors: [TeamColor.hex('Czech Blue', 0xFF11457E), TeamColor.hex('Czech Red', 0xFFD7141A)], aliases: ['czech republic', 'czechia', 'czech soccer', 'narodni tym']),
+
+    // --- AFRICA ---
+    _intl(id: 'fifa_morocco', name: 'Morocco', city: 'Rabat', league: 'FIFA World Cup', country: 'Morocco', espnTeamId: 'MAR', colors: [TeamColor.hex('Morocco Red', 0xFFC1272D), TeamColor.hex('Morocco Green', 0xFF006233)], aliases: ['morocco', 'atlas lions', 'les lions de l\'atlas', 'moroccan soccer']),
+    _intl(id: 'fifa_senegal', name: 'Senegal', city: 'Dakar', league: 'FIFA World Cup', country: 'Senegal', espnTeamId: 'SEN', colors: [TeamColor.hex('Senegal Green', 0xFF00853F), TeamColor.hex('Senegal Yellow', 0xFFFDEF42)], aliases: ['senegal', 'lions of teranga', 'senegalese soccer']),
+    _intl(id: 'fifa_cameroon', name: 'Cameroon', city: 'Yaoundé', league: 'FIFA World Cup', country: 'Cameroon', espnTeamId: 'CMR', colors: [TeamColor.hex('Cameroon Green', 0xFF007A5E), TeamColor.hex('Cameroon Red', 0xFFCE1126)], aliases: ['cameroon', 'indomitable lions', 'les lions indomptables']),
+    _intl(id: 'fifa_nigeria', name: 'Nigeria', city: 'Abuja', league: 'FIFA World Cup', country: 'Nigeria', espnTeamId: 'NGA', colors: [TeamColor.hex('Nigeria Green', 0xFF008751), TeamColor.hex('Nigeria White', 0xFFFFFFFF)], aliases: ['nigeria', 'super eagles', 'nigerian soccer']),
+    _intl(id: 'fifa_ghana', name: 'Ghana', city: 'Accra', league: 'FIFA World Cup', country: 'Ghana', espnTeamId: 'GHA', colors: [TeamColor.hex('Ghana Gold', 0xFFFFD700), TeamColor.hex('Ghana Green', 0xFF006B3F)], aliases: ['ghana', 'black stars', 'ghanaian soccer']),
+    _intl(id: 'fifa_egypt', name: 'Egypt', city: 'Cairo', league: 'FIFA World Cup', country: 'Egypt', espnTeamId: 'EGY', colors: [TeamColor.hex('Egypt Red', 0xFFCE1126), TeamColor.hex('Egypt White', 0xFFFFFFFF)], aliases: ['egypt', 'the pharaohs', 'egyptian soccer']),
+    _intl(id: 'fifa_tunisia', name: 'Tunisia', city: 'Tunis', league: 'FIFA World Cup', country: 'Tunisia', espnTeamId: 'TUN', colors: [TeamColor.hex('Tunisia Red', 0xFFE70013), TeamColor.hex('Tunisia White', 0xFFFFFFFF)], aliases: ['tunisia', 'eagles of carthage', 'tunisian soccer']),
+    _intl(id: 'fifa_algeria', name: 'Algeria', city: 'Algiers', league: 'FIFA World Cup', country: 'Algeria', espnTeamId: 'ALG', colors: [TeamColor.hex('Algeria Green', 0xFF006233), TeamColor.hex('Algeria White', 0xFFFFFFFF)], aliases: ['algeria', 'les fennecs', 'desert foxes', 'algerian soccer']),
+    _intl(id: 'fifa_ivory_coast', name: "Côte d'Ivoire", city: 'Abidjan', league: 'FIFA World Cup', country: "Côte d'Ivoire", espnTeamId: 'CIV', colors: [TeamColor.hex('Ivory Coast Orange', 0xFFFF8200), TeamColor.hex('Ivory Coast Green', 0xFF009A44)], aliases: ['ivory coast', "cote d'ivoire", 'the elephants', 'les éléphants']),
+    _intl(id: 'fifa_mali', name: 'Mali', city: 'Bamako', league: 'FIFA World Cup', country: 'Mali', espnTeamId: 'MLI', colors: [TeamColor.hex('Mali Green', 0xFF14B53A), TeamColor.hex('Mali Yellow', 0xFFFCD116)], aliases: ['mali', 'les aigles', 'the eagles mali']),
+    _intl(id: 'fifa_south_africa', name: 'South Africa', city: 'Johannesburg', league: 'FIFA World Cup', country: 'South Africa', espnTeamId: 'RSA', colors: [TeamColor.hex('Bafana Green', 0xFF007749), TeamColor.hex('Bafana Gold', 0xFFFFB81C)], aliases: ['south africa', 'bafana bafana', 'south african soccer']),
+    _intl(id: 'fifa_dr_congo', name: 'DR Congo', city: 'Kinshasa', league: 'FIFA World Cup', country: 'DR Congo', espnTeamId: 'COD', colors: [TeamColor.hex('Congo Blue', 0xFF007FFF), TeamColor.hex('Congo Red', 0xFFCE1126)], aliases: ['dr congo', 'congo', 'leopards', 'congolese soccer']),
+
+    // --- ASIA ---
+    _intl(id: 'fifa_japan', name: 'Japan', city: 'Tokyo', league: 'FIFA World Cup', country: 'Japan', espnTeamId: 'JPN', colors: [TeamColor.hex('Japan Blue', 0xFF000080), TeamColor.hex('Japan White', 0xFFFFFFFF)], aliases: ['japan', 'samurai blue', 'japanese soccer', 'nippon']),
+    _intl(id: 'fifa_south_korea', name: 'South Korea', city: 'Seoul', league: 'FIFA World Cup', country: 'South Korea', espnTeamId: 'KOR', colors: [TeamColor.hex('Korea Red', 0xFFCD2E3A), TeamColor.hex('Korea Blue', 0xFF003478)], aliases: ['south korea', 'korea', 'taegeuk warriors', 'korean soccer']),
+    _intl(id: 'fifa_australia', name: 'Australia', city: 'Sydney', league: 'FIFA World Cup', country: 'Australia', espnTeamId: 'AUS', colors: [TeamColor.hex('Socceroos Gold', 0xFFFFCC00), TeamColor.hex('Socceroos Green', 0xFF00843D)], aliases: ['australia', 'socceroos', 'australian soccer', 'aussies']),
+    _intl(id: 'fifa_saudi_arabia', name: 'Saudi Arabia', city: 'Riyadh', league: 'FIFA World Cup', country: 'Saudi Arabia', espnTeamId: 'KSA', colors: [TeamColor.hex('Saudi Green', 0xFF006C35), TeamColor.hex('Saudi White', 0xFFFFFFFF)], aliases: ['saudi arabia', 'the green falcons', 'saudi soccer']),
+    _intl(id: 'fifa_iran', name: 'Iran', city: 'Tehran', league: 'FIFA World Cup', country: 'Iran', espnTeamId: 'IRN', colors: [TeamColor.hex('Iran Red', 0xFFDA0000), TeamColor.hex('Iran Green', 0xFF239F40)], aliases: ['iran', 'team melli', 'iranian soccer']),
+    _intl(id: 'fifa_qatar', name: 'Qatar', city: 'Doha', league: 'FIFA World Cup', country: 'Qatar', espnTeamId: 'QAT', colors: [TeamColor.hex('Qatar Maroon', 0xFF8A1538), TeamColor.hex('Qatar White', 0xFFFFFFFF)], aliases: ['qatar', 'al-annabi', 'qatari soccer']),
+    _intl(id: 'fifa_indonesia', name: 'Indonesia', city: 'Jakarta', league: 'FIFA World Cup', country: 'Indonesia', espnTeamId: 'IDN', colors: [TeamColor.hex('Indonesia Red', 0xFFFF0000), TeamColor.hex('Indonesia White', 0xFFFFFFFF)], aliases: ['indonesia', 'garuda', 'indonesian soccer', 'timnas']),
+
+    // --- OCEANIA ---
+    _intl(id: 'fifa_new_zealand', name: 'New Zealand', city: 'Wellington', league: 'FIFA World Cup', country: 'New Zealand', espnTeamId: 'NZL', colors: [TeamColor.hex('All Whites Black', 0xFF000000), TeamColor.hex('All Whites White', 0xFFFFFFFF)], aliases: ['new zealand', 'all whites', 'kiwis soccer', 'nz soccer']),
   ];
 }

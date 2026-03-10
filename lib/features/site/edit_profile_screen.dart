@@ -423,7 +423,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           final model = profile.valueOrNull;
           _hydrate(model, user.displayName);
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
             children: [
               // House Photo Section for AR Preview
               _HousePhotoCard(),

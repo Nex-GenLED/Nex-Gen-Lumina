@@ -453,6 +453,54 @@ final deleteDesignProvider = Provider<Future<bool> Function(String designId)>((r
   };
 });
 
+/// Save the current WLED state as a new CustomDesign.
+/// Used by the Now Playing bar's tap-to-save flow for unsaved custom configs.
+final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String name)>((ref) {
+  return (name) async {
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) return null;
+
+    final wledState = ref.read(wledStateProvider);
+    final segments = ref.read(zoneSegmentsProvider).valueOrNull ?? [];
+
+    final channels = segments.map((seg) => ChannelDesign(
+      channelId: seg.id,
+      channelName: seg.name,
+      included: true,
+      colorGroups: [
+        LedColorGroup(
+          startLed: 0,
+          endLed: seg.ledCount > 0 ? seg.ledCount - 1 : 0,
+          color: [
+            wledState.color.red,
+            wledState.color.green,
+            wledState.color.blue,
+            wledState.warmWhite,
+          ],
+        ),
+      ],
+      effectId: wledState.effectId,
+      speed: wledState.speed,
+      intensity: wledState.intensity,
+      ledCount: seg.ledCount,
+    )).toList();
+
+    final now = DateTime.now();
+    final design = CustomDesign(
+      id: '',
+      name: name,
+      createdAt: now,
+      updatedAt: now,
+      ownerId: user.uid,
+      channels: channels,
+      brightness: wledState.brightness,
+    );
+
+    final service = ref.read(designServiceProvider);
+    return service.saveDesign(user.uid, design);
+  };
+});
+
 /// Duplicate an existing design
 final duplicateDesignProvider = Provider<Future<String?> Function(CustomDesign design, String newName)>((ref) {
   return (design, newName) async {

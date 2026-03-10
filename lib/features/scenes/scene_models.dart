@@ -463,7 +463,7 @@ class SystemScenes {
     wledPayload: {
       'on': true,
       'bri': 180,
-      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 180, 100, 120]]}],
+      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 180, 100, 255]]}],
     },
     previewColors: [[255, 180, 100]],
     brightness: 180,
@@ -477,7 +477,7 @@ class SystemScenes {
     wledPayload: {
       'on': true,
       'bri': 255,
-      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 255, 255, 255]]}],
+      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[0, 0, 0, 255]]}],
     },
     previewColors: [[255, 255, 255]],
     brightness: 255,

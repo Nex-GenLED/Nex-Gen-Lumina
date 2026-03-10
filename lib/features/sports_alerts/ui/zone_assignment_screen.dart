@@ -61,11 +61,40 @@ List<_SensitivityOption> _sensitivityOptions(SportType sport) => switch (sport) 
             description: 'Multi-run innings and big moments',
           ),
         ],
-      SportType.nhl || SportType.mls => [
+      SportType.nhl || SportType.mls || SportType.fifa || SportType.championsLeague => [
           const _SensitivityOption(
             value: AlertSensitivity.allEvents,
             label: 'Every Goal',
             description: 'Light show on every goal',
+          ),
+        ],
+      SportType.ncaaFB => [
+          const _SensitivityOption(
+            value: AlertSensitivity.allEvents,
+            label: 'All Events',
+            description: 'Touchdowns, field goals, safeties',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.majorOnly,
+            label: 'Scores Only',
+            description: 'All scoring plays',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.clutchOnly,
+            label: 'Touchdowns Only',
+            description: 'Only touchdowns trigger lights',
+          ),
+        ],
+      SportType.ncaaMB => [
+          const _SensitivityOption(
+            value: AlertSensitivity.allEvents,
+            label: 'Quarter Wins + Clutch',
+            description: 'Quarter-end leads and clutch baskets',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.clutchOnly,
+            label: 'Clutch Time Only',
+            description: 'Only during close, late-game moments',
           ),
         ],
     };
@@ -83,19 +112,19 @@ class _SensitivityOption {
 
 /// Default preview event type per sport.
 AlertEventType _previewEventType(SportType sport) => switch (sport) {
-      SportType.nfl => AlertEventType.touchdown,
-      SportType.nba => AlertEventType.clutchBasket,
+      SportType.nfl || SportType.ncaaFB => AlertEventType.touchdown,
+      SportType.nba || SportType.ncaaMB => AlertEventType.clutchBasket,
       SportType.mlb => AlertEventType.run,
       SportType.nhl => AlertEventType.goal,
-      SportType.mls => AlertEventType.goal,
+      SportType.mls || SportType.fifa || SportType.championsLeague => AlertEventType.soccerGoal,
     };
 
 String _previewLabel(SportType sport) => switch (sport) {
-      SportType.nfl => 'Preview Touchdown Animation',
-      SportType.nba => 'Preview Clutch Basket Animation',
+      SportType.nfl || SportType.ncaaFB => 'Preview Touchdown Animation',
+      SportType.nba || SportType.ncaaMB => 'Preview Clutch Basket Animation',
       SportType.mlb => 'Preview Run Animation',
       SportType.nhl => 'Preview Goal Animation',
-      SportType.mls => 'Preview Goal Animation',
+      SportType.mls || SportType.fifa || SportType.championsLeague => 'Preview Soccer Goal Animation',
     };
 
 // ---------------------------------------------------------------------------

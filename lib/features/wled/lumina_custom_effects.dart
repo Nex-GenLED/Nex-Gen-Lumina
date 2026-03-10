@@ -73,7 +73,7 @@ class LuminaEffectController {
               'start': clampedPixels,
               'stop': totalPixels,
               'on': true,
-              'col': [[0, 0, 0]], // Off
+              'col': [[0, 0, 0, 0]], // Off
               'fx': 0,
             },
           if (clampedPixels > 0 && reverse)
@@ -82,7 +82,7 @@ class LuminaEffectController {
               'start': 0,
               'stop': clampedPixels,
               'on': true,
-              'col': [[0, 0, 0]], // Off
+              'col': [[0, 0, 0, 0]], // Off
               'fx': 0,
             },
         ],
@@ -121,7 +121,7 @@ class LuminaEffectController {
               'start': 0,
               'stop': leftStart,
               'on': true,
-              'col': [[0, 0, 0]],
+              'col': [[0, 0, 0, 0]],
               'fx': 0,
             },
           // Center lit section
@@ -140,7 +140,7 @@ class LuminaEffectController {
               'start': rightEnd,
               'stop': totalPixels,
               'on': true,
-              'col': [[0, 0, 0]],
+              'col': [[0, 0, 0, 0]],
               'fx': 0,
             },
         ],
@@ -188,7 +188,7 @@ class LuminaEffectController {
               'start': leftEnd,
               'stop': rightStart,
               'on': true,
-              'col': [[0, 0, 0]],
+              'col': [[0, 0, 0, 0]],
               'fx': 0,
             },
           // Right revealed section

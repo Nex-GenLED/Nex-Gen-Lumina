@@ -627,6 +627,11 @@ class SyncCommand {
   /// Helps UI display the correct theme name.
   final String? complementTheme;
 
+  /// Per-member full pattern overrides for Custom Mode per-house assignments.
+  /// Key: member userId, Value: SyncPatternAssignment with effectId, colors, speed, intensity, brightness.
+  /// If a member is not in this map, they use the global fields.
+  final Map<String, SyncPatternAssignment>? memberPatternOverrides;
+
   const SyncCommand({
     required this.id,
     required this.groupId,
@@ -643,6 +648,7 @@ class SyncCommand {
     this.scheduleId,
     this.memberColorOverrides,
     this.complementTheme,
+    this.memberPatternOverrides,
   });
 
   factory SyncCommand.fromFirestore(DocumentSnapshot doc) {
@@ -653,6 +659,15 @@ class SyncCommand {
     if (data['memberColorOverrides'] != null) {
       final raw = data['memberColorOverrides'] as Map<String, dynamic>;
       colorOverrides = raw.map((k, v) => MapEntry(k, List<int>.from(v)));
+    }
+
+    // Parse memberPatternOverrides from Firestore
+    Map<String, SyncPatternAssignment>? patternOverrides;
+    if (data['memberPatternOverrides'] != null) {
+      final raw = data['memberPatternOverrides'] as Map<String, dynamic>;
+      patternOverrides = raw.map(
+        (k, v) => MapEntry(k, SyncPatternAssignment.fromJson(Map<String, dynamic>.from(v))),
+      );
     }
 
     return SyncCommand(
@@ -673,6 +688,7 @@ class SyncCommand {
       scheduleId: data['scheduleId'],
       memberColorOverrides: colorOverrides,
       complementTheme: data['complementTheme'],
+      memberPatternOverrides: patternOverrides,
     );
   }
 
@@ -692,6 +708,10 @@ class SyncCommand {
       'scheduleId': scheduleId,
       if (memberColorOverrides != null) 'memberColorOverrides': memberColorOverrides,
       if (complementTheme != null) 'complementTheme': complementTheme,
+      if (memberPatternOverrides != null)
+        'memberPatternOverrides': memberPatternOverrides!.map(
+          (k, v) => MapEntry(k, v.toJson()),
+        ),
     };
   }
 
@@ -726,6 +746,27 @@ class SyncCommand {
 
   /// Check if this command uses Complement Mode.
   bool get isComplementMode => syncType == SyncType.complement;
+
+  /// Check if this command has per-house pattern assignments.
+  bool get hasPerHouseAssignments =>
+      memberPatternOverrides != null && memberPatternOverrides!.isNotEmpty;
+
+  /// Get the full pattern assignment for a specific member.
+  /// Returns the per-house override if set, otherwise builds from global fields.
+  SyncPatternAssignment getPatternForMember(String memberId) {
+    if (memberPatternOverrides != null &&
+        memberPatternOverrides!.containsKey(memberId)) {
+      return memberPatternOverrides![memberId]!;
+    }
+    return SyncPatternAssignment(
+      name: patternName ?? 'Sync Pattern',
+      effectId: effectId,
+      colors: getColorsForMember(memberId),
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+    );
+  }
 }
 
 /// Status of a member in the neighborhood sync.
@@ -986,5 +1027,117 @@ class ComplementThemes {
     } catch (_) {
       return null;
     }
+  }
+}
+
+/// A pattern assignment for use in Neighborhood Sync Custom Mode.
+///
+/// Captures all the WLED parameters needed to reproduce a selected pattern
+/// from the Explore Patterns library or manual configuration.
+class SyncPatternAssignment {
+  final String name;
+  final int effectId;
+  final List<int> colors; // Raw color ints (0xRRGGBB)
+  final int speed;
+  final int intensity;
+  final int brightness;
+
+  /// Optional full WLED payload for advanced patterns.
+  final Map<String, dynamic>? wledPayload;
+
+  const SyncPatternAssignment({
+    required this.name,
+    required this.effectId,
+    required this.colors,
+    this.speed = 128,
+    this.intensity = 128,
+    this.brightness = 200,
+    this.wledPayload,
+  });
+
+  /// Create from a PatternItem's wledPayload.
+  factory SyncPatternAssignment.fromWledPayload({
+    required String name,
+    required Map<String, dynamic> payload,
+    int brightness = 200,
+  }) {
+    int effectId = 0;
+    int speed = 128;
+    int intensity = 128;
+    final colors = <int>[];
+
+    final seg = payload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final firstSeg = seg.first;
+      if (firstSeg is Map) {
+        effectId = (firstSeg['fx'] as int?) ?? 0;
+        speed = (firstSeg['sx'] as int?) ?? 128;
+        intensity = (firstSeg['ix'] as int?) ?? 128;
+
+        final col = firstSeg['col'];
+        if (col is List) {
+          for (final c in col) {
+            if (c is List && c.length >= 3) {
+              colors.add((c[0] << 16) | (c[1] << 8) | c[2]);
+            }
+          }
+        }
+      }
+    }
+
+    if (colors.isEmpty) colors.add(0xFFFFFF);
+
+    return SyncPatternAssignment(
+      name: name,
+      effectId: effectId,
+      colors: colors,
+      speed: speed,
+      intensity: intensity,
+      brightness: (payload['bri'] as int?) ?? brightness,
+      wledPayload: payload,
+    );
+  }
+
+  /// Create from a LibraryNode palette (theme colors + suggested effect).
+  factory SyncPatternAssignment.fromLibraryNode({
+    required String name,
+    required List<Color> themeColors,
+    int effectId = 0,
+    int speed = 128,
+    int intensity = 128,
+    int brightness = 200,
+  }) {
+    return SyncPatternAssignment(
+      name: name,
+      effectId: effectId,
+      colors: themeColors.map((c) => c.value & 0xFFFFFF).toList(),
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+    );
+  }
+
+  /// Convert colors to Flutter Color objects.
+  List<Color> get colorObjects =>
+      colors.map((c) => Color(c | 0xFF000000)).toList();
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'effectId': effectId,
+        'colors': colors,
+        'speed': speed,
+        'intensity': intensity,
+        'brightness': brightness,
+      };
+
+  factory SyncPatternAssignment.fromJson(Map<String, dynamic> json) {
+    return SyncPatternAssignment(
+      name: json['name'] ?? 'Unknown',
+      effectId: json['effectId'] ?? 0,
+      colors: List<int>.from(json['colors'] ?? [0xFFFFFF]),
+      speed: json['speed'] ?? 128,
+      intensity: json['intensity'] ?? 128,
+      brightness: json['brightness'] ?? 200,
+    );
   }
 }

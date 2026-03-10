@@ -589,8 +589,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                     if (result != null) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('${_current.name} saved to My Scenes'),
-                          action: SnackBarAction(label: 'View', onPressed: () => context.push('/explore/scenes')),
+                          content: Text('${_current.name} saved'),
                         ),
                       );
                     } else {
@@ -601,7 +600,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   }
                 },
                 icon: const Icon(Icons.save_alt, color: NexGenPalette.cyan),
-                label: const Text('Save to My Scenes'),
+                label: const Text('Save'),
               ),
             ]),
           ]
@@ -804,7 +803,7 @@ class CategoryDetailScreen extends ConsumerWidget {
                 ),
               ),
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(12, 0, 12, kBottomNavBarPadding),
+                padding: EdgeInsets.fromLTRB(12, 0, 12, navBarTotalHeight(context)),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
@@ -1113,7 +1112,8 @@ IconData _heroIconForSubCategory(String subId) {
     case 'sub_la_liga':       return Icons.sports_soccer;
     case 'sub_bundesliga':    return Icons.sports_soccer;
     case 'sub_serie_a':       return Icons.sports_soccer;
-    case 'sub_ligue_1':       return Icons.sports_soccer;
+    case 'sub_champions_league': return Icons.sports_soccer;
+    case 'sub_fifa_world_cup': return Icons.sports_soccer;
     case 'sub_fifa':
     case 'sub_world_cup':     return Icons.sports_soccer;
   }
@@ -1133,7 +1133,8 @@ IconData _heroIconForSubCategory(String subId) {
       subId.contains('fifa') || subId.contains('world_cup') ||
       subId.contains('epl') || subId.contains('premier') ||
       subId.contains('la_liga') || subId.contains('bundesliga') ||
-      subId.contains('serie_a') || subId.contains('ligue_1')) {
+      subId.contains('serie_a') || subId.contains('champions_league') ||
+      subId.contains('fifa_world_cup')) {
     return Icons.sports_soccer;
   }
   if (subId.contains('football') || subId.contains('nfl') ||
@@ -1216,7 +1217,8 @@ int _sportSubSortKey(String id) {
   if (id.contains('la_liga')) return 840;
   if (id.contains('bundesliga')) return 850;
   if (id.contains('serie_a')) return 860;
-  if (id.contains('ligue_1')) return 870;
+  if (id.contains('champions_league')) return 870;
+  if (id.contains('fifa_world_cup')) return 875;
   // NWSL
   if (id.contains('nwsl')) {
     if (id.contains('east')) return 910;
@@ -1281,7 +1283,8 @@ List<Color> _gradientForSubCategory(String subId) {
     case 'sub_la_liga':     return const [Color(0xFFFF6B35), Color(0xFFCC4400)]; // La Liga Orange
     case 'sub_bundesliga':  return const [Color(0xFFD4020D), Color(0xFF8B0000)]; // Bundesliga Red
     case 'sub_serie_a':     return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)]; // Serie A Blue
-    case 'sub_ligue_1':     return const [Color(0xFF003189), Color(0xFF001E55)]; // Ligue 1 Navy
+    case 'sub_champions_league': return const [Color(0xFF0D47A1), Color(0xFF1A237E)]; // CL Blue
+    case 'sub_fifa_world_cup': return const [Color(0xFFD4AF37), Color(0xFF1565C0)]; // Gold/Blue
     case 'sub_fifa':
     case 'sub_world_cup':   return const [Color(0xFFFFD700), Color(0xFF1565C0)]; // Gold/Blue
     // ── MLB conferences ───────────────────────────────────────────────────────
@@ -1366,7 +1369,8 @@ Color _accentForSubCategory(String subId) {
     case 'sub_la_liga':     return const Color(0xFFFF6B35);   // La Liga Orange
     case 'sub_bundesliga':  return const Color(0xFFD4020D);   // Bundesliga Red
     case 'sub_serie_a':     return const Color(0xFF1B4FBB);   // Serie A Blue
-    case 'sub_ligue_1':     return const Color(0xFF003189);   // Ligue 1 Blue
+    case 'sub_champions_league': return const Color(0xFF0D47A1); // CL Blue
+    case 'sub_fifa_world_cup': return const Color(0xFFD4AF37); // WC Gold
     case 'sub_fifa':
     case 'sub_world_cup':   return const Color(0xFFFFD700);   // Gold
     // ── MLB divisions ─────────────────────────────────────────────────────────

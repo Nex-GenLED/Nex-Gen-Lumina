@@ -412,7 +412,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
           : AbsorbPointer(
               absorbing: _saving,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
                 children: [
                   Text('Channel Configuration', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 6),
@@ -457,7 +457,6 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
                     ledType: _ledType,
                     onCurrentChanged: (v) => setState(() => _maxCurrentA = v),
                   ),
-                  const SizedBox(height: 90),
                 ],
               ),
             ),

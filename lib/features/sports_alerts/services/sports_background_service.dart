@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../neighborhood/services/sync_event_background_persistence.dart';
+import '../../neighborhood/services/sync_event_background_worker.dart';
 import '../data/team_colors.dart';
 import '../models/game_state.dart';
 import '../models/score_alert_config.dart';
@@ -72,6 +74,18 @@ void updateControllerIps(List<String> ips) {
   FlutterBackgroundService().invoke('updateIps', {'ips': ips});
 }
 
+/// Notify the running background service that sync event configs changed.
+/// The service will reload from SharedPreferences on its next poll cycle.
+void notifySyncEventsChanged() {
+  FlutterBackgroundService().invoke('syncEventsChanged');
+}
+
+/// Start the background service specifically for sync event monitoring.
+/// Reuses the same service — just ensures it's running.
+Future<void> startSyncEventService() async {
+  await startSportsService();
+}
+
 // ---------------------------------------------------------------------------
 // Android foreground / iOS foreground entry point
 // ---------------------------------------------------------------------------
@@ -85,11 +99,22 @@ void _onStart(ServiceInstance service) async {
   final scheduleService = GameScheduleService();
   List<String> controllerIps = [];
 
+  // ── Sync Event Background Worker ───────────────────────────────────
+  final syncEspnApi = EspnApiService();
+  final syncWorker = SyncEventBackgroundWorker(service, syncEspnApi);
+  syncWorker.startMonitoring();
+
   // Listen for IP updates from the UI isolate.
   service.on('updateIps').listen((data) {
     if (data != null && data['ips'] is List) {
       controllerIps = List<String>.from(data['ips'] as List);
+      syncWorker.updateControllerIps(controllerIps);
     }
+  });
+
+  // Listen for sync events config change signal.
+  service.on('syncEventsChanged').listen((_) {
+    debugPrint('[Background] Sync events changed — worker will reload on next poll');
   });
 
   // Listen for stop signal.
@@ -97,6 +122,7 @@ void _onStart(ServiceInstance service) async {
     monitor.dispose();
     espnApi.dispose();
     scheduleService.dispose();
+    syncWorker.dispose();
     await service.stopSelf();
   });
 
@@ -109,52 +135,84 @@ void _onStart(ServiceInstance service) async {
   Future<void> poll() async {
     final configs = await _loadConfigs();
     final active = configs.where((c) => c.isEnabled).toList();
-    if (active.isEmpty) {
+
+    // Check if sync events are active (even if no sports alerts)
+    final syncEvents = await loadSyncEventsForBackground();
+    final hasSyncEvents = syncEvents.any((e) => e.isEnabled && !e.isManual);
+    final hasActiveSession = await loadActiveSession() != null;
+
+    if (active.isEmpty && !hasSyncEvents && !hasActiveSession) {
       _updateNotification(service, 'No active alerts');
       return;
     }
 
-    // Rebuild trigger service with latest IPs each cycle.
-    final trigger = AlertTriggerService(controllerIps: controllerIps);
+    // ── Sports alerts polling ──────────────────────────────────────
+    if (active.isNotEmpty) {
+      // Rebuild trigger service with latest IPs each cycle.
+      final trigger = AlertTriggerService(controllerIps: controllerIps);
 
-    // Ensure we're subscribed to the monitor stream.
-    alertSub ??= monitor.alertStream.listen((event) {
-      final config = active.firstWhere(
-        (c) => c.teamSlug == event.teamSlug,
-        orElse: () => active.first,
-      );
-      trigger.handleAlertEvent(event, config);
-    });
+      // Ensure we're subscribed to the monitor stream.
+      alertSub ??= monitor.alertStream.listen((event) {
+        final config = active.firstWhere(
+          (c) => c.teamSlug == event.teamSlug,
+          orElse: () => active.first,
+        );
+        trigger.handleAlertEvent(event, config);
 
-    // Run the score check.
-    await monitor.checkScores(active);
+        // Also notify the sync worker so Neighborhood Sync Game Day
+        // sessions can broadcast the celebration to all participants.
+        syncWorker.onScoreAlertEvent(event);
+      });
 
-    // Determine best polling interval and notification text.
-    final intervalInfo = await _resolvePollingInterval(
-      active,
-      espnApi,
-      scheduleService,
-    );
-
-    _updateNotification(service, intervalInfo.notificationBody);
-
-    // If no games are active and none start soon, stop the service.
-    if (intervalInfo.shouldStop) {
-      monitor.dispose();
-      espnApi.dispose();
-      scheduleService.dispose();
-      alertSub?.cancel();
-      pollTimer?.cancel();
-      await service.stopSelf();
-      return;
+      // Run the score check.
+      await monitor.checkScores(active);
     }
 
-    // Re-schedule next poll.
-    pollTimer?.cancel();
-    pollTimer = Timer(
-      Duration(seconds: intervalInfo.intervalSeconds),
-      poll,
-    );
+    // ── Determine polling interval ─────────────────────────────────
+    if (active.isNotEmpty) {
+      final intervalInfo = await _resolvePollingInterval(
+        active,
+        espnApi,
+        scheduleService,
+      );
+
+      _updateNotification(service, intervalInfo.notificationBody);
+
+      // Only auto-stop if no sync events are being monitored either
+      if (intervalInfo.shouldStop && !hasSyncEvents && !hasActiveSession) {
+        monitor.dispose();
+        espnApi.dispose();
+        scheduleService.dispose();
+        syncWorker.dispose();
+        alertSub?.cancel();
+        pollTimer?.cancel();
+        await service.stopSelf();
+        return;
+      }
+
+      // Re-schedule next poll at the sports alert interval
+      // (sync worker manages its own internal timers)
+      pollTimer?.cancel();
+      pollTimer = Timer(
+        Duration(seconds: intervalInfo.intervalSeconds),
+        poll,
+      );
+    } else {
+      // No sports alerts — poll at sync event cadence
+      final activeSession = await loadActiveSession();
+      final interval = activeSession != null
+          ? const Duration(seconds: 30) // Active session — frequent polls
+          : const Duration(minutes: 5); // Waiting for trigger
+
+      if (hasActiveSession) {
+        _updateNotification(service, 'Neighborhood Sync Active');
+      } else if (hasSyncEvents) {
+        _updateNotification(service, 'Monitoring sync events');
+      }
+
+      pollTimer?.cancel();
+      pollTimer = Timer(interval, poll);
+    }
   }
 
   // Kick off the first poll immediately.
@@ -169,32 +227,35 @@ void _onStart(ServiceInstance service) async {
 FutureOr<bool> _onIosBackground(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // iOS background fetch has ~15-20s max. Do a quick score check.
+  // iOS background fetch has ~15-20s max. Do quick checks for both
+  // sports alerts AND sync events.
+
+  // ── Sports alerts quick check ────────────────────────────────────
   final espnApi = EspnApiService();
   final monitor = ScoreMonitorService(espnApi: espnApi);
   final configs = await _loadConfigs();
   final active = configs.where((c) => c.isEnabled).toList();
 
-  if (active.isEmpty) {
-    espnApi.dispose();
-    monitor.dispose();
-    return true;
+  if (active.isNotEmpty) {
+    final trigger = AlertTriggerService(controllerIps: const []);
+    monitor.alertStream.listen((event) {
+      final config = active.firstWhere(
+        (c) => c.teamSlug == event.teamSlug,
+        orElse: () => active.first,
+      );
+      trigger.handleAlertEvent(event, config);
+    });
+
+    await monitor.checkScores(active);
   }
-
-  // Quick check — emit events via local notifications only.
-  final trigger = AlertTriggerService(controllerIps: const []);
-  monitor.alertStream.listen((event) {
-    final config = active.firstWhere(
-      (c) => c.teamSlug == event.teamSlug,
-      orElse: () => active.first,
-    );
-    trigger.handleAlertEvent(event, config);
-  });
-
-  await monitor.checkScores(active);
 
   espnApi.dispose();
   monitor.dispose();
+
+  // ── Sync events quick check ──────────────────────────────────────
+  // Must complete within the remaining iOS background execution window.
+  await performQuickSyncCheck();
+
   return true;
 }
 
@@ -254,7 +315,10 @@ Future<_PollingInterval> _resolvePollingInterval(
       case GameStatus.halftime:
         anyInProgress = true;
         final sportInterval = config.sport.pollingIntervalSeconds;
-        if (game.isClutchTime) {
+        final isClutch = game.isClutchTime ||
+            (config.sport == SportType.ncaaMB &&
+                game.isCollegeBasketballClutchTime);
+        if (isClutch) {
           anyClutch = true;
           final clutch = config.sport.clutchPollingIntervalSeconds;
           if (clutch < minInterval) minInterval = clutch;

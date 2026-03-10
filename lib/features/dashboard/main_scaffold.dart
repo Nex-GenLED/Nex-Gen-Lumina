@@ -56,9 +56,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Only start geofence monitoring if location permission is already
+      // granted. Never prompt on launch — the dialog is shown contextually
+      // when the user enables geofencing from Settings.
       final notifier = ref.read(geofenceMonitorProvider.notifier);
-      await notifier.ensurePermissionsWithDialog(context);
-      await notifier.start();
+      if (await notifier.hasLocationPermission()) {
+        await notifier.start();
+      }
 
       ref.read(autopilotSchedulerProvider);
 

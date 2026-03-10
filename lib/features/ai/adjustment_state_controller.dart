@@ -172,8 +172,12 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
               colorNames: s.palette.colorNames,
               effectName: s.effect.name,
             );
-        ref.read(activePresetLabelProvider.notifier).state =
-            s.palette.name != 'Custom Palette' ? s.palette.name : 'Lumina Pattern';
+        final paletteName = s.palette.name != 'Custom Palette' ? s.palette.name : null;
+        if (paletteName != null) {
+          ref.read(activePresetLabelProvider.notifier).state = paletteName;
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
 
         // Update refinement context
         ref.read(luminaSheetProvider.notifier).setPatternContext(

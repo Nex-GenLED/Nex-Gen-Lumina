@@ -47,7 +47,7 @@ class _ReferralProgramScreenState extends ConsumerState<ReferralProgramScreen> {
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         title: const Text('Refer & Earn'),
       ),
-      body: ListView(controller: _scrollCtrl, padding: const EdgeInsets.all(16), children: [
+      body: ListView(controller: _scrollCtrl, padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)), children: [
         // Hero / Status
         Card(
           child: Padding(

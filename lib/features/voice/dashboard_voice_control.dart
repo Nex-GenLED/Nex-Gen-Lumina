@@ -218,7 +218,7 @@ class VoiceCommandHandler {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return 'No controller connected';
 
-      // Bright white: full RGB + full W channel for maximum brightness
+      // Bright white: pure W channel — dedicated white LED for clean white
       final payload = {
         'on': true,
         'bri': 255,
@@ -227,7 +227,7 @@ class VoiceCommandHandler {
             'id': 0,
             'fx': 0, // Solid effect
             'col': [
-              [255, 255, 255, 255], // Full RGB + full W
+              [0, 0, 0, 255], // Pure W channel — dedicated white LED
             ],
           }
         ],

@@ -25,7 +25,10 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
+import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
+import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
@@ -100,7 +103,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   ImageProvider? _heroImageProvider;
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
-  bool _syncWarningAcknowledged = false;
   Timer? _skyRefreshTimer;
   final TextEditingController _luminaCtrl = TextEditingController();
   bool _luminaLoading = false;
@@ -108,6 +110,24 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   late final stt.SpeechToText _luminaSpeech;
 
   _SkyTheme get _currentSkyTheme => _getSkyTheme(DateTime.now());
+
+  Future<void> _showSaveCustomDialog(BuildContext context, WidgetRef ref) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const SaveCustomPatternDialog(),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+
+    final designId = await ref.read(saveCurrentAsDesignProvider)(name);
+    if (designId != null) {
+      ref.read(activePresetLabelProvider.notifier).state = name;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved "$name" to My Designs')),
+        );
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -129,17 +149,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   }
 
   Future<bool> _checkSyncWarning() async {
-    if (_syncWarningAcknowledged) return true;
-    final syncStatus = ref.read(userSyncStatusProvider);
-    if (!syncStatus.isInActiveSync || syncStatus.isPaused) return true;
-    final result = await SyncWarningDialog.showIfNeeded(context, ref);
-    if (result == null) return true;
-    if (result == SyncWarningResult.cancel) return false;
-    _syncWarningAcknowledged = true;
-    if (result == SyncWarningResult.pauseAndContinue) {
-      await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
-    }
-    return true;
+    // Auto-pause sync silently — user actions always take priority.
+    // The WledNotifier._postUpdate also handles this, but this catches
+    // dashboard-specific actions that may not route through _postUpdate.
+    return SyncWarningDialog.checkAndProceed(context, ref);
   }
 
   Future<void> _checkControllersAndMaybeLaunchWizard() async {
@@ -310,7 +323,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             child: _buildViewAsBanner(context, ref, userName),
           ),
         SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, 100),
+          padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, navBarTotalHeight(context)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _buildHeroSection(context, ref, state, profileAsync),
             _buildLuminaBar(context, ref),
@@ -780,17 +793,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       bottom: 0,
       child: Consumer(builder: (context, ref, _) {
         final wledState = ref.watch(wledStateProvider);
-        final activePreset = ref.watch(activePresetLabelProvider);
         final isOn = wledState.isOn;
-
-        String effectName;
-        if (activePreset != null) {
-          effectName = activePreset;
-        } else if (wledState.supportsRgbw && wledState.warmWhite > 0) {
-          effectName = 'Warm White';
-        } else {
-          effectName = wledState.effectName;
-        }
+        final effectName = ref.watch(displayPatternNameProvider);
+        final isUnsaved = ref.watch(isUnsavedCustomConfigProvider);
 
         return ClipRRect(
           borderRadius: const BorderRadius.only(
@@ -841,14 +846,32 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   Row(
                                     children: [
                                       Flexible(
-                                        child: Text(
-                                          effectName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700,
+                                        child: GestureDetector(
+                                          onTap: isUnsaved ? () => _showSaveCustomDialog(context, ref) : null,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  effectName,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (isUnsaved) ...[
+                                                const SizedBox(width: 4),
+                                                Icon(
+                                                  Icons.bookmark_add_outlined,
+                                                  size: 13,
+                                                  color: Colors.white.withValues(alpha: 0.45),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                         ),
                                       ),
@@ -884,7 +907,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 ],
                               )
                             : Text(
-                                'System Off',
+                                'Lights Off',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.35),
                                   fontSize: 13,

@@ -16,42 +16,39 @@ class SimpleNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     final selected = NexGenPalette.cyan;
     const unselected = Color(0xFF808080);
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                SimpleNavItem(
-                  label: 'Home',
-                  icon: Icons.home_filled,
-                  active: index == 0,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(0),
-                ),
-                SimpleNavItem(
-                  label: 'Settings',
-                  icon: Icons.settings_rounded,
-                  active: index == 1,
-                  selected: selected,
-                  unselected: unselected,
-                  onTap: () => onTap(1),
-                ),
-              ],
-            ),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(24, 12, 24, 12 + bottomInset),
+          decoration: const BoxDecoration(
+            color: NexGenPalette.gunmetal90,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              SimpleNavItem(
+                label: 'Home',
+                icon: Icons.home_filled,
+                active: index == 0,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(0),
+              ),
+              SimpleNavItem(
+                label: 'Settings',
+                icon: Icons.settings_rounded,
+                active: index == 1,
+                selected: selected,
+                unselected: unselected,
+                onTap: () => onTap(1),
+              ),
+            ],
           ),
         ),
       ),

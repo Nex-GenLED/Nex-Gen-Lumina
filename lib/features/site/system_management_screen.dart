@@ -60,7 +60,7 @@ class _MyControllersTab extends ConsumerWidget {
     final deleteController = ref.watch(deleteControllerProvider);
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       child: asyncControllers.when(
         data: (items) {
           if (items.isEmpty) {
@@ -223,7 +223,7 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
     final showAudio = ref.watch(showAudioEffectsProvider);
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       child: ListView(children: [
         // ── Lighting Areas (reflects hardware channel configuration) ──
         Row(children: [
@@ -793,7 +793,7 @@ class _RemoteAccessTab extends ConsumerWidget {
     final homeSsid = userProfile?.homeSsid;
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       child: ListView(children: [
         // Status Card
         _buildStatusCard(context, connectivityStatus, isEnabled),
@@ -1034,7 +1034,7 @@ class _ModeTab extends ConsumerWidget {
     final isCom = mode == SiteMode.commercial;
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       child: ListView(children: [
         // Mode Selection Card
         Card(
