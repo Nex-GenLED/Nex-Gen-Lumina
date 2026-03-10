@@ -16,6 +16,9 @@ import 'package:nexgen_command/data/team_color_database.dart';
 import 'package:nexgen_command/data/team_color_resolver.dart';
 import 'package:nexgen_command/data/holiday_color_database.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/features/ai/compound_command_detector.dart';
+import 'package:nexgen_command/features/ai/user_variety_profile.dart';
+import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
@@ -39,6 +42,31 @@ class LuminaBrain {
       debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
     }
 
+    // ── PRE-TIER: Compound Command Detection ──────────────────────────────
+    // Detect and handle commands that combine lighting + scheduling intent
+    // BEFORE tier resolution so temporal language doesn't corrupt team/holiday
+    // fuzzy matching. e.g. "Royals design every night this week from sunset to sunrise"
+    // → lightingIntent="Royals design", temporal=7 days sunset→sunrise
+    {
+      final compound = CompoundCommandDetector.detect(userPrompt);
+      if (compound.isCompound && compound.temporal != null) {
+        debugPrint('🗓️ Compound command detected: '
+            'lighting="${compound.lightingIntent}", '
+            'days=${compound.temporal!.dayCount}, '
+            'start=${compound.temporal!.startTrigger.name}');
+
+        final scheduledResponse = await _handleCompoundCommand(
+          ref,
+          compound,
+          historyService,
+        );
+        if (scheduledResponse != null) return scheduledResponse;
+
+        // If resolution failed, fall through using the original prompt.
+        debugPrint('⚠️ Compound resolution failed — falling through to normal tiers');
+      }
+    }
+
     // TIER 0.5 (run first): Holiday / season / cultural event resolution
     // Runs before team resolution to prevent holidays like "St. Patrick's" from
     // fuzzy-matching to sports teams (e.g., "patricks" → "patriots").
@@ -53,10 +81,8 @@ class LuminaBrain {
     }
 
     // TIER 0: Smart team resolution with fuzzy matching + user context
-    // Replaces basic SportsTeamsDatabase.findTeamInQuery with multi-phase resolver
     // Skip when query is clearly about schedules/time — prevents "sunset" fuzzy-matching "suns"
     if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt)) {
-      // Read user context for "My Teams" boost and location disambiguation
       List<String>? userTeams;
       String? userLocation;
       try {
@@ -88,7 +114,6 @@ class LuminaBrain {
         final response = _buildCanonicalTeamResponse(teamResult.team, context);
         return response;
       } else if (teamResult != null) {
-        // Low confidence - still use it but log the ambiguity
         debugPrint('🏈 TIER 0: Low-confidence team match: ${teamResult.team.officialName} '
             '(${teamResult.confidence.toStringAsFixed(2)}) - using anyway');
         final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
@@ -98,8 +123,6 @@ class LuminaBrain {
     }
 
     // TIER 1: Try to match against deterministic event theme library
-    // Note: We still allow theme matches for open-ended queries since
-    // "give me a party" could match a party theme, which is expected behavior
     final themeMatch = EventThemeLibrary.matchQuery(userPrompt);
 
     if (themeMatch != null && !isOpenEnded) {
@@ -111,9 +134,6 @@ class LuminaBrain {
     }
 
     // TIER 2: Check semantic cache for previously processed queries
-    // SKIP for:
-    // - Open-ended queries (to ensure variety)
-    // - Generic queries without a specific theme (to avoid "party" matching "fun", "dance", etc.)
     final detectedTheme = SemanticPatternMatcher.extractTheme(userPrompt);
     final hasSpecificTheme = detectedTheme != null;
 
@@ -123,8 +143,6 @@ class LuminaBrain {
         debugPrint('💾 TIER 2: Using cached pattern (hash: ${SemanticPatternMatcher.createQueryHash(userPrompt)})');
         final context = SemanticPatternMatcher.extractContext(userPrompt);
         debugPrint('   Theme: $detectedTheme, Context: $context');
-
-        // Build response from cached data
         return _buildResponseFromCachedData(cachedPattern);
       }
     } else if (isOpenEnded) {
@@ -139,10 +157,8 @@ class LuminaBrain {
     final context = SemanticPatternMatcher.extractContext(userPrompt);
     debugPrint('   Detected theme: $theme, context: $context');
 
-    // Build context block with optional avoidance context for open-ended queries
     String contextBlock = _buildContextBlock(ref);
 
-    // For open-ended queries, inject recent suggestion history
     if (isOpenEnded) {
       final avoidanceContext = historyService.getAvoidanceContext(limit: 5);
       if (avoidanceContext != null) {
@@ -152,7 +168,6 @@ class LuminaBrain {
     }
 
     // Inject global learning context from cross-user analytics
-    // This helps the AI make better recommendations based on what works well for all users
     try {
       final analyticsService = ref.read(patternAnalyticsServiceProvider);
       final globalContext = await analyticsService.buildGlobalLearningContext(userPrompt);
@@ -164,27 +179,22 @@ class LuminaBrain {
       debugPrint('Failed to inject global learning context: $e');
     }
 
-    // Inject intent classification context so the AI knows whether to
-    // adjust the current scene or start fresh.
+    // Inject intent classification context
     final classification = ref.read(latestClassificationProvider);
     if (classification != null) {
-      final classHint =
-          CommandIntentClassifier.buildAIContextHint(classification);
+      final classHint = CommandIntentClassifier.buildAIContextHint(classification);
       contextBlock = '$contextBlock\n\n$classHint';
       debugPrint('🏷️ Injected classification context: '
           '${classification.classification.name}');
     }
 
-    // Use higher temperature for open-ended queries to increase creativity
     final aiResponse = await LuminaAI.chat(
       userPrompt,
       contextBlock: contextBlock,
-      temperature: isOpenEnded ? 0.7 : null, // Higher temp for variety
+      temperature: isOpenEnded ? 0.7 : null,
     );
 
     // Extract and cache the pattern from AI response
-    // Only cache queries that have a SPECIFIC theme (not generic queries)
-    // This prevents "party", "fun", "dance" from all returning the same cached result
     final parsed = _extractJsonFromContent(aiResponse);
     if (parsed != null && !isOpenEnded && hasSpecificTheme) {
       SemanticPatternMatcher.cachePattern(userPrompt, parsed.object);
@@ -193,25 +203,171 @@ class LuminaBrain {
       debugPrint('   ⏭️ Not caching generic query (would cause false matches)');
     }
 
+    // Record in suggestion history for variety tracking
+    if (parsed != null) {
+      final effectObj = parsed.object['effect'];
+      final effectId = effectObj is Map ? (effectObj['id'] as num?)?.toInt() : null;
+      final effectName = effectObj is Map ? effectObj['name'] as String? : null;
+      final colorsArr = parsed.object['colors'];
+      final colorNames = <String>[];
+      if (colorsArr is List) {
+        for (final c in colorsArr) {
+          final n = (c as Map?)?['name'] as String?;
+          if (n != null) colorNames.add(n);
+        }
+      }
+      historyService.recordSuggestion(
+        patternName: parsed.object['patternName'] as String? ?? 'Pattern',
+        colorNames: colorNames,
+        effectId: effectId,
+        effectName: effectName,
+        queryType: isOpenEnded ? 'open_ended' : 'specific',
+      );
+    }
+
     return aiResponse;
   }
 
-  /// Builds a response from cached pattern data
+  // -------------------------------------------------------------------------
+  // Compound command handler
+  // -------------------------------------------------------------------------
+
+  /// Handles a confirmed compound lighting+scheduling command.
+  ///
+  /// Runs tier 0/0.5 resolution on [compound.lightingIntent] (temporal
+  /// language already stripped), then hands off to [LuminaSmartScheduler]
+  /// to build a variety-aware multi-day plan using [UserVarietyProfile].
+  ///
+  /// Returns null if theme resolution fails — caller falls through to normal tiers.
+  static Future<String?> _handleCompoundCommand(
+    WidgetRef ref,
+    CompoundCommandResult compound,
+    SuggestionHistoryService historyService,
+  ) async {
+    final lightingPrompt = compound.lightingIntent;
+    final temporal = compound.temporal!;
+
+    // Read the inferred user variety profile
+    UserVarietyProfile varietyProfile;
+    try {
+      varietyProfile = ref.read(userVarietyProfileProvider);
+      debugPrint('👤 Variety profile for schedule: ${varietyProfile.level.name} '
+          '(score=${varietyProfile.varietyScore.toStringAsFixed(2)})');
+    } catch (e) {
+      debugPrint('⚠️ Could not read variety profile, using default: $e');
+      varietyProfile = UserVarietyProfile.defaultProfile();
+    }
+
+    ResolvedTheme? theme;
+    bool isHolidayTheme = false;
+
+    // --- Attempt holiday resolution on the stripped lighting intent ---
+    final holidayResult = HolidayColorDatabase.resolve(lightingPrompt);
+    if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
+      final holiday = holidayResult.holiday!;
+      isHolidayTheme = true;
+      theme = ResolvedTheme(
+        name: holiday.name,
+        colorEntries: holiday.colors
+            .map((c) => {
+                  'name': c.name,
+                  'rgb': rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true),
+                })
+            .toList(),
+        suggestedEffects: holiday.suggestedEffects,
+        defaultSpeed: holiday.defaultSpeed,
+        defaultIntensity: holiday.defaultIntensity,
+      );
+      debugPrint('🎄 Compound: resolved holiday "${holiday.name}"');
+    }
+
+    // --- Attempt team resolution if holiday didn't match ---
+    if (theme == null && !_isScheduleOrTimeQuery(lightingPrompt)) {
+      List<String>? userTeams;
+      String? userLocation;
+      try {
+        final profile = ref.read(currentUserProfileProvider).maybeWhen(
+              data: (u) => u,
+              orElse: () => null,
+            );
+        if (profile != null) {
+          userTeams = profile.sportsTeams;
+          userLocation = profile.location;
+        }
+      } catch (_) {}
+
+      final teamResult = TeamColorResolver.resolve(
+        lightingPrompt,
+        userTeams: userTeams,
+        userLocation: userLocation,
+      );
+
+      if (teamResult != null) {
+        final ledRgb = teamResult.team.ledOptimizedRgb;
+        theme = ResolvedTheme(
+          name: teamResult.team.officialName,
+          colorEntries: teamResult.team.colors.asMap().entries.map((e) {
+            final i = e.key;
+            final tc = e.value;
+            final rgb =
+                i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b, 0];
+            return {
+              'name': tc.name,
+              'rgb': rgb.length >= 4 ? rgb : [...rgb, 0],
+            };
+          }).toList(),
+          suggestedEffects: teamResult.team.suggestedEffects.isNotEmpty
+              ? teamResult.team.suggestedEffects
+              : [2, 41, 43, 12, 0],
+          defaultSpeed: teamResult.team.defaultSpeed,
+          defaultIntensity: teamResult.team.defaultIntensity,
+        );
+        debugPrint('🏈 Compound: resolved team "${teamResult.team.officialName}"');
+      }
+    }
+
+    // Could not resolve the theme — caller will fall through to normal tiers
+    if (theme == null) return null;
+
+    // Generate the smart multi-day schedule plan
+    final plan = LuminaSmartScheduler.generatePlan(
+      theme: theme,
+      command: compound,
+      userProfile: varietyProfile,
+      isHolidayTheme: isHolidayTheme,
+    );
+
+    // Record each occurrence in suggestion history for future variety analysis
+    for (final occ in plan.occurrences) {
+      historyService.recordSuggestion(
+        patternName: occ.patternName,
+        effectId: occ.effectId,
+        effectName: occ.effectName,
+        colorNames: occ.colors.isNotEmpty
+            ? [LuminaSmartScheduler.colorNameFromRgbw(occ.colors.first)]
+            : null,
+        queryType: 'scheduled',
+      );
+    }
+
+    // Build the response JSON and verbal summary
+    final responseJson = LuminaSmartScheduler.planToResponseJson(plan);
+    return '${plan.summaryText} ${jsonEncode(responseJson)}';
+  }
+
+  // -------------------------------------------------------------------------
+  // Existing helpers (unchanged)
+  // -------------------------------------------------------------------------
+
   static String _buildResponseFromCachedData(Map<String, dynamic> cachedData) {
-    // Extract fields from cached data
     final patternName = cachedData['patternName'] as String? ?? 'Pattern';
     final thought = cachedData['thought'] as String? ?? '';
-
-    // Build a friendly verbal response
     final verbal = thought.isNotEmpty
         ? '$thought - here we go!'
         : 'Perfect! Applying $patternName now.';
-
-    // Return formatted response with embedded JSON
     return '$verbal ${jsonEncode(cachedData)}';
   }
 
-  /// Helper to extract JSON from AI content (moved from chat screen logic)
   static _JsonExtraction? _extractJsonFromContent(String content) {
     try {
       final start = content.indexOf('{');
@@ -238,13 +394,10 @@ class LuminaBrain {
     return null;
   }
 
-  /// Builds a deterministic response in the same format as AI responses.
-  /// This ensures consistent parsing in the chat screen.
   static String _buildDeterministicResponse(
-    dynamic pattern, // GradientPattern
+    dynamic pattern,
     Map<String, dynamic> wledPayload,
   ) {
-    // Extract pattern properties safely
     final name = pattern.name as String? ?? 'Custom Pattern';
     final subtitle = pattern.subtitle as String? ?? '';
     final colors = pattern.colors as List<dynamic>? ?? [];
@@ -255,16 +408,14 @@ class LuminaBrain {
     final speed = pattern.speed as int? ?? 128;
     final intensity = pattern.intensity as int? ?? 128;
 
-    // Build colors array
     final colorsArray = colors.map((c) {
-      final color = c as dynamic; // Color object
+      final color = c as dynamic;
       return {
         'name': _colorToName(color),
-        'rgb': [color.red, color.green, color.blue, 0], // Force W=0 for saturated colors
+        'rgb': [color.red, color.green, color.blue, 0],
       };
     }).toList();
 
-    // Build JSON object
     final jsonObject = {
       'patternName': name,
       'thought': subtitle.isNotEmpty ? subtitle : 'Perfect choice for this occasion!',
@@ -280,21 +431,16 @@ class LuminaBrain {
       'wled': wledPayload,
     };
 
-    // Format as a friendly message with embedded JSON
     final verbal = subtitle.isNotEmpty
         ? '$subtitle - here we go!'
         : 'Perfect! Applying $name now.';
-
     return '$verbal ${jsonEncode(jsonObject)}';
   }
 
-  /// Builds a response for a [UnifiedTeamEntry] using LED-optimized colors
-  /// from the canonical theme when available, falling back to raw RGB.
   static String _buildCanonicalTeamResponse(
     UnifiedTeamEntry team,
     EventContext context,
   ) {
-    // Determine effect based on context (same logic as _buildSportsTeamResponse)
     int effectId;
     String effectName;
     int speed;
@@ -303,39 +449,20 @@ class LuminaBrain {
 
     switch (context) {
       case EventContext.party:
-        effectId = 41;
-        effectName = 'Running';
-        speed = 180;
-        intensity = 220;
-        isStatic = false;
+        effectId = 41; effectName = 'Running'; speed = 180; intensity = 220; isStatic = false;
         break;
       case EventContext.celebration:
-        effectId = 43;
-        effectName = 'Twinkle';
-        speed = 120;
-        intensity = 180;
-        isStatic = false;
+        effectId = 43; effectName = 'Twinkle'; speed = 120; intensity = 180; isStatic = false;
         break;
       case EventContext.elegant:
-        effectId = 2;
-        effectName = 'Breathe';
-        speed = 50;
-        intensity = 140;
-        isStatic = false;
+        effectId = 2; effectName = 'Breathe'; speed = 50; intensity = 140; isStatic = false;
         break;
       case EventContext.staticSimple:
-        effectId = 0;
-        effectName = 'Solid';
-        speed = 128;
-        intensity = 128;
-        isStatic = true;
+        effectId = 0; effectName = 'Solid'; speed = 128; intensity = 128; isStatic = true;
         break;
       case EventContext.romantic:
       case EventContext.neutral:
-        // Use the team's suggested defaults when available
-        effectId = team.suggestedEffects.isNotEmpty
-            ? team.suggestedEffects.first
-            : 2;
+        effectId = team.suggestedEffects.isNotEmpty ? team.suggestedEffects.first : 2;
         effectName = _effectIdToName(effectId);
         speed = team.defaultSpeed;
         intensity = team.defaultIntensity;
@@ -343,13 +470,11 @@ class LuminaBrain {
         break;
     }
 
-    // Use LED-optimized RGB if a canonical theme is attached
     final ledRgb = team.ledOptimizedRgb;
-
-    // Build pattern name and subtitle
     final shortName = team.officialName.split(' ').last;
     String patternName;
     String subtitle;
+
     switch (context) {
       case EventContext.party:
         patternName = '${team.officialName} Party';
@@ -374,22 +499,21 @@ class LuminaBrain {
         break;
     }
 
-    // Colors array for response JSON
     final colorsArray = <Map<String, dynamic>>[];
     for (var i = 0; i < team.colors.length; i++) {
       final tc = team.colors[i];
-      // Prefer LED-optimized values when available
       final rgb = i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b, 0];
       colorsArray.add({
         'name': tc.name,
-        'rgb': rgb.length >= 4 ? rgb : [...rgb, 0], // ensure RGBW
+        'rgb': rgb.length >= 4 ? rgb : [...rgb, 0],
       });
     }
 
-    // WLED segment colors
     final segCol = <List<int>>[];
     for (var i = 0; i < team.colors.length; i++) {
-      final rgb = i < ledRgb.length ? ledRgb[i] : [team.colors[i].r, team.colors[i].g, team.colors[i].b, 0];
+      final rgb = i < ledRgb.length
+          ? ledRgb[i]
+          : [team.colors[i].r, team.colors[i].g, team.colors[i].b, 0];
       segCol.add(rgb);
     }
 
@@ -428,7 +552,6 @@ class LuminaBrain {
     return '$verbal ${jsonEncode(jsonObject)}';
   }
 
-  /// Builds a response for a holiday / season / cultural event.
   static String _buildHolidayResponse(HolidayColorEntry holiday) {
     final effectId =
         holiday.suggestedEffects.isNotEmpty ? holiday.suggestedEffects.first : 0;
@@ -444,7 +567,9 @@ class LuminaBrain {
       };
     }).toList();
 
-    final segCol = holiday.colors.map((c) => rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true)).toList();
+    final segCol = holiday.colors
+        .map((c) => rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true))
+        .toList();
 
     final wledPayload = {
       'on': true,
@@ -454,7 +579,9 @@ class LuminaBrain {
           'id': 0,
           'on': true,
           'bri': 255,
-          'col': segCol.isEmpty ? [rgbToRgbw(255, 255, 255, forceZeroWhite: true)] : segCol,
+          'col': segCol.isEmpty
+              ? [rgbToRgbw(255, 255, 255, forceZeroWhite: true)]
+              : segCol,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
@@ -482,7 +609,6 @@ class LuminaBrain {
     return '$verbal ${jsonEncode(jsonObject)}';
   }
 
-  /// Maps a WLED effect ID to a human-readable name for the most common effects.
   static String _effectIdToName(int id) {
     const names = <int, String>{
       0: 'Solid',
@@ -497,13 +623,11 @@ class LuminaBrain {
     return names[id] ?? 'Effect $id';
   }
 
-  /// Simple color name heuristic
   static String _colorToName(dynamic color) {
     final r = color.red as int;
     final g = color.green as int;
     final b = color.blue as int;
 
-    // Simple heuristic for common colors
     if (r > 200 && g < 100 && b < 100) return 'Red';
     if (g > 200 && r < 100 && b < 100) return 'Green';
     if (b > 200 && r < 100 && g < 100) return 'Blue';
@@ -515,27 +639,21 @@ class LuminaBrain {
     if (r > 200 && g > 200 && b > 200) return 'White';
     if (r > 200 && g > 160 && b < 150) return 'Gold';
     if (r > 200 && g > 180 && b > 150) return 'Champagne';
-
     return 'Color';
   }
 
-  /// Requests a strict WLED JSON payload with context aware instructions.
-  static Future<Map<String, dynamic>> generateWledJson(WidgetRef ref, String userPrompt) async {
+  static Future<Map<String, dynamic>> generateWledJson(
+      WidgetRef ref, String userPrompt) async {
     final contextBlock = _buildContextBlock(ref);
     return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
   }
 
-  /// Requests a strict WLED JSON payload using a plain Ref (for services).
-  /// This variant is used by background services like AutopilotGenerationService
-  /// that don't have access to a WidgetRef.
-  static Future<Map<String, dynamic>> generateWledJsonFromRef(Ref ref, String userPrompt) async {
+  static Future<Map<String, dynamic>> generateWledJsonFromRef(
+      Ref ref, String userPrompt) async {
     final contextBlock = _buildContextBlockFromRef(ref);
     return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
   }
 
-  /// Sends a refinement request that modifies an existing pattern.
-  /// The [currentPattern] is the full pattern context including colors, effect, speed, etc.
-  /// The [refinementPrompt] describes what to change (e.g., "Make it slower").
   static Future<String> chatRefinement(
     WidgetRef ref,
     String refinementPrompt, {
@@ -543,13 +661,12 @@ class LuminaBrain {
   }) async {
     String contextBlock = _buildContextBlock(ref);
 
-    // Inject global learning context for refinements too
-    // This helps the AI understand what adjustments work well for users
     try {
       final analyticsService = ref.read(patternAnalyticsServiceProvider);
-      // Extract the original query from the pattern if available
-      final originalQuery = currentPattern['originalQuery'] as String? ?? refinementPrompt;
-      final globalContext = await analyticsService.buildGlobalLearningContext(originalQuery);
+      final originalQuery =
+          currentPattern['originalQuery'] as String? ?? refinementPrompt;
+      final globalContext =
+          await analyticsService.buildGlobalLearningContext(originalQuery);
       if (globalContext != null && globalContext.isNotEmpty) {
         contextBlock = '$contextBlock\n\n$globalContext';
       }
@@ -564,33 +681,21 @@ class LuminaBrain {
     );
   }
 
-  /// Generates a segment-aware pattern suggestion based on the user's roofline.
-  ///
-  /// This method is specifically designed for the Design Studio to generate
-  /// patterns that respect segment boundaries and anchor points.
-  ///
-  /// Returns a map with:
-  /// - 'suggestion': Human-readable description
-  /// - 'segments': List of segment color/effect assignments
-  /// - 'wled': Ready-to-apply WLED payload
   static Future<Map<String, dynamic>> generateSegmentAwarePattern(
     WidgetRef ref,
     String userPrompt, {
     bool highlightAnchors = true,
     bool useSymmetry = true,
   }) async {
-    // Get roofline config
     final rooflineConfig = ref.read(currentRooflineConfigProvider).maybeWhen(
           data: (config) => config,
           orElse: () => null,
         );
 
     if (rooflineConfig == null || rooflineConfig.segments.isEmpty) {
-      // Fall back to standard generation if no roofline config
       return generateWledJson(ref, userPrompt);
     }
 
-    // Build enhanced prompt with segment details
     final enhancedPrompt = _buildSegmentAwarePrompt(
       userPrompt,
       rooflineConfig,
@@ -602,7 +707,6 @@ class LuminaBrain {
     return LuminaAI.generateWledJson(enhancedPrompt, contextBlock: contextBlock);
   }
 
-  /// Builds an enhanced prompt that includes segment-specific instructions.
   static String _buildSegmentAwarePrompt(
     String userPrompt,
     RooflineConfiguration config, {
@@ -612,8 +716,6 @@ class LuminaBrain {
     final buffer = StringBuffer(userPrompt);
     buffer.writeln('\n\nIMPORTANT - Apply this pattern to my specific roofline layout:');
     buffer.writeln('Total LEDs: ${config.totalPixelCount}');
-
-    // Describe segments for the AI
     buffer.writeln('\nSegments:');
     for (final segment in config.segments) {
       buffer.write('- ${segment.name} (${_segmentTypeName(segment.type)}): ');
@@ -640,17 +742,20 @@ class LuminaBrain {
     }
 
     if (useSymmetry) {
-      // Find main peak for symmetry axis
-      final peaks = config.segments.where((s) => s.type == SegmentType.peak).toList();
+      final peaks =
+          config.segments.where((s) => s.type == SegmentType.peak).toList();
       if (peaks.isNotEmpty) {
-        final mainPeak = peaks.reduce((a, b) => a.pixelCount > b.pixelCount ? a : b);
-        buffer.writeln('\nSymmetry: The main peak "${mainPeak.name}" is the visual center.');
-        buffer.writeln('Consider mirroring colors/effects on either side of the peak.');
+        final mainPeak =
+            peaks.reduce((a, b) => a.pixelCount > b.pixelCount ? a : b);
+        buffer.writeln(
+            '\nSymmetry: The main peak "${mainPeak.name}" is the visual center.');
+        buffer.writeln(
+            'Consider mirroring colors/effects on either side of the peak.');
       }
     }
 
-    buffer.writeln('\nGenerate a WLED payload that applies this pattern across all segments.');
-
+    buffer.writeln(
+        '\nGenerate a WLED payload that applies this pattern across all segments.');
     return buffer.toString();
   }
 
@@ -666,11 +771,9 @@ class LuminaBrain {
             orElse: () => null,
           );
       if (profile != null) {
-        // Prefer explicit location field (e.g., "Kansas City, MO").
         if (profile.location != null && profile.location!.trim().isNotEmpty) {
           location = profile.location!.trim();
         }
-        // Build interests list from interestTags.
         if (profile.interestTags.isNotEmpty) {
           interests = profile.interestTags.join(', ');
         }
@@ -682,7 +785,6 @@ class LuminaBrain {
       debugPrint('LuminaBrain context profile read error: $e');
     }
 
-    // Build roofline context if available
     try {
       final rooflineConfig = ref.read(currentRooflineConfigProvider).maybeWhen(
             data: (config) => config,
@@ -699,13 +801,6 @@ class LuminaBrain {
     final dateStr = _formatFullDate(now);
     final tod = _timeOfDayLabel(now);
 
-    // Per spec: append this block to the system message.
-    // Plaintext
-    // CONTEXT:
-    // - User Location: [City, State]
-    // - Current Date: [Date_String]
-    // - Known Interests: [Interests_List]
-    // - Time of Day: [Morning/Night]
     final buffer = StringBuffer('CONTEXT:\n'
         '- User Location: $location\n'
         '- Current Date: $dateStr\n'
@@ -720,10 +815,18 @@ class LuminaBrain {
       buffer.write('\n\n$rooflineContext');
     }
 
+    // Inject user variety preference for scheduling and multi-day requests
+    try {
+      final varietyProfile = ref.read(userVarietyProfileProvider);
+      buffer.write('\n\n${varietyProfile.buildAIContextHint()}');
+      debugPrint('🎨 Injected variety profile into context: ${varietyProfile.level.name}');
+    } catch (e) {
+      debugPrint('LuminaBrain variety profile read error: $e');
+    }
+
     return buffer.toString();
   }
 
-  /// Builds context block using a plain Ref (for background services).
   static String _buildContextBlockFromRef(Ref ref) {
     String location = 'Unknown';
     String interests = 'None';
@@ -783,14 +886,11 @@ class LuminaBrain {
     return buffer.toString();
   }
 
-  /// Builds a detailed roofline context string for AI to understand the user's
-  /// specific LED installation and make segment-aware recommendations.
   static String _buildRooflineContext(RooflineConfiguration config) {
     final buffer = StringBuffer('ROOFLINE INSTALLATION:\n');
     buffer.writeln('- Total LED Count: ${config.totalPixelCount}');
     buffer.writeln('- Number of Segments: ${config.segmentCount}');
 
-    // Count segment types
     final typeCounts = <SegmentType, int>{};
     for (final segment in config.segments) {
       typeCounts[segment.type] = (typeCounts[segment.type] ?? 0) + 1;
@@ -798,12 +898,12 @@ class LuminaBrain {
 
     if (typeCounts.isNotEmpty) {
       final typeDescriptions = typeCounts.entries
-          .map((e) => '${e.value} ${_segmentTypeName(e.key)}${e.value > 1 ? 's' : ''}')
+          .map((e) =>
+              '${e.value} ${_segmentTypeName(e.key)}${e.value > 1 ? 's' : ''}')
           .join(', ');
       buffer.writeln('- Segment Types: $typeDescriptions');
     }
 
-    // Count architectural roles
     final roleCounts = <ArchitecturalRole, int>{};
     for (final segment in config.segments) {
       if (segment.architecturalRole != null) {
@@ -819,44 +919,34 @@ class LuminaBrain {
       buffer.writeln('- Architectural Features: $roleDescriptions');
     }
 
-    // Total anchor points
-    final totalAnchors = config.segments.fold(0, (sum, s) => sum + s.anchorPixels.length);
+    final totalAnchors =
+        config.segments.fold(0, (sum, s) => sum + s.anchorPixels.length);
     if (totalAnchors > 0) {
       buffer.writeln('- Accent Points (corners/peaks): $totalAnchors');
     }
 
-    // Describe segments with architectural roles
     buffer.writeln('\nSegments (in order from LED #0):');
     for (final segment in config.segments) {
       buffer.write('  ${segment.name}');
-
-      // Add architectural role if present
       if (segment.architecturalRole != null) {
         buffer.write(' [${segment.architecturalRole!.displayName}]');
       } else {
         buffer.write(' (${_segmentTypeName(segment.type)})');
       }
-
-      // Add location if present
       if (segment.location != null && segment.location!.isNotEmpty) {
         buffer.write(' - ${segment.location}');
       }
-
       buffer.write(': LEDs ${segment.startPixel}-${segment.endPixel}');
       buffer.write(' (${segment.pixelCount} pixels)');
-
       if (segment.anchorPixels.isNotEmpty) {
         buffer.write(' [${segment.anchorPixels.length} anchors]');
       }
-
       if (segment.isProminent) {
         buffer.write(' *PROMINENT*');
       }
-
       buffer.writeln();
     }
 
-    // Add guidance for AI
     buffer.writeln();
     buffer.writeln('ROOFLINE-AWARE PATTERN GUIDANCE:');
     buffer.writeln('- User can request patterns by architectural feature (e.g., "light the peaks")');
@@ -870,25 +960,18 @@ class LuminaBrain {
     return buffer.toString();
   }
 
-  /// Returns human-readable segment type name.
   static String _segmentTypeName(SegmentType type) {
     switch (type) {
-      case SegmentType.run:
-        return 'horizontal run';
-      case SegmentType.corner:
-        return 'corner';
-      case SegmentType.peak:
-        return 'peak';
-      case SegmentType.column:
-        return 'column';
-      case SegmentType.connector:
-        return 'connector';
+      case SegmentType.run: return 'horizontal run';
+      case SegmentType.corner: return 'corner';
+      case SegmentType.peak: return 'peak';
+      case SegmentType.column: return 'column';
+      case SegmentType.connector: return 'connector';
     }
   }
 
   static String _timeOfDayLabel(DateTime dt) {
     final h = dt.hour;
-    // Minimal spec asks Morning/Night. We'll treat 5:00–16:59 as Morning, else Night.
     return (h >= 5 && h < 17) ? 'Morning' : 'Night';
   }
 
@@ -896,11 +979,11 @@ class LuminaBrain {
     'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
   ];
   static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
   ];
 
   static String _formatFullDate(DateTime dt) {
-    // Example: "Sunday, Jan 5, 2026, 1:00 PM"
     final weekday = _weekdays[(dt.weekday - 1).clamp(0, 6)];
     final month = _months[(dt.month - 1).clamp(0, 11)];
     final day = dt.day;
@@ -911,13 +994,6 @@ class LuminaBrain {
     return '$weekday, $month $day, $year, $hour12:$minute $ampm';
   }
 
-  /// Parse a design intent using AI when deterministic parsing has low confidence.
-  ///
-  /// This is a fallback for complex or ambiguous design requests that the
-  /// NLU service can't parse confidently. Returns structured JSON that can
-  /// be converted to a DesignIntent.
-  ///
-  /// Used by: AI Design Studio
   static Future<Map<String, dynamic>?> parseDesignIntent(
     WidgetRef ref,
     String userPrompt,
@@ -927,7 +1003,6 @@ class LuminaBrain {
           orElse: () => null,
         );
 
-    // Build a specialized prompt for design intent parsing
     final systemPrompt = '''
 You are a lighting design parser for permanent outdoor LED systems.
 Parse the user's natural language request into a structured design intent.
@@ -941,23 +1016,23 @@ Parse the request into this JSON structure:
       "name": "Layer name",
       "zone": {
         "type": "all|architectural|location|level",
-        "roles": ["peak", "corner", "run"] // for architectural type
-        "location": "front|back|left|right" // for location type
+        "roles": ["peak", "corner", "run"],
+        "location": "front|back|left|right"
       },
       "colors": {
         "primary": [R, G, B],
-        "secondary": [R, G, B], // optional
-        "accent": [R, G, B] // optional
+        "secondary": [R, G, B],
+        "accent": [R, G, B]
       },
       "spacing": {
         "type": "continuous|everyOther|oneOnTwoOff|equallySpaced|anchorsOnly",
-        "onCount": 1, // for pattern spacing
-        "offCount": 1 // for pattern spacing
+        "onCount": 1,
+        "offCount": 1
       },
       "motion": {
         "type": "none|chase|wave|pulse|twinkle",
         "direction": "leftToRight|rightToLeft|inward|outward",
-        "speed": 128 // 0-255
+        "speed": 128
       }
     }
   ],
@@ -978,10 +1053,9 @@ Rules:
       final response = await LuminaAI.chat(
         'Parse this lighting design request: "$userPrompt"',
         contextBlock: systemPrompt,
-        temperature: 0.3, // Low temperature for consistent parsing
+        temperature: 0.3,
       );
 
-      // Extract JSON from response
       final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(response);
       if (jsonMatch != null) {
         try {
@@ -996,9 +1070,7 @@ Rules:
 
     return null;
   }
-/// Direct calendar bypass — skips ALL tier matching (holiday, team, semantic cache).
-  /// [systemContext] is used as the sole system prompt — no lighting instructions injected.
-  /// [userMessage] contains the date facts + user request only.
+
   static Future<String> chatCalendar(
     WidgetRef ref,
     String systemContext,
@@ -1010,30 +1082,18 @@ Rules:
       temperature: 0.1,
     );
   }
-  /// Returns true if the query is about scheduling or time-based automation,
-  /// NOT a sports team reference. Prevents "sunset" from fuzzy-matching "suns".
+
   static bool _isScheduleOrTimeQuery(String query) {
     final lower = query.toLowerCase();
     const timeKeywords = [
-      'schedule',
-      'sunrise',
-      'sunset',
-      'dusk',
-      'dawn',
-      'timer',
-      'automate',
-      'automation',
-      'every day',
-      'every night',
-      'recurring',
-      'turn on at',
-      'turn off at',
+      'schedule', 'sunrise', 'sunset', 'dusk', 'dawn',
+      'timer', 'automate', 'automation', 'every day',
+      'every night', 'recurring', 'turn on at', 'turn off at',
     ];
     return timeKeywords.any((kw) => lower.contains(kw));
   }
 }
 
-/// Helper class for JSON extraction
 class _JsonExtraction {
   final Map<String, dynamic> object;
   final String substring;
