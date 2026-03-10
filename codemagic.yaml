@@ -38,14 +38,12 @@ workflows:
             ONLY_ACTIVE_ARCH=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             BUILD_DIR="../build/ios" \
-            clean build 2>&1 | tee /tmp/xcode_build.log | tail -30
+            build 2>&1 | tee /tmp/xcode_build.log | tail -30
           cd ..
 
-          # Show actual errors (not just notes)
-          echo "=== XCODEBUILD ERRORS ==="
-          grep -i "error:" /tmp/xcode_build.log | grep -v "note:" | tail -30
-          echo "=== SCRIPT PHASE OUTPUT ==="
-          grep -A5 "PhaseScriptExecution\|xcode_backend\|FLUTTER_ROOT\|error:" /tmp/xcode_build.log | grep -v "note: Disabling" | tail -40
+          # Show build errors if any
+          echo "=== BUILD ERRORS ==="
+          grep -i "error:" /tmp/xcode_build.log | grep -v "extension.*Error" | tail -15
 
           # 3. Locate the .app bundle
           APP_PATH="build/ios/Release-iphoneos/Runner.app"
