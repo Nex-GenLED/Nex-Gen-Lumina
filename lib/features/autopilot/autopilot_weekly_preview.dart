@@ -248,12 +248,8 @@ class _DayDetailSheet extends ConsumerWidget {
   }
 
   void _approveItem(WidgetRef ref, AutopilotScheduleItem item) {
-    try {
-      final schedulesNotifier = ref.read(schedulesProvider.notifier);
-      schedulesNotifier.markApproved('autopilot-${item.id}');
-    } catch (e) {
-      debugPrint('Failed to approve item: $e');
-    }
+    // TODO: Implement schedule approval workflow
+    debugPrint('Approve autopilot item: ${item.id}');
   }
 
   void _showEditDialog(
