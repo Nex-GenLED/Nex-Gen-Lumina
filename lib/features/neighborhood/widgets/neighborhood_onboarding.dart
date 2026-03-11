@@ -188,7 +188,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
         builder: (context, child) {
           return CustomPaint(
             size: const Size(double.infinity, 180),
-            painter: _NeighborhoodHeroPainter(
+            painter: NeighborhoodHeroPainter(
               pulseValue: _pulseController.value,
               waveValue: _waveController.value,
             ),
@@ -835,12 +835,13 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
   }
 }
 
-/// Custom painter for the animated hero visualization
-class _NeighborhoodHeroPainter extends CustomPainter {
+/// Custom painter for the animated hero visualization.
+/// Public so it can be reused on the returning-user landing screen.
+class NeighborhoodHeroPainter extends CustomPainter {
   final double pulseValue;
   final double waveValue;
 
-  _NeighborhoodHeroPainter({
+  NeighborhoodHeroPainter({
     required this.pulseValue,
     required this.waveValue,
   });
@@ -943,7 +944,7 @@ class _NeighborhoodHeroPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _NeighborhoodHeroPainter oldDelegate) {
+  bool shouldRepaint(covariant NeighborhoodHeroPainter oldDelegate) {
     return oldDelegate.pulseValue != pulseValue ||
         oldDelegate.waveValue != waveValue;
   }

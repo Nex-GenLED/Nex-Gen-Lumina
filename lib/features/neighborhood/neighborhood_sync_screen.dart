@@ -347,7 +347,7 @@ class _NeighborhoodLoadingShimmer extends StatelessWidget {
 // Returning-User Group List View
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _NeighborhoodGroupListView extends ConsumerWidget {
+class _NeighborhoodGroupListView extends ConsumerStatefulWidget {
   final List<NeighborhoodGroup> groups;
   final void Function(NeighborhoodGroup) onGroupTap;
   final VoidCallback onCreateGroup;
@@ -361,299 +361,572 @@ class _NeighborhoodGroupListView extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_NeighborhoodGroupListView> createState() =>
+      _NeighborhoodGroupListViewState();
+}
+
+class _NeighborhoodGroupListViewState
+    extends ConsumerState<_NeighborhoodGroupListView>
+    with TickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late AnimationController _waveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final previousAsync = ref.watch(previousGroupsProvider);
     final previousGroups = previousAsync.valueOrNull ?? [];
 
     // Sort: active sessions first, then by member count
-    final sorted = [...groups]..sort((a, b) {
+    final sorted = [...widget.groups]..sort((a, b) {
         if (a.isActive && !b.isActive) return -1;
         if (!a.isActive && b.isActive) return 1;
         return b.memberUids.length.compareTo(a.memberUids.length);
       });
 
-    return SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header ──────────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 12, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Neighborhood Sync',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (groups.isNotEmpty)
-                        Text(
-                          groups.length == 1 ? '1 Group' : '${groups.length} Groups',
-                          style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                        ),
-                    ],
-                  ),
-                ),
-                // "+" add-group button
-                IconButton(
-                  onPressed: () => _showAddMenu(context),
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: NexGenPalette.cyan.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: NexGenPalette.cyan.withOpacity(0.35)),
-                    ),
-                    child: const Icon(Icons.add, color: NexGenPalette.cyan, size: 20),
-                  ),
-                ),
-              ],
-            ),
-          ),
+    final anyActive = widget.groups.any((g) => g.isActive);
+    final subtitle = widget.groups.isEmpty
+        ? 'Your Sync Crews'
+        : widget.groups.length == 1
+            ? (anyActive ? '1 Active Group' : '1 Group')
+            : (anyActive
+                ? '${widget.groups.length} Groups Syncing'
+                : '${widget.groups.length} Groups');
 
-          // ── Group list / empty state ─────────────────────────────────────
-          Expanded(
-            child: groups.isEmpty
-                ? _buildEmptyState(context, previousGroups, ref)
-                : ListView(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, navBarTotalHeight(context) + 88),
-                    children: [
-                      for (final group in sorted)
-                        _buildGroupCard(context, group),
-                      // Previous groups rejoin section (if any)
-                      if (previousGroups.isNotEmpty) ...[
-                        const SizedBox(height: 24),
-                        _buildPreviousGroupsSection(context, previousGroups, ref),
-                      ],
-                    ],
-                  ),
-          ),
-
-          // ── Bottom action buttons ────────────────────────────────────────
-          Container(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, navBarTotalHeight(context) + 8),
-            decoration: BoxDecoration(
-              color: Colors.black,
-              border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onCreateGroup,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('New Crew'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: NexGenPalette.cyan,
-                      side: BorderSide(color: NexGenPalette.cyan.withOpacity(0.6)),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onJoinGroup,
-                    icon: const Icon(Icons.login, size: 18),
-                    label: const Text('Join Group'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.grey.shade300,
-                      side: BorderSide(color: Colors.grey.shade700),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black,
+            NexGenPalette.midnightBlue.withOpacity(0.8),
+            Colors.black,
+          ],
+        ),
       ),
-    );
-  }
+      child: SafeArea(
+        child: Column(
+          children: [
+            // ── Compact animated hero header ──────────────────────────────
+            _buildHeroHeader(subtitle),
 
-  Widget _buildGroupCard(BuildContext context, NeighborhoodGroup group) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: GestureDetector(
-        onTap: () => onGroupTap(group),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                NexGenPalette.gunmetal.withOpacity(0.95),
-                NexGenPalette.midnightBlue.withOpacity(0.9),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: group.isActive
-                  ? Colors.green.withOpacity(0.5)
-                  : NexGenPalette.cyan.withOpacity(0.25),
-            ),
-          ),
-          child: Row(
-            children: [
-              // Icon
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: group.isActive
-                        ? [Colors.green.shade700, Colors.green.shade400]
-                        : [NexGenPalette.cyan, NexGenPalette.blue],
-                  ),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(
-                  group.isActive ? Icons.sync : Icons.sync_disabled,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 14),
-              // Info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            // ── Group list / empty state ──────────────────────────────────
+            Expanded(
+              child: widget.groups.isEmpty
+                  ? _buildEmptyState(previousGroups)
+                  : ListView(
+                      padding: EdgeInsets.fromLTRB(
+                          16, 8, 16, navBarTotalHeight(context) + 88),
                       children: [
-                        Expanded(
-                          child: Text(
-                            group.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (group.isActive)
-                          Container(
-                            margin: const EdgeInsets.only(left: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.fiber_manual_record, color: Colors.green, size: 7),
-                                SizedBox(width: 4),
-                                Text(
-                                  'LIVE',
-                                  style: TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Icon(Icons.home, size: 13, color: Colors.grey.shade500),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${group.memberUids.length} ${group.memberUids.length == 1 ? "home" : "homes"}',
-                          style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-                        ),
-                        if (group.isActive && group.activePatternName != null) ...[
-                          Text('  ·  ', style: TextStyle(color: Colors.grey.shade700)),
-                          Expanded(
-                            child: Text(
-                              group.activePatternName!,
-                              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                        for (int i = 0; i < sorted.length; i++)
+                          _buildGroupCard(sorted[i], i + 1),
+                        if (previousGroups.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          _buildPreviousGroupsSection(previousGroups),
                         ],
                       ],
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right, color: Colors.grey.shade600),
-            ],
-          ),
+            ),
+
+            // ── Bottom action buttons ─────────────────────────────────────
+            _buildActionButtons(),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildEmptyState(
-    BuildContext context,
-    List<PreviousGroup> previousGroups,
-    WidgetRef ref,
-  ) {
-    return ListView(
-      padding: EdgeInsets.fromLTRB(24, 40, 24, navBarTotalHeight(context) + 88),
+  // ── Hero header ────────────────────────────────────────────────────────────
+
+  Widget _buildHeroHeader(String subtitle) {
+    return Stack(
       children: [
-        // Empty state icon + copy
-        Center(
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withOpacity(0.1),
-              shape: BoxShape.circle,
+        Column(
+          children: [
+            // Compact 120px animated hero (reuses NeighborhoodHeroPainter)
+            SizedBox(
+              height: 120,
+              width: double.infinity,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_pulseController, _waveController]),
+                builder: (context, child) => CustomPaint(
+                  size: const Size(double.infinity, 120),
+                  painter: NeighborhoodHeroPainter(
+                    pulseValue: _pulseController.value,
+                    waveValue: _waveController.value,
+                  ),
+                ),
+              ),
             ),
-            child: Icon(Icons.sync, size: 40, color: NexGenPalette.cyan.withOpacity(0.7)),
+            const SizedBox(height: 12),
+            // Gradient title
+            ShaderMask(
+              shaderCallback: (bounds) => const LinearGradient(
+                colors: [NexGenPalette.cyan, Colors.white, NexGenPalette.violet],
+              ).createShader(bounds),
+              child: const Text(
+                'Neighborhood Sync',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: NexGenPalette.cyan.withOpacity(0.9),
+                fontWeight: FontWeight.w500,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+        ),
+        // "+" button top-right
+        Positioned(
+          top: 8,
+          right: 8,
+          child: GestureDetector(
+            onTap: () => _showAddMenu(context),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: NexGenPalette.cyan.withOpacity(0.35)),
+              ),
+              child: const Icon(Icons.add, color: NexGenPalette.cyan, size: 20),
+            ),
           ),
         ),
-        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  // ── Group card ─────────────────────────────────────────────────────────────
+
+  Widget _buildGroupCard(NeighborhoodGroup group, int rank) {
+    final colors = _syncTypeColors(group.activeSyncType);
+    final emoji = _syncTypeEmoji(group.activeSyncType);
+    final accent = colors[0];
+
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, child) {
+        final borderOpacity =
+            group.isActive ? 0.4 + _pulseController.value * 0.4 : 0.3;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: GestureDetector(
+            onTap: () => widget.onGroupTap(group),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withOpacity(0.12),
+                    colors[1].withOpacity(0.05),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: accent.withOpacity(borderOpacity)),
+                boxShadow: group.isActive
+                    ? [
+                        BoxShadow(
+                          color: accent.withOpacity(
+                              0.18 + _pulseController.value * 0.14),
+                          blurRadius: 16,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Sync-mode icon container (onboarding card style)
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: colors),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child:
+                          Text(emoji, style: const TextStyle(fontSize: 22)),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+
+                  // Content
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                group.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            // LIVE chip — cyan styled (onboarding feature chip)
+                            if (group.isActive)
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: NexGenPalette.cyan.withOpacity(0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: NexGenPalette.cyan
+                                          .withOpacity(0.5)),
+                                ),
+                                child: const Text(
+                                  'LIVE',
+                                  style: TextStyle(
+                                    color: NexGenPalette.cyan,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+
+                        // Sync type pill + member count (sync mode card style)
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                group.activeSyncType.displayName,
+                                style: TextStyle(
+                                    color: Colors.grey.shade400,
+                                    fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(Icons.home,
+                                size: 12, color: Colors.grey.shade600),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${group.memberUids.length} '
+                              '${group.memberUids.length == 1 ? "home" : "homes"}',
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+
+                        // Animated status row
+                        _buildStatusRow(group),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // Rank badge + chevron (step-circle from onboarding)
+                  Column(
+                    children: [
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [NexGenPalette.cyan, NexGenPalette.blue],
+                          ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$rank',
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Icon(Icons.chevron_right,
+                          color: Colors.grey.shade600, size: 18),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatusRow(NeighborhoodGroup group) {
+    if (group.isActive) {
+      return AnimatedBuilder(
+        animation: _pulseController,
+        builder: (context, child) => Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: NexGenPalette.cyan
+                    .withOpacity(0.5 + _pulseController.value * 0.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: NexGenPalette.cyan.withOpacity(0.5),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                group.activePatternName != null
+                    ? 'Syncing · ${group.activePatternName}'
+                    : 'Syncing Now',
+                style: const TextStyle(
+                  color: NexGenPalette.cyan,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+              shape: BoxShape.circle, color: Colors.grey.shade700),
+        ),
+        const SizedBox(width: 6),
+        Text('Idle',
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+      ],
+    );
+  }
+
+  // ── Empty state ─────────────────────────────────────────────────────────────
+
+  Widget _buildEmptyState(List<PreviousGroup> previousGroups) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, navBarTotalHeight(context) + 88),
+      children: [
+        // Animated glow circle (matches _buildGetStartedPage in onboarding)
+        Center(
+          child: AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, child) => Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    NexGenPalette.cyan
+                        .withOpacity(0.3 + _pulseController.value * 0.2),
+                    NexGenPalette.cyan.withOpacity(0.1),
+                    Colors.transparent,
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NexGenPalette.cyan
+                        .withOpacity(0.3 + _pulseController.value * 0.2),
+                    blurRadius: 30 + _pulseController.value * 10,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child:
+                  const Icon(Icons.celebration, size: 56, color: Colors.white),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 28),
+
         const Center(
           child: Text(
-            'No active groups',
-            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            'Ready to Light Up\nYour Street?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              height: 1.2,
+            ),
           ),
         ),
-        const SizedBox(height: 8),
+
+        const SizedBox(height: 12),
+
         Center(
           child: Text(
-            'Create a new crew or join an existing one\nto start syncing with your neighbors.',
+            "Create a new crew or join one that's already syncing nearby.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 14, height: 1.5),
+            style: TextStyle(
+                fontSize: 14, color: Colors.grey.shade400, height: 1.5),
           ),
         ),
-        // Previous groups rejoin (if any)
+
+        const SizedBox(height: 32),
+
+        // Setup steps (matching _buildSetupStep from onboarding)
+        _buildSetupStep(
+            1, 'Create or Join', 'Start a new sync group or enter an invite code'),
+        const SizedBox(height: 14),
+        _buildSetupStep(
+            2, 'Configure Your Home', 'Set your LED count and position on the street'),
+        const SizedBox(height: 14),
+        _buildSetupStep(
+            3, 'Sync & Celebrate', 'Pick a pattern and watch the magic happen'),
+
+        const SizedBox(height: 28),
+
+        // Pro tip callout (onboarding style)
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.lightbulb_outline,
+                  color: NexGenPalette.cyan, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Pro tip: Share your invite code via text or social media to grow your group quickly!',
+                  style:
+                      TextStyle(color: Colors.grey.shade300, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+
         if (previousGroups.isNotEmpty) ...[
           const SizedBox(height: 32),
-          _buildPreviousGroupsSection(context, previousGroups, ref),
+          _buildPreviousGroupsSection(previousGroups),
         ],
       ],
     );
   }
 
-  Widget _buildPreviousGroupsSection(
-    BuildContext context,
-    List<PreviousGroup> previousGroups,
-    WidgetRef ref,
-  ) {
+  Widget _buildSetupStep(int number, String title, String subtitle) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: const BoxDecoration(
+            gradient:
+                LinearGradient(colors: [NexGenPalette.cyan, NexGenPalette.blue]),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number.toString(),
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15)),
+              Text(subtitle,
+                  style:
+                      TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Previous groups section ────────────────────────────────────────────────
+
+  Widget _buildPreviousGroupsSection(List<PreviousGroup> previousGroups) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(Icons.history, size: 16, color: Colors.grey.shade500),
+            Icon(Icons.history,
+                size: 16, color: NexGenPalette.cyan.withOpacity(0.7)),
             const SizedBox(width: 8),
             Text(
               'Previous Groups',
@@ -661,89 +934,175 @@ class _NeighborhoodGroupListView extends ConsumerWidget {
                 color: Colors.grey.shade400,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
               ),
             ),
           ],
         ),
         const SizedBox(height: 10),
-        ...previousGroups.map((prev) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
-                onTap: () async {
-                  final group = await ref
-                      .read(neighborhoodNotifierProvider.notifier)
-                      .joinGroup(prev.inviteCode);
-                  if (!context.mounted) return;
-                  if (group != null) {
+        ...previousGroups.map(
+          (prev) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              onTap: () async {
+                final group = await ref
+                    .read(neighborhoodNotifierProvider.notifier)
+                    .joinGroup(prev.inviteCode);
+                if (!context.mounted) return;
+                if (group != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Welcome back to ${group.name}!'),
+                    backgroundColor: Colors.green,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                } else {
+                  await removePreviousGroup(prev.id);
+                  ref.invalidate(previousGroupsProvider);
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('Welcome back to ${group.name}!'),
-                      backgroundColor: Colors.green,
+                      content: const Text('This group no longer exists.'),
+                      backgroundColor: Colors.orange.shade700,
                       behavior: SnackBarBehavior.floating,
                     ));
-                  } else {
-                    await removePreviousGroup(prev.id);
-                    ref.invalidate(previousGroupsProvider);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: const Text('This group no longer exists.'),
-                        backgroundColor: Colors.orange.shade700,
-                        behavior: SnackBarBehavior.floating,
-                      ));
-                    }
                   }
-                },
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white.withOpacity(0.08)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.group, size: 20, color: Colors.cyan),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          prev.name,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                }
+              },
+              borderRadius: BorderRadius.circular(12),
+              // Use case card style from onboarding
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.gunmetal.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: NexGenPalette.cyan.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.cyan.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Text('🏘️', style: TextStyle(fontSize: 20)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        prev.name,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.cyan.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: NexGenPalette.cyan.withOpacity(0.3)),
+                      ),
+                      child: const Text(
+                        'Rejoin',
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.cyan.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          'Rejoin',
-                          style: TextStyle(
-                            color: Colors.cyan,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            )),
+            ),
+          ),
+        ),
       ],
     );
   }
 
+  // ── Action buttons ─────────────────────────────────────────────────────────
+
+  Widget _buildActionButtons() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          24, 12, 24, navBarTotalHeight(context) + 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        border: Border(
+            top: BorderSide(color: NexGenPalette.cyan.withOpacity(0.1))),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Primary — matches "Start a Block Party" in onboarding
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: widget.onCreateGroup,
+              icon:
+                  const Icon(Icons.add_circle_outline, size: 20),
+              label: const Text(
+                'Start a Block Party',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                foregroundColor: Colors.black,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                elevation: 8,
+                shadowColor:
+                    NexGenPalette.cyan.withOpacity(0.4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Secondary — matches "Join the Party" in onboarding
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: widget.onJoinGroup,
+              icon: const Icon(Icons.login, size: 20),
+              label: const Text('Join the Party'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: NexGenPalette.cyan,
+                side: const BorderSide(color: NexGenPalette.cyan),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Add menu ───────────────────────────────────────────────────────────────
+
   void _showAddMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey.shade900,
+      backgroundColor: NexGenPalette.gunmetal,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -763,13 +1122,19 @@ class _NeighborhoodGroupListView extends ConsumerWidget {
                     color: NexGenPalette.cyan.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.add_home, color: NexGenPalette.cyan),
+                  child:
+                      const Icon(Icons.add_home, color: NexGenPalette.cyan),
                 ),
-                title: const Text('New Crew', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text('Start a new neighborhood sync group', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                title: const Text('New Crew',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600)),
+                subtitle: Text('Start a new neighborhood sync group',
+                    style: TextStyle(
+                        color: Colors.grey.shade500, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(context);
-                  onCreateGroup();
+                  widget.onCreateGroup();
                 },
               ),
               ListTile(
@@ -781,11 +1146,17 @@ class _NeighborhoodGroupListView extends ConsumerWidget {
                   ),
                   child: Icon(Icons.login, color: Colors.green.shade400),
                 ),
-                title: const Text('Join Group', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text('Enter an invite code to join an existing crew', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                title: const Text('Join Group',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                    'Enter an invite code to join an existing crew',
+                    style: TextStyle(
+                        color: Colors.grey.shade500, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(context);
-                  onJoinGroup();
+                  widget.onJoinGroup();
                 },
               ),
               const SizedBox(height: 8),
@@ -794,6 +1165,34 @@ class _NeighborhoodGroupListView extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  // ── Sync type theming helpers ──────────────────────────────────────────────
+
+  List<Color> _syncTypeColors(SyncType type) {
+    switch (type) {
+      case SyncType.sequentialFlow:
+        return [NexGenPalette.cyan, NexGenPalette.blue];
+      case SyncType.simultaneous:
+        return [Colors.red.shade400, Colors.pink.shade300];
+      case SyncType.patternMatch:
+        return [Colors.green.shade400, Colors.teal.shade300];
+      case SyncType.complement:
+        return [Colors.purple.shade400, NexGenPalette.violet];
+    }
+  }
+
+  String _syncTypeEmoji(SyncType type) {
+    switch (type) {
+      case SyncType.sequentialFlow:
+        return '🌊';
+      case SyncType.simultaneous:
+        return '❤️';
+      case SyncType.patternMatch:
+        return '🔄';
+      case SyncType.complement:
+        return '🎨';
+    }
   }
 }
 
@@ -880,7 +1279,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               Expanded(
                 child: ListView(
                   controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).padding.bottom + 88),
                   children: [
                     // Group selector (if multiple groups)
                     if (widget.groups.length > 1) ...[
