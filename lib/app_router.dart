@@ -50,6 +50,8 @@ import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
+import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
+import 'package:nexgen_command/features/autopilot/screens/autopilot_calendar_screen.dart';
 import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 // Dashboard pages for branch wrappers
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
@@ -202,6 +204,25 @@ class AppRouter {
         name: 'first-run',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: FirstRunScreen()),
+      ),
+      // ===== AUTOPILOT REVEAL + CALENDAR (root navigator) =====
+      GoRoute(
+        path: AppRoutes.firstWeekReveal,
+        name: 'first-week-reveal',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: FirstWeekRevealScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.autopilotCalendar,
+        name: 'autopilot-calendar',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: AutopilotCalendarScreen(),
+        ),
       ),
       // ===== SETUP / FULLSCREEN MODAL ROUTES (root navigator) =====
       GoRoute(
@@ -649,4 +670,7 @@ class AppRoutes {
   static const String demoComplete = '/demo/complete';
   // First-run onboarding (post-installer handoff)
   static const String firstRun = '/first-run';
+  // Autopilot generation reveal + unified calendar
+  static const String firstWeekReveal = '/autopilot/first-week';
+  static const String autopilotCalendar = '/autopilot/calendar';
 }

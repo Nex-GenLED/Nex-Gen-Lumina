@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_activity_entry.dart';
+import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
@@ -281,6 +282,41 @@ class AutopilotSettingsService {
       debugPrint('AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
     } catch (e) {
       debugPrint('AutopilotSettingsService: Failed to generate schedules: $e');
+    }
+  }
+
+  /// Send a weekly brief notification for [AutopilotEvent] objects from the
+  /// new autopilot_events subcollection.  Delegates to the existing
+  /// notification service after converting event names to a human-readable
+  /// summary string.
+  Future<void> scheduleWeeklyBriefForEvents(
+      UserModel profile, List<AutopilotEvent> events) async {
+    try {
+      final notificationService =
+          _ref.read(autopilotNotificationServiceProvider);
+      // Re-use the existing scheduleWeeklyBrief by converting AutopilotEvents
+      // to AutopilotScheduleItems (minimal fields for notification body).
+      final now = DateTime.now();
+      final pseudoItems = events.map((e) => AutopilotScheduleItem(
+            id: e.id,
+            scheduledTime: e.startTime,
+            repeatDays: const [],
+            patternName: e.patternName,
+            reason: e.sourceDetail,
+            trigger: e.eventType == AutopilotEventType.game
+                ? AutopilotTrigger.gameDay
+                : e.eventType == AutopilotEventType.holiday
+                    ? AutopilotTrigger.holiday
+                    : AutopilotTrigger.sunset,
+            confidenceScore: e.confidenceScore,
+            wledPayload: e.wledPayload ?? const {},
+            eventName: e.sourceDetail,
+            createdAt: now,
+          )).toList();
+      await notificationService.scheduleWeeklyBrief(
+          profile: profile, schedule: pseudoItems);
+    } catch (e) {
+      debugPrint('scheduleWeeklyBriefForEvents failed: $e');
     }
   }
 

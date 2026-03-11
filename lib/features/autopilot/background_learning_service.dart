@@ -5,12 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
+import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
+import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/services/sports_alert_service.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/autopilot_sync_trigger.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/services/suggestion_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 
 /// Background service for running periodic habit analysis and suggestion generation.
 ///
@@ -25,6 +28,9 @@ class BackgroundLearningService {
 
   DateTime? _lastDailyRun;
   bool _isRunning = false;
+
+  /// Tracks the last time the Sunday 7PM weekly regeneration ran.
+  DateTime? _lastWeeklyRegen;
 
   /// Run on app startup - checks for contextual suggestions
   Future<void> onAppStartup() async {
@@ -46,6 +52,98 @@ class BackgroundLearningService {
       debugPrint('✅ BackgroundLearningService: Startup check complete');
     } catch (e) {
       debugPrint('❌ BackgroundLearningService startup failed: $e');
+    }
+  }
+
+  // ── Sunday 7PM Weekly Regeneration ────────────────────────────────────────
+
+  /// Check whether the Sunday 7PM weekly regeneration should fire and run it
+  /// if so.  Call this from [onAppStartup] and after the daily maintenance run.
+  ///
+  /// Fires when:
+  ///   - It is Sunday and the local time is at or past 19:00 AND
+  ///     regeneration has not yet run this Sunday.
+  /// Missed-Sunday recovery:
+  ///   - If [now] is Monday or later and [_lastWeeklyRegen] is from last week
+  ///     (or null), regenerate immediately — never silently skip.
+  ///
+  /// Must be called from a Riverpod-aware context.
+  static Future<void> checkAndRunSundayRegen(WidgetRef ref) async {
+    try {
+      final enabled = ref.read(autopilotEnabledProvider);
+      if (!enabled) return;
+
+      final now = DateTime.now();
+      final service = BackgroundLearningService();
+
+      final bool isSundayAfter7pm =
+          now.weekday == DateTime.sunday && now.hour >= 19;
+
+      // Check if we already ran during this Sunday's window.
+      final lastRegen = service._lastWeeklyRegen;
+      final alreadyRanThisSunday = lastRegen != null &&
+          lastRegen.weekday == DateTime.sunday &&
+          lastRegen.year == now.year &&
+          lastRegen.month == now.month &&
+          lastRegen.day == now.day;
+
+      // Check missed-Sunday recovery: it's Monday or later and last regen
+      // is from more than 7 days ago (or never ran).
+      final daysSinceRegen = lastRegen != null
+          ? now.difference(lastRegen).inDays
+          : 999;
+      final missedSunday =
+          now.weekday != DateTime.sunday && daysSinceRegen >= 7;
+
+      if ((isSundayAfter7pm && !alreadyRanThisSunday) || missedSunday) {
+        debugPrint(
+            '🗓️ BackgroundLearningService: running Sunday 7PM weekly regen '
+            '(missed=$missedSunday, isSunday=$isSundayAfter7pm)');
+        await _runWeeklyRegen(ref);
+        service._lastWeeklyRegen = now;
+      }
+    } catch (e) {
+      debugPrint('❌ Sunday regen check failed: $e');
+    }
+  }
+
+  static Future<void> _runWeeklyRegen(WidgetRef ref) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final profileAsync = ref.read(currentUserProfileProvider);
+    final profile = profileAsync.maybeWhen(data: (p) => p, orElse: () => null);
+    if (profile == null) {
+      debugPrint('⚠️ WeeklyRegen: no profile loaded, skipping');
+      return;
+    }
+
+    // Pre-generation: fetch sports + holidays from providers if available.
+    // The repository's runWeeklyRegeneration accepts empty lists and falls
+    // back to seasonal/preferred-white defaults — safe for the first release.
+    final repo = ref.read(autopilotEventRepositoryProvider);
+    final newEvents = await repo.runWeeklyRegeneration(
+      uid: uid,
+      profile: profile,
+      sportingEvents: const [],
+      holidays: const [],
+      weekGeneration: DateTime.now().millisecondsSinceEpoch ~/ (7 * 86400000),
+    );
+
+    debugPrint(
+        '✅ WeeklyRegen: generated ${newEvents.length} events for upcoming week');
+
+    // Dispatch push notification if user has opted in.
+    if (profile.weeklySchedulePreviewEnabled && newEvents.isNotEmpty) {
+      try {
+        // AutopilotNotificationService already handles this — pass through.
+        final notifier = ref.read(autopilotSettingsServiceProvider);
+        // scheduleWeeklyBrief is on the notification service; trigger via
+        // the existing settings service to avoid circular imports.
+        await notifier.scheduleWeeklyBriefForEvents(profile, newEvents);
+      } catch (e) {
+        debugPrint('⚠️ Weekly brief notification failed: $e');
+      }
     }
   }
 
@@ -142,6 +240,9 @@ class BackgroundLearningService {
             .read(autopilotSettingsServiceProvider)
             .generateAndPopulateSchedules();
       }
+
+      // Also check Sunday 7PM weekly regen (new autopilot_events subcollection).
+      await checkAndRunSundayRegen(ref);
     } catch (e) {
       debugPrint('❌ Autopilot regen check failed: $e');
     }

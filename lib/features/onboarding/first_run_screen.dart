@@ -6,7 +6,10 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.dart';
+import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 /// First-run onboarding screen shown when welcomeCompleted == false.
 /// Lets the customer review/adjust installer-set preferences before using the app.
@@ -99,8 +102,49 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
       await ref.read(autopilotSettingsServiceProvider).setEnabled(true);
     }
 
+    // ── Initial Schedule Generation ────────────────────────────────────────
+    // Fire-and-forget: generate the first week in the background so the
+    // FirstWeekRevealScreen has data ready when the user arrives.
+    _triggerInitialScheduleGeneration();
+
     if (mounted) {
-      context.go(AppRoutes.dashboard);
+      // Navigate to the reveal screen instead of the dashboard so the user
+      // sees their personalized first week before activating autopilot.
+      context.go(AppRoutes.firstWeekReveal);
+    }
+  }
+
+  /// Runs the initial schedule generation asynchronously.
+  /// Errors are swallowed — the reveal screen handles the empty-state gracefully.
+  Future<void> _triggerInitialScheduleGeneration() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      // Re-read the profile to get the freshly saved preferences.
+      final profileAsync = ref.read(currentUserProfileProvider);
+      final profile =
+          profileAsync.maybeWhen(data: (p) => p, orElse: () => null);
+      if (profile == null) return;
+
+      final weekStart = upcomingWeekStart(DateTime.now());
+      final weekEnd = weekEndFor(weekStart);
+
+      final generator = AutopilotScheduleGenerator();
+      final events = await generator.generateWeek(
+        weekStart: weekStart,
+        weekEnd: weekEnd,
+        profile: profile,
+        protectedBlocks: const [], // New user — no protected blocks yet
+        sportingEvents: const [], // Sports events loaded by sports providers
+        holidays: const [],       // Holiday events loaded by calendar providers
+        weekGeneration: 0,
+      );
+
+      final repo = ref.read(autopilotEventRepositoryProvider);
+      await repo.saveInitialWeekEvents(uid, events);
+    } catch (e) {
+      debugPrint('⚠️ Initial schedule generation failed (non-fatal): $e');
     }
   }
 

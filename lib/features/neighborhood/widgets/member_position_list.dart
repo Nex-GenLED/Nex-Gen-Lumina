@@ -445,7 +445,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
     _nameController = TextEditingController(text: widget.member.displayName);
     _ledCountController = TextEditingController(text: '${widget.member.ledCount}');
     _rooflineController = TextEditingController(
-      text: widget.member.rooflineMeters.toStringAsFixed(1),
+      text: (widget.member.rooflineMeters * 3.28084).toStringAsFixed(1),
     );
     _rooflineDirection = widget.member.rooflineDirection;
     _participationStatus = widget.member.participationStatus;
@@ -515,8 +515,8 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: 'Roofline Length (meters)',
-                hintText: 'e.g., 15.0',
+                labelText: 'Roofline Length (feet)',
+                hintText: 'e.g., 50.0',
                 labelStyle: TextStyle(color: Colors.grey.shade500),
                 hintStyle: TextStyle(color: Colors.grey.shade700),
                 enabledBorder: OutlineInputBorder(
@@ -733,7 +733,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
     final updatedMember = widget.member.copyWith(
       displayName: _nameController.text.trim(),
       ledCount: int.tryParse(_ledCountController.text) ?? widget.member.ledCount,
-      rooflineMeters: double.tryParse(_rooflineController.text) ?? widget.member.rooflineMeters,
+      rooflineMeters: ((double.tryParse(_rooflineController.text) ?? (widget.member.rooflineMeters * 3.28084)) / 3.28084),
       rooflineDirection: _rooflineDirection,
       participationStatus: _participationStatus,
     );
