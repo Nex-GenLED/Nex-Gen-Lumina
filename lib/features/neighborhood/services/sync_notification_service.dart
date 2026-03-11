@@ -69,6 +69,19 @@ enum SyncNotificationType {
   sessionEnding,
   sessionEnded,
   joinBanner,
+  groupDissolved,
+
+  /// A shortForm group has taken over — longForm is paused.
+  handoffPaused,
+
+  /// ShortForm session ended — longForm is resuming.
+  handoffResumed,
+
+  /// Game is in overtime — longForm resume is delayed.
+  handoffOvertimeDelay,
+
+  /// Victory celebration before handing back to longForm.
+  handoffVictory,
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -99,6 +112,11 @@ class SyncNotificationService {
   static const _kSessionEndingId = 7003;
   static const _kSessionEndedId = 7004;
   static const _kJoinBannerId = 7005;
+  static const _kGroupDissolvedId = 7006;
+  static const _kHandoffPausedId = 7007;
+  static const _kHandoffResumedId = 7008;
+  static const _kHandoffOvertimeId = 7009;
+  static const _kHandoffVictoryId = 7010;
 
   SyncNotificationService({
     FirebaseMessaging? messaging,
@@ -337,6 +355,82 @@ class SyncNotificationService {
     );
   }
 
+  Future<void> notifyGroupDissolved({
+    required String groupId,
+    required List<String> participantUids,
+    required String hostName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: 'Neighborhood Sync',
+      body: '$hostName has left and the group has been dissolved. '
+          'Create or join a new group to sync again.',
+      type: SyncNotificationType.groupDissolved,
+    );
+  }
+
+  // ── Handoff Notifications ───────────────────────────────────────────
+
+  Future<void> notifyHandoffPaused({
+    required String groupId,
+    required List<String> participantUids,
+    required String shortFormEventName,
+    required String longFormGroupName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: '$shortFormEventName is live! 🏈',
+      body:
+          'Your $longFormGroupName lights will resume after the game.',
+      type: SyncNotificationType.handoffPaused,
+    );
+  }
+
+  Future<void> notifyHandoffResumed({
+    required String groupId,
+    required List<String> participantUids,
+    required String longFormGroupName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: 'Welcome back!',
+      body: 'Your $longFormGroupName lights are back! 🎄',
+      type: SyncNotificationType.handoffResumed,
+    );
+  }
+
+  Future<void> notifyHandoffOvertime({
+    required String groupId,
+    required List<String> participantUids,
+    required String longFormGroupName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: 'Overtime!',
+      body: "Game's in overtime — $longFormGroupName lights standing by 🎄",
+      type: SyncNotificationType.handoffOvertimeDelay,
+    );
+  }
+
+  Future<void> notifyHandoffVictory({
+    required String groupId,
+    required List<String> participantUids,
+    required String teamName,
+    required String longFormGroupName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: '$teamName wins! 🏆',
+      body: 'Celebrating before handing back to $longFormGroupName...',
+      type: SyncNotificationType.handoffVictory,
+    );
+  }
+
   // ── Foreground Notification Handling ────────────────────────────────
 
   /// Handle messages received while app is in the foreground.
@@ -458,6 +552,16 @@ class SyncNotificationService {
         return _kSessionEndedId;
       case SyncNotificationType.joinBanner:
         return _kJoinBannerId;
+      case SyncNotificationType.groupDissolved:
+        return _kGroupDissolvedId;
+      case SyncNotificationType.handoffPaused:
+        return _kHandoffPausedId;
+      case SyncNotificationType.handoffResumed:
+        return _kHandoffResumedId;
+      case SyncNotificationType.handoffOvertimeDelay:
+        return _kHandoffOvertimeId;
+      case SyncNotificationType.handoffVictory:
+        return _kHandoffVictoryId;
     }
   }
 
@@ -538,6 +642,14 @@ class SyncNotificationService {
         return prefs.sessionEnd;
       case SyncNotificationType.joinBanner:
         return prefs.sessionStart; // Same category as session start
+      case SyncNotificationType.groupDissolved:
+        return true; // Always send dissolution notifications
+      case SyncNotificationType.handoffPaused:
+      case SyncNotificationType.handoffResumed:
+      case SyncNotificationType.handoffVictory:
+        return prefs.sessionStart;
+      case SyncNotificationType.handoffOvertimeDelay:
+        return prefs.sessionEnd;
     }
   }
 
@@ -576,6 +688,18 @@ class SyncNotificationService {
           break;
         case SyncNotificationType.sessionEnding:
         case SyncNotificationType.sessionEnded:
+          if (prefs.sessionEnd) eligible.add(uid);
+          break;
+        case SyncNotificationType.groupDissolved:
+          eligible.add(uid); // Always notify about dissolution
+          break;
+        // Handoff notifications follow session start/end preferences
+        case SyncNotificationType.handoffPaused:
+        case SyncNotificationType.handoffResumed:
+        case SyncNotificationType.handoffVictory:
+          if (prefs.sessionStart) eligible.add(uid);
+          break;
+        case SyncNotificationType.handoffOvertimeDelay:
           if (prefs.sessionEnd) eligible.add(uid);
           break;
       }

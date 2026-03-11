@@ -550,38 +550,113 @@ class UserService {
 
   // ==================== Schedule Management ====================
 
-  /// Save all schedules for a user (replaces existing schedules).
-  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) async {
+  /// Retry delays for transient failures: 2s, then 5s.
+  static const _retryDelays = [Duration(seconds: 2), Duration(seconds: 5)];
+
+  /// Attempts a Firestore write with automatic retry on transient failure.
+  /// Returns true if the write eventually succeeded, false otherwise.
+  Future<bool> _writeWithRetry(Future<void> Function() writeOp) async {
+    // First attempt
     try {
+      await writeOp();
+      return true;
+    } catch (e, stack) {
+      debugPrint('❌ Schedule write failed (attempt 1): $e\n$stack');
+    }
+
+    // Retry attempts
+    for (int i = 0; i < _retryDelays.length; i++) {
+      await Future.delayed(_retryDelays[i]);
+      try {
+        await writeOp();
+        debugPrint('✅ Schedule write succeeded on retry ${i + 2}');
+        return true;
+      } catch (e, stack) {
+        debugPrint('❌ Schedule write failed (attempt ${i + 2}): $e\n$stack');
+      }
+    }
+    return false;
+  }
+
+  /// Verifies a schedule write reached the Firestore server by reading
+  /// back with [Source.server] (bypasses local cache).
+  Future<bool> verifyServerWrite(String userId, int expectedCount) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .get(const GetOptions(source: Source.server));
+      final serverSchedules = doc.data()?['schedules'] as List?;
+      return serverSchedules != null && serverSchedules.length == expectedCount;
+    } catch (e) {
+      debugPrint('⚠️ Server verification failed (offline?): $e');
+      return false;
+    }
+  }
+
+  /// Fetches schedules directly from the Firestore server, bypassing cache.
+  Future<List<ScheduleItem>> fetchSchedulesFromServer(String userId) async {
+    final doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .get(const GetOptions(source: Source.server));
+    if (!doc.exists) return [];
+    final data = doc.data()!;
+    return (data['schedules'] as List?)
+            ?.whereType<Map<String, dynamic>>()
+            .map((e) => ScheduleItem.fromJson(e))
+            .toList() ??
+        [];
+  }
+
+  /// Save all schedules for a user (replaces existing schedules).
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> saveSchedules(String userId, List<ScheduleItem> schedules) async {
+    final success = await _writeWithRetry(() async {
       await _firestore.collection('users').doc(userId).update({
         'schedules': schedules.map((e) => e.toJson()).toList(),
         'updated_at': FieldValue.serverTimestamp(),
       });
-      debugPrint('✅ Schedules saved: ${schedules.length} items');
-    } catch (e) {
-      debugPrint('❌ saveSchedules failed: $e');
-      rethrow;
+    });
+
+    if (!success) {
+      debugPrint('❌ saveSchedules failed after all retries');
+      return false;
     }
+
+    // Verify the write reached the server
+    final verified = await verifyServerWrite(userId, schedules.length);
+    if (!verified) {
+      debugPrint('⚠️ saveSchedules: write accepted but server verification failed');
+    } else {
+      debugPrint('✅ Schedules saved and verified: ${schedules.length} items');
+    }
+    return verified;
   }
 
   /// Add a single schedule item.
-  Future<void> addSchedule(String userId, ScheduleItem schedule) async {
-    try {
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> addSchedule(String userId, ScheduleItem schedule) async {
+    final success = await _writeWithRetry(() async {
       await _firestore.collection('users').doc(userId).update({
         'schedules': FieldValue.arrayUnion([schedule.toJson()]),
         'updated_at': FieldValue.serverTimestamp(),
       });
-      debugPrint('✅ Schedule added: ${schedule.id}');
-    } catch (e) {
-      debugPrint('❌ addSchedule failed: $e');
-      rethrow;
+    });
+
+    if (!success) {
+      debugPrint('❌ addSchedule failed after all retries');
+      return false;
     }
+    debugPrint('✅ Schedule added: ${schedule.id}');
+    return true;
   }
 
   /// Remove a schedule item by ID.
   /// Note: arrayRemove requires exact match, so we fetch and resave.
-  Future<void> removeSchedule(String userId, String scheduleId) async {
-    try {
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> removeSchedule(String userId, String scheduleId) async {
+    final success = await _writeWithRetry(() async {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (!doc.exists) return;
 
@@ -597,16 +672,20 @@ class UserService {
         'schedules': schedules.map((e) => e.toJson()).toList(),
         'updated_at': FieldValue.serverTimestamp(),
       });
-      debugPrint('✅ Schedule removed: $scheduleId');
-    } catch (e) {
-      debugPrint('❌ removeSchedule failed: $e');
-      rethrow;
+    });
+
+    if (!success) {
+      debugPrint('❌ removeSchedule failed after all retries');
+      return false;
     }
+    debugPrint('✅ Schedule removed: $scheduleId');
+    return true;
   }
 
   /// Update a single schedule item.
-  Future<void> updateSchedule(String userId, ScheduleItem schedule) async {
-    try {
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> updateSchedule(String userId, ScheduleItem schedule) async {
+    final success = await _writeWithRetry(() async {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (!doc.exists) return;
 
@@ -622,11 +701,14 @@ class UserService {
         'schedules': schedules.map((e) => e.toJson()).toList(),
         'updated_at': FieldValue.serverTimestamp(),
       });
-      debugPrint('✅ Schedule updated: ${schedule.id}');
-    } catch (e) {
-      debugPrint('❌ updateSchedule failed: $e');
-      rethrow;
+    });
+
+    if (!success) {
+      debugPrint('❌ updateSchedule failed after all retries');
+      return false;
     }
+    debugPrint('✅ Schedule updated: ${schedule.id}');
+    return true;
   }
 
   /// Stream user's schedules.

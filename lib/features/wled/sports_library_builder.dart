@@ -151,6 +151,7 @@ class SportsLibraryBuilder {
     'Bundesliga': 'league_bundesliga',
     'Serie A': 'league_serie_a',
     'Champions League': 'league_champions_league',
+    'FIFA World Cup': 'league_fifa_world_cup',
   };
 
   /// Build palette nodes for international soccer teams from TeamColorDatabase.

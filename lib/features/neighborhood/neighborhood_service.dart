@@ -125,6 +125,11 @@ class NeighborhoodService {
   }
 
   /// Leaves a neighborhood group.
+  ///
+  /// If a sync session is active, the user is gracefully disconnected
+  /// (their lights hold their last state rather than turning off).
+  /// If the leaving user is the host and no ownership transfer was done,
+  /// the group is dissolved for all members.
   Future<void> leaveGroup(String groupId) async {
     final uid = _currentUid;
     if (uid == null) throw Exception('User not authenticated');
@@ -135,6 +140,19 @@ class NeighborhoodService {
     if (!doc.exists) return;
 
     final group = NeighborhoodGroup.fromFirestore(doc);
+
+    // If sync is active, mark this member offline so the engine
+    // stops sending commands — lights hold their last state.
+    if (group.isActive) {
+      try {
+        await docRef.collection('members').doc(uid).update({
+          'isOnline': false,
+          'participationStatus': MemberParticipationStatus.optedOut.name,
+        });
+      } catch (_) {
+        // Member doc may already be gone — that's fine.
+      }
+    }
 
     // Remove from member list
     await docRef.update({
@@ -150,6 +168,72 @@ class NeighborhoodService {
     }
 
     debugPrint('Left neighborhood group: ${group.name}');
+  }
+
+  /// Dissolves a group entirely (host leaving without transferring ownership).
+  ///
+  /// Removes all members, commands, schedules, and the group document.
+  /// Returns the list of member UIDs that were in the group (excluding the host)
+  /// so the caller can send notifications.
+  Future<List<String>> dissolveGroup(String groupId) async {
+    final uid = _currentUid;
+    if (uid == null) throw Exception('User not authenticated');
+
+    final docRef = _neighborhoodsRef.doc(groupId);
+    final doc = await docRef.get();
+    if (!doc.exists) return [];
+
+    final group = NeighborhoodGroup.fromFirestore(doc);
+    final otherMembers = group.memberUids.where((id) => id != uid).toList();
+
+    // Stop any active sync first
+    if (group.isActive) {
+      await stopSync(groupId);
+    }
+
+    // Delete all sub-collections
+    final membersSnapshot = await docRef.collection('members').get();
+    for (final memberDoc in membersSnapshot.docs) {
+      await memberDoc.reference.delete();
+    }
+
+    final commandsSnapshot = await docRef.collection('commands').get();
+    for (final commandDoc in commandsSnapshot.docs) {
+      await commandDoc.reference.delete();
+    }
+
+    final schedulesSnapshot = await docRef.collection('schedules').get();
+    for (final scheduleDoc in schedulesSnapshot.docs) {
+      await scheduleDoc.reference.delete();
+    }
+
+    // Delete group document
+    await docRef.delete();
+
+    debugPrint('Dissolved neighborhood group: ${group.name}');
+    return otherMembers;
+  }
+
+  /// Transfers group ownership to another member.
+  Future<void> transferOwnership(String groupId, String newOwnerUid) async {
+    final uid = _currentUid;
+    if (uid == null) throw Exception('User not authenticated');
+
+    final docRef = _neighborhoodsRef.doc(groupId);
+    final doc = await docRef.get();
+    if (!doc.exists) throw Exception('Group not found');
+
+    final group = NeighborhoodGroup.fromFirestore(doc);
+    if (group.creatorUid != uid) {
+      throw Exception('Only the current host can transfer ownership');
+    }
+
+    if (!group.memberUids.contains(newOwnerUid)) {
+      throw Exception('New owner must be a member of the group');
+    }
+
+    await docRef.update({'creatorUid': newOwnerUid});
+    debugPrint('Transferred ownership of ${group.name} to $newOwnerUid');
   }
 
   /// Deletes a neighborhood group (creator only).

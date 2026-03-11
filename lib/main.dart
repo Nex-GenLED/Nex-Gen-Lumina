@@ -8,8 +8,10 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
+import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_notification_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -91,6 +93,7 @@ class MyApp extends ConsumerStatefulWidget {
 
 class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   bool _voiceServicesInitialized = false;
+  bool _schedulePersistenceChecked = false;
 
   @override
   void initState() {
@@ -172,9 +175,28 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       }
     });
 
+    // Run schedule persistence health check once after auth is ready
+    if (!_schedulePersistenceChecked) {
+      final user = ref.read(authStateProvider).maybeWhen(
+            data: (u) => u,
+            orElse: () => null,
+          );
+      if (user != null) {
+        _schedulePersistenceChecked = true;
+        Future.microtask(() {
+          ref.read(schedulesProvider.notifier).verifyPersistence().catchError((e) {
+            debugPrint('Schedule persistence check failed: $e');
+          });
+        });
+      }
+    }
+
     return MaterialApp.router(
       title: 'Lumina',
       debugShowCheckedModeBanner: false,
+
+      // Global scaffold messenger key for showing snackbars from services
+      scaffoldMessengerKey: AppRouter.scaffoldMessengerKey,
 
       // Theme configuration: Nex‑Gen Premium Dark
       theme: nexGenPremiumDarkTheme,

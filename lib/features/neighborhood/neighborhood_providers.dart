@@ -1,8 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
+import 'services/sync_notification_service.dart';
 
 /// Provider for the NeighborhoodService singleton.
 final neighborhoodServiceProvider = Provider<NeighborhoodService>((ref) {
@@ -131,17 +133,102 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
   }
 
   /// Leaves the currently active group.
+  ///
+  /// For non-host members, removes them from the group.
+  /// Stores the group info for the rejoin flow.
   Future<void> leaveCurrentGroup() async {
     final groupId = ref.read(activeNeighborhoodIdProvider);
     if (groupId == null) return;
 
     state = const AsyncValue.loading();
     try {
+      // Save group info for rejoin before leaving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
       await _service.leaveGroup(groupId);
       ref.read(activeNeighborhoodIdProvider.notifier).state = null;
       state = const AsyncValue.data(null);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Dissolves the group when the host leaves without transferring ownership.
+  /// Notifies all remaining members via push notification.
+  Future<void> dissolveGroupAsHost({required String hostDisplayName}) async {
+    final groupId = ref.read(activeNeighborhoodIdProvider);
+    if (groupId == null) return;
+
+    state = const AsyncValue.loading();
+    try {
+      // Save group info for rejoin before dissolving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
+      final otherMembers = await _service.dissolveGroup(groupId);
+
+      // Notify all other members that the group has been dissolved
+      if (otherMembers.isNotEmpty) {
+        try {
+          final notifService = ref.read(syncNotificationServiceProvider);
+          await notifService.notifyGroupDissolved(
+            groupId: groupId,
+            participantUids: otherMembers,
+            hostName: hostDisplayName,
+          );
+        } catch (_) {
+          // Best-effort notification — don't block the leave flow
+        }
+      }
+
+      ref.read(activeNeighborhoodIdProvider.notifier).state = null;
+      state = const AsyncValue.data(null);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Transfers ownership to another member, then leaves the group.
+  Future<void> transferOwnershipAndLeave(String newOwnerUid) async {
+    final groupId = ref.read(activeNeighborhoodIdProvider);
+    if (groupId == null) return;
+
+    state = const AsyncValue.loading();
+    try {
+      // Save group info for rejoin before leaving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
+      await _service.transferOwnership(groupId, newOwnerUid);
+      await _service.leaveGroup(groupId);
+      ref.read(activeNeighborhoodIdProvider.notifier).state = null;
+      state = const AsyncValue.data(null);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Persists group info to SharedPreferences for the "Previous Groups" rejoin flow.
+  Future<void> _savePreviousGroup(NeighborhoodGroup group) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final existing = prefs.getStringList('previous_group_ids') ?? [];
+      if (!existing.contains(group.id)) {
+        existing.add(group.id);
+        await prefs.setStringList('previous_group_ids', existing);
+      }
+      // Store name and invite code for display
+      await prefs.setString('prev_group_name_${group.id}', group.name);
+      await prefs.setString('prev_group_code_${group.id}', group.inviteCode);
+    } catch (_) {
+      // Non-critical — rejoin will just require manual code entry
     }
   }
 
@@ -498,3 +585,54 @@ final activeMembersForScheduleProvider = Provider.family<List<NeighborhoodMember
   }).toList()
     ..sort((a, b) => a.positionIndex.compareTo(b.positionIndex));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Previous Groups (Rejoin Flow)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A previously-joined group stored locally for one-tap rejoin.
+class PreviousGroup {
+  final String id;
+  final String name;
+  final String inviteCode;
+
+  const PreviousGroup({
+    required this.id,
+    required this.name,
+    required this.inviteCode,
+  });
+}
+
+/// Loads previously-left groups from local storage.
+/// Filters out groups the user is currently a member of.
+final previousGroupsProvider = FutureProvider<List<PreviousGroup>>((ref) async {
+  final prefs = await SharedPreferences.getInstance();
+  final ids = prefs.getStringList('previous_group_ids') ?? [];
+  if (ids.isEmpty) return [];
+
+  // Get current group IDs to exclude
+  final currentGroups = ref.watch(userNeighborhoodsProvider).valueOrNull ?? [];
+  final currentIds = currentGroups.map((g) => g.id).toSet();
+
+  final results = <PreviousGroup>[];
+  for (final id in ids) {
+    if (currentIds.contains(id)) continue;
+
+    final name = prefs.getString('prev_group_name_$id');
+    final code = prefs.getString('prev_group_code_$id');
+    if (name != null && code != null) {
+      results.add(PreviousGroup(id: id, name: name, inviteCode: code));
+    }
+  }
+  return results;
+});
+
+/// Removes a previous group from the rejoin list.
+Future<void> removePreviousGroup(String groupId) async {
+  final prefs = await SharedPreferences.getInstance();
+  final ids = prefs.getStringList('previous_group_ids') ?? [];
+  ids.remove(groupId);
+  await prefs.setStringList('previous_group_ids', ids);
+  await prefs.remove('prev_group_name_$groupId');
+  await prefs.remove('prev_group_code_$groupId');
+}

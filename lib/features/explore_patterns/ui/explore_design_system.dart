@@ -79,7 +79,7 @@ const Map<String, FolderTheme> kFolderThemes = {
     emoji: '🍂',
   ),
   'architectural white and downlighting': FolderTheme(
-    gradientColors: [Color(0xFFE0E0E0), Color(0xFF90CAF9)],
+    gradientColors: [Color(0xFF1A1A2E), Color(0xFF16213E)],
     emoji: '🏛️',
   ),
   'movies & super heroes': FolderTheme(

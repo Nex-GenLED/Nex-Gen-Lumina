@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,7 +51,8 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
             child: groupsAsync.when(
               data: (groups) {
                 if (groups.isEmpty) {
-                  return const SizedBox.shrink(); // No card needed
+                  // No active groups — show rejoin section if they have previous groups
+                  return _buildPreviousGroupsSection();
                 }
 
                 // Auto-select first group if none selected
@@ -282,6 +284,124 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
           ),
         ),
       ),
+    );
+  }
+
+  /// Shows previous groups the user can rejoin with one tap.
+  Widget _buildPreviousGroupsSection() {
+    final previousAsync = ref.watch(previousGroupsProvider);
+
+    return previousAsync.when(
+      data: (previousGroups) {
+        if (previousGroups.isEmpty) return const SizedBox.shrink();
+
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: NexGenPalette.gunmetal.withOpacity(0.95),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.history, size: 18, color: Colors.grey.shade400),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Previous Groups',
+                        style: TextStyle(
+                          color: Colors.grey.shade300,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ...previousGroups.map((prev) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: InkWell(
+                      onTap: () async {
+                        final group = await ref
+                            .read(neighborhoodNotifierProvider.notifier)
+                            .joinGroup(prev.inviteCode);
+                        if (group != null && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Welcome back to ${group.name}!'),
+                              backgroundColor: Colors.green,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        } else if (mounted) {
+                          // Group may no longer exist — remove from list
+                          await removePreviousGroup(prev.id);
+                          ref.invalidate(previousGroupsProvider);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('This group no longer exists.'),
+                              backgroundColor: Colors.orange.shade700,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.group, size: 20, color: Colors.cyan),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                prev.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.cyan.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Rejoin',
+                                style: TextStyle(
+                                  color: Colors.cyan,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 
@@ -528,6 +648,36 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, color: Colors.grey),
+                      color: Colors.grey.shade800,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      onSelected: (value) {
+                        if (value == 'leave') {
+                          final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+                          if (group != null) {
+                            _showLeaveGroupDialog(group);
+                          }
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'leave',
+                          child: Row(
+                            children: [
+                              Icon(Icons.logout, size: 18, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text(
+                                'Leave Group',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(context),
@@ -906,15 +1056,23 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
           ],
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
 
-        // Leave group
-        TextButton.icon(
-          onPressed: () => _showLeaveGroupDialog(group),
-          icon: Icon(Icons.logout, size: 16, color: Colors.grey.shade600),
-          label: Text(
-            'Leave Crew',
-            style: TextStyle(color: Colors.grey.shade600),
+        // Leave group — destructive but not irreversible, use red outline
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _showLeaveGroupDialog(group),
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('Leave Group'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red,
+              side: const BorderSide(color: Colors.red),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ),
       ],
@@ -929,17 +1087,29 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
   }
 
   void _showLeaveGroupDialog(NeighborhoodGroup group) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final isHost = uid != null && group.creatorUid == uid;
+
+    if (isHost) {
+      _showHostLeaveGroupDialog(group);
+    } else {
+      _showMemberLeaveGroupDialog(group);
+    }
+  }
+
+  void _showMemberLeaveGroupDialog(NeighborhoodGroup group) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey.shade900,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Leave Crew?',
-          style: TextStyle(color: Colors.white),
+        title: Text(
+          'Leave ${group.name}?',
+          style: const TextStyle(color: Colors.white),
         ),
         content: Text(
-          'Are you sure you want to leave "${group.name}"? You\'ll need an invite code to rejoin.',
+          'You\'ll stop receiving sync commands from this group. '
+          'You can rejoin anytime with the group code.',
           style: TextStyle(color: Colors.grey.shade400),
         ),
         actions: [
@@ -950,17 +1120,183 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               style: TextStyle(color: Colors.grey.shade500),
             ),
           ),
-          ElevatedButton(
+          TextButton(
             onPressed: () {
               Navigator.pop(context); // Close dialog
               Navigator.pop(context); // Close sheet
               ref.read(neighborhoodNotifierProvider.notifier).leaveCurrentGroup();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('You\'ve left ${group.name}'),
+                  backgroundColor: Colors.grey.shade800,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade700,
-              foregroundColor: Colors.white,
+            child: const Text(
+              'Leave Group',
+              style: TextStyle(color: Colors.red),
             ),
-            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHostLeaveGroupDialog(NeighborhoodGroup group) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Leave ${group.name}?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You\'ll stop receiving sync commands from this group. '
+              'You can rejoin anytime with the group code.',
+              style: TextStyle(color: Colors.grey.shade400),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'You\'re the host of this group. Leaving will end the group '
+                      'for all members unless you transfer ownership first.',
+                      style: TextStyle(color: Colors.orange.shade300, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _showTransferOwnershipDialog(group);
+            },
+            child: const Text(
+              'Transfer Ownership',
+              style: TextStyle(color: Colors.cyan),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext); // Close dialog
+              Navigator.pop(context); // Close sheet
+              final member = ref.read(currentUserMemberProvider);
+              ref.read(neighborhoodNotifierProvider.notifier).dissolveGroupAsHost(
+                hostDisplayName: member?.displayName ?? 'The host',
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('You\'ve left ${group.name}'),
+                  backgroundColor: Colors.grey.shade800,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text(
+              'Leave Group',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTransferOwnershipDialog(NeighborhoodGroup group) {
+    final members = ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final otherMembers = members.where((m) => m.oderId != uid).toList();
+
+    if (otherMembers.isEmpty) {
+      // No other members to transfer to — just show leave dialog
+      _showMemberLeaveGroupDialog(group);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Transfer Ownership',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select the new host for ${group.name}:',
+                style: TextStyle(color: Colors.grey.shade400),
+              ),
+              const SizedBox(height: 16),
+              ...otherMembers.map((member) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: Colors.cyan.withOpacity(0.2),
+                  child: const Icon(Icons.home, color: Colors.cyan, size: 20),
+                ),
+                title: Text(
+                  member.displayName,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {
+                  Navigator.pop(dialogContext); // Close transfer dialog
+                  Navigator.pop(context); // Close sheet
+                  ref.read(neighborhoodNotifierProvider.notifier)
+                      .transferOwnershipAndLeave(member.oderId);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('You\'ve left ${group.name}'),
+                      backgroundColor: Colors.grey.shade800,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
           ),
         ],
       ),

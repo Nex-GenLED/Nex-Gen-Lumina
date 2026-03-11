@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../neighborhood_models.dart';
+import 'session_duration_type.dart';
 
 /// How an Autopilot Sync Event is triggered.
 enum SyncEventTriggerType {
@@ -250,6 +251,17 @@ class SyncEvent {
 
   bool get isRecurring => repeatDays.isNotEmpty;
 
+  /// Automatically classified duration type based on event category.
+  /// Game Day → shortForm; Holiday → longForm; Custom → depends on duration.
+  SessionDurationType get durationType =>
+      classifySessionDuration(category: category);
+
+  /// Whether this event is a short-form event (under 8 hours).
+  bool get isShortForm => durationType == SessionDurationType.shortForm;
+
+  /// Whether this event is a long-form event (over 24 hours).
+  bool get isLongForm => durationType == SessionDurationType.longForm;
+
   factory SyncEvent.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return SyncEvent(
@@ -394,6 +406,11 @@ class SyncEventSession {
   final bool isCelebrating;
   final DateTime? celebrationStartedAt;
 
+  /// UIDs of participants whose lights are temporarily controlled by a
+  /// different (shortForm) group via the handoff system. These members
+  /// are still logically "in" this session but their lights are paused.
+  final List<String> handoffPausedUids;
+
   const SyncEventSession({
     required this.id,
     required this.syncEventId,
@@ -407,6 +424,7 @@ class SyncEventSession {
     this.gameId,
     this.isCelebrating = false,
     this.celebrationStartedAt,
+    this.handoffPausedUids = const [],
   });
 
   factory SyncEventSession.fromFirestore(DocumentSnapshot doc) {
@@ -427,6 +445,8 @@ class SyncEventSession {
       isCelebrating: data['isCelebrating'] ?? false,
       celebrationStartedAt:
           (data['celebrationStartedAt'] as Timestamp?)?.toDate(),
+      handoffPausedUids:
+          List<String>.from(data['handoffPausedUids'] ?? []),
     );
   }
 
@@ -445,6 +465,7 @@ class SyncEventSession {
       'celebrationStartedAt': celebrationStartedAt != null
           ? Timestamp.fromDate(celebrationStartedAt!)
           : null,
+      'handoffPausedUids': handoffPausedUids,
     };
   }
 
@@ -461,6 +482,7 @@ class SyncEventSession {
     String? gameId,
     bool? isCelebrating,
     DateTime? celebrationStartedAt,
+    List<String>? handoffPausedUids,
   }) {
     return SyncEventSession(
       id: id ?? this.id,
@@ -477,6 +499,7 @@ class SyncEventSession {
       isCelebrating: isCelebrating ?? this.isCelebrating,
       celebrationStartedAt:
           celebrationStartedAt ?? this.celebrationStartedAt,
+      handoffPausedUids: handoffPausedUids ?? this.handoffPausedUids,
     );
   }
 }

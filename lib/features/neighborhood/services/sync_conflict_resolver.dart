@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/session_duration_type.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
@@ -18,6 +19,12 @@ class SyncConflictResolver {
   SyncConflictResolver(this._ref, this._eventService);
 
   /// Check if a new sync event conflicts with existing events.
+  ///
+  /// Duration-aware logic:
+  ///   - Short vs Long → no conflict (handled by handoff system)
+  ///   - Short vs Short → real conflict, use manual priority rank
+  ///   - Long vs Long → real conflict, use manual priority rank
+  ///
   /// Returns the conflicting event if one exists, null otherwise.
   Future<SyncEventConflict?> checkForConflicts({
     required String groupId,
@@ -37,15 +44,51 @@ class SyncConflictResolver {
         _estimateDuration(existing),
       );
 
-      if (overlap) {
+      if (!overlap) continue;
+
+      // ── Duration-aware conflict resolution ──────────────────────
+      // If the two events are different duration types (short vs long),
+      // the handoff system handles this automatically — not a conflict.
+      if (shouldAutoOverride(
+        incoming: proposedEvent.durationType,
+        active: existing.durationType,
+      )) {
+        // Short over long — handoff handles it. Return a friendly
+        // confirmation instead of a conflict warning.
         return SyncEventConflict(
           proposedEvent: proposedEvent,
           conflictingEvent: existing,
-          type: ConflictType.timeOverlap,
+          type: ConflictType.handoffManaged,
           message:
-              '"${proposedEvent.name}" overlaps with "${existing.name}"',
+              'During ${proposedEvent.name} your lights will switch to '
+              '${proposedEvent.name}. Your ${existing.name} lights will '
+              'automatically resume when it ends.',
         );
       }
+
+      if (shouldAutoOverride(
+        incoming: existing.durationType,
+        active: proposedEvent.durationType,
+      )) {
+        // The existing short event will auto-override the proposed long one.
+        return SyncEventConflict(
+          proposedEvent: proposedEvent,
+          conflictingEvent: existing,
+          type: ConflictType.handoffManaged,
+          message:
+              '${existing.name} will temporarily take over during its window. '
+              '${proposedEvent.name} will automatically resume afterward.',
+        );
+      }
+
+      // Same duration type — real conflict, needs manual priority rank
+      return SyncEventConflict(
+        proposedEvent: proposedEvent,
+        conflictingEvent: existing,
+        type: ConflictType.timeOverlap,
+        message:
+            '"${proposedEvent.name}" overlaps with "${existing.name}"',
+      );
     }
     return null;
   }
@@ -145,6 +188,11 @@ enum ConflictType {
   timeOverlap,
   manualOverride,
   apiUnavailable,
+
+  /// The overlap is between different duration types (short vs long)
+  /// and will be handled automatically by the handoff system.
+  /// This is informational, not a blocking conflict.
+  handoffManaged,
 }
 
 enum ConflictAction {

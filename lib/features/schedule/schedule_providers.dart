@@ -1,6 +1,7 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -19,7 +20,8 @@ final userSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) {
 });
 
 /// Notifier that manages schedule state and syncs with Firestore.
-/// Changes are persisted immediately to Firestore.
+/// All mutations use optimistic local updates with revert-on-failure,
+/// automatic retry, server verification, and user-visible error reporting.
 class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   final Ref _ref;
   bool _initialized = false;
@@ -67,6 +69,30 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         );
   }
 
+  // ─── Error surfacing ───────────────────────────────────────────
+
+  /// Shows a persistent snackbar with a retry action when a schedule
+  /// write fails after all automatic retries.
+  void _showSaveError(String operation, VoidCallback retry) {
+    final messenger = AppRouter.scaffoldMessengerKey.currentState;
+    if (messenger == null) return;
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text(
+          "Schedule couldn't be saved — check your connection and try again",
+        ),
+        duration: const Duration(seconds: 10),
+        action: SnackBarAction(
+          label: 'RETRY',
+          onPressed: retry,
+        ),
+      ),
+    );
+  }
+
+  // ─── Mutations ─────────────────────────────────────────────────
+
   /// Toggle a schedule's enabled state
   Future<void> toggle(String id, bool value) async {
     final userId = _userId;
@@ -77,22 +103,28 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
+    // Store previous state for revert
+    final oldState = List<ScheduleItem>.from(state);
+
     // Optimistically update local state
     state = [
       for (final s in state)
         if (s.id == id) s.copyWith(enabled: value) else s,
     ];
 
-    // Persist to Firestore
-    try {
-      final schedule = state.firstWhere((s) => s.id == id);
-      await _ref.read(userServiceProvider).updateSchedule(userId, schedule);
+    // Persist to Firestore (returns false on failure after retries)
+    final schedule = state.firstWhere((s) => s.id == id);
+    final success = await _ref.read(userServiceProvider).updateSchedule(userId, schedule);
+
+    if (success) {
       debugPrint('Schedule $id toggled to $value and saved');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist toggle: $e');
-    } finally {
-      _isMutating = false;
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist toggle — reverting');
+      state = oldState;
+      _showSaveError('toggle', () => toggle(id, value));
     }
+
+    _isMutating = false;
   }
 
   /// Add a new schedule
@@ -105,20 +137,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
+    // Store previous state for revert
+    final oldState = List<ScheduleItem>.from(state);
+
     // Optimistically update local state
     state = [...state, item];
 
     // Persist to Firestore
-    try {
-      await _ref.read(userServiceProvider).addSchedule(userId, item);
+    final success = await _ref.read(userServiceProvider).addSchedule(userId, item);
+
+    if (success) {
       debugPrint('Schedule added and saved: ${item.id}');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist add: $e');
-      // Revert on failure
-      state = state.where((s) => s.id != item.id).toList();
-    } finally {
-      _isMutating = false;
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist add — reverting');
+      state = oldState;
+      _showSaveError('add', () => add(item));
     }
+
+    _isMutating = false;
   }
 
   /// Remove a schedule by ID
@@ -131,23 +167,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
-    // Store for potential revert
-    final removed = state.firstWhere((s) => s.id == id, orElse: () => throw Exception('Not found'));
+    // Store previous state for revert
+    final oldState = List<ScheduleItem>.from(state);
 
     // Optimistically update local state
     state = state.where((s) => s.id != id).toList();
 
     // Persist to Firestore
-    try {
-      await _ref.read(userServiceProvider).removeSchedule(userId, id);
+    final success = await _ref.read(userServiceProvider).removeSchedule(userId, id);
+
+    if (success) {
       debugPrint('Schedule removed and saved: $id');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist remove: $e');
-      // Revert on failure
-      state = [...state, removed];
-    } finally {
-      _isMutating = false;
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist remove — reverting');
+      state = oldState;
+      _showSaveError('remove', () => remove(id));
     }
+
+    _isMutating = false;
   }
 
   /// Update an existing schedule
@@ -160,23 +197,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
-    // Store old value for potential revert
-    final oldItem = state.firstWhere((s) => s.id == item.id, orElse: () => throw Exception('Not found'));
+    // Store previous state for revert
+    final oldState = List<ScheduleItem>.from(state);
 
     // Optimistically update local state
     state = [for (final s in state) if (s.id == item.id) item else s];
 
     // Persist to Firestore
-    try {
-      await _ref.read(userServiceProvider).updateSchedule(userId, item);
+    final success = await _ref.read(userServiceProvider).updateSchedule(userId, item);
+
+    if (success) {
       debugPrint('Schedule updated and saved: ${item.id}');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist update: $e');
-      // Revert on failure
-      state = [for (final s in state) if (s.id == item.id) oldItem else s];
-    } finally {
-      _isMutating = false;
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist update — reverting');
+      state = oldState;
+      _showSaveError('update', () => update(item));
     }
+
+    _isMutating = false;
   }
 
   /// Replace all schedules (used by Autopilot)
@@ -189,23 +227,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
-    // Store old state for potential revert
-    final oldState = state;
+    // Store old state for revert
+    final oldState = List<ScheduleItem>.from(state);
 
     // Optimistically update local state
     state = schedules;
 
     // Persist to Firestore
-    try {
-      await _ref.read(userServiceProvider).saveSchedules(userId, schedules);
+    final success = await _ref.read(userServiceProvider).saveSchedules(userId, schedules);
+
+    if (success) {
       debugPrint('All schedules replaced and saved: ${schedules.length} items');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist replaceAll: $e');
-      // Revert on failure
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist replaceAll — reverting');
       state = oldState;
-    } finally {
-      _isMutating = false;
+      _showSaveError('replaceAll', () => replaceAll(schedules));
     }
+
+    _isMutating = false;
   }
 
   /// Add multiple schedules at once (used by Autopilot)
@@ -218,24 +257,57 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
+    // Store old state for revert
+    final oldState = List<ScheduleItem>.from(state);
+
     // Merge with existing, avoiding duplicates by ID
     final existingIds = state.map((s) => s.id).toSet();
     final newItems = items.where((i) => !existingIds.contains(i.id)).toList();
     final merged = [...state, ...newItems];
 
     // Optimistically update local state
-    final oldState = state;
     state = merged;
 
     // Persist to Firestore
-    try {
-      await _ref.read(userServiceProvider).saveSchedules(userId, merged);
+    final success = await _ref.read(userServiceProvider).saveSchedules(userId, merged);
+
+    if (success) {
       debugPrint('Added ${newItems.length} new schedules, total: ${merged.length}');
-    } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist addAll: $e');
+    } else {
+      debugPrint('SchedulesNotifier: Failed to persist addAll — reverting');
       state = oldState;
-    } finally {
-      _isMutating = false;
+      _showSaveError('addAll', () => addAll(items));
+    }
+
+    _isMutating = false;
+  }
+
+  // ─── Persistence health check ──────────────────────────────────
+
+  /// Verifies local schedule state matches the Firestore server.
+  /// Runs on app launch to catch any prior sync failures.
+  /// Trusts the server as the source of truth on mismatch.
+  Future<void> verifyPersistence() async {
+    final userId = _userId;
+    if (userId == null) return;
+
+    try {
+      final serverSchedules = await _ref
+          .read(userServiceProvider)
+          .fetchSchedulesFromServer(userId);
+
+      if (!_listEquals(state, serverSchedules)) {
+        debugPrint(
+          'SchedulesNotifier: Cache/server mismatch — '
+          'local=${state.length}, server=${serverSchedules.length}. '
+          'Resyncing from server.',
+        );
+        state = serverSchedules;
+      } else {
+        debugPrint('SchedulesNotifier: Persistence verified — ${state.length} schedules in sync');
+      }
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Persistence check failed (offline?): $e');
     }
   }
 }

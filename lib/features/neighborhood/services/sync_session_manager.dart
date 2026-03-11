@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../sports_alerts/models/game_state.dart';
+import '../../sports_alerts/models/sport_type.dart';
+import '../../sports_alerts/services/espn_api_service.dart';
+import '../models/session_duration_type.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
 import 'sync_celebration_service.dart';
+import 'sync_handoff_manager.dart';
 import 'sync_notification_service.dart';
 import 'autopilot_sync_trigger.dart' show syncEventServiceProvider;
 import 'sync_event_service.dart';
@@ -72,6 +77,29 @@ class SyncSessionManager {
 
     // Start listening for session lifecycle events
     _watchSession(groupId, sessionId, event);
+
+    // ── Duration-aware handoff integration ─────────────────────────
+    // If this is a shortForm event, notify the handoff manager so it
+    // can pause any active longForm sessions for each participant.
+    if (event.isShortForm) {
+      final handoffManager = _ref.read(syncHandoffManagerProvider);
+      await handoffManager.onShortFormSessionStart(
+        shortFormGroupId: groupId,
+        shortFormSessionId: sessionId,
+        shortFormEvent: event,
+        estimatedEndTime: _estimateEndTime(event),
+      );
+
+      // If game day, also start overtime monitoring on the handoff manager
+      if (event.isGameDay && gameId != null && event.sportLeague != null) {
+        handoffManager.startOvertimeWatch(
+          sportLeague: event.sportLeague!,
+          gameId: gameId,
+          shortFormGroupId: groupId,
+          shortFormSessionId: sessionId,
+        );
+      }
+    }
 
     // If game day, start celebration monitoring
     if (event.isGameDay && gameId != null) {
@@ -247,6 +275,9 @@ class SyncSessionManager {
   }
 
   /// Final dissolution — apply post-event behavior for each participant.
+  ///
+  /// If this was a shortForm session, triggers the handoff manager to resume
+  /// any paused longForm sessions for affected participants.
   Future<void> _dissolveSession(
     String groupId,
     SyncEventSession session,
@@ -260,8 +291,33 @@ class SyncSessionManager {
     final fallbackBehavior =
         defaultBehavior ?? event?.postEventBehavior ?? PostEventBehavior.returnToAutopilot;
 
-    // Apply per-participant post-event behavior
+    // ── Duration-aware handoff: check if this is a shortForm session ──
+    final isShortForm = event?.isShortForm ?? false;
+    bool? teamWon;
+
+    if (isShortForm && event != null && event.isGameDay && session.gameId != null) {
+      // Determine game outcome for victory/loss handling
+      teamWon = await _determineGameOutcome(event, session.gameId!);
+    }
+
+    // Notify handoff manager to resume paused longForm sessions
+    if (isShortForm) {
+      final handoffManager = _ref.read(syncHandoffManagerProvider);
+      await handoffManager.onShortFormSessionEnd(
+        shortFormGroupId: groupId,
+        shortFormSessionId: session.id,
+        teamWon: teamWon,
+        shortFormEvent: event,
+      );
+    }
+
+    // Apply per-participant post-event behavior (only for those NOT being
+    // handed off to a longForm session — the handoff manager handles those)
+    final handoffManager = _ref.read(syncHandoffManagerProvider);
     for (final uid in session.activeParticipantUids) {
+      // If the handoff manager is resuming a longForm for this user, skip
+      if (isShortForm && handoffManager.state.isLongFormPaused) continue;
+
       final consent = await _eventService.getConsent(groupId, uid);
       final behavior = consent?.preferredPostBehavior ?? fallbackBehavior;
       await _applyPostEventBehavior(uid, behavior);
@@ -287,6 +343,62 @@ class SyncSessionManager {
       participantUids: endedEligible,
       eventName: eventName,
     );
+  }
+
+  /// Determine if the tracked team won the game.
+  Future<bool?> _determineGameOutcome(SyncEvent event, String gameId) async {
+    try {
+      final celebService = _ref.read(syncCelebrationServiceProvider);
+      // Use the ESPN API to check final score
+      final espnApi = EspnApiService();
+      final sport = _parseSportType(event.sportLeague ?? '');
+      if (sport == null) return null;
+
+      final gameState = await espnApi.fetchGame(sport, gameId);
+      espnApi.dispose();
+      if (gameState == null) return null;
+      if (gameState.status != GameStatus.final_) return null;
+
+      final teamId = event.espnTeamId ?? '';
+      final isHome = gameState.homeTeamId == teamId;
+      final teamScore = isHome ? gameState.homeScore : gameState.awayScore;
+      final opponentScore = isHome ? gameState.awayScore : gameState.homeScore;
+
+      return teamScore > opponentScore;
+    } catch (e) {
+      debugPrint('[SyncSessionManager] Failed to determine game outcome: $e');
+      return null;
+    }
+  }
+
+  SportType? _parseSportType(String league) {
+    switch (league.toUpperCase()) {
+      case 'NFL': return SportType.nfl;
+      case 'NBA': return SportType.nba;
+      case 'MLB': return SportType.mlb;
+      case 'NHL': return SportType.nhl;
+      case 'MLS': return SportType.mls;
+      default: return null;
+    }
+  }
+
+  /// Estimate when a sync event will end.
+  DateTime? _estimateEndTime(SyncEvent event) {
+    if (event.scheduledTime == null) return null;
+    final duration = _estimateGameDuration(event);
+    return event.scheduledTime!.add(duration);
+  }
+
+  Duration _estimateGameDuration(SyncEvent event) {
+    if (!event.isGameDay) return const Duration(hours: 2);
+    switch (event.sportLeague?.toUpperCase()) {
+      case 'NFL': return const Duration(hours: 3, minutes: 15);
+      case 'NBA': return const Duration(hours: 2, minutes: 30);
+      case 'MLB': return const Duration(hours: 3);
+      case 'NHL': return const Duration(hours: 2, minutes: 30);
+      case 'MLS': return const Duration(hours: 2);
+      default: return const Duration(hours: 3);
+    }
   }
 
   /// Apply the appropriate post-event behavior for a single participant.

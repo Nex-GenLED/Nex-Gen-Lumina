@@ -117,20 +117,9 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
-      // Schedules subcollection - automation schedules for lighting
-      match /schedules/{scheduleId} {
-        // Users can read their own schedules, media users can view for content
-        allow read: if canReadUserData(userId);
-
-        // Users can create schedules
-        allow create: if isOwner(userId);
-
-        // Users can update their schedules
-        allow update: if isOwner(userId);
-
-        // Users can delete their schedules
-        allow delete: if isOwner(userId);
-      }
+      // NOTE: Schedules are stored as an array field on the /users/{userId}
+      // document (not a subcollection). The user document update rule above
+      // governs schedule persistence. No subcollection rules needed.
 
       // Commands subcollection - Cloud Relay commands for remote WLED control
       match /commands/{commandId} {

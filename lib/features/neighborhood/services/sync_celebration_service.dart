@@ -28,6 +28,11 @@ class SyncCelebrationService {
   bool _isCelebrating = false;
   String? _activeGroupId;
   String? _activeSessionId;
+  SyncEvent? _activeEvent;
+
+  /// Whether the tracked team won the game (set on game final).
+  bool? _teamWon;
+  bool? get teamWon => _teamWon;
 
   SyncCelebrationService(this._ref, this._eventService, this._espnApi);
 
@@ -42,6 +47,8 @@ class SyncCelebrationService {
   }) {
     _activeGroupId = groupId;
     _activeSessionId = sessionId;
+    _activeEvent = event;
+    _teamWon = null;
 
     final sport = _parseSportType(event.sportLeague ?? '');
     if (sport == null) return;
@@ -70,6 +77,9 @@ class SyncCelebrationService {
     _isCelebrating = false;
     _activeGroupId = null;
     _activeSessionId = null;
+    _activeEvent = null;
+    // Note: _teamWon is intentionally NOT cleared here — it's read by the
+    // session manager during dissolution to determine handoff behavior.
     debugPrint('[SyncCelebrationService] Stopped monitoring');
   }
 
@@ -83,10 +93,29 @@ class SyncCelebrationService {
       final currentState = await _espnApi.fetchGame(sport, gameId);
       if (currentState == null) return;
 
-      // Check if game is over → trigger session end
+      // Check if game is over → determine outcome and trigger session end
       if (currentState.status == GameStatus.final_) {
         debugPrint('[SyncCelebrationService] Game is final');
         _pollingTimer?.cancel();
+
+        // Determine if the tracked team won for handoff victory/loss handling
+        if (event.espnTeamId != null) {
+          final teamId = event.espnTeamId!;
+          final isHome = currentState.homeTeamId == teamId;
+          final teamScore =
+              isHome ? currentState.homeScore : currentState.awayScore;
+          final opponentScore =
+              isHome ? currentState.awayScore : currentState.homeScore;
+          _teamWon = teamScore > opponentScore;
+          debugPrint(
+            '[SyncCelebrationService] Team ${_teamWon! ? "WON" : "LOST"} '
+            '($teamScore - $opponentScore)',
+          );
+        }
+
+        // The actual handoff will be triggered by the session manager
+        // during dissolution — we just record the outcome here via _teamWon.
+
         // Session manager will handle dissolution via its own monitoring
         return;
       }

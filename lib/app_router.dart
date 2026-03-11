@@ -98,6 +98,10 @@ class AppRouter {
   // Navigator keys for StatefulShellRoute branches
   /// Root navigator key — exposed for notification deep-link navigation.
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+  /// Global scaffold messenger key — allows showing snackbars from
+  /// non-widget code (e.g., Riverpod notifiers, services).
+  static final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   static GlobalKey<NavigatorState> get _rootNavigatorKey => rootNavigatorKey;
   static final _homeNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'home');
   static final _scheduleNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'schedule');

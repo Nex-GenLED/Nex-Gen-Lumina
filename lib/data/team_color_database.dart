@@ -286,6 +286,7 @@ class TeamColorDatabase {
       ..._bundesligaTeams,
       ..._serieATeams,
       ..._fifaWorldCupTeams,
+      ..._championsLeagueTeams,
     ];
   }
 
@@ -1709,5 +1710,44 @@ class TeamColorDatabase {
 
     // --- OCEANIA ---
     _intl(id: 'fifa_new_zealand', name: 'New Zealand', city: 'Wellington', league: 'FIFA World Cup', country: 'New Zealand', espnTeamId: 'NZL', colors: [TeamColor.hex('All Whites Black', 0xFF000000), TeamColor.hex('All Whites White', 0xFFFFFFFF)], aliases: ['new zealand', 'all whites', 'kiwis soccer', 'nz soccer']),
+  ];
+
+  // -----------------------------------------------------------------------
+  // Champions League -- 24 clubs (16 cross-league + 8 new)
+  // -----------------------------------------------------------------------
+  static final List<UnifiedTeamEntry> _championsLeagueTeams = [
+    // --- EPL clubs ---
+    _intl(id: 'cl_arsenal', name: 'Arsenal', city: 'London', league: 'Champions League', country: 'England', espnTeamId: '359', colors: [TeamColor.hex('Arsenal Red', 0xFFEF0107), TeamColor.hex('Arsenal White', 0xFFFFFFFF)], aliases: ['arsenal', 'arsenal fc', 'gunners']),
+    _intl(id: 'cl_man_city', name: 'Manchester City', city: 'Manchester', league: 'Champions League', country: 'England', espnTeamId: '382', colors: [TeamColor.hex('City Sky Blue', 0xFF6CABDD), TeamColor.hex('City White', 0xFFFFFFFF)], aliases: ['man city', 'manchester city', 'citizens', 'mcfc']),
+    _intl(id: 'cl_liverpool', name: 'Liverpool', city: 'Liverpool', league: 'Champions League', country: 'England', espnTeamId: '364', colors: [TeamColor.hex('Liverpool Red', 0xFFC8102E), TeamColor.hex('Liverpool White', 0xFFFFFFFF)], aliases: ['liverpool', 'liverpool fc', 'reds', 'lfc']),
+    _intl(id: 'cl_chelsea', name: 'Chelsea', city: 'London', league: 'Champions League', country: 'England', espnTeamId: '363', colors: [TeamColor.hex('Chelsea Blue', 0xFF034694), TeamColor.hex('Chelsea White', 0xFFFFFFFF)], aliases: ['chelsea', 'chelsea fc', 'blues', 'cfc']),
+    _intl(id: 'cl_tottenham', name: 'Tottenham Hotspur', city: 'London', league: 'Champions League', country: 'England', espnTeamId: '367', colors: [TeamColor.hex('Spurs White', 0xFFFFFFFF), TeamColor.hex('Spurs Navy', 0xFF132257)], aliases: ['tottenham', 'spurs', 'tottenham hotspur', 'thfc']),
+    _intl(id: 'cl_aston_villa', name: 'Aston Villa', city: 'Birmingham', league: 'Champions League', country: 'England', espnTeamId: '362', colors: [TeamColor.hex('Villa Claret', 0xFF670E36), TeamColor.hex('Villa Blue', 0xFF95BFE5)], aliases: ['aston villa', 'villa', 'avfc', 'villans']),
+
+    // --- La Liga clubs ---
+    _intl(id: 'cl_real_madrid', name: 'Real Madrid', city: 'Madrid', league: 'Champions League', country: 'Spain', espnTeamId: '86', colors: [TeamColor.hex('Madrid White', 0xFFFFFFFF), TeamColor.hex('Madrid Gold', 0xFFFEBE10)], aliases: ['real madrid', 'madrid', 'los blancos', 'rmcf']),
+    _intl(id: 'cl_barcelona', name: 'FC Barcelona', city: 'Barcelona', league: 'Champions League', country: 'Spain', espnTeamId: '83', colors: [TeamColor.hex('Barca Blue', 0xFF004D98), TeamColor.hex('Barca Red', 0xFFA50044)], aliases: ['barcelona', 'barca', 'fc barcelona', 'fcb', 'blaugrana']),
+    _intl(id: 'cl_atletico_madrid', name: 'Atletico Madrid', city: 'Madrid', league: 'Champions League', country: 'Spain', espnTeamId: '1068', colors: [TeamColor.hex('Atletico Red', 0xFFCB3524), TeamColor.hex('Atletico White', 0xFFFFFFFF)], aliases: ['atletico madrid', 'atletico', 'atleti', 'colchoneros']),
+
+    // --- Bundesliga clubs ---
+    _intl(id: 'cl_bayern_munich', name: 'Bayern Munich', city: 'Munich', league: 'Champions League', country: 'Germany', espnTeamId: '132', colors: [TeamColor.hex('Bayern Red', 0xFFDC052D), TeamColor.hex('Bayern White', 0xFFFFFFFF)], aliases: ['bayern munich', 'bayern', 'fc bayern']),
+    _intl(id: 'cl_borussia_dortmund', name: 'Borussia Dortmund', city: 'Dortmund', league: 'Champions League', country: 'Germany', espnTeamId: '108', colors: [TeamColor.hex('BVB Yellow', 0xFFFDE100), TeamColor.hex('BVB Black', 0xFF000000)], aliases: ['borussia dortmund', 'dortmund', 'bvb']),
+    _intl(id: 'cl_rb_leipzig', name: 'RB Leipzig', city: 'Leipzig', league: 'Champions League', country: 'Germany', espnTeamId: '11420', colors: [TeamColor.hex('Leipzig Red', 0xFFDD0741), TeamColor.hex('Leipzig White', 0xFFFFFFFF)], aliases: ['rb leipzig', 'leipzig', 'rbl', 'die roten bullen']),
+    _intl(id: 'cl_bayer_leverkusen', name: 'Bayer Leverkusen', city: 'Leverkusen', league: 'Champions League', country: 'Germany', espnTeamId: '106', colors: [TeamColor.hex('Leverkusen Red', 0xFFC4122E), TeamColor.hex('Leverkusen Black', 0xFF000000)], aliases: ['bayer leverkusen', 'leverkusen', 'werkself', 'b04']),
+
+    // --- Serie A clubs ---
+    _intl(id: 'cl_inter_milan', name: 'Inter Milan', city: 'Milan', league: 'Champions League', country: 'Italy', espnTeamId: '110', colors: [TeamColor.hex('Inter Blue', 0xFF010E80), TeamColor.hex('Inter Black', 0xFF000000)], aliases: ['inter milan', 'inter', 'internazionale', 'nerazzurri']),
+    _intl(id: 'cl_ac_milan', name: 'AC Milan', city: 'Milan', league: 'Champions League', country: 'Italy', espnTeamId: '103', colors: [TeamColor.hex('Milan Red', 0xFFFB090B), TeamColor.hex('Milan Black', 0xFF000000)], aliases: ['ac milan', 'milan', 'rossoneri', 'acm']),
+    _intl(id: 'cl_juventus', name: 'Juventus', city: 'Turin', league: 'Champions League', country: 'Italy', espnTeamId: '111', colors: [TeamColor.hex('Juve Black', 0xFF000000), TeamColor.hex('Juve White', 0xFFFFFFFF)], aliases: ['juventus', 'juve', 'bianconeri', 'la vecchia signora']),
+    _intl(id: 'cl_napoli', name: 'Napoli', city: 'Naples', league: 'Champions League', country: 'Italy', espnTeamId: '114', colors: [TeamColor.hex('Napoli Blue', 0xFF009FE3), TeamColor.hex('Napoli White', 0xFFFFFFFF)], aliases: ['napoli', 'ssc napoli', 'gli azzurri', 'partenopei']),
+
+    // --- New clubs (not in other league lists) ---
+    _intl(id: 'cl_psg', name: 'Paris Saint-Germain', city: 'Paris', league: 'Champions League', country: 'France', espnTeamId: '160', colors: [TeamColor.hex('PSG Navy', 0xFF002654), TeamColor.hex('PSG Gold', 0xFFDAA520)], aliases: ['psg', 'paris saint-germain', 'paris sg', 'parisiens']),
+    _intl(id: 'cl_porto', name: 'FC Porto', city: 'Porto', league: 'Champions League', country: 'Portugal', espnTeamId: '399', colors: [TeamColor.hex('Porto Blue', 0xFF003F91), TeamColor.hex('Porto White', 0xFFFFFFFF)], aliases: ['porto', 'fc porto', 'dragões', 'fcp']),
+    _intl(id: 'cl_benfica', name: 'SL Benfica', city: 'Lisbon', league: 'Champions League', country: 'Portugal', espnTeamId: '397', colors: [TeamColor.hex('Benfica Red', 0xFFC41230), TeamColor.hex('Benfica White', 0xFFFFFFFF)], aliases: ['benfica', 'sl benfica', 'águias', 'encarnados']),
+    _intl(id: 'cl_ajax', name: 'AFC Ajax', city: 'Amsterdam', league: 'Champions League', country: 'Netherlands', espnTeamId: '139', colors: [TeamColor.hex('Ajax Red', 0xFFC41230), TeamColor.hex('Ajax White', 0xFFFFFFFF)], aliases: ['ajax', 'afc ajax', 'godenzonen', 'de amsterdammers']),
+    _intl(id: 'cl_celtic', name: 'Celtic FC', city: 'Glasgow', league: 'Champions League', country: 'Scotland', espnTeamId: '158', colors: [TeamColor.hex('Celtic Green', 0xFF006838), TeamColor.hex('Celtic White', 0xFFFFFFFF)], aliases: ['celtic', 'celtic fc', 'the hoops', 'bhoys']),
+    _intl(id: 'cl_feyenoord', name: 'Feyenoord', city: 'Rotterdam', league: 'Champions League', country: 'Netherlands', espnTeamId: '143', colors: [TeamColor.hex('Feyenoord Red', 0xFFC41230), TeamColor.hex('Feyenoord White', 0xFFFFFFFF)], aliases: ['feyenoord', 'feyenoord rotterdam', 'de club aan de maas']),
+    _intl(id: 'cl_sporting_cp', name: 'Sporting CP', city: 'Lisbon', league: 'Champions League', country: 'Portugal', espnTeamId: '400', colors: [TeamColor.hex('Sporting Green', 0xFF006838), TeamColor.hex('Sporting White', 0xFFFFFFFF)], aliases: ['sporting cp', 'sporting lisbon', 'sporting', 'leões']),
   ];
 }
