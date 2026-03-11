@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../sports_alerts/models/game_state.dart';
+import '../../sports_alerts/models/sport_type.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
 import '../../wled/wled_providers.dart' show wledRepositoryProvider;
 import '../models/paused_session_state.dart';

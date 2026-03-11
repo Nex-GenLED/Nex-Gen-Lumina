@@ -17,6 +17,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Color;
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/models/user_model.dart';
