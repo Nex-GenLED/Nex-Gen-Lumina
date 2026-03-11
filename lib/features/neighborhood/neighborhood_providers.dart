@@ -6,6 +6,30 @@ import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
 import 'services/sync_notification_service.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarding Completion Flag
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kOnboardingCompleteKey = 'neighborhood_sync_onboarding_complete';
+
+/// Whether the user has completed or bypassed the Neighborhood Sync onboarding.
+/// Once set, this flag is never reset — even after leaving all groups.
+final neighborhoodSyncOnboardingCompleteProvider = FutureProvider<bool>((ref) async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool(_kOnboardingCompleteKey) ?? false;
+});
+
+/// Persists the onboarding-complete flag. Fire-and-forget — safe to call
+/// without awaiting. Silently ignores errors (non-critical path).
+Future<void> markNeighborhoodSyncOnboardingComplete() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kOnboardingCompleteKey, true);
+  } catch (_) {
+    // Non-critical — worst case the user sees onboarding once more.
+  }
+}
+
 /// Provider for the NeighborhoodService singleton.
 final neighborhoodServiceProvider = Provider<NeighborhoodService>((ref) {
   return NeighborhoodService();
@@ -108,6 +132,7 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
         longitude: longitude,
       );
       ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+      markNeighborhoodSyncOnboardingComplete(); // auto-complete on first group created
       state = const AsyncValue.data(null);
       return group;
     } catch (e, st) {
@@ -123,6 +148,7 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
       final group = await _service.joinGroup(inviteCode, displayName: displayName);
       if (group != null) {
         ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+        markNeighborhoodSyncOnboardingComplete(); // auto-complete on first group joined
       }
       state = const AsyncValue.data(null);
       return group;

@@ -74,7 +74,7 @@ class _MemberPositionListState extends ConsumerState<MemberPositionList> {
 
   Widget _buildStreetVisualization() {
     return Container(
-      height: 80,
+      height: 96,
       decoration: BoxDecoration(
         color: Colors.grey.shade900,
         borderRadius: BorderRadius.circular(12),

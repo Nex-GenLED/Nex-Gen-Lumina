@@ -611,13 +611,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: SizedBox(
-          height: 275,
+          height: 350,
           child: Stack(fit: StackFit.expand, children: [
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
-              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, -0.3))
+              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, 0.4))
             else if (!profileAsync.isLoading)
-              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, -0.3)),
+              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.4)),
             // Sky color overlay — sits above photo, below controls
             Positioned.fill(
               child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
@@ -634,7 +634,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       brightness: state.brightness,
                       forceOn: state.isOn,
                       targetAspectRatio: targetAspectRatio,
-                      imageAlignment: const Offset(0, -0.3),
+                      imageAlignment: const Offset(0, 0.4),
                       useBoxFitCover: true,
                     );
                   },
