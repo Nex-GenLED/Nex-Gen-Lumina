@@ -151,11 +151,35 @@ flutter run -d android       # Android Emulator
 
 ### Build
 
+**Development / quick builds:**
 ```bash
 flutter build apk            # Android APK
 flutter build ipa            # iOS (requires macOS + Xcode)
 flutter build web            # Web build
 ```
+
+**Release builds with obfuscation (use these for store submissions):**
+```bash
+# Android — APK
+flutter build apk --release --obfuscate --split-debug-info=build/debug-info/android
+
+# Android — App Bundle (preferred for Play Store)
+flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android
+
+# iOS
+flutter build ios --release --obfuscate --split-debug-info=build/debug-info/ios
+```
+
+Or use the named targets in `build.sh`:
+```bash
+./build.sh build-android-release
+./build.sh build-ios-release
+./build.sh build-all-release
+```
+
+> **Important:** The `build/debug-info/` directory contains symbol files required
+> for crash symbolication. Keep these files — never commit them to source control
+> and never delete them after a release.
 
 ### Code Generation (if needed)
 

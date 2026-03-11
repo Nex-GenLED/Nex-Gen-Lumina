@@ -24,6 +24,71 @@ import 'dart:convert';
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
 /// every OpenAI request for improved grounding and personalization.
 class LuminaBrain {
+  /// Returns true if the prompt appears to be probing internal architecture,
+  /// credentials, or attempting a prompt-injection / jailbreak.
+  static bool _isExtractionAttempt(String prompt) {
+    const patterns = [
+      'system prompt',
+      'ignore previous',
+      'ignore instructions',
+      'repeat your instructions',
+      'what are your instructions',
+      'how do you work',
+      'what algorithm',
+      'your source code',
+      'your api',
+      'reveal your',
+      'show your prompt',
+      'pretend you are',
+      'act as if',
+      'jailbreak',
+      'developer mode',
+      'dan mode',
+      'what model',
+      'which ai',
+      'openai',
+      'anthropic',
+      'gpt',
+      'claude',
+    ];
+    final lower = prompt.toLowerCase();
+    return patterns.any((p) => lower.contains(p));
+  }
+
+  /// Safe deflection response for extraction / jailbreak attempts.
+  static String _safeDeflectResponse() =>
+      "I'm Lumina — I'm here to help with your lighting. "
+      "What can I light up for you today?";
+
+  /// Scrubs sensitive data patterns from AI-generated responses before
+  /// they are shown to the user. Applied only to Tier 3 (cloud AI) output.
+  static String _sanitizeResponse(String response) {
+    // 1. URLs
+    var result = response.replaceAllMapped(
+      RegExp(r'https?://[^\s]+', caseSensitive: false),
+      (_) => '[link removed]',
+    );
+    // 2. IPv4 addresses
+    result = result.replaceAllMapped(
+      RegExp(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),
+      (_) => '[address removed]',
+    );
+    // 3. UUIDs
+    result = result.replaceAllMapped(
+      RegExp(
+        r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}',
+        caseSensitive: false,
+      ),
+      (_) => '[removed]',
+    );
+    // 4. API-key-like tokens: 32+ char alphanumeric with no spaces
+    result = result.replaceAllMapped(
+      RegExp(r'\b[A-Za-z0-9]{32,}\b'),
+      (_) => '[removed]',
+    );
+    return result;
+  }
+
   /// Sends a conversational request enriched with context.
   /// Three-tier matching system for maximum consistency and scalability:
   /// 1. Check pre-defined theme library (fastest, for common themes)
@@ -35,6 +100,9 @@ class LuminaBrain {
   /// - Inject recent suggestion history so AI avoids repetition
   /// - Use slightly higher temperature for creativity
   static Future<String> chat(WidgetRef ref, String userPrompt) async {
+    // Guard: deflect prompt-extraction and jailbreak attempts immediately.
+    if (_isExtractionAttempt(userPrompt)) return _safeDeflectResponse();
+
     final historyService = SuggestionHistoryService.instance;
     final isOpenEnded = SuggestionHistoryService.isOpenEndedQuery(userPrompt);
 
@@ -225,7 +293,7 @@ class LuminaBrain {
       );
     }
 
-    return aiResponse;
+    return _sanitizeResponse(aiResponse);
   }
 
   // -------------------------------------------------------------------------
@@ -824,7 +892,9 @@ class LuminaBrain {
       debugPrint('LuminaBrain variety profile read error: $e');
     }
 
-    return buffer.toString();
+    // Defensive sanitization: strip any sensitive values that could have been
+    // entered freeform by the user (IPs, URLs, tokens) before sending to AI.
+    return _sanitizeResponse(buffer.toString());
   }
 
   static String _buildContextBlockFromRef(Ref ref) {
@@ -883,7 +953,9 @@ class LuminaBrain {
       buffer.write('\n\n$rooflineContext');
     }
 
-    return buffer.toString();
+    // Defensive sanitization: strip any sensitive values that could have been
+    // entered freeform by the user (IPs, URLs, tokens) before sending to AI.
+    return _sanitizeResponse(buffer.toString());
   }
 
   static String _buildRooflineContext(RooflineConfiguration config) {

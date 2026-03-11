@@ -300,12 +300,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     return Scaffold(
       appBar: GlassAppBar(
-        title: Text(isViewingAsCustomer ? 'Viewing: $userName' : 'Hello, $userName'),
+        title: Text(
+          isViewingAsCustomer ? 'Viewing: $userName' : 'Hello, $userName',
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 8),
-            child: ConnectionStatusIndicator(showLabel: true, compact: false),
-          ),
           _buildControllerSelector(context, ref, state),
           IconButton(
             icon: const Icon(Icons.settings_suggest_outlined),
@@ -389,12 +388,17 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.lightbulb_outline,
-                size: 14,
-                color: state.connected ? NexGenPalette.cyan : Colors.grey,
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: state.connected
+                      ? NexGenPalette.cyan
+                      : Colors.red.withValues(alpha: 0.8),
+                ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 120),
                 child: Text(
@@ -611,9 +615,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           child: Stack(fit: StackFit.expand, children: [
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
-              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, 0.3))
+              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, -0.3))
             else if (!profileAsync.isLoading)
-              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.3)),
+              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, -0.3)),
             // Sky color overlay — sits above photo, below controls
             Positioned.fill(
               child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
@@ -630,7 +634,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       brightness: state.brightness,
                       forceOn: state.isOn,
                       targetAspectRatio: targetAspectRatio,
-                      imageAlignment: const Offset(0, 0.3),
+                      imageAlignment: const Offset(0, -0.3),
                       useBoxFitCover: true,
                     );
                   },
