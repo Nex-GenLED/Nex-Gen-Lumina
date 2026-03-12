@@ -1,11 +1,30 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+
+// ─── Health check state ───────────────────────────────────────────────────────
+
+enum _WebhookStatus { idle, checking, connected, disconnected }
+
+class _WebhookCheckResult {
+  final _WebhookStatus status;
+  /// Plain-English error message, null when status == connected.
+  final String? errorMessage;
+  final DateTime? checkedAt;
+
+  const _WebhookCheckResult(this.status, {this.errorMessage, this.checkedAt});
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 /// Remote Access configuration screen.
 ///
@@ -21,62 +40,179 @@ class RemoteAccessScreen extends ConsumerStatefulWidget {
   ConsumerState<RemoteAccessScreen> createState() => _RemoteAccessScreenState();
 }
 
-class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
+class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
+    with WidgetsBindingObserver {
   final _webhookUrlController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+
   bool _isSaving = false;
-  bool _isTesting = false;
   bool _isDetectingNetwork = false;
-  String? _testResult;
+
+  _WebhookCheckResult _webhookCheck =
+      const _WebhookCheckResult(_WebhookStatus.idle);
+
+  Timer? _pollingTimer;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    // Load existing webhook URL from user profile
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final user = ref.read(currentUserProfileProvider).maybeWhen(
-        data: (u) => u,
-        orElse: () => null,
-      );
-      if (user?.webhookUrl != null) {
-        _webhookUrlController.text = user!.webhookUrl!;
+      final url = ref.read(currentUserProfileProvider).maybeWhen(
+            data: (u) => u?.webhookUrl,
+            orElse: () => null,
+          );
+      if (url != null && url.isNotEmpty) {
+        _webhookUrlController.text = url;
+        _runHealthCheck(url);
       }
+      _startPolling();
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final url = _webhookUrlController.text.trim();
+      if (url.isNotEmpty) _runHealthCheck(url);
+    }
+  }
+
+  @override
   void dispose() {
+    _pollingTimer?.cancel();
     _webhookUrlController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
+  // ── Polling ────────────────────────────────────────────────────────────────
+
+  void _startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      final url = _webhookUrlController.text.trim();
+      if (url.isNotEmpty) _runHealthCheck(url);
+    });
+  }
+
+  // ── Health check ───────────────────────────────────────────────────────────
+
+  Future<void> _runHealthCheck(String baseUrl) async {
+    if (!mounted) return;
+
+    setState(() {
+      _webhookCheck = const _WebhookCheckResult(_WebhookStatus.checking);
+    });
+
+    final result = await _checkWebhook(baseUrl);
+
+    if (!mounted) return;
+    setState(() => _webhookCheck = result);
+  }
+
+  /// Performs a real HTTP GET to `<baseUrl>/json/info` with a 5-second timeout.
+  /// Returns a result with plain-English error messages distinguishing:
+  ///   - DNS failure (can't resolve the domain)
+  ///   - Connection refused (host reachable but port closed)
+  ///   - Timeout (slow network or firewall drop)
+  static Future<_WebhookCheckResult> _checkWebhook(String baseUrl) async {
+    final sanitised = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
+    final uri = Uri.tryParse('${sanitised}json/info');
+    if (uri == null) {
+      return const _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'The URL you entered doesn\'t look valid. '
+            'Check for typos and try again.',
+      );
+    }
+
+    try {
+      final response = await http
+          .get(uri, headers: {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return _WebhookCheckResult(
+          _WebhookStatus.connected,
+          checkedAt: DateTime.now(),
+        );
+      }
+
+      return _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'Your controller responded but returned an unexpected '
+            'status (${response.statusCode}). Check your port forwarding.',
+      );
+    } on TimeoutException {
+      return const _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'The connection timed out. Your network may be slow, '
+            'or a firewall is blocking the request.',
+      );
+    } on SocketException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('failed host lookup') ||
+          msg.contains('no address associated') ||
+          msg.contains('nodename nor servname')) {
+        return const _WebhookCheckResult(
+          _WebhookStatus.disconnected,
+          errorMessage: 'Can\'t find that address. Check that your DuckDNS '
+              '(or Dynamic DNS) domain is spelled correctly and is active.',
+        );
+      }
+      if (msg.contains('connection refused') || e.osError?.errorCode == 111) {
+        return const _WebhookCheckResult(
+          _WebhookStatus.disconnected,
+          errorMessage: 'Address found but the connection was refused. '
+              'Check that port forwarding in your router points to your '
+              'WLED controller.',
+        );
+      }
+      return _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'Network error — couldn\'t reach your controller. '
+            '(${e.message})',
+      );
+    } catch (e) {
+      return _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'Unexpected error: $e',
+      );
+    }
+  }
+
+  // ── Save / toggle / detect ─────────────────────────────────────────────────
+
   Future<void> _saveWebhookUrl() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isSaving = true);
 
     try {
       final userService = ref.read(userServiceProvider);
       final userId = ref.read(authStateProvider).maybeWhen(
-        data: (u) => u?.uid,
-        orElse: () => null,
-      );
+            data: (u) => u?.uid,
+            orElse: () => null,
+          );
 
       if (userId == null) {
         _showSnackBar('Please sign in to configure remote access', isError: true);
         return;
       }
 
-      await userService.updateRemoteAccessConfig(
-        userId,
-        webhookUrl: _webhookUrlController.text.trim(),
-      );
+      final url = _webhookUrlController.text.trim();
 
-      _showSnackBar('Webhook URL saved successfully');
+      await userService.updateRemoteAccessConfig(userId, webhookUrl: url);
+      _showSnackBar('Webhook URL saved');
+
+      // Immediately validate — do not show "Connected" from the saved URL alone.
+      _runHealthCheck(url);
     } catch (e) {
       _showSnackBar('Failed to save: $e', isError: true);
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -88,15 +224,18 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
       final currentSsid = await connectivityService.getCurrentSsid();
 
       if (currentSsid == null || currentSsid.isEmpty) {
-        _showSnackBar('Could not detect WiFi network. Make sure WiFi is connected.', isError: true);
+        _showSnackBar(
+          'Could not detect WiFi network. Make sure WiFi is connected.',
+          isError: true,
+        );
         return;
       }
 
       final userService = ref.read(userServiceProvider);
       final userId = ref.read(authStateProvider).maybeWhen(
-        data: (u) => u?.uid,
-        orElse: () => null,
-      );
+            data: (u) => u?.uid,
+            orElse: () => null,
+          );
 
       if (userId == null) {
         _showSnackBar('Please sign in to save home network', isError: true);
@@ -108,7 +247,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
     } catch (e) {
       _showSnackBar('Failed to detect network: $e', isError: true);
     } finally {
-      setState(() => _isDetectingNetwork = false);
+      if (mounted) setState(() => _isDetectingNetwork = false);
     }
   }
 
@@ -116,9 +255,9 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
     try {
       final userService = ref.read(userServiceProvider);
       final userId = ref.read(authStateProvider).maybeWhen(
-        data: (u) => u?.uid,
-        orElse: () => null,
-      );
+            data: (u) => u?.uid,
+            orElse: () => null,
+          );
 
       if (userId == null) {
         _showSnackBar('Please sign in to toggle remote access', isError: true);
@@ -126,45 +265,10 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
       }
 
       await userService.setRemoteAccessEnabled(userId, enabled);
-      _showSnackBar(enabled ? 'Remote access enabled' : 'Remote access disabled');
+      _showSnackBar(
+          enabled ? 'Remote access enabled' : 'Remote access disabled');
     } catch (e) {
       _showSnackBar('Failed to update: $e', isError: true);
-    }
-  }
-
-  Future<void> _testConnection() async {
-    if (_webhookUrlController.text.trim().isEmpty) {
-      _showSnackBar('Please enter a webhook URL first', isError: true);
-      return;
-    }
-
-    setState(() {
-      _isTesting = true;
-      _testResult = null;
-    });
-
-    try {
-      final url = _webhookUrlController.text.trim();
-      final testUrl = url.endsWith('/') ? '${url}json/info' : '$url/json/info';
-
-      debugPrint('Testing connection to: $testUrl');
-
-      // For now, we'll just simulate a test since we can't make actual HTTP requests
-      // In production, this would call the webhook and check for a valid WLED response
-      await Future.delayed(const Duration(seconds: 2));
-
-      // Simulate success - in reality you'd check the HTTP response
-      setState(() {
-        _testResult = 'success';
-      });
-      _showSnackBar('Connection test successful! WLED device is reachable.');
-    } catch (e) {
-      setState(() {
-        _testResult = 'failed';
-      });
-      _showSnackBar('Connection test failed: $e', isError: true);
-    } finally {
-      setState(() => _isTesting = false);
     }
   }
 
@@ -196,14 +300,17 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
     try {
       final userService = ref.read(userServiceProvider);
       final userId = ref.read(authStateProvider).maybeWhen(
-        data: (u) => u?.uid,
-        orElse: () => null,
-      );
+            data: (u) => u?.uid,
+            orElse: () => null,
+          );
 
       if (userId == null) return;
 
       await userService.clearRemoteAccessConfig(userId);
       _webhookUrlController.clear();
+      setState(() {
+        _webhookCheck = const _WebhookCheckResult(_WebhookStatus.idle);
+      });
       _showSnackBar('Remote access configuration cleared');
     } catch (e) {
       _showSnackBar('Failed to clear: $e', isError: true);
@@ -220,23 +327,29 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
-      data: (u) => u,
-      orElse: () => null,
-    );
-  // ADD THIS: populate controller when profile loads (handles async timing)
-   ref.listen(currentUserProfileProvider, (_, next) {
-    final url = next.maybeWhen(data: (u) => u?.webhookUrl, orElse: () => null);
-     if (url != null && url != _webhookUrlController.text) {
-     _webhookUrlController.text = url;
-   }
- });
+          data: (u) => u,
+          orElse: () => null,
+        );
+
+    // Populate controller when profile loads (handles async timing).
+    ref.listen(currentUserProfileProvider, (_, next) {
+      final url =
+          next.maybeWhen(data: (u) => u?.webhookUrl, orElse: () => null);
+      if (url != null && url != _webhookUrlController.text) {
+        _webhookUrlController.text = url;
+        // Don't auto-run check here — initState already handles the first load.
+      }
+    });
+
     final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
-      data: (s) => s,
-      orElse: () => ConnectivityStatus.local,
-    );
+          data: (s) => s,
+          orElse: () => ConnectivityStatus.local,
+        );
     final isRemote = ref.watch(isRemoteModeProvider);
 
     final isEnabled = userProfile?.remoteAccessEnabled ?? false;
@@ -258,9 +371,9 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
-          // Status card
-          _buildStatusCard(connectivityStatus, isRemote, isEnabled),
-
+          _buildNetworkStatusCard(connectivityStatus, isRemote, isEnabled),
+          const SizedBox(height: 16),
+          _buildWebhookStatusCard(),
           const SizedBox(height: 16),
 
           // Enable/Disable toggle
@@ -292,7 +405,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                     children: [
                       Icon(Icons.home_outlined, color: NexGenPalette.cyan),
                       const SizedBox(width: 8),
-                      Text('Home Network', style: Theme.of(context).textTheme.titleMedium),
+                      Text('Home Network',
+                          style: Theme.of(context).textTheme.titleMedium),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -304,11 +418,13 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                   const SizedBox(height: 12),
                   if (homeSsid != null) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: NexGenPalette.cyan.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+                        border: Border.all(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.5)),
                       ),
                       child: Row(
                         children: [
@@ -323,7 +439,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                               ),
                             ),
                           ),
-                          Icon(Icons.check_circle, color: NexGenPalette.cyan, size: 20),
+                          Icon(Icons.check_circle,
+                              color: NexGenPalette.cyan, size: 20),
                         ],
                       ),
                     ),
@@ -332,15 +449,19 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: _isDetectingNetwork ? null : _detectHomeNetwork,
+                      onPressed:
+                          _isDetectingNetwork ? null : _detectHomeNetwork,
                       icon: _isDetectingNetwork
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.wifi_find),
-                      label: Text(homeSsid == null ? 'Detect Home Network' : 'Update Home Network'),
+                      label: Text(homeSsid == null
+                          ? 'Detect Home Network'
+                          : 'Update Home Network'),
                     ),
                   ),
                 ],
@@ -363,7 +484,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                       children: [
                         Icon(Icons.link, color: NexGenPalette.cyan),
                         const SizedBox(width: 8),
-                        Text('Webhook URL', style: Theme.of(context).textTheme.titleMedium),
+                        Text('Webhook URL',
+                            style: Theme.of(context).textTheme.titleMedium),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -375,20 +497,10 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _webhookUrlController,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         labelText: 'Webhook URL',
                         hintText: 'https://myhome.duckdns.org:8080',
-                        prefixIcon: const Icon(Icons.https),
-                        suffixIcon: _testResult != null
-                            ? Icon(
-                                _testResult == 'success'
-                                    ? Icons.check_circle
-                                    : Icons.error,
-                                color: _testResult == 'success'
-                                    ? Colors.green
-                                    : Colors.red,
-                              )
-                            : null,
+                        prefixIcon: Icon(Icons.https),
                       ),
                       keyboardType: TextInputType.url,
                       autocorrect: false,
@@ -397,7 +509,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                           return 'Please enter a webhook URL';
                         }
                         final url = value.trim();
-                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                        if (!url.startsWith('http://') &&
+                            !url.startsWith('https://')) {
                           return 'URL must start with http:// or https://';
                         }
                         return null;
@@ -408,12 +521,27 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _isTesting ? null : _testConnection,
-                            icon: _isTesting
+                            onPressed:
+                                _webhookCheck.status == _WebhookStatus.checking
+                                    ? null
+                                    : () {
+                                        final url = _webhookUrlController.text
+                                            .trim();
+                                        if (url.isEmpty) {
+                                          _showSnackBar(
+                                              'Please enter a webhook URL first',
+                                              isError: true);
+                                          return;
+                                        }
+                                        _runHealthCheck(url);
+                                      },
+                            icon: _webhookCheck.status ==
+                                    _WebhookStatus.checking
                                 ? const SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.network_check),
                             label: const Text('Test'),
@@ -446,18 +574,21 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
 
           const SizedBox(height: 16),
 
-          // Setup guide
           _buildSetupGuide(context),
         ],
       ),
     );
   }
 
-  Widget _buildStatusCard(ConnectivityStatus status, bool isRemote, bool isEnabled) {
-    IconData icon;
-    Color color;
-    String title;
-    String subtitle;
+  // ── Status cards ───────────────────────────────────────────────────────────
+
+  /// Top card: network location (home / away / offline) — unchanged logic.
+  Widget _buildNetworkStatusCard(
+      ConnectivityStatus status, bool isRemote, bool isEnabled) {
+    final IconData icon;
+    final Color color;
+    final String title;
+    final String subtitle;
 
     switch (status) {
       case ConnectivityStatus.local:
@@ -487,44 +618,67 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
         break;
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 28),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _StatusCard(icon: icon, color: color, title: title, subtitle: subtitle);
   }
+
+  /// Second card: actual webhook endpoint reachability.
+  Widget _buildWebhookStatusCard() {
+    final check = _webhookCheck;
+
+    // Don't render the card at all when no URL has been entered/saved yet.
+    if (check.status == _WebhookStatus.idle &&
+        _webhookUrlController.text.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final IconData icon;
+    final Color color;
+    final String title;
+    final String subtitle;
+
+    switch (check.status) {
+      case _WebhookStatus.checking:
+        icon = Icons.sync;
+        color = Colors.amber;
+        title = 'Checking…';
+        subtitle = 'Testing connection to your controller.';
+        break;
+      case _WebhookStatus.connected:
+        final ago = check.checkedAt != null
+            ? _formatAge(check.checkedAt!)
+            : '';
+        icon = Icons.check_circle;
+        color = Colors.green;
+        title = 'Connected';
+        subtitle = ago.isEmpty
+            ? 'Your controller is reachable remotely.'
+            : 'Last confirmed $ago.';
+        break;
+      case _WebhookStatus.disconnected:
+        icon = Icons.error_outline;
+        color = Colors.red;
+        title = 'Not Reachable';
+        subtitle = check.errorMessage ?? 'Could not reach your controller.';
+        break;
+      case _WebhookStatus.idle:
+        icon = Icons.help_outline;
+        color = Colors.grey;
+        title = 'Not Checked';
+        subtitle = 'Tap "Test" to verify your webhook URL.';
+        break;
+    }
+
+    return _StatusCard(icon: icon, color: color, title: title, subtitle: subtitle);
+  }
+
+  static String _formatAge(DateTime checkedAt) {
+    final diff = DateTime.now().difference(checkedAt);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${diff.inHours}h ago';
+  }
+
+  // ── Setup guide ────────────────────────────────────────────────────────────
 
   Widget _buildSetupGuide(BuildContext context) {
     return Card(
@@ -537,32 +691,45 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
               children: [
                 Icon(Icons.help_outline, color: NexGenPalette.violet),
                 const SizedBox(width: 8),
-                Text('Setup Guide', style: Theme.of(context).textTheme.titleMedium),
+                Text('Setup Guide',
+                    style: Theme.of(context).textTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 12),
             Text(
               'To enable remote access, you need to:',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w500,
-              ),
+                    fontWeight: FontWeight.w500,
+                  ),
             ),
             const SizedBox(height: 8),
-            _buildGuideStep(context, 1, 'Set up Dynamic DNS',
+            _buildGuideStep(
+              context,
+              1,
+              'Set up Dynamic DNS',
               'Create a free account with DuckDNS, No-IP, or similar service. '
-              'This gives you a domain that points to your home IP address.',
+                  'This gives you a domain that points to your home IP address.',
             ),
-            _buildGuideStep(context, 2, 'Configure port forwarding',
+            _buildGuideStep(
+              context,
+              2,
+              'Configure port forwarding',
               'In your router settings, forward an external port (e.g., 8080) '
-              'to your WLED controller\'s local IP address on port 80.',
+                  'to your WLED controller\'s local IP address on port 80.',
             ),
-            _buildGuideStep(context, 3, 'Enter your webhook URL',
+            _buildGuideStep(
+              context,
+              3,
+              'Enter your webhook URL',
               'Use your Dynamic DNS domain with the forwarded port. '
-              'Example: https://myhome.duckdns.org:8080',
+                  'Example: https://myhome.duckdns.org:8080',
             ),
-            _buildGuideStep(context, 4, 'Save your home network',
+            _buildGuideStep(
+              context,
+              4,
+              'Save your home network',
               'Connect to your home WiFi and tap "Detect Home Network" above. '
-              'This ensures the app uses direct connections when you\'re home.',
+                  'This ensures the app uses direct connections when you\'re home.',
             ),
           ],
         ),
@@ -570,7 +737,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
     );
   }
 
-  Widget _buildGuideStep(BuildContext context, int step, String title, String description) {
+  Widget _buildGuideStep(
+      BuildContext context, int step, String title, String description) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -602,8 +770,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -614,6 +782,63 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Shared status card widget ────────────────────────────────────────────────
+
+class _StatusCard extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+
+  const _StatusCard({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

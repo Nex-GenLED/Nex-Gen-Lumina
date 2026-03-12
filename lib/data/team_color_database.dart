@@ -312,7 +312,7 @@ class TeamColorDatabase {
     // AFC WEST
     _team(id: 'broncos', name: 'Denver Broncos', city: 'Denver', league: 'NFL', colors: [TeamColor.hex('Broncos Orange', 0xFFFB4F14), TeamColor.hex('Broncos Navy', 0xFF002244)], aliases: ['denver', 'denver broncos', 'den', 'denver football']),
     _team(id: 'chiefs', name: 'Kansas City Chiefs', city: 'Kansas City', league: 'NFL', colors: [TeamColor.hex('Chiefs Red', 0xFFE31837), TeamColor.hex('Chiefs Gold', 0xFFFFB81C)], aliases: ['kansas city', 'kansas city chiefs', 'kc', 'kc chiefs', 'mahomes']),
-    _team(id: 'raiders', name: 'Las Vegas Raiders', city: 'Las Vegas', league: 'NFL', colors: [TeamColor.hex('Raiders Silver', 0xFFA5ACAF), TeamColor.hex('Raiders Black', 0xFF000000)], aliases: ['las vegas', 'las vegas raiders', 'lv', 'oakland raiders', 'oakland']),
+    _team(id: 'raiders', name: 'Las Vegas Raiders', city: 'Las Vegas', league: 'NFL', colors: [TeamColor.hex('Raiders Black', 0xFF000000), TeamColor.hex('Raiders Silver', 0xFFA4A9AD), TeamColor.hex('Raiders White', 0xFFFFFFFF)], aliases: ['las vegas', 'las vegas raiders', 'lv', 'oakland raiders', 'oakland']),
     _team(id: 'chargers', name: 'Los Angeles Chargers', city: 'Los Angeles', league: 'NFL', colors: [TeamColor.hex('Chargers Blue', 0xFF0080C6), TeamColor.hex('Chargers Gold', 0xFFFFC20E)], aliases: ['la chargers', 'los angeles chargers', 'lac', 'san diego chargers']),
     // NFC EAST
     _team(id: 'cowboys', name: 'Dallas Cowboys', city: 'Dallas', league: 'NFL', colors: [TeamColor.hex('Cowboys Navy', 0xFF003594), TeamColor.hex('Cowboys Silver', 0xFF869397), TeamColor.hex('Cowboys White', 0xFFFFFFFF)], aliases: ['dallas', 'dallas cowboys', 'dal', 'americas team']),
