@@ -122,6 +122,24 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
       debugPrint('📝 Controller name: $deviceName');
 
+      // Determine WiFi status from /json/info wifi object.
+      // A controller is WiFi-configured when signal > 0, rssi is negative,
+      // or ap == false (connected to a network vs. broadcasting its own AP).
+      // Ethernet-primary controllers may also report wifi.signal > 0 if their
+      // WiFi radio is active, which is fine — the flag just means the device
+      // is reachable on a network, not that it must be WiFi-only.
+      final wifiObj = info['wifi'];
+      bool wifiIsConfigured = false;
+      if (wifiObj is Map) {
+        final signal = wifiObj['signal'];
+        final rssi = wifiObj['rssi'];
+        final ap = wifiObj['ap'];
+        wifiIsConfigured = (signal is num && signal > 0) ||
+            (rssi is num && rssi < 0) ||
+            (ap is bool && ap == false);
+      }
+      debugPrint('📶 WiFi configured (from /json/info): $wifiIsConfigured');
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         throw Exception('No user logged in');
@@ -135,6 +153,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
         serial: ip.replaceAll('.', '_'),
         ip: ip,
         name: deviceName,
+        wifiConfigured: wifiIsConfigured,
       );
 
       debugPrint('✅ Controller saved successfully!');

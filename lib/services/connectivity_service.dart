@@ -82,12 +82,26 @@ class ConnectivityService {
 
   /// Check if device appears to have any network connectivity.
   /// Note: This checks WiFi specifically, not cellular.
+  ///
+  /// Returns true if a WiFi IP is found. Also returns true when the IP
+  /// cannot be determined (permission denied, API quirk, Ethernet-only
+  /// phone) — in that case we assume local rather than blocking all
+  /// commands with a false "offline" status.
   Future<bool> hasWifiConnection() async {
     try {
       final ip = await _networkInfo.getWifiIP();
-      return ip != null && ip.isNotEmpty && ip != '0.0.0.0';
+      // If API returns null/empty we cannot confirm connectivity but we
+      // also cannot confirm absence — default to true (assume connected)
+      // so commands are not silently blocked.
+      if (ip == null || ip.isEmpty || ip == '0.0.0.0') {
+        debugPrint('ConnectivityService: WiFi IP unavailable — assuming connected');
+        return true;
+      }
+      return true;
     } catch (e) {
-      return false;
+      // Cannot determine connectivity; assume connected to avoid false offline.
+      debugPrint('ConnectivityService: getWifiIP failed ($e) — assuming connected');
+      return true;
     }
   }
 

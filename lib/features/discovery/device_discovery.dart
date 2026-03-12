@@ -113,6 +113,7 @@ class DeviceRepository {
     required String ip,
     String? name,
     String? ssid,
+    bool? wifiConfigured,
   }) async {
     try {
       final docId = serial.isNotEmpty ? serial.replaceAll(':', '_') : ip.replaceAll('.', '_');
@@ -123,7 +124,8 @@ class DeviceRepository {
       debugPrint('   - ip: $ip');
       debugPrint('   - name: ${name ?? 'Controller '+ip}');
       debugPrint('   - ssid: ${ssid ?? 'N/A'}');
-      debugPrint('   - wifiConfigured: ${ssid != null && ssid.isNotEmpty}');
+      final resolvedWifiConfigured = wifiConfigured ?? (ssid != null && ssid.isNotEmpty);
+      debugPrint('   - wifiConfigured: $resolvedWifiConfigured');
 
       final ref = _db.collection('users').doc(userId).collection('controllers').doc(docId);
 
@@ -132,7 +134,7 @@ class DeviceRepository {
         'ip': ip,
         'name': name ?? 'Controller '+ip,
         if (ssid != null && ssid.isNotEmpty) 'ssid': ssid,
-        'wifiConfigured': ssid != null && ssid.isNotEmpty,
+        'wifiConfigured': resolvedWifiConfigured,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
