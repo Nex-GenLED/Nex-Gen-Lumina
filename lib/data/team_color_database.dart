@@ -124,7 +124,7 @@ class UnifiedTeamEntry {
   static List<int> _optimizeForLed(int r, int g, int b) {
     if (r > 240 && g > 240 && b > 240) return [255, 255, 255, 0];
 
-    if (b > 50 && r < 30 && g < 80 && b > r && b > g) {
+    if (b > 50 && r < 30 && g < 80 && b > r && (b - g) > 30) {
       final boostFactor = 255.0 / b;
       return [0, (g * boostFactor * 0.3).round().clamp(0, 80), 255, 0];
     }
@@ -140,7 +140,7 @@ class UnifiedTeamEntry {
       return [r, g, 0, 0];
     }
 
-    if (b > 80 && b > r && b > g) {
+    if (b > 80 && (b - r) > 30 && (b - g) > 30) {
       final cleanG = (g > b * 0.5) ? g : (g > noiseThreshold ? (g * 0.5).round() : 0);
       return [0, cleanG, b < 150 ? (b * 1.7).round().clamp(0, 255) : b, 0];
     }

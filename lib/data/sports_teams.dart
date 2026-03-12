@@ -126,14 +126,16 @@ class SportsTeamsDatabase {
   // ---------------------------------------------------------------------------
 
   /// Derive a [SportsTeam] from a [UnifiedTeamEntry].
+  ///
+  /// Uses raw brand colors (no LED optimisation) — this path feeds UI
+  /// rendering only. LED payload generation calls [ledOptimizedRgb] directly
+  /// on the [UnifiedTeamEntry] (see lumina_brain.dart).
   static SportsTeam _fromEntry(UnifiedTeamEntry entry) {
     return SportsTeam(
       name: UnifiedTeamEntry.extractTeamName(entry.officialName, entry.city),
       league: entry.league,
       city: entry.city,
-      colors: entry.ledOptimizedRgb
-          .map((rgb) => Color.fromARGB(255, rgb[0], rgb[1], rgb[2]))
-          .toList(),
+      colors: entry.colors.map((c) => c.toColor()).toList(),
       nickname: _deriveNickname(entry),
     );
   }

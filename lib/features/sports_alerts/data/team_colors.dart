@@ -131,8 +131,8 @@ const Map<String, TeamColors> kTeamColors = {
     espnTeamId: '12',
   ),
   'nfl_raiders': TeamColors(
-    primary: Color(0xFFA5ACAF),
-    secondary: Color(0xFF000000),
+    primary: Color(0xFF000000),
+    secondary: Color(0xFFA4A9AD),
     teamName: 'Las Vegas Raiders',
     sport: SportType.nfl,
     espnTeamId: '13',
