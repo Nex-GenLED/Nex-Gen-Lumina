@@ -46,17 +46,6 @@ Future<void> main() async {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
 
-  // iOS SIGABRT prevention: disable Firestore offline persistence BEFORE any
-  // Firestore operation. This MUST be the very first Firestore call after
-  // Firebase.initializeApp(). When persistence is disabled, the native iOS SDK
-  // never loads the LevelDB offline queue — so corrupted cached writes from
-  // previous sessions cannot trigger the FSTUserDataReader SIGABRT crash.
-  // The app requires network for WLED control anyway.
-  if (!kIsWeb && Platform.isIOS) {
-    FirebaseFirestore.instance.settings =
-        const Settings(persistenceEnabled: false);
-  }
-
   // Seed reviewer account for App Store review (no-op if already exists)
   ReviewerSeedService.ensureReviewerAccount().catchError((e) {
     debugPrint('Reviewer seed failed: $e');

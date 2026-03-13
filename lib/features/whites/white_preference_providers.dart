@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/whites/white_preset_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Provider for the user's preferred primary white
 final preferredWhitePrimaryProvider = Provider<WhitePreset>((ref) {
@@ -33,11 +34,13 @@ Future<void> saveWhitePreferences({
   final user = ref.read(authStateProvider).value;
   if (user == null) return;
 
-  await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-    'preferred_white_primary': primary.toJson(),
-    'preferred_white_complement': complement.toJson(),
-    'updated_at': Timestamp.now(),
-  });
+  await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
+    UserService.sanitizeForFirestore({
+      'preferred_white_primary': primary.toJson(),
+      'preferred_white_complement': complement.toJson(),
+      'updated_at': Timestamp.now(),
+    }),
+  );
 }
 
 /// Save white preferences using a Ref (for non-widget contexts)
@@ -49,9 +52,11 @@ Future<void> saveWhitePreferencesWithRef({
   final user = ref.read(authStateProvider).value;
   if (user == null) return;
 
-  await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-    'preferred_white_primary': primary.toJson(),
-    'preferred_white_complement': complement.toJson(),
-    'updated_at': Timestamp.now(),
-  });
+  await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
+    UserService.sanitizeForFirestore({
+      'preferred_white_primary': primary.toJson(),
+      'preferred_white_complement': complement.toJson(),
+      'updated_at': Timestamp.now(),
+    }),
+  );
 }

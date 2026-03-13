@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Model representing a favorite pattern with usage metadata.
 ///
@@ -150,13 +151,13 @@ class FavoritesNotifier extends Notifier<void> {
       final docRef = FirebaseFirestore.instance
           .doc('users/${user.uid}/favorites/$patternId');
 
-      await docRef.set({
+      await docRef.set(UserService.sanitizeForFirestore({
         'name': patternName,
         'usageCount': 1,
         'lastUsed': FieldValue.serverTimestamp(),
         'wledPayload': patternData,
-        'autoAdded': autoAdded, // Store the flag in Firestore
-      }, SetOptions(merge: true));
+        'autoAdded': autoAdded,
+      }), SetOptions(merge: true));
     } catch (e) {
       debugPrint('Failed to add favorite: $e');
       rethrow;

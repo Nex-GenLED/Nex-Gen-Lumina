@@ -142,7 +142,7 @@ class PatternAnalyticsService {
         wledPayload: wledPayload,
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -190,7 +190,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -233,7 +233,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -271,16 +271,16 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update refinement counts in analytics
       final docRef = _analyticsCollection.doc(queryHash);
-      await docRef.set({
+      await docRef.set(UserService.sanitizeForFirestore({
         'common_refinements': {
           refinementType: FieldValue.increment(1),
         },
         'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      }), SetOptions(merge: true));
 
       debugPrint('🔧 Recorded refinement: $queryHash - $refinementType');
     } catch (e) {
@@ -307,7 +307,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _vibeCorrectionsCollection.add(record.toFirestore());
+      await _vibeCorrectionsCollection.add(UserService.sanitizeForFirestore(record.toFirestore()));
       debugPrint('🎭 Recorded vibe correction: $detectedVibe → $desiredVibe');
     } catch (e) {
       debugPrint('Error recording vibe correction: $e');

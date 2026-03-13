@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
 /// Used to trigger GoRouter redirect checks.
@@ -17,17 +18,20 @@ class AuthStateListenable extends ChangeNotifier {
 /// Creates an unlinked user profile for new Firebase Auth users.
 Future<void> createUnlinkedUserProfile(User user) async {
   try {
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-      'id': user.uid,
-      'email': user.email ?? '',
-      'display_name': user.displayName ?? user.email?.split('@').first ?? 'User',
-      'photo_url': user.photoURL,
-      'owner_id': user.uid,
-      'created_at': FieldValue.serverTimestamp(),
-      'updated_at': FieldValue.serverTimestamp(),
-      'installation_role': 'unlinked',
-      'welcome_completed': false,
-    }, SetOptions(merge: true));
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      UserService.sanitizeForFirestore({
+        'id': user.uid,
+        'email': user.email ?? '',
+        'display_name': user.displayName ?? user.email?.split('@').first ?? 'User',
+        if (user.photoURL != null) 'photo_url': user.photoURL,
+        'owner_id': user.uid,
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+        'installation_role': 'unlinked',
+        'welcome_completed': false,
+      }),
+      SetOptions(merge: true),
+    );
     debugPrint('Created unlinked user profile for ${user.uid}');
   } catch (e) {
     debugPrint('Error creating unlinked user profile: $e');

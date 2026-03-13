@@ -148,7 +148,7 @@ class SyncEventService {
     SyncEventSession session,
   ) async {
     await _syncSessionsCol(groupId).doc(session.id).update(
-          session.toFirestore(),
+          UserService.sanitizeForFirestore(session.toFirestore()),
         );
   }
 
