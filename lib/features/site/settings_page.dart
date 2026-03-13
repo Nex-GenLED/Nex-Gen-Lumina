@@ -90,6 +90,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const _GrowthCard(),
           const SizedBox(height: 16),
           const _SupportResourcesCard(),
+          // ── Installer Tools ──────────────────────────────────────
+          const SizedBox(height: 24),
+          Divider(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3)),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Installer Tools',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          Card(
+            child: ListTile(
+              leading: Icon(Icons.cable, color: NexGenPalette.cyan),
+              title: const Text('Zone & Fixture Setup'),
+              subtitle: const Text('Assign fixture types to controller segments'),
+              trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              onTap: () => context.push(AppRoutes.zoneSetup),
+            ),
+          ),
           if (mode == SiteMode.commercial) ...[
             const SizedBox(height: 16),
             _buildZonesSection(context, zones),

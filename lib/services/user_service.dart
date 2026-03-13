@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -64,37 +66,77 @@ class UserService {
     }
   }
 
-  /// Recursively remove null values from a map to prevent Firestore errors
+  /// Recursively sanitize a map for Firestore compatibility.
+  ///
+  /// Removes null values AND converts any non-Firestore-safe types:
+  /// - [DateTime] → [Timestamp]
+  /// - [Color] → [int] (ARGB value)
+  /// - [Map] with non-String keys → [Map<String, dynamic>]
+  /// - Typed lists (Uint8List etc.) are already Firestore Blob-compatible.
+  ///
+  /// This prevents the native iOS Firestore SDK (FSTUserDataReader) from
+  /// crashing with SIGABRT when encountering unsupported types.
   Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) {
     final result = <String, dynamic>{};
     for (final entry in data.entries) {
-      final value = entry.value;
-      if (value != null) {
-        if (value is Map<String, dynamic>) {
-          result[entry.key] = _removeNullValues(value);
-        } else if (value is List) {
-          result[entry.key] = _cleanList(value);
-        } else {
-          result[entry.key] = value;
-        }
+      final sanitized = _sanitizeValue(entry.value);
+      if (sanitized != null) {
+        result[entry.key] = sanitized;
       }
     }
     return result;
   }
 
-  /// Recursively clean a list by removing nulls and processing nested structures
-  List<dynamic> _cleanList(List<dynamic> list) {
-    return list
-        .where((item) => item != null)
-        .map((item) {
-          if (item is Map<String, dynamic>) {
-            return _removeNullValues(item);
-          } else if (item is List) {
-            return _cleanList(item);
-          }
-          return item;
-        })
-        .toList();
+  /// Sanitize a single value for Firestore. Returns null if the value is null.
+  dynamic _sanitizeValue(dynamic value) {
+    if (value == null) return null;
+
+    // Already Firestore-safe primitives
+    if (value is String || value is bool || value is int || value is double) {
+      return value;
+    }
+
+    // Firestore-native types
+    if (value is Timestamp || value is GeoPoint || value is FieldValue) {
+      return value;
+    }
+
+    // Convert DateTime → Timestamp (common serialization mistake)
+    if (value is DateTime) {
+      return Timestamp.fromDate(value);
+    }
+
+    // Convert Color → ARGB int (prevents SIGABRT on iOS)
+    if (value is Color) {
+      // ignore: deprecated_member_use
+      return value.value;
+    }
+
+    // Recursively sanitize maps
+    if (value is Map) {
+      final result = <String, dynamic>{};
+      for (final entry in value.entries) {
+        final sanitized = _sanitizeValue(entry.value);
+        if (sanitized != null) {
+          result[entry.key.toString()] = sanitized;
+        }
+      }
+      return result;
+    }
+
+    // Recursively sanitize lists
+    if (value is List) {
+      return value
+          .where((item) => item != null)
+          .map((item) => _sanitizeValue(item))
+          .where((item) => item != null)
+          .toList();
+    }
+
+    // Fallback: convert unknown types to string to prevent SIGABRT
+    debugPrint('⚠️ Firestore sanitizer: converting unknown type '
+        '${value.runtimeType} to string');
+    return value.toString();
   }
 
   /// Update specific fields in user profile by ID

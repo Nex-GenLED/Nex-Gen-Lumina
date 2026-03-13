@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -17,7 +18,33 @@ import 'package:nexgen_command/features/sports_alerts/services/sports_background
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz;
+
+/// One-time Firestore persistence cache clear for iOS crash recovery.
+///
+/// If a previous session queued a Firestore write containing a data type the
+/// native iOS SDK cannot serialize (e.g. Color objects, raw DateTime, typed
+/// lists), the SDK crashes with SIGABRT every launch while trying to flush
+/// the offline queue. Clearing persistence once breaks the crash loop.
+///
+/// Version-gated via SharedPreferences so it only runs once per recovery.
+const _kFirestoreCacheClearVersion = 1; // bump to re-trigger after a new fix
+
+Future<void> _clearFirestoreCacheIfNeeded() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final lastClear = prefs.getInt('firestore_cache_clear_version') ?? 0;
+    if (lastClear >= _kFirestoreCacheClearVersion) return;
+
+    debugPrint('🔧 Clearing Firestore persistence cache (recovery v$_kFirestoreCacheClearVersion)');
+    await FirebaseFirestore.instance.clearPersistence();
+    await prefs.setInt('firestore_cache_clear_version', _kFirestoreCacheClearVersion);
+    debugPrint('✅ Firestore cache cleared');
+  } catch (e) {
+    debugPrint('⚠️ Firestore cache clear failed (non-fatal): $e');
+  }
+}
 
 /// Main entry point for the application
 ///
@@ -44,6 +71,16 @@ Future<void> main() async {
     debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
+
+  // iOS crash recovery: clear Firestore persistence cache if a previous session
+  // queued a write with an unsupported data type. The native iOS Firestore SDK
+  // (FSTUserDataReader) crashes with SIGABRT on startup when it encounters
+  // invalid types in the offline queue — this one-time flush prevents the
+  // crash-on-launch loop. Gated by a version flag so it only runs once.
+  if (!kIsWeb && Platform.isIOS) {
+    await _clearFirestoreCacheIfNeeded();
+  }
+
   // Seed reviewer account for App Store review (no-op if already exists)
   ReviewerSeedService.ensureReviewerAccount().catchError((e) {
     debugPrint('Reviewer seed failed: $e');

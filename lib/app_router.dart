@@ -52,6 +52,7 @@ import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
 import 'package:nexgen_command/features/autopilot/screens/autopilot_calendar_screen.dart';
+import 'package:nexgen_command/features/zones/screens/zone_setup_screen.dart';
 import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 // Dashboard pages for branch wrappers
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
@@ -578,6 +579,12 @@ class AppRouter {
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: PreferredWhiteSelectionPage()),
                   ),
+                  GoRoute(
+                    path: 'zone-setup',
+                    name: 'zone-setup',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(child: ZoneSetupScreen()),
+                  ),
                   // Note: roofline-editor is intentionally a root-level fullscreen route,
                   // not nested here. See the root GoRoute for /settings/roofline-editor.
                 ],
@@ -673,4 +680,6 @@ class AppRoutes {
   // Autopilot generation reveal + unified calendar
   static const String firstWeekReveal = '/autopilot/first-week';
   static const String autopilotCalendar = '/autopilot/calendar';
+
+  static const String zoneSetup = '/settings/zone-setup';
 }
