@@ -1,4 +1,3 @@
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +5,7 @@ import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
-import 'package:nexgen_command/openai/openai_config.dart';
+import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
@@ -19,10 +18,13 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/ai/compound_command_detector.dart';
 import 'package:nexgen_command/features/ai/user_variety_profile.dart';
 import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'dart:convert';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
-/// every OpenAI request for improved grounding and personalization.
+/// every Lumina AI request for improved grounding and personalization.
 class LuminaBrain {
   /// Returns true if the prompt appears to be probing internal architecture,
   /// credentials, or attempting a prompt-injection / jailbreak.
@@ -106,10 +108,6 @@ class LuminaBrain {
     final historyService = SuggestionHistoryService.instance;
     final isOpenEnded = SuggestionHistoryService.isOpenEndedQuery(userPrompt);
 
-    if (isOpenEnded) {
-      debugPrint('🎲 Open-ended query detected: "$userPrompt" - will ensure variety');
-    }
-
     // ── PRE-TIER: Compound Command Detection ──────────────────────────────
     // Detect and handle commands that combine lighting + scheduling intent
     // BEFORE tier resolution so temporal language doesn't corrupt team/holiday
@@ -118,20 +116,12 @@ class LuminaBrain {
     {
       final compound = CompoundCommandDetector.detect(userPrompt);
       if (compound.isCompound && compound.temporal != null) {
-        debugPrint('🗓️ Compound command detected: '
-            'lighting="${compound.lightingIntent}", '
-            'days=${compound.temporal!.dayCount}, '
-            'start=${compound.temporal!.startTrigger.name}');
-
         final scheduledResponse = await _handleCompoundCommand(
           ref,
           compound,
           historyService,
         );
         if (scheduledResponse != null) return scheduledResponse;
-
-        // If resolution failed, fall through using the original prompt.
-        debugPrint('⚠️ Compound resolution failed — falling through to normal tiers');
       }
     }
 
@@ -141,8 +131,6 @@ class LuminaBrain {
     {
       final holidayResult = HolidayColorDatabase.resolve(userPrompt);
       if (holidayResult.resolved && holidayResult.confidence >= 0.7) {
-        debugPrint('🎄 TIER 0.5: Resolved holiday: ${holidayResult.holiday!.name} '
-            'confidence=${holidayResult.confidence.toStringAsFixed(2)}');
         final response = _buildHolidayResponse(holidayResult.holiday!);
         return response;
       }
@@ -171,19 +159,10 @@ class LuminaBrain {
       );
 
       if (teamResult != null && teamResult.isHighConfidence) {
-        debugPrint('🏈 TIER 0: Resolved team: ${teamResult.team.officialName} '
-            '(${teamResult.team.league}) confidence=${teamResult.confidence.toStringAsFixed(2)} '
-            'via ${teamResult.matchType.name}');
-        if (teamResult.alternatives.isNotEmpty) {
-          debugPrint('   Alternatives: ${teamResult.alternatives.map((a) => '${a.team.officialName}(${a.confidence})').join(', ')}');
-        }
         final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
-        debugPrint('   Context modifier: $context');
         final response = _buildCanonicalTeamResponse(teamResult.team, context);
         return response;
       } else if (teamResult != null) {
-        debugPrint('🏈 TIER 0: Low-confidence team match: ${teamResult.team.officialName} '
-            '(${teamResult.confidence.toStringAsFixed(2)}) - using anyway');
         final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
         final response = _buildCanonicalTeamResponse(teamResult.team, context);
         return response;
@@ -194,7 +173,6 @@ class LuminaBrain {
     final themeMatch = EventThemeLibrary.matchQuery(userPrompt);
 
     if (themeMatch != null && !isOpenEnded) {
-      debugPrint('🎯 TIER 1: Matched pre-defined theme: ${themeMatch.theme.name} with context: ${themeMatch.context}');
       final pattern = themeMatch.pattern;
       final wledPayload = pattern.toWledPayload();
       final response = _buildDeterministicResponse(pattern, wledPayload);
@@ -202,36 +180,22 @@ class LuminaBrain {
     }
 
     // TIER 2: Check semantic cache for previously processed queries
-    final detectedTheme = SemanticPatternMatcher.extractTheme(userPrompt);
-    final hasSpecificTheme = detectedTheme != null;
+    final hasSpecificTheme = SemanticPatternMatcher.extractTheme(userPrompt) != null;
 
     if (!isOpenEnded && hasSpecificTheme) {
       final cachedPattern = SemanticPatternMatcher.getCachedPattern(userPrompt);
       if (cachedPattern != null) {
-        debugPrint('💾 TIER 2: Using cached pattern (hash: ${SemanticPatternMatcher.createQueryHash(userPrompt)})');
-        final context = SemanticPatternMatcher.extractContext(userPrompt);
-        debugPrint('   Theme: $detectedTheme, Context: $context');
         return _buildResponseFromCachedData(cachedPattern);
       }
-    } else if (isOpenEnded) {
-      debugPrint('⏭️ Skipping semantic cache for open-ended query');
-    } else if (!hasSpecificTheme) {
-      debugPrint('⏭️ Skipping semantic cache for generic query (no specific theme detected)');
     }
 
     // TIER 3: Fall back to AI for new queries
-    debugPrint('🤖 TIER 3: Using AI${isOpenEnded ? " (with variety context)" : " (will cache result)"}');
-    final theme = SemanticPatternMatcher.extractTheme(userPrompt);
-    final context = SemanticPatternMatcher.extractContext(userPrompt);
-    debugPrint('   Detected theme: $theme, context: $context');
-
     String contextBlock = _buildContextBlock(ref);
 
     if (isOpenEnded) {
       final avoidanceContext = historyService.getAvoidanceContext(limit: 5);
       if (avoidanceContext != null) {
         contextBlock = '$contextBlock\n\n$avoidanceContext';
-        debugPrint('📋 Injected avoidance context (${historyService.historySize} suggestions in history)');
       }
     }
 
@@ -241,7 +205,6 @@ class LuminaBrain {
       final globalContext = await analyticsService.buildGlobalLearningContext(userPrompt);
       if (globalContext != null && globalContext.isNotEmpty) {
         contextBlock = '$contextBlock\n\n$globalContext';
-        debugPrint('🌐 Injected global learning context from analytics');
       }
     } catch (e) {
       debugPrint('Failed to inject global learning context: $e');
@@ -252,8 +215,6 @@ class LuminaBrain {
     if (classification != null) {
       final classHint = CommandIntentClassifier.buildAIContextHint(classification);
       contextBlock = '$contextBlock\n\n$classHint';
-      debugPrint('🏷️ Injected classification context: '
-          '${classification.classification.name}');
     }
 
     final aiResponse = await LuminaAI.chat(
@@ -266,9 +227,6 @@ class LuminaBrain {
     final parsed = _extractJsonFromContent(aiResponse);
     if (parsed != null && !isOpenEnded && hasSpecificTheme) {
       SemanticPatternMatcher.cachePattern(userPrompt, parsed.object);
-      debugPrint('   ✅ Cached AI response for theme "$detectedTheme" (cache size: ${SemanticPatternMatcher.cacheSize})');
-    } else if (parsed != null && !hasSpecificTheme) {
-      debugPrint('   ⏭️ Not caching generic query (would cause false matches)');
     }
 
     // Record in suggestion history for variety tracking
@@ -313,14 +271,10 @@ class LuminaBrain {
     SuggestionHistoryService historyService,
   ) async {
     final lightingPrompt = compound.lightingIntent;
-    final temporal = compound.temporal!;
-
     // Read the inferred user variety profile
     UserVarietyProfile varietyProfile;
     try {
       varietyProfile = ref.read(userVarietyProfileProvider);
-      debugPrint('👤 Variety profile for schedule: ${varietyProfile.level.name} '
-          '(score=${varietyProfile.varietyScore.toStringAsFixed(2)})');
     } catch (e) {
       debugPrint('⚠️ Could not read variety profile, using default: $e');
       varietyProfile = UserVarietyProfile.defaultProfile();
@@ -346,7 +300,6 @@ class LuminaBrain {
         defaultSpeed: holiday.defaultSpeed,
         defaultIntensity: holiday.defaultIntensity,
       );
-      debugPrint('🎄 Compound: resolved holiday "${holiday.name}"');
     }
 
     // --- Attempt team resolution if holiday didn't match ---
@@ -390,7 +343,6 @@ class LuminaBrain {
           defaultSpeed: teamResult.team.defaultSpeed,
           defaultIntensity: teamResult.team.defaultIntensity,
         );
-        debugPrint('🏈 Compound: resolved team "${teamResult.team.officialName}"');
       }
     }
 
@@ -887,9 +839,49 @@ class LuminaBrain {
     try {
       final varietyProfile = ref.read(userVarietyProfileProvider);
       buffer.write('\n\n${varietyProfile.buildAIContextHint()}');
-      debugPrint('🎨 Injected variety profile into context: ${varietyProfile.level.name}');
     } catch (e) {
       debugPrint('LuminaBrain variety profile read error: $e');
+    }
+
+    // Audio reactivity context — enables AI to suggest mic-driven
+    // effects when controller hardware supports it
+    try {
+      final ip = ref.read(selectedDeviceIpProvider);
+      if (ip != null) {
+        final capAsync = ref.read(audioCapabilityProvider(ip));
+        capAsync.whenData((cap) {
+          if (cap.isSupported) {
+            buffer.write('\n\nAUDIO REACTIVITY:\n');
+            buffer.writeln('- Supported: YES (onboard MEMS microphone detected)');
+            if (cap.audioReactiveEffects.isNotEmpty) {
+              // Fetch effect names to build a readable list
+              final effectNamesAsync = ref.read(wledEffectNamesProvider(ip));
+              final effectNames = effectNamesAsync.valueOrNull ?? [];
+              final arEffectNames = <String>[];
+              for (final fxId in cap.audioReactiveEffects) {
+                if (fxId < effectNames.length) {
+                  final raw = effectNames[fxId];
+                  arEffectNames.add(raw.startsWith('* ') ? raw.substring(2) : raw);
+                } else {
+                  arEffectNames.add('Effect $fxId');
+                }
+              }
+              buffer.writeln('- Available Audio Effects (${arEffectNames.length}): ${arEffectNames.join(', ')}');
+            }
+            // Check if current effect is audio-reactive
+            try {
+              final state = ref.read(wledStateProvider);
+              if (cap.audioReactiveEffects.contains(state.effectId)) {
+                buffer.writeln('- Currently Active Audio Effect: YES (effect ID ${state.effectId})');
+              }
+            } catch (_) {}
+          } else {
+            buffer.writeln('\nAUDIO REACTIVITY: Not supported on this controller');
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain audio context read error: $e');
     }
 
     // Defensive sanitization: strip any sensitive values that could have been
@@ -951,6 +943,39 @@ class LuminaBrain {
 
     if (rooflineContext.isNotEmpty) {
       buffer.write('\n\n$rooflineContext');
+    }
+
+    // Audio reactivity context — enables AI to suggest mic-driven
+    // effects when controller hardware supports it
+    try {
+      final ip = ref.read(selectedDeviceIpProvider);
+      if (ip != null) {
+        final capAsync = ref.read(audioCapabilityProvider(ip));
+        capAsync.whenData((cap) {
+          if (cap.isSupported) {
+            buffer.write('\n\nAUDIO REACTIVITY:\n');
+            buffer.writeln('- Supported: YES (onboard MEMS microphone detected)');
+            if (cap.audioReactiveEffects.isNotEmpty) {
+              final effectNamesAsync = ref.read(wledEffectNamesProvider(ip));
+              final effectNames = effectNamesAsync.valueOrNull ?? [];
+              final arEffectNames = <String>[];
+              for (final fxId in cap.audioReactiveEffects) {
+                if (fxId < effectNames.length) {
+                  final raw = effectNames[fxId];
+                  arEffectNames.add(raw.startsWith('* ') ? raw.substring(2) : raw);
+                } else {
+                  arEffectNames.add('Effect $fxId');
+                }
+              }
+              buffer.writeln('- Available Audio Effects (${arEffectNames.length}): ${arEffectNames.join(', ')}');
+            }
+          } else {
+            buffer.writeln('\nAUDIO REACTIVITY: Not supported on this controller');
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain audio context read error: $e');
     }
 
     // Defensive sanitization: strip any sensitive values that could have been

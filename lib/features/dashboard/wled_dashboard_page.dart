@@ -24,20 +24,16 @@ import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.d
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
-import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry.dart';
-import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
-import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
-import 'package:nexgen_command/widgets/connection_status_indicator.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
@@ -99,7 +95,6 @@ class WledDashboardPage extends ConsumerStatefulWidget {
 class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   bool _checkedFirstRun = false;
   bool _pushedSetup = false;
-  double? _heroAspectRatio;
   ImageProvider? _heroImageProvider;
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
@@ -196,11 +191,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       final stream = provider.resolve(createLocalImageConfiguration(context));
       late final ImageStreamListener listener;
       listener = ImageStreamListener((info, _) {
-        final w = info.image.width.toDouble();
-        final h = info.image.height.toDouble();
-        if (w > 0 && h > 0) {
-          if (mounted) setState(() => _heroAspectRatio = w / h);
-        }
         stream.removeListener(listener);
       }, onError: (error, stack) {
         debugPrint('Hero image resolve failed: $error');
@@ -280,12 +270,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(wledStateProvider);
-    final ip = ref.watch(selectedDeviceIpProvider);
+    ref.watch(selectedDeviceIpProvider);
     final profileAsync = ref.watch(activeUserProfileProvider);
-    final isRemoteMode = ref.watch(isRemoteModeProvider);
+    ref.watch(isRemoteModeProvider);
     final isViewingAsCustomer = ref.watch(isViewingAsCustomerProvider);
 
-    debugPrint('📊 Dashboard build: ip=$ip, connected=${state.connected}, isOn=${state.isOn}, remote=$isRemoteMode');
     final userName = profileAsync.maybeWhen(data: (u) => u?.displayName ?? 'User', orElse: () => 'User');
 
     final profileLoaded = profileAsync.hasValue;
@@ -338,6 +327,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 ],
               ),
             ),
+            _buildAudioReactiveChip(context, ref),
             const SizedBox(height: 16),
             _buildSmartSuggestions(context, ref),
             const SizedBox(height: 16),
@@ -1204,6 +1194,30 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
+  Widget _buildAudioReactiveChip(BuildContext context, WidgetRef ref) {
+    final ip = ref.watch(selectedDeviceIpProvider);
+    if (ip == null) return const SizedBox.shrink();
+
+    final capAsync = ref.watch(audioCapabilityProvider(ip));
+    final hasSupport = capAsync.valueOrNull?.hasAudioReactiveUsermod ?? false;
+    if (!hasSupport) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, top: 10),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ActionChip(
+          avatar: Icon(Icons.mic, size: 16, color: NexGenPalette.cyan),
+          label: const Text('Audio Reactive'),
+          labelStyle: TextStyle(color: NexGenPalette.textHigh, fontSize: 12, fontWeight: FontWeight.w500),
+          side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.4)),
+          backgroundColor: NexGenPalette.gunmetal90,
+          onPressed: () => context.push(AppRoutes.audioReactive),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSmartSuggestions(BuildContext context, WidgetRef ref) {
     return SmartSuggestionsList(
       maxSuggestions: 3,
@@ -1282,8 +1296,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller connected')));
                 return;
               }
-              debugPrint('Applying favorite: ${favorite.patternName}');
-              debugPrint('Pattern data: ${favorite.patternData}');
               var payload = favorite.patternData;
               final channels = ref.read(effectiveChannelIdsProvider);
               if (channels.isNotEmpty) {

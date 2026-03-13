@@ -83,7 +83,7 @@ ThemeData get lightTheme => ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
       side: BorderSide(
-        color: LightModeColors.lightOutline.withOpacity(0.2),
+        color: LightModeColors.lightOutline.withValues(alpha: 0.2),
         width: 1,
       ),
     ),
@@ -128,7 +128,7 @@ ThemeData get darkTheme => ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
       side: BorderSide(
-        color: DarkModeColors.darkOutline.withOpacity(0.2),
+        color: DarkModeColors.darkOutline.withValues(alpha: 0.2),
         width: 1,
       ),
     ),
@@ -207,35 +207,35 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
     contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
   ),
   switchTheme: SwitchThemeData(
-    thumbColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-    trackColor: MaterialStateProperty.resolveWith((states) {
-      if (states.contains(MaterialState.selected)) return NexGenPalette.cyan.withValues(alpha: 0.25);
+    thumbColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+    trackColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.selected)) return NexGenPalette.cyan.withValues(alpha: 0.25);
       return NexGenPalette.line;
     }),
   ),
   filledButtonTheme: FilledButtonThemeData(
     style: ButtonStyle(
-      backgroundColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-      foregroundColor: const MaterialStatePropertyAll(Colors.black),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-      elevation: const MaterialStatePropertyAll(6),
-      shadowColor: MaterialStatePropertyAll(NexGenPalette.cyan.withValues(alpha: 0.4)),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+      backgroundColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+      foregroundColor: const WidgetStatePropertyAll(Colors.black),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      elevation: const WidgetStatePropertyAll(6),
+      shadowColor: WidgetStatePropertyAll(NexGenPalette.cyan.withValues(alpha: 0.4)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
     ),
   ),
   outlinedButtonTheme: OutlinedButtonThemeData(
     style: ButtonStyle(
-      side: const MaterialStatePropertyAll(BorderSide(color: NexGenPalette.line, width: 1.5)),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-      foregroundColor: const MaterialStatePropertyAll(NexGenPalette.textHigh),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+      side: const WidgetStatePropertyAll(BorderSide(color: NexGenPalette.line, width: 1.5)),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      foregroundColor: const WidgetStatePropertyAll(NexGenPalette.textHigh),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
     ),
   ),
   textButtonTheme: TextButtonThemeData(
     style: ButtonStyle(
-      foregroundColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+      foregroundColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
     ),
   ),
   snackBarTheme: const SnackBarThemeData(

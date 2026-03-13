@@ -2,7 +2,7 @@ name: nexgen_command
 description: "A new Flutter project."
 publish_to: "none"
 
-version: 2.1.0+2
+version: 2.1.1+3
 
 environment:
   sdk: ^3.6.0

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -8,7 +7,6 @@ import 'package:nexgen_command/features/wled/sports_library_builder.dart';
 import 'package:nexgen_command/data/holiday_palettes.dart';
 import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
-import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
 import 'package:flutter/material.dart';
@@ -912,7 +910,6 @@ class PatternRepository {
     }
 
     // Add Galaxy & Starlight section
-    final styleCount = _archWhiteStyles.length;
     nodes.add(const LibraryNode(
       id: 'arch_galaxy',
       name: 'Galaxy & Starlight',

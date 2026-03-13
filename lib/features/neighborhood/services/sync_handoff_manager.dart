@@ -16,7 +16,6 @@ import '../models/session_duration_type.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
-import '../neighborhood_sync_engine.dart';
 import 'autopilot_sync_trigger.dart' show syncEventServiceProvider;
 import 'sync_event_service.dart';
 import 'sync_notification_service.dart';
@@ -116,9 +115,6 @@ class SyncHandoffManager {
   /// Listeners that want to know when state changes.
   final _stateController = StreamController<HandoffState>.broadcast();
   Stream<HandoffState> get stateStream => _stateController.stream;
-
-  /// Duration of the crossfade transition between groups.
-  static const _crossfadeDuration = Duration(seconds: 3);
 
   /// Victory celebration duration before handing back to longForm.
   static const _victoryCelebrationDuration = Duration(seconds: 15);

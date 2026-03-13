@@ -89,10 +89,6 @@ class ProvisioningService {
         (c) => (c.properties.write || c.properties.writeWithoutResponse),
         orElse: () => improvService.characteristics.first,
       );
-      if (writeChar == null) {
-        throw Exception('Improv characteristic not found');
-      }
-
       // Subscribe to notifications on the write characteristic (common for Improv)
       try {
         await writeChar.setNotifyValue(true);
@@ -373,10 +369,6 @@ class ProvisioningService {
         (c) => (c.properties.write || c.properties.writeWithoutResponse),
         orElse: () => improvService.characteristics.first,
       );
-
-      if (writeChar == null) {
-        throw Exception('Improv write characteristic not found');
-      }
 
       // Build and send provision command
       final packet = _buildImprovProvisionPacket(ssid, password);

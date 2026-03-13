@@ -2,7 +2,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Global Simulation Mode toggle.
@@ -123,7 +122,7 @@ final connectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) {
 /// Whether the user is currently on their home (local) network.
 /// Defaults to true if we can't determine (to preserve existing local-first behavior).
 final isLocalNetworkProvider = FutureProvider<bool>((ref) async {
-  final connectivityService = ref.watch(connectivityServiceProvider);
+  ref.watch(connectivityServiceProvider);
   // This will be properly wired to user's homeSsid in wled_providers.dart
   // For now, return true as a safe default
   return true;

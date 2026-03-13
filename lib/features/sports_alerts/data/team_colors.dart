@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../models/sport_type.dart';
 
+// TODO(consolidation): This database and lib/data/team_color_database.dart
+// define overlapping team color data for 155 domestic pro teams. This file is
+// a compile-time const map keyed by slug; the other is a runtime-constructed
+// list with AI/LED metadata. If either is refactored, keep color hex values
+// and espnTeamId values in sync between the two.
+
 /// Official team color pair and metadata for LED alert effects.
 class TeamColors {
   final Color primary;

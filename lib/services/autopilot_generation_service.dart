@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
-import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/calendar_event_service.dart';
 import 'package:nexgen_command/services/hoa_compliance_service.dart';

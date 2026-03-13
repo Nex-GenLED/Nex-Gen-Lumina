@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -528,16 +526,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 class _SectionCard extends StatelessWidget {
   final String title;
   final Widget child;
-  final bool initiallyExpanded;
   final String? subtitle;
   final Widget? leading;
-  const _SectionCard({required this.title, required this.child, this.initiallyExpanded = true, this.subtitle, this.leading});
+  const _SectionCard({required this.title, required this.child, this.subtitle, this.leading});
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.zero,
       child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded,
+        initiallyExpanded: true,
         leading: leading,
         title: Text(title, style: Theme.of(context).textTheme.titleLarge),
         subtitle: subtitle == null ? null : Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
@@ -612,7 +609,7 @@ class _InterestsCard extends StatelessWidget {
   final void Function(String) onToggleHoliday;
   final double vibeLevel;
   final ValueChanged<double> onVibeChanged;
-  const _InterestsCard({super.key, required this.teamInputCtrl, required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
+  const _InterestsCard({required this.teamInputCtrl, required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
 
   static const _holidays = <String>[
     'Christmas','Halloween','Hanukkah','July 4th','Valentine\'s','New Year\'s','Easter','Thanksgiving','Diwali'
@@ -696,7 +693,7 @@ class _HoaGuardianCard extends StatelessWidget {
   final VoidCallback onAddWindow;
   final void Function(int index) onRemoveWindow;
   final String Function(SeasonalColorWindow) windowFormatter;
-  const _HoaGuardianCard({super.key, required this.hoaCompliance, required this.onHoaChanged, required this.quietStart, required this.quietEnd, required this.onPickStart, required this.onPickEnd, required this.timeFormatter, required this.seasonalWindows, required this.onAddWindow, required this.onRemoveWindow, required this.windowFormatter});
+  const _HoaGuardianCard({required this.hoaCompliance, required this.onHoaChanged, required this.quietStart, required this.quietEnd, required this.onPickStart, required this.onPickEnd, required this.timeFormatter, required this.seasonalWindows, required this.onAddWindow, required this.onRemoveWindow, required this.windowFormatter});
 
   @override
   Widget build(BuildContext context) {
@@ -774,7 +771,7 @@ class _HoaGuardianCard extends StatelessWidget {
 }
 
 class _PrivacyIntelligenceCard extends StatelessWidget {
-  const _PrivacyIntelligenceCard({super.key, required this.autonomyLevel, required this.onAutonomyChanged, required this.communityPatternSharing, required this.onCommunityChanged, required this.allowPersonalization, required this.onAllowPersonalizationChanged});
+  const _PrivacyIntelligenceCard({required this.autonomyLevel, required this.onAutonomyChanged, required this.communityPatternSharing, required this.onCommunityChanged, required this.allowPersonalization, required this.onAllowPersonalizationChanged});
   final int autonomyLevel; // 0..2
   final ValueChanged<int> onAutonomyChanged;
   final bool communityPatternSharing;
@@ -856,7 +853,6 @@ class _PrivacyIntelligenceCard extends StatelessWidget {
 
 class _ArchitectureCard extends StatelessWidget {
   const _ArchitectureCard({
-    super.key,
     required this.builderValue,
     required this.onBuilderChanged,
     required this.floorPlanValue,
@@ -930,9 +926,9 @@ class _ArchitectureCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withOpacity(0.1),
+                color: NexGenPalette.cyan.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -1104,9 +1100,9 @@ class _AutopilotCard extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: NexGenPalette.cyan.withOpacity(0.1),
+                  color: NexGenPalette.cyan.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
                 ),
                 child: Text(
                   '${tolerance.label}: ${tolerance.description}',
@@ -1441,7 +1437,7 @@ class _TeamPriorityList extends StatelessWidget {
                 height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: index == 0 ? NexGenPalette.cyan : Colors.grey.withOpacity(0.3),
+                  color: index == 0 ? NexGenPalette.cyan : Colors.grey.withValues(alpha: 0.3),
                   shape: BoxShape.circle,
                 ),
                 child: Text(
@@ -1460,7 +1456,7 @@ class _TeamPriorityList extends StatelessWidget {
               ? Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: NexGenPalette.cyan.withOpacity(0.2),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(

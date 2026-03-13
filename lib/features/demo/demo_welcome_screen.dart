@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,10 +48,10 @@ class DemoWelcomeScreen extends ConsumerWidget {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: NexGenPalette.cyan.withOpacity(0.1),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: NexGenPalette.cyan.withOpacity(0.3),
+                          color: NexGenPalette.cyan.withValues(alpha: 0.3),
                         ),
                       ),
                       child: Row(
@@ -107,7 +106,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: NexGenPalette.cyan.withOpacity(0.4),
+                              color: NexGenPalette.cyan.withValues(alpha: 0.4),
                               blurRadius: 30,
                               spreadRadius: 5,
                             ),
@@ -181,7 +180,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: NexGenPalette.cyan.withOpacity(0.1),
+                                color: NexGenPalette.cyan.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -261,7 +260,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal.withOpacity(0.6),
+            color: NexGenPalette.gunmetal.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: NexGenPalette.line),
           ),

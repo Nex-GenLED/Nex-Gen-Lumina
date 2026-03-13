@@ -411,10 +411,10 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
               colors: [team.primary, team.secondary],
             ),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             boxShadow: [
               BoxShadow(
-                color: team.primary.withOpacity(0.3),
+                color: team.primary.withValues(alpha: 0.3),
                 blurRadius: 16,
                 spreadRadius: 2,
               ),
@@ -454,7 +454,7 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
               onSelected: (sel) {
                 if (sel) setState(() => _selectedEffectId = e.key);
               },
-              selectedColor: team.primary.withOpacity(0.3),
+              selectedColor: team.primary.withValues(alpha: 0.3),
               backgroundColor: Colors.grey.shade800,
               labelStyle: TextStyle(
                 color: isSelected ? Colors.white : Colors.grey.shade400,
@@ -491,13 +491,13 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
                     ],
             ),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           alignment: Alignment.center,
           child: Text(
             kEffectNames[_selectedEffectId] ?? 'Effect',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               fontSize: 11,
               fontWeight: FontWeight.w500,
             ),
@@ -519,11 +519,11 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.grey.shade900.withOpacity(0.5),
+            color: Colors.grey.shade900.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: _scoreCelebration
-                  ? team.primary.withOpacity(0.4)
+                  ? team.primary.withValues(alpha: 0.4)
                   : Colors.grey.shade800,
             ),
           ),
@@ -797,12 +797,12 @@ class _SportChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: selected
-                ? NexGenPalette.cyan.withOpacity(0.15)
+                ? NexGenPalette.cyan.withValues(alpha: 0.15)
                 : NexGenPalette.gunmetal,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
               color: selected
-                  ? NexGenPalette.cyan.withOpacity(0.6)
+                  ? NexGenPalette.cyan.withValues(alpha: 0.6)
                   : NexGenPalette.line,
             ),
           ),
@@ -867,7 +867,7 @@ class _GameDayTeamRow extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: Colors.white.withOpacity(0.1),
+                    color: Colors.white.withValues(alpha: 0.1),
                   ),
                 ),
                 alignment: Alignment.center,
@@ -908,7 +908,7 @@ class _GameDayTeamRow extends StatelessWidget {
                   color: team.primary,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                   ),
                 ),
               ),
@@ -920,7 +920,7 @@ class _GameDayTeamRow extends StatelessWidget {
                   color: team.secondary,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                   ),
                 ),
               ),

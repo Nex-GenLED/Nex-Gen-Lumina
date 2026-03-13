@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/paused_session_state.dart';
 import '../models/session_duration_type.dart';
+import '../models/sync_event.dart';
 import '../services/sync_handoff_manager.dart';
 
 /// Stream of the current handoff state for the local user.

@@ -6,7 +6,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/sync_event.dart';
 import '../neighborhood_providers.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -582,8 +581,7 @@ class SyncNotificationService {
         .get();
 
     if (!doc.exists) return const SyncNotificationPreferences();
-    return SyncNotificationPreferences.fromMap(
-        doc.data() as Map<String, dynamic>?);
+    return SyncNotificationPreferences.fromMap(doc.data());
   }
 
   /// Save notification preferences.
@@ -620,8 +618,7 @@ class SyncNotificationService {
         .snapshots()
         .map((doc) {
       if (!doc.exists) return const SyncNotificationPreferences();
-      return SyncNotificationPreferences.fromMap(
-          doc.data() as Map<String, dynamic>?);
+      return SyncNotificationPreferences.fromMap(doc.data());
     });
   }
 
@@ -673,7 +670,7 @@ class SyncNotificationService {
           .get();
 
       final prefs = SyncNotificationPreferences.fromMap(
-        doc.exists ? doc.data() as Map<String, dynamic>? : null,
+        doc.exists ? doc.data() : null,
       );
 
       if (!prefs.enabled) continue;

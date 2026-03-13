@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/features/wled/pattern_library_pages.dart';
 
 /// Bottom sheet for picking a solid color when using Solid effect.
 class SolidColorPickerSheet extends StatelessWidget {
@@ -271,16 +270,6 @@ class _ColorPickerTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Wrapper to keep LiveGradientStrip lightweight in item cards.
-class _ItemLiveGradient extends StatelessWidget {
-  final List<Color> colors;
-  final double speed;
-  const _ItemLiveGradient({required this.colors, required this.speed});
-
-  @override
-  Widget build(BuildContext context) => LiveGradientStrip(colors: colors, speed: speed);
 }
 
 /// Realistic effect preview that animates based on the WLED effect type.

@@ -20,9 +20,9 @@ import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
-import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
-import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -89,13 +89,6 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
   }
 
   // ── View mode toggle ──
-  static const _viewModes = [
-    ('week', 'Week'),
-    ('month', '1 Mo'),
-    ('3month', '3 Mo'),
-    ('6month', '6 Mo'),
-    ('year', 'Year'),
-  ];
 
   void _setViewMode(String mode) {
     ref.read(calendarViewModeProvider.notifier).state = mode;
@@ -1497,7 +1490,7 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
   @override
   Widget build(BuildContext context) {
-    final autopilotEnabled = ref.watch(autopilotEnabledProvider);
+    ref.watch(autopilotEnabledProvider);
     final pending = ref.watch(pendingCalendarProvider);
 
     return ClipRRect(
@@ -2013,6 +2006,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   _ActionType _action = _ActionType.runPattern;
   double _brightness = 70; // percentage 0..100
   PatternSelection? _selectedPattern;
+  bool _useAudioReactive = false;
 
   // Day selection represented as indices 0..6 => S M T W T F S
   final List<String> _dayLabelsShort = const ['S','M','T','W','T','F','S'];
@@ -2086,7 +2080,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       // Action
       final a = editing.actionLabel.trim();
       final lower = a.toLowerCase();
-      if (lower.startsWith('pattern')) {
+      if (lower == 'react to music' || (editing.useAudioReactive == true)) {
+        _action = _ActionType.runPattern;
+        _useAudioReactive = true;
+      } else if (lower.startsWith('pattern')) {
         _action = _ActionType.runPattern;
         final idx = a.indexOf(':');
         final name = (idx != -1 && idx + 1 < a.length) ? a.substring(idx + 1).trim() : a.replaceFirst(RegExp(r'^pattern', caseSensitive: false), '').trim();
@@ -2103,6 +2100,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
         _action = _ActionType.brightness;
         _brightness = 100;
       }
+      // Hydrate audio reactive state
+      _useAudioReactive = editing.useAudioReactive ?? false;
     } else if (widget.preselectedDayIndex != null && widget.preselectedDayIndex! >= 0 && widget.preselectedDayIndex! <= 6) {
       _selectedDays = {widget.preselectedDayIndex!};
     }
@@ -2266,7 +2265,69 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   onChanged: (v) => setState(() => _action = v ?? _action),
                 ),
                 const SizedBox(height: 12),
+                // React to Music toggle — only shown when audio reactivity is
+                // available on the connected controller and action is runPattern
                 if (_action == _ActionType.runPattern)
+                  Builder(builder: (context) {
+                    final ip = ref.watch(selectedDeviceIpProvider);
+                    if (ip == null) return const SizedBox.shrink();
+                    final capAsync = ref.watch(audioCapabilityProvider(ip));
+                    return capAsync.maybeWhen(
+                      data: (cap) {
+                        if (!cap.isSupported) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _useAudioReactive
+                                  ? NexGenPalette.cyan.withValues(alpha: 0.08)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _useAudioReactive
+                                    ? NexGenPalette.cyan.withValues(alpha: 0.3)
+                                    : NexGenPalette.line,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.mic, size: 20, color: _useAudioReactive ? NexGenPalette.cyan : NexGenPalette.textMedium),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'React to Music',
+                                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                          color: _useAudioReactive ? NexGenPalette.cyan : NexGenPalette.textHigh,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Use a random audio-reactive effect',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: NexGenPalette.textMedium,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                CupertinoSwitch(
+                                  value: _useAudioReactive,
+                                  activeColor: NexGenPalette.cyan,
+                                  onChanged: (v) => setState(() => _useAudioReactive = v),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                      orElse: () => const SizedBox.shrink(),
+                    );
+                  }),
+                if (_action == _ActionType.runPattern && !_useAudioReactive)
                   _PatternPickerRow(
                     selection: _selectedPattern,
                     onPick: () async {
@@ -2355,7 +2416,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select at least one day')));
                       return;
                     }
-                    if (_action == _ActionType.runPattern && _selectedPattern == null) {
+                    if (_action == _ActionType.runPattern && !_useAudioReactive && _selectedPattern == null) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose a pattern to run')));
                       return;
                     }
@@ -2373,7 +2434,9 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                         actionLabel = 'Turn Off';
                         break;
                       case _ActionType.runPattern:
-                        actionLabel = 'Pattern: ${_selectedPattern!.name}';
+                        actionLabel = _useAudioReactive
+                            ? 'React to Music'
+                            : 'Pattern: ${_selectedPattern!.name}';
                         break;
                       case _ActionType.brightness:
                         actionLabel = 'Brightness: ${_brightness.round()}%';
@@ -2389,6 +2452,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       enabled: _enabled,
                       wledPayload: widget.editing?.wledPayload,
                       presetId: widget.editing?.presetId,
+                      useAudioReactive: _useAudioReactive ? true : null,
                     );
 
                     try {
@@ -2424,28 +2488,6 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     final m = t.minute.toString().padLeft(2, '0');
     final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
     return '$h:$m $ampm';
-  }
-}
-
-class _DayChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _DayChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = selected ? NexGenPalette.cyan.withValues(alpha: 0.18) : Colors.transparent;
-    final border = selected ? NexGenPalette.cyan : NexGenPalette.line;
-    final color = selected ? NexGenPalette.cyan : NexGenPalette.textMedium;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border, width: 1.2)),
-        child: Text(label, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: color)),
-      ),
-    );
   }
 }
 

@@ -16,8 +16,6 @@ class NeonColorWheel extends StatefulWidget {
 }
 
 class _NeonColorWheelState extends State<NeonColorWheel> {
-  Offset? _lastPos;
-
   @override
   Widget build(BuildContext context) {
     final radius = widget.size / 2;
@@ -54,7 +52,7 @@ class _NeonColorWheelState extends State<NeonColorWheel> {
             onPanDown: (d) => _updateFromLocal(d.localPosition, radius),
             onPanStart: _handlePan,
             onPanUpdate: _handlePan,
-            onPanEnd: (_) => _lastPos = null,
+            onPanEnd: (_) {},
             onTapDown: (d) => _updateFromLocal(d.localPosition, radius),
             child: const SizedBox.expand(),
           ),

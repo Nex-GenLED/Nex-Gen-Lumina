@@ -77,7 +77,7 @@ class NeighborhoodScheduleList extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900.withOpacity(0.3),
+        color: Colors.grey.shade900.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade800),
       ),
@@ -185,10 +185,10 @@ class _ScheduleTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900.withOpacity(0.5),
+        color: Colors.grey.shade900.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isActive ? Colors.cyan.withOpacity(0.5) : Colors.grey.shade800,
+          color: isActive ? Colors.cyan.withValues(alpha: 0.5) : Colors.grey.shade800,
         ),
       ),
       child: Material(
@@ -241,7 +241,7 @@ class _ScheduleTile extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.grey.withOpacity(0.2),
+                                color: Colors.grey.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
@@ -298,7 +298,7 @@ class _ScheduleTile extends StatelessWidget {
           width: 20,
           height: 20,
           decoration: BoxDecoration(
-            color: isActive ? Colors.cyan.withOpacity(0.3) : Colors.grey.withOpacity(0.2),
+            color: isActive ? Colors.cyan.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(4),
           ),
           child: Center(
@@ -382,7 +382,7 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.cyan.withOpacity(0.1),
+                color: Colors.cyan.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -641,7 +641,7 @@ class _CreateScheduleSheetState extends ConsumerState<CreateScheduleSheet> {
           onSelected: (selected) {
             if (selected) setState(() => _selectedEffectId = entry.key);
           },
-          selectedColor: Colors.cyan.withOpacity(0.3),
+          selectedColor: Colors.cyan.withValues(alpha: 0.3),
           backgroundColor: Colors.grey.shade800,
           labelStyle: TextStyle(color: isSelected ? Colors.cyan : Colors.grey.shade400),
           side: BorderSide(color: isSelected ? Colors.cyan : Colors.grey.shade700),
@@ -664,7 +664,7 @@ class _CreateScheduleSheetState extends ConsumerState<CreateScheduleSheet> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.cyan.withOpacity(0.15) : Colors.transparent,
+                color: isSelected ? Colors.cyan.withValues(alpha: 0.15) : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -845,7 +845,7 @@ class _CreateScheduleSheetState extends ConsumerState<CreateScheduleSheet> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: isSelected ? Colors.cyan.withOpacity(0.3) : Colors.grey.shade800,
+              color: isSelected ? Colors.cyan.withValues(alpha: 0.3) : Colors.grey.shade800,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: isSelected ? Colors.cyan : Colors.grey.shade700,

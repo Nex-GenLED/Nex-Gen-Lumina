@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/data/us_federal_holidays.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
@@ -8,8 +7,6 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/services/sports_schedule_service.dart';
-import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 

@@ -108,7 +108,6 @@ class SuggestionService {
   Future<void> _createNightTimeSuggestion() async {
     try {
       // Check if user has a habit of turning off lights at night
-      final frequency = await _userService.getPatternFrequency(userId, days: 30);
       final usageByHour = await _userService.getUsageByHour(userId, days: 30);
 
       // Look for nighttime turn-off patterns (11pm - 1am)

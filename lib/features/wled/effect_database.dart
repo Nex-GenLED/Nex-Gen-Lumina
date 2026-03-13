@@ -11,7 +11,6 @@
 /// These should ONLY be recommended when the user explicitly requests
 /// rainbow/multicolor effects, NOT for themed patterns.
 
-import 'package:flutter/material.dart';
 
 /// Motion types for categorizing how effects animate
 enum MotionType {

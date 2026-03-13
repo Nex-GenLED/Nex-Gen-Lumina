@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -7,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -22,7 +20,6 @@ class LuminaStudioScreen extends ConsumerStatefulWidget {
 class _LuminaStudioScreenState extends ConsumerState<LuminaStudioScreen> {
   int _step = 0;
   String? _area; // Landscape, Patio, Deck, Pool
-  XFile? _image;
   Uint8List? _imageBytes;
   final _picker = ImagePicker();
   final List<_Fixture> _fixtures = [];
@@ -34,7 +31,6 @@ class _LuminaStudioScreenState extends ConsumerState<LuminaStudioScreen> {
       if (file != null) {
         final bytes = await file.readAsBytes();
         setState(() {
-          _image = file;
           _imageBytes = bytes;
         });
       }

@@ -186,7 +186,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
                   backgroundColor: isDone
                       ? NexGenPalette.cyan
                       : isActive
-                          ? NexGenPalette.cyan.withOpacity(0.6)
+                          ? NexGenPalette.cyan.withValues(alpha: 0.6)
                           : Colors.white12,
                   child: isDone
                       ? const Icon(Icons.check, size: 14, color: Colors.black)
@@ -284,7 +284,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
   Widget _buildGroupTile(group) {
     final isSelected = _selectedGroupId == group.id;
     return Card(
-      color: isSelected ? NexGenPalette.cyan.withOpacity(0.15) : Colors.white10,
+      color: isSelected ? NexGenPalette.cyan.withValues(alpha: 0.15) : Colors.white10,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: isSelected
@@ -342,7 +342,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
                   child: FilterChip(
                     label: Text(sport.displayName),
                     selected: isSelected,
-                    selectedColor: NexGenPalette.cyan.withOpacity(0.3),
+                    selectedColor: NexGenPalette.cyan.withValues(alpha: 0.3),
                     checkmarkColor: NexGenPalette.cyan,
                     labelStyle: TextStyle(
                       color: isSelected ? NexGenPalette.cyan : Colors.white70,
@@ -391,7 +391,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
               final isSelected = _selectedTeamSlug == slug;
               return Card(
                 color: isSelected
-                    ? NexGenPalette.cyan.withOpacity(0.15)
+                    ? NexGenPalette.cyan.withValues(alpha: 0.15)
                     : Colors.white10,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -577,7 +577,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
   ) {
     final isSelected = _triggerType == type;
     return Card(
-      color: isSelected ? NexGenPalette.cyan.withOpacity(0.15) : Colors.white10,
+      color: isSelected ? NexGenPalette.cyan.withValues(alpha: 0.15) : Colors.white10,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: isSelected
@@ -864,7 +864,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
           }
           return Card(
             color: isSelected
-                ? NexGenPalette.cyan.withOpacity(0.15)
+                ? NexGenPalette.cyan.withValues(alpha: 0.15)
                 : Colors.white10,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -985,7 +985,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
             return ChoiceChip(
               label: Text(e.value),
               selected: isSelected,
-              selectedColor: NexGenPalette.cyan.withOpacity(0.3),
+              selectedColor: NexGenPalette.cyan.withValues(alpha: 0.3),
               checkmarkColor: NexGenPalette.cyan,
               labelStyle: TextStyle(
                 color: isSelected ? NexGenPalette.cyan : Colors.white70,

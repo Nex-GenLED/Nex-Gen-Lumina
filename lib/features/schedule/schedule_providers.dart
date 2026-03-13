@@ -457,15 +457,6 @@ class ScheduleFinder {
     return DateTime(day.year, day.month, day.day, hour, minute);
   }
 
-  /// Legacy method - kept for compatibility
-  static DateTime? _parseScheduleTime(
-    ScheduleItem schedule,
-    DateTime now,
-    double? latitude,
-    double? longitude,
-  ) {
-    return _parseTimeLabel(schedule.timeLabel, now, latitude, longitude);
-  }
 }
 
 /// Provider that returns the currently applicable schedule item based on

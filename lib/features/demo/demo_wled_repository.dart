@@ -10,7 +10,6 @@ class DemoWledRepository implements WledRepository {
   int _speed = 128; // 0-255
   Color _color = const Color(0xFFFFFFFF);
   int _white = 0; // 0-255 warm white channel
-  String? _lastLedMap;
   final List<String> _segNames = ['Segment 0', 'Segment 1', 'Segment 2'];
 
   // Simulated segment configuration (start, stop for each segment)
@@ -169,7 +168,6 @@ class DemoWledRepository implements WledRepository {
 
   @override
   Future<bool> uploadLedMapJson(String jsonContent) async {
-    _lastLedMap = jsonContent;
     return true;
   }
 

@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/data/us_federal_holidays.dart';
-import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/sports_schedule_service.dart';
 
@@ -98,7 +97,7 @@ class CalendarEventService {
     // Add custom holidays from user profile
     for (final customHoliday in profile.customHolidays) {
       final occurrence = customHoliday.getNextOccurrence(start);
-      if (occurrence != null && !occurrence.isAfter(end)) {
+      if (!occurrence.isAfter(end)) {
         events.add(CalendarEvent(
           name: customHoliday.name,
           date: occurrence,

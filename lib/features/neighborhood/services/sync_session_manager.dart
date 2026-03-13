@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
-import '../models/session_duration_type.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
@@ -348,7 +347,6 @@ class SyncSessionManager {
   /// Determine if the tracked team won the game.
   Future<bool?> _determineGameOutcome(SyncEvent event, String gameId) async {
     try {
-      final celebService = _ref.read(syncCelebrationServiceProvider);
       // Use the ESPN API to check final score
       final espnApi = EspnApiService();
       final sport = _parseSportType(event.sportLeague ?? '');

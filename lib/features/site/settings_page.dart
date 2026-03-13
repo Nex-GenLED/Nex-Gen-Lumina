@@ -1,6 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/premium_card.dart';
@@ -22,6 +21,12 @@ import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
+
+/// Master PIN for Installer Tools access (session-gated).
+const String kInstallerMasterPin = '8817';
+
+/// Session-level flag — resets only on full app restart.
+bool _installerUnlocked = false;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -110,7 +115,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               title: const Text('Zone & Fixture Setup'),
               subtitle: const Text('Assign fixture types to controller segments'),
               trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              onTap: () => context.push(AppRoutes.zoneSetup),
+              onTap: () => _guardInstallerAccess(() => context.push(AppRoutes.zoneSetup)),
             ),
           ),
           if (mode == SiteMode.commercial) ...[
@@ -118,6 +123,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             _buildZonesSection(context, zones),
           ]
         ],
+      ),
+    );
+  }
+
+  /// Gates [action] behind the installer PIN dialog unless already unlocked
+  /// this session.
+  void _guardInstallerAccess(VoidCallback action) {
+    if (_installerUnlocked) {
+      action();
+      return;
+    }
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _InstallerPinDialog(
+        onSuccess: () {
+          _installerUnlocked = true;
+          action();
+        },
       ),
     );
   }
@@ -250,59 +274,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
-class _ModeToggle extends StatelessWidget {
-  const _ModeToggle({required this.value, required this.onChanged});
-  final SiteMode value;
-  final ValueChanged<SiteMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final isRes = value == SiteMode.residential;
-    final isCom = value == SiteMode.commercial;
-    return Row(children: [
-      Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onChanged(SiteMode.residential),
-          child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: isRes ? NexGenPalette.cyan : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isRes ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withOpacity(0.6)),
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.home_outlined, color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Text('Residential', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant)),
-            ]),
-          ),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onChanged(SiteMode.commercial),
-          child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: isCom ? NexGenPalette.cyan : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isCom ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withOpacity(0.6)),
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.apartment_outlined, color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Text('Commercial', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant)),
-            ]),
-          ),
-        ),
-      ),
-    ]);
-  }
-}
-
 class _SystemManagementButton extends StatelessWidget {
   const _SystemManagementButton();
 
@@ -325,48 +296,6 @@ class _SystemManagementButton extends StatelessWidget {
   }
 }
 
-class _LinkedControllersTile extends ConsumerWidget {
-  const _LinkedControllersTile();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final linked = ref.watch(linkedControllersProvider);
-    return Card(
-      child: ListTile(
-        leading: Icon(Icons.hub_outlined, color: NexGenPalette.cyan),
-        title: const Text('Linked Controllers'),
-        subtitle: const Text('Sync multiple devices (e.g., Roof + Patio) to act as one system.'),
-        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (linked.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
-              ),
-              child: Text('${linked.length} linked', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan)),
-            ),
-          const SizedBox(width: 8),
-          Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ]),
-        onTap: () => _openMultiControllerSetupSheet(context),
-      ),
-    );
-  }
-
-  Future<void> _openMultiControllerSetupSheet(BuildContext context) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => const MultiControllerSetupSheet(),
-    );
-  }
-}
-
 class MultiControllerSetupSheet extends ConsumerWidget {
   const MultiControllerSetupSheet({super.key});
 
@@ -384,7 +313,7 @@ class MultiControllerSetupSheet extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Center(
-            child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999))),
+            child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999))),
           ),
           const SizedBox(height: 12),
           Row(children: [
@@ -443,48 +372,6 @@ class MultiControllerSetupSheet extends ConsumerWidget {
   }
 }
 
-class _ControllerHardwareTile extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(CupertinoIcons.device_laptop, color: NexGenPalette.violet),
-        title: const Text('Controller Hardware Setup'),
-        subtitle: const Text('Configure ports, pixel counts, and power.'),
-        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
-            ),
-            child: Text('Advanced', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan)),
-          ),
-          const SizedBox(width: 8),
-          Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ]),
-        onTap: () async {
-          final proceed = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Warning'),
-              content: const Text('Changing pixel counts will reset your current map. Proceed?'),
-              actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continue')),
-              ],
-            ),
-          );
-          if (proceed == true && context.mounted) {
-            context.push(AppRoutes.hardwareConfig);
-          }
-        },
-      ),
-    );
-  }
-}
-
 class _UserProfileEntry extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -518,22 +405,6 @@ class _MyWhitesCard extends StatelessWidget {
   }
 }
 
-class _ControllersTile extends StatelessWidget {
-  const _ControllersTile();
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(Icons.router_outlined, color: NexGenPalette.cyan),
-        title: const Text('Controllers & Devices'),
-        subtitle: const Text('Add, remove, and select your controllers.'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push(AppRoutes.controllersSettings),
-      ),
-    );
-  }
-}
-
 class _SupportResourcesCard extends StatefulWidget {
   const _SupportResourcesCard();
 
@@ -555,7 +426,7 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999)))),
+              Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999)))),
               const SizedBox(height: 12),
               Row(children: [
                 Icon(Icons.support_agent, color: NexGenPalette.cyan),
@@ -1515,7 +1386,7 @@ class _SupportRequestFormSheetState extends ConsumerState<SupportRequestFormShee
       child: Padding(
         padding: EdgeInsets.only(left: 16, right: 16, top: 12, bottom: bottomInset + 16),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999)))),
+          Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999)))),
           const SizedBox(height: 12),
           Row(children: [
             Icon(Icons.assignment_outlined, color: NexGenPalette.cyan),
@@ -1581,5 +1452,164 @@ class _SupportRequestFormSheetState extends ConsumerState<SupportRequestFormShee
         ]),
       ),
     );
+  }
+}
+
+// ── Installer PIN Dialog ─────────────────────────────────────────────────────
+
+class _InstallerPinDialog extends StatefulWidget {
+  final VoidCallback onSuccess;
+  const _InstallerPinDialog({required this.onSuccess});
+
+  @override
+  State<_InstallerPinDialog> createState() => _InstallerPinDialogState();
+}
+
+class _InstallerPinDialogState extends State<_InstallerPinDialog> {
+  String _pin = '';
+  bool _error = false;
+
+  void _onDigit(String digit) {
+    if (_pin.length >= 4) return;
+    setState(() {
+      _error = false;
+      _pin += digit;
+    });
+    if (_pin.length == 4) {
+      if (_pin == kInstallerMasterPin) {
+        Navigator.of(context).pop();
+        widget.onSuccess();
+      } else {
+        setState(() {
+          _error = true;
+          _pin = '';
+        });
+      }
+    }
+  }
+
+  void _onBackspace() {
+    if (_pin.isEmpty) return;
+    setState(() {
+      _error = false;
+      _pin = _pin.substring(0, _pin.length - 1);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: NexGenPalette.line),
+      ),
+      title: Row(
+        children: [
+          Icon(Icons.lock_outline, color: NexGenPalette.cyan),
+          const SizedBox(width: 12),
+          const Text('Installer Access'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Enter installer code to continue',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: NexGenPalette.textMedium,
+            ),
+          ),
+          const SizedBox(height: 24),
+          // PIN dots
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(4, (i) {
+              final filled = i < _pin.length;
+              return Container(
+                width: 18,
+                height: 18,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: filled ? NexGenPalette.cyan : Colors.transparent,
+                  border: Border.all(
+                    color: _error ? Colors.redAccent : NexGenPalette.cyan,
+                    width: 2,
+                  ),
+                ),
+              );
+            }),
+          ),
+          if (_error) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Incorrect code',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.redAccent,
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+          // Numeric keypad
+          ..._buildKeypadRows(),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildKeypadRows() {
+    const rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['', '0', '⌫'],
+    ];
+    return rows.map((row) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: row.map((key) {
+            if (key.isEmpty) {
+              return const SizedBox(width: 64, height: 48);
+            }
+            final isBackspace = key == '⌫';
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: SizedBox(
+                width: 64,
+                height: 48,
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    backgroundColor: NexGenPalette.line,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: isBackspace ? _onBackspace : () => _onDigit(key),
+                  child: isBackspace
+                      ? Icon(Icons.backspace_outlined, color: NexGenPalette.textHigh, size: 20)
+                      : Text(
+                          key,
+                          style: TextStyle(
+                            fontSize: 20,
+                            color: NexGenPalette.textHigh,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }).toList();
   }
 }

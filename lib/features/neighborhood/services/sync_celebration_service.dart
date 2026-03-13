@@ -28,7 +28,6 @@ class SyncCelebrationService {
   bool _isCelebrating = false;
   String? _activeGroupId;
   String? _activeSessionId;
-  SyncEvent? _activeEvent;
 
   /// Whether the tracked team won the game (set on game final).
   bool? _teamWon;
@@ -47,7 +46,6 @@ class SyncCelebrationService {
   }) {
     _activeGroupId = groupId;
     _activeSessionId = sessionId;
-    _activeEvent = event;
     _teamWon = null;
 
     final sport = _parseSportType(event.sportLeague ?? '');
@@ -77,7 +75,6 @@ class SyncCelebrationService {
     _isCelebrating = false;
     _activeGroupId = null;
     _activeSessionId = null;
-    _activeEvent = null;
     // Note: _teamWon is intentionally NOT cleared here — it's read by the
     // session manager during dissolution to determine handoff behavior.
     debugPrint('[SyncCelebrationService] Stopped monitoring');

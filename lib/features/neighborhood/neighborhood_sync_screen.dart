@@ -105,9 +105,9 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.15),
+            color: Colors.orange.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
           ),
           child: Row(
             children: [
@@ -165,7 +165,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.cyan.withOpacity(0.2),
+                color: Colors.cyan.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.login, color: Colors.cyan, size: 20),
@@ -338,7 +338,7 @@ class _NeighborhoodLoadingShimmer extends StatelessWidget {
   }
 
   BoxDecoration _shimmerDecor({double radius = 8}) => BoxDecoration(
-        color: Colors.white.withOpacity(0.07),
+        color: Colors.white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(radius),
       );
 }
@@ -419,7 +419,7 @@ class _NeighborhoodGroupListViewState
           end: Alignment.bottomCenter,
           colors: [
             Colors.black,
-            NexGenPalette.midnightBlue.withOpacity(0.8),
+            NexGenPalette.midnightBlue.withValues(alpha: 0.8),
             Colors.black,
           ],
         ),
@@ -498,7 +498,7 @@ class _NeighborhoodGroupListViewState
               subtitle,
               style: TextStyle(
                 fontSize: 13,
-                color: NexGenPalette.cyan.withOpacity(0.9),
+                color: NexGenPalette.cyan.withValues(alpha: 0.9),
                 fontWeight: FontWeight.w500,
                 letterSpacing: 1.5,
               ),
@@ -515,9 +515,9 @@ class _NeighborhoodGroupListViewState
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withOpacity(0.12),
+                color: NexGenPalette.cyan.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: NexGenPalette.cyan.withOpacity(0.35)),
+                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.35)),
               ),
               child: const Icon(Icons.add, color: NexGenPalette.cyan, size: 20),
             ),
@@ -549,18 +549,18 @@ class _NeighborhoodGroupListViewState
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    accent.withOpacity(0.12),
-                    colors[1].withOpacity(0.05),
+                    accent.withValues(alpha: 0.12),
+                    colors[1].withValues(alpha: 0.05),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: accent.withOpacity(borderOpacity)),
+                border: Border.all(color: accent.withValues(alpha: borderOpacity)),
                 boxShadow: group.isActive
                     ? [
                         BoxShadow(
-                          color: accent.withOpacity(
+                          color: accent.withValues(alpha: 
                               0.18 + _pulseController.value * 0.14),
                           blurRadius: 16,
                           spreadRadius: 1,
@@ -611,11 +611,11 @@ class _NeighborhoodGroupListViewState
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: NexGenPalette.cyan.withOpacity(0.18),
+                                  color: NexGenPalette.cyan.withValues(alpha: 0.18),
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
                                       color: NexGenPalette.cyan
-                                          .withOpacity(0.5)),
+                                          .withValues(alpha: 0.5)),
                                 ),
                                 child: const Text(
                                   'LIVE',
@@ -638,7 +638,7 @@ class _NeighborhoodGroupListViewState
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
+                                color: Colors.white.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -719,10 +719,10 @@ class _NeighborhoodGroupListViewState
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: NexGenPalette.cyan
-                    .withOpacity(0.5 + _pulseController.value * 0.5),
+                    .withValues(alpha: 0.5 + _pulseController.value * 0.5),
                 boxShadow: [
                   BoxShadow(
-                    color: NexGenPalette.cyan.withOpacity(0.5),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.5),
                     blurRadius: 6,
                     spreadRadius: 1,
                   ),
@@ -782,15 +782,15 @@ class _NeighborhoodGroupListViewState
                 gradient: RadialGradient(
                   colors: [
                     NexGenPalette.cyan
-                        .withOpacity(0.3 + _pulseController.value * 0.2),
-                    NexGenPalette.cyan.withOpacity(0.1),
+                        .withValues(alpha: 0.3 + _pulseController.value * 0.2),
+                    NexGenPalette.cyan.withValues(alpha: 0.1),
                     Colors.transparent,
                   ],
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: NexGenPalette.cyan
-                        .withOpacity(0.3 + _pulseController.value * 0.2),
+                        .withValues(alpha: 0.3 + _pulseController.value * 0.2),
                     blurRadius: 30 + _pulseController.value * 10,
                     spreadRadius: 5,
                   ),
@@ -846,10 +846,10 @@ class _NeighborhoodGroupListViewState
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: NexGenPalette.cyan.withOpacity(0.1),
+            color: NexGenPalette.cyan.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
             border:
-                Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+                Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
           ),
           child: Row(
             children: [
@@ -926,7 +926,7 @@ class _NeighborhoodGroupListViewState
         Row(
           children: [
             Icon(Icons.history,
-                size: 16, color: NexGenPalette.cyan.withOpacity(0.7)),
+                size: 16, color: NexGenPalette.cyan.withValues(alpha: 0.7)),
             const SizedBox(width: 8),
             Text(
               'Previous Groups',
@@ -972,10 +972,10 @@ class _NeighborhoodGroupListViewState
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: NexGenPalette.gunmetal.withOpacity(0.5),
+                  color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                      color: NexGenPalette.cyan.withOpacity(0.2)),
+                      color: NexGenPalette.cyan.withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   children: [
@@ -983,7 +983,7 @@ class _NeighborhoodGroupListViewState
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: NexGenPalette.cyan.withOpacity(0.12),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Center(
@@ -1004,10 +1004,10 @@ class _NeighborhoodGroupListViewState
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: NexGenPalette.cyan.withOpacity(0.15),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                            color: NexGenPalette.cyan.withOpacity(0.3)),
+                            color: NexGenPalette.cyan.withValues(alpha: 0.3)),
                       ),
                       child: const Text(
                         'Rejoin',
@@ -1035,9 +1035,9 @@ class _NeighborhoodGroupListViewState
       padding: EdgeInsets.fromLTRB(
           24, 12, 24, navBarTotalHeight(context) + 12),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withValues(alpha: 0.7),
         border: Border(
-            top: BorderSide(color: NexGenPalette.cyan.withOpacity(0.1))),
+            top: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.1))),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1063,7 +1063,7 @@ class _NeighborhoodGroupListViewState
                     borderRadius: BorderRadius.circular(14)),
                 elevation: 8,
                 shadowColor:
-                    NexGenPalette.cyan.withOpacity(0.4),
+                    NexGenPalette.cyan.withValues(alpha: 0.4),
               ),
             ),
           ),
@@ -1119,7 +1119,7 @@ class _NeighborhoodGroupListViewState
                 leading: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: NexGenPalette.cyan.withOpacity(0.15),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child:
@@ -1141,7 +1141,7 @@ class _NeighborhoodGroupListViewState
                 leading: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.15),
+                    color: Colors.green.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(Icons.login, color: Colors.green.shade400),
@@ -1410,7 +1410,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: isActive ? Colors.cyan.withOpacity(0.2) : Colors.transparent,
+                  color: isActive ? Colors.cyan.withValues(alpha: 0.2) : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -1437,12 +1437,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Colors.cyan.withOpacity(0.15),
-            Colors.purple.withOpacity(0.1),
+            Colors.cyan.withValues(alpha: 0.15),
+            Colors.purple.withValues(alpha: 0.1),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+        border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -1450,7 +1450,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -1492,7 +1492,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
+                          color: Colors.green.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -1556,12 +1556,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.cyan.withOpacity(0.1),
-                Colors.purple.withOpacity(0.05),
+                Colors.cyan.withValues(alpha: 0.1),
+                Colors.purple.withValues(alpha: 0.05),
               ],
             ),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.cyan.withOpacity(0.2)),
+            border: Border.all(color: Colors.cyan.withValues(alpha: 0.2)),
           ),
           child: Column(
             children: [
@@ -1756,9 +1756,9 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1857,7 +1857,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               ...otherMembers.map((member) => ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: CircleAvatar(
-                  backgroundColor: Colors.cyan.withOpacity(0.2),
+                  backgroundColor: Colors.cyan.withValues(alpha: 0.2),
                   child: const Icon(Icons.home, color: Colors.cyan, size: 20),
                 ),
                 title: Text(
@@ -1946,7 +1946,7 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.celebration, color: Colors.cyan, size: 20),
@@ -2055,9 +2055,9 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.cyan.withOpacity(0.1),
+                    color: Colors.cyan.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+                    border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
@@ -2260,7 +2260,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.cyan.withOpacity(0.2),
+                      color: Colors.cyan.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.explore, color: Colors.cyan, size: 20),
@@ -2381,7 +2381,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.cyan.withOpacity(0.1),
+                  color: Colors.cyan.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.flag, color: Colors.cyan, size: 40),
@@ -2522,7 +2522,7 @@ class _NearbyGroupTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900.withOpacity(0.5),
+        color: Colors.grey.shade900.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade800),
       ),
@@ -2532,7 +2532,7 @@ class _NearbyGroupTile extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.home_work, color: Colors.cyan),

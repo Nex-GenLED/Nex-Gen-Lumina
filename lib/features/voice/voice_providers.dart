@@ -146,7 +146,7 @@ final donateSystemShortcutsProvider = Provider<Future<void> Function()>((ref) {
 // ============== Private Handlers ==============
 
 /// Handle Siri Shortcut activation
-void _handleSiriShortcut(ProviderRef ref, String activityType, Map<String, dynamic> userInfo) {
+void _handleSiriShortcut(Ref ref, String activityType, Map<String, dynamic> userInfo) {
   switch (activityType) {
     case SiriActivityTypes.applyScene:
       final sceneId = userInfo['sceneId'] as String?;
@@ -177,7 +177,7 @@ void _handleSiriShortcut(ProviderRef ref, String activityType, Map<String, dynam
 }
 
 /// Handle Deep Link action
-void _handleDeepLinkAction(ProviderRef ref, DeepLinkAction action) {
+void _handleDeepLinkAction(Ref ref, DeepLinkAction action) {
   switch (action.type) {
     case DeepLinkActionType.powerOn:
       _setPower(ref, true);
@@ -215,7 +215,7 @@ void _handleDeepLinkAction(ProviderRef ref, DeepLinkAction action) {
 }
 
 /// Apply scene by ID
-void _applySceneById(ProviderRef ref, String sceneId) {
+void _applySceneById(Ref ref, String sceneId) {
   debugPrint('Voice: Applying scene by ID: $sceneId');
 
   final allScenesAsync = ref.read(allScenesProvider);
@@ -230,7 +230,7 @@ void _applySceneById(ProviderRef ref, String sceneId) {
 }
 
 /// Apply scene by name
-void _applySceneByName(ProviderRef ref, String sceneName) {
+void _applySceneByName(Ref ref, String sceneName) {
   debugPrint('Voice: Applying scene by name: $sceneName');
 
   final allScenesAsync = ref.read(allScenesProvider);
@@ -249,7 +249,7 @@ void _applySceneByName(ProviderRef ref, String sceneName) {
 }
 
 /// Set power on/off
-void _setPower(ProviderRef ref, bool on) {
+void _setPower(Ref ref, bool on) {
   debugPrint('Voice: Setting power: $on');
 
   final notifier = ref.read(wledStateProvider.notifier);
@@ -257,7 +257,7 @@ void _setPower(ProviderRef ref, bool on) {
 }
 
 /// Set brightness level
-void _setBrightness(ProviderRef ref, int level) {
+void _setBrightness(Ref ref, int level) {
   debugPrint('Voice: Setting brightness: $level');
 
   final notifier = ref.read(wledStateProvider.notifier);
@@ -265,7 +265,7 @@ void _setBrightness(ProviderRef ref, int level) {
 }
 
 /// Set color from Siri shortcut
-void _setColor(ProviderRef ref, Map<String, dynamic> userInfo) {
+void _setColor(Ref ref, Map<String, dynamic> userInfo) {
   final r = (userInfo['r'] as num?)?.toInt() ?? 255;
   final g = (userInfo['g'] as num?)?.toInt() ?? 255;
   final b = (userInfo['b'] as num?)?.toInt() ?? 255;
@@ -292,7 +292,7 @@ void _setColor(ProviderRef ref, Map<String, dynamic> userInfo) {
 }
 
 /// Run the current schedule - applies whatever pattern/action should be active now
-Future<void> _runSchedule(ProviderRef ref) async {
+Future<void> _runSchedule(Ref ref) async {
   debugPrint('Voice: Running schedule');
 
   // Find the current scheduled action based on time and day

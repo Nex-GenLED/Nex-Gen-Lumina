@@ -35,8 +35,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   bool _connected = false;
 
   BluetoothDevice? _device;
-  BluetoothCharacteristic? _improvChar;
-  BluetoothCharacteristic? _improvResultChar; // Optional: RPC Result characteristic
   StreamSubscription<List<int>>? _notifySub;
 
   // Provisioning form state
@@ -233,14 +231,11 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         );
 
         _device = device;
-        _improvChar = writeChar;
-        _improvResultChar = resultChar;
       }
 
       if (!mounted) return;
       if (kIsWeb || kSimulationMode) {
         _device = device;
-        _improvChar = null; // no real BLE on web
       }
       setState(() {
         _connected = true;
@@ -349,20 +344,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         content: const Text('Connection Failed. Please check your Wi‑Fi password and try again.'),
         backgroundColor: Theme.of(context).colorScheme.error,
       ));
-    }
-  }
-
-  // Attempt to read optional RPC Result characteristic for error code diagnostics
-  Future<void> _readRpcResult() async {
-    final c = _improvResultChar;
-    if (c == null || kIsWeb || kSimulationMode) return;
-    try {
-      final value = await c.read();
-      if (value.isEmpty) return;
-      final code = value.first;
-      debugPrint('Improv RPC Result code: 0x${code.toRadixString(16)} (len=${value.length})');
-    } catch (e) {
-      debugPrint('Failed to read RPC Result characteristic: $e');
     }
   }
 

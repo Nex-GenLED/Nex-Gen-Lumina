@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -417,23 +416,6 @@ class LibraryNodeCard extends StatelessWidget {
     return null;
   }
 
-  /// Expand a 2-color gradient pair into a richer multi-color list
-  /// for the mini pixel preview strip on folder cards.
-  static List<Color> _expandGradient(List<Color> pair) {
-    if (pair.length < 2) return pair;
-    final a = pair[0];
-    final b = pair[1];
-    return [
-      a,
-      Color.lerp(a, b, 0.25)!,
-      Color.lerp(a, b, 0.5)!,
-      Color.lerp(a, b, 0.75)!,
-      b,
-      Color.lerp(b, a, 0.3)!,
-      a,
-    ];
-  }
-
   @override
   Widget build(BuildContext context) {
     // Palettes get color-dominant cards, folders get solid themed cards
@@ -451,10 +433,6 @@ class LibraryNodeCard extends StatelessWidget {
     final gradientColors = _getGradientForNode();
     final accentColor = _getFolderThemeColor();
     final icon = _iconForNode();
-    final previewColors = node.themeColors ?? node.previewColors;
-    final stripColors = previewColors != null && previewColors.isNotEmpty
-        ? _expandGradient(previewColors.take(2).toList())
-        : _expandGradient(gradientColors);
 
     return Material(
       color: Colors.transparent,
@@ -1139,17 +1117,10 @@ class PatternCard extends ConsumerWidget {
     return 0;
   }
 
-  /// Get effect name from effect ID
-  String? _getEffectName() {
-    final effectId = _getEffectId();
-    return kEffectNames[effectId];
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = _getColors();
     final effectId = _getEffectId();
-    final effectName = _getEffectName();
 
     return GestureDetector(
       onTap: () async {

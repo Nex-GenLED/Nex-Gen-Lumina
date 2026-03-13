@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
-import 'package:nexgen_command/features/design/models/clarification_models.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 
 /// Service for validating design constraints and suggesting alternatives.
@@ -326,7 +325,6 @@ class ConstraintSolver {
       );
     }
 
-    final litCount = (pixelCount / interval).ceil();
     final remainder = pixelCount % interval;
 
     // Small remainder is acceptable

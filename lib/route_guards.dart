@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -77,24 +76,13 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
       if (userDoc.exists) {
         final data = userDoc.data()!;
         final role = data['installation_role'] as String?;
-        final installationId = data['installation_id'] as String?;
 
-        // Unlinked users go to link-account
-        // DEV BYPASS: Skip link-account for testing (remove before production)
-        const devBypassLinkAccount = true;
-        if (!devBypassLinkAccount && (role == null || role == 'unlinked')) {
-          return AppRoutes.linkAccount;
-        }
+        // DEV BYPASS: Link-account and installation checks skipped for testing
+        // (remove before production)
 
         // Installers and admins don't need an installation
         if (role == 'installer' || role == 'admin') {
           return AppRoutes.dashboard;
-        }
-
-        // Primary and subUser need an installation
-        // DEV BYPASS: Skip installation check for testing
-        if (!devBypassLinkAccount && installationId == null) {
-          return AppRoutes.linkAccount;
         }
       } else {
         // User exists in Auth but not Firestore - create unlinked profile
@@ -138,56 +126,5 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // For protected routes (dashboard, settings, etc.), verify installation access
   // DEV BYPASS: Skip all installation checks for testing
-  const devBypassInstallation = true;
-  if (devBypassInstallation) {
-    return null; // Allow access to all routes
-  }
-
-  try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-
-    if (!userDoc.exists) {
-      await createUnlinkedUserProfile(user);
-      return AppRoutes.linkAccount;
-    }
-
-    final data = userDoc.data()!;
-    final role = data['installation_role'] as String?;
-    final installationId = data['installation_id'] as String?;
-
-    // Unlinked users must go to link-account
-    if (role == null || role == 'unlinked') {
-      return AppRoutes.linkAccount;
-    }
-
-    // Installers and admins have unrestricted access
-    if (role == 'installer' || role == 'admin') {
-      return null;
-    }
-
-    // Primary and subUser need a valid installation
-    if (installationId == null) {
-      return AppRoutes.linkAccount;
-    }
-
-    // Check if installation is still active
-    final installDoc = await FirebaseFirestore.instance
-        .collection('installations')
-        .doc(installationId)
-        .get();
-
-    if (installDoc.exists && installDoc.data()?['is_active'] == false) {
-      // Installation deactivated - show error (for now, redirect to link-account)
-      return AppRoutes.linkAccount;
-    }
-  } catch (e) {
-    debugPrint('Redirect: Error checking installation access: $e');
-    // On error, allow access (fail open for better UX, security handled by Firestore rules)
-  }
-
-  // No redirect needed
-  return null;
+  return null; // Allow access to all routes
 }

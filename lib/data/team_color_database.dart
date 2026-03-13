@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+// TODO(consolidation): This database and
+// lib/features/sports_alerts/data/team_colors.dart define overlapping team
+// color data for 155 domestic pro teams (NFL/NBA/MLB/NHL/MLS). The two cannot
+// be merged today because kTeamColors is a compile-time const Map<String,
+// TeamColors> with a SportType enum tightly coupled to the alerts subsystem,
+// while this database uses runtime-constructed UnifiedTeamEntry with AI/LED
+// metadata. If either is refactored, keep color hex values in sync.
+
 // ---------------------------------------------------------------------------
 // TeamColor -- lightweight named RGB color
 // ---------------------------------------------------------------------------

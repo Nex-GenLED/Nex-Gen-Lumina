@@ -6,7 +6,6 @@ import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
-import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/services/sports_alert_service.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/autopilot_sync_trigger.dart';

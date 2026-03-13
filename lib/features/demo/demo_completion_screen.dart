@@ -107,7 +107,7 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
             child: Container(
               padding: const EdgeInsets.all(32),
               decoration: BoxDecoration(
-                color: NexGenPalette.gunmetal.withOpacity(0.95),
+                color: NexGenPalette.gunmetal.withValues(alpha: 0.95),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: NexGenPalette.cyan),
               ),
@@ -119,9 +119,9 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: NexGenPalette.cyan.withOpacity(0.1),
+                      color: NexGenPalette.cyan.withValues(alpha: 0.1),
                       border: Border.all(
-                        color: NexGenPalette.cyan.withOpacity(0.5),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.5),
                         width: 2,
                       ),
                     ),
@@ -216,7 +216,7 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: NexGenPalette.cyan.withOpacity(0.4),
+                  color: NexGenPalette.cyan.withValues(alpha: 0.4),
                   blurRadius: 30,
                   spreadRadius: 5,
                 ),
@@ -494,8 +494,8 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
-              ? NexGenPalette.cyan.withOpacity(0.15)
-              : NexGenPalette.gunmetal.withOpacity(0.5),
+              ? NexGenPalette.cyan.withValues(alpha: 0.15)
+              : NexGenPalette.gunmetal.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,

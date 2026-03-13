@@ -98,7 +98,7 @@ class _SuggestionCard extends ConsumerWidget {
       direction: DismissDirection.endToStart,
       background: Container(
         decoration: BoxDecoration(
-          color: Colors.red.shade900.withOpacity(0.3),
+          color: Colors.red.shade900.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(16),
         ),
         alignment: Alignment.centerRight,
@@ -162,7 +162,7 @@ class _SuggestionCard extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.amber.withOpacity(0.2),
+                        color: Colors.amber.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -237,11 +237,11 @@ class _SuggestionCard extends ConsumerWidget {
       case SuggestionType.createSchedule:
         return NexGenPalette.cardBackground;
       case SuggestionType.applyPattern:
-        return NexGenPalette.primary.withOpacity(0.05);
+        return NexGenPalette.primary.withValues(alpha: 0.05);
       case SuggestionType.eventReminder:
-        return Colors.purple.shade900.withOpacity(0.1);
+        return Colors.purple.shade900.withValues(alpha: 0.1);
       case SuggestionType.favorite:
-        return Colors.amber.shade900.withOpacity(0.1);
+        return Colors.amber.shade900.withValues(alpha: 0.1);
       default:
         return NexGenPalette.cardBackground;
     }
@@ -250,20 +250,20 @@ class _SuggestionCard extends ConsumerWidget {
   Color _getBorderColor(SuggestionType type) {
     switch (type) {
       case SuggestionType.createSchedule:
-        return NexGenPalette.primary.withOpacity(0.3);
+        return NexGenPalette.primary.withValues(alpha: 0.3);
       case SuggestionType.applyPattern:
-        return NexGenPalette.primary.withOpacity(0.5);
+        return NexGenPalette.primary.withValues(alpha: 0.5);
       case SuggestionType.eventReminder:
-        return Colors.purple.withOpacity(0.5);
+        return Colors.purple.withValues(alpha: 0.5);
       case SuggestionType.favorite:
-        return Colors.amber.withOpacity(0.5);
+        return Colors.amber.withValues(alpha: 0.5);
       default:
-        return NexGenPalette.primary.withOpacity(0.3);
+        return NexGenPalette.primary.withValues(alpha: 0.3);
     }
   }
 
   Color _getIconBackgroundColor(SuggestionType type) {
-    return _getIconColor(type).withOpacity(0.15);
+    return _getIconColor(type).withValues(alpha: 0.15);
   }
 
   Color _getIconColor(SuggestionType type) {

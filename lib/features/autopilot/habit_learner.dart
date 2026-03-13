@@ -364,7 +364,7 @@ class HabitLearner {
       final patternName = event['pattern_name'] as String?;
       final effectId = event['effect_id']?.toString();
 
-      final key = patternName ?? 'effect_$effectId' ?? 'unknown';
+      final key = patternName ?? 'effect_$effectId';
       patternCounts[key] = (patternCounts[key] ?? 0) + 1;
     }
 

@@ -301,9 +301,9 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexGenPalette.cyan.withOpacity(0.2)),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -347,7 +347,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
               description,
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.white.withOpacity(0.8),
+                color: Colors.white.withValues(alpha: 0.8),
                 height: 1.5,
               ),
             ),
@@ -419,7 +419,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.2),
+                color: Colors.orange.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange),
               ),

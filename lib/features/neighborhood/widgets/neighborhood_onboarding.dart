@@ -61,7 +61,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           end: Alignment.bottomCenter,
           colors: [
             Colors.black,
-            NexGenPalette.midnightBlue.withOpacity(0.8),
+            NexGenPalette.midnightBlue.withValues(alpha: 0.8),
             Colors.black,
           ],
         ),
@@ -135,7 +135,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
             'The Street Comes Alive',
             style: TextStyle(
               fontSize: 18,
-              color: NexGenPalette.cyan.withOpacity(0.9),
+              color: NexGenPalette.cyan.withValues(alpha: 0.9),
               fontWeight: FontWeight.w500,
               letterSpacing: 1.5,
             ),
@@ -202,10 +202,10 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal.withOpacity(0.6),
+        color: NexGenPalette.gunmetal.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: NexGenPalette.cyan.withOpacity(0.2),
+          color: NexGenPalette.cyan.withValues(alpha: 0.2),
         ),
       ),
       child: Row(
@@ -213,7 +213,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withOpacity(0.15),
+              color: NexGenPalette.cyan.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: NexGenPalette.cyan, size: 24),
@@ -259,7 +259,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
             child: Icon(
               Icons.tune,
               size: 48,
-              color: NexGenPalette.cyan.withOpacity(0.8),
+              color: NexGenPalette.cyan.withValues(alpha: 0.8),
             ),
           ),
 
@@ -346,15 +346,15 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            gradientColors[0].withOpacity(0.15),
-            gradientColors[1].withOpacity(0.05),
+            gradientColors[0].withValues(alpha: 0.15),
+            gradientColors[1].withValues(alpha: 0.05),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: gradientColors[0].withOpacity(0.3),
+          color: gradientColors[0].withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -390,7 +390,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -496,10 +496,10 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal.withOpacity(0.5),
+        color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: accentColor.withOpacity(0.3),
+          color: accentColor.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -557,14 +557,14 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      NexGenPalette.cyan.withOpacity(0.3 + _pulseController.value * 0.2),
-                      NexGenPalette.cyan.withOpacity(0.1),
+                      NexGenPalette.cyan.withValues(alpha: 0.3 + _pulseController.value * 0.2),
+                      NexGenPalette.cyan.withValues(alpha: 0.1),
                       Colors.transparent,
                     ],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: NexGenPalette.cyan.withOpacity(0.3 + _pulseController.value * 0.2),
+                      color: NexGenPalette.cyan.withValues(alpha: 0.3 + _pulseController.value * 0.2),
                       blurRadius: 30 + _pulseController.value * 10,
                       spreadRadius: 5,
                     ),
@@ -631,10 +631,10 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withOpacity(0.1),
+              color: NexGenPalette.cyan.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: NexGenPalette.cyan.withOpacity(0.3),
+                color: NexGenPalette.cyan.withValues(alpha: 0.3),
               ),
             ),
             child: Row(
@@ -753,7 +753,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
                   borderRadius: BorderRadius.circular(14),
                 ),
                 elevation: 8,
-                shadowColor: NexGenPalette.cyan.withOpacity(0.4),
+                shadowColor: NexGenPalette.cyan.withValues(alpha: 0.4),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -867,7 +867,7 @@ class NeighborhoodHeroPainter extends CustomPainter {
 
       // Glow behind house
       final glowOpacity = 0.3 + pulseValue * 0.2;
-      glowPaint.color = lightColor.withOpacity(glowOpacity);
+      glowPaint.color = lightColor.withValues(alpha: glowOpacity);
       canvas.drawCircle(
         Offset(x + houseWidth / 2, y - 10),
         houseWidth * 0.8,
@@ -975,7 +975,7 @@ class NeighborhoodErrorState extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(

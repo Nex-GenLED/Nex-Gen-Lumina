@@ -112,7 +112,7 @@ class FavoritesGrid extends ConsumerWidget {
           Icon(
             Icons.star_border_rounded,
             size: 48,
-            color: NexGenPalette.textSecondary.withOpacity(0.5),
+            color: NexGenPalette.textSecondary.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 12),
           Text(
@@ -126,7 +126,7 @@ class FavoritesGrid extends ConsumerWidget {
             'Your most-used patterns will appear here',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: NexGenPalette.textSecondary.withOpacity(0.7),
+                  color: NexGenPalette.textSecondary.withValues(alpha: 0.7),
                 ),
           ),
         ],
@@ -149,10 +149,10 @@ class _EmptySlot extends StatelessWidget {
         child: Container(
           height: 52,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: Colors.white.withOpacity(0.1),
+              color: Colors.white.withValues(alpha: 0.1),
               width: 1,
               strokeAlign: BorderSide.strokeAlignInside,
             ),
@@ -160,7 +160,7 @@ class _EmptySlot extends StatelessWidget {
           child: Center(
             child: Icon(
               Icons.add_rounded,
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               size: 24,
             ),
           ),
@@ -271,12 +271,12 @@ class _FavoritePatternCard extends ConsumerWidget {
             ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: patternColors.first.withOpacity(0.3),
+                color: patternColors.first.withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -293,9 +293,9 @@ class _FavoritePatternCard extends ConsumerWidget {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                       colors: [
-                        Colors.black.withOpacity(0.15),
+                        Colors.black.withValues(alpha: 0.15),
                         Colors.transparent,
-                        Colors.black.withOpacity(0.15),
+                        Colors.black.withValues(alpha: 0.15),
                       ],
                     ),
                   ),
@@ -313,7 +313,7 @@ class _FavoritePatternCard extends ConsumerWidget {
                         Icon(
                           Icons.push_pin_rounded,
                           size: 14,
-                          color: textColor.withOpacity(0.8),
+                          color: textColor.withValues(alpha: 0.8),
                         ),
                         const SizedBox(width: 5),
                       ]
@@ -322,7 +322,7 @@ class _FavoritePatternCard extends ConsumerWidget {
                         Icon(
                           Icons.star_rounded,
                           size: 16,
-                          color: textColor.withOpacity(0.9),
+                          color: textColor.withValues(alpha: 0.9),
                         ),
                         const SizedBox(width: 6),
                       ],
@@ -335,7 +335,7 @@ class _FavoritePatternCard extends ConsumerWidget {
                                 fontWeight: FontWeight.w600,
                                 shadows: [
                                   Shadow(
-                                    color: Colors.black.withOpacity(0.4),
+                                    color: Colors.black.withValues(alpha: 0.4),
                                     blurRadius: 4,
                                   ),
                                 ],

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
@@ -17,7 +16,6 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/services/lumina_backend_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
-import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -530,7 +528,6 @@ class WledNotifier extends Notifier<WledStateModel> {
     _posting = true;
     try {
       // Check if a channel filter is active (user selected specific channels).
-      final channelFilter = ref.read(selectedChannelIdsProvider);
       final effectiveChannels = ref.read(effectiveChannelIdsProvider);
 
       bool ok;
@@ -595,12 +592,6 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
-  void _registerDispose() {
-    ref.onDispose(() {
-      _poller?.cancel();
-      _reconnectTimer?.cancel();
-    });
-  }
 }
 
 final wledStateProvider = NotifierProvider<WledNotifier, WledStateModel>(WledNotifier.new);

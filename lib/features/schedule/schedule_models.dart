@@ -30,6 +30,11 @@ class ScheduleItem {
   /// Assigned automatically during sync if not set.
   final int? presetId;
 
+  /// When true, the schedule will pick a random audio-reactive effect
+  /// from the controller's SR WLED usermod instead of using a fixed pattern.
+  /// Requires a controller with onboard microphone support (NGL-CTRL-P1).
+  final bool? useAudioReactive;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -39,6 +44,7 @@ class ScheduleItem {
     required this.enabled,
     this.wledPayload,
     this.presetId,
+    this.useAudioReactive,
   });
 
   /// Returns true if this schedule has an off time configured.
@@ -59,6 +65,7 @@ class ScheduleItem {
     bool clearWledPayload = false,
     int? presetId,
     bool clearPresetId = false,
+    bool? useAudioReactive,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -69,6 +76,7 @@ class ScheduleItem {
         enabled: enabled ?? this.enabled,
         wledPayload: clearWledPayload ? null : (wledPayload ?? this.wledPayload),
         presetId: clearPresetId ? null : (presetId ?? this.presetId),
+        useAudioReactive: useAudioReactive ?? this.useAudioReactive,
       );
 
   Map<String, dynamic> toJson() => {
@@ -80,6 +88,7 @@ class ScheduleItem {
         'enabled': enabled,
         if (wledPayload != null) 'wledPayload': wledPayload,
         if (presetId != null) 'presetId': presetId,
+        if (useAudioReactive != null) 'useAudioReactive': useAudioReactive,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -91,6 +100,7 @@ class ScheduleItem {
         enabled: json['enabled'] as bool,
         wledPayload: json['wledPayload'] as Map<String, dynamic>?,
         presetId: json['presetId'] as int?,
+        useAudioReactive: json['useAudioReactive'] as bool?,
       );
 
   @override

@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 
 /// Represents a sports game.
 class SportsGame {
@@ -50,8 +48,6 @@ class SportsGame {
 /// fake games that don't reflect real schedules. Only enable for explicit
 /// demo/testing purposes. In production, integrate a real sports API.
 class SportsScheduleService {
-  final Ref _ref;
-
   /// API key for sports data service (optional).
   /// Can be configured via environment or Firebase Remote Config.
   String? _apiKey;
@@ -60,7 +56,7 @@ class SportsScheduleService {
   /// DISABLED by default - simulated games create misleading suggestions.
   bool _useSimulatedData = false;
 
-  SportsScheduleService(this._ref);
+  SportsScheduleService();
 
   /// Get upcoming games for the specified teams within a date range.
   ///
@@ -482,5 +478,5 @@ class SportsScheduleService {
 
 /// Provider for the sports schedule service.
 final sportsScheduleServiceProvider = Provider<SportsScheduleService>(
-  (ref) => SportsScheduleService(ref),
+  (ref) => SportsScheduleService(),
 );

@@ -6,7 +6,6 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
-import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
@@ -165,122 +164,6 @@ class ThemeSelectionScreen extends ConsumerWidget {
   }
 }
 
-class _PaletteTile extends StatelessWidget {
-  final Color color;
-  final VoidCallback onTap;
-  const _PaletteTile({required this.color, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: NexGenPalette.line),
-        ),
-      ),
-    );
-  }
-}
-
-class _StyleVariationChips extends StatelessWidget {
-  final ThemeStyle currentStyle;
-  final ValueChanged<ThemeStyle> onStyleSelected;
-  const _StyleVariationChips({required this.currentStyle, required this.onStyleSelected});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.tune, color: NexGenPalette.cyan, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              'Style Variations',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: NexGenPalette.textMedium),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: ThemeStyle.values.map((style) => _StyleChip(
-            style: style,
-            isSelected: style == currentStyle,
-            onTap: () => onStyleSelected(style),
-          )).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _StyleChip extends StatelessWidget {
-  final ThemeStyle style;
-  final bool isSelected;
-  final VoidCallback onTap;
-  const _StyleChip({required this.style, required this.isSelected, required this.onTap});
-
-  IconData _iconForStyle(ThemeStyle style) {
-    switch (style) {
-      case ThemeStyle.classic:  return Icons.auto_awesome;
-      case ThemeStyle.subtle:   return Icons.contrast;
-      case ThemeStyle.bold:     return Icons.wb_sunny;
-      case ThemeStyle.vintage:  return Icons.filter_vintage;
-      case ThemeStyle.modern:   return Icons.architecture;
-      case ThemeStyle.playful:  return Icons.celebration;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          constraints: const BoxConstraints(minHeight: 36),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? NexGenPalette.cyan.withValues(alpha: 0.2) : NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
-              width: isSelected ? 1.5 : 1,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_iconForStyle(style), size: 16, color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium),
-              const SizedBox(width: 6),
-              Text(
-                style.displayName,
-                style: TextStyle(
-                  color: isSelected ? NexGenPalette.textHigh : NexGenPalette.textMedium,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ============================================================================
 // LIBRARY BROWSER SCREEN
 // ============================================================================
@@ -299,7 +182,6 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
 
 class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   bool _isPaletteView = false;
-  double _scrollOffset = 0.0;
 
   @override
   void dispose() {
@@ -527,16 +409,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
   const _CompactPatternItemCard({required this.item, required this.themeColors});
-
-  static int _getColorSlotsForEffect(int effectId) {
-    const autoColorEffects = {
-      4, 5, 7, 8, 9, 14, 19, 24, 26, 29, 30, 32, 33, 34, 35, 36, 38, 45, 63, 66, 88,
-      94, 99, 101, 104, 116, 117, 39, 42, 43, 61, 64, 65, 67, 68, 69, 70, 71, 72, 73,
-      74, 75, 79, 80, 81, 89, 90, 92, 93, 97, 105, 106, 107, 108, 109, 110, 115, 128,
-    };
-    if (autoColorEffects.contains(effectId)) return 0;
-    return 3;
-  }
 
   static String _effectDisplayName(int effectId) {
     const names = {

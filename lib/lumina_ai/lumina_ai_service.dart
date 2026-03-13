@@ -1,3 +1,7 @@
+// Lumina AI service — Claude-powered lighting assistant.
+// Routes prompts to Haiku (fast) or Opus (smart) via Firebase Cloud Functions.
+// Formerly lib/openai/openai_config.dart — renamed to reflect actual backend.
+
 import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
@@ -192,8 +196,6 @@ class LuminaAI {
         ? _kFastSystemPrompt
         : _kSmartSystemPrompt;
 
-    debugPrint('🤖 Lumina Tier 3 → ${tier == _LuminaTier.fast ? "FAST (Haiku)" : "SMART (Opus 4)"} | "$userPrompt"');
-
     final effectiveTemp = temperature ?? (tier == _LuminaTier.smart ? 0.4 : 0.2);
 
     return _callClaude(
@@ -213,7 +215,6 @@ class LuminaAI {
     required String systemPrompt,
     double temperature = 0.1,
   }) async {
-    debugPrint('📅 Lumina Direct → Haiku | "$userMessage"');
     return _callClaude(
       model: _kHaiku,
       systemPrompt: systemPrompt,
@@ -229,8 +230,6 @@ class LuminaAI {
     required Map<String, dynamic> currentPattern,
     String? contextBlock,
   }) async {
-    debugPrint('🔧 Lumina Refinement → Haiku | "$refinementPrompt"');
-
     final patternJson = jsonEncode(currentPattern);
     final systemWithContext = _injectContext(_kRefinementSystemPrompt, contextBlock);
 
@@ -250,8 +249,6 @@ class LuminaAI {
     String userPrompt, {
     String? contextBlock,
   }) async {
-    debugPrint('🎨 Lumina WLED JSON → Haiku | "$userPrompt"');
-
     const system =
         _kSecurityPreamble + '\n\n'
         'You are Lumina. Translate the user intent into a strict WLED /json state payload. '
@@ -308,8 +305,6 @@ class LuminaAI {
         final result = await callable.call(body);
 
         final rawData = result.data;
-        debugPrint('$label raw response type: ${rawData.runtimeType}');
-
         Map<String, dynamic>? data;
         if (rawData is Map<String, dynamic>) {
           data = rawData;
@@ -328,7 +323,6 @@ class LuminaAI {
             if (blockMap?['type'] == 'text') {
               final text = blockMap!['text'] as String?;
               if (text != null && text.trim().isNotEmpty) {
-                debugPrint('$label ✅ response length: ${text.length}');
                 return text;
               }
             }

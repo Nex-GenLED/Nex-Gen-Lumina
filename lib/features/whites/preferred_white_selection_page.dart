@@ -313,7 +313,7 @@ class _PreferredWhiteSelectionPageState extends ConsumerState<PreferredWhiteSele
               labelText: 'Name your white',
               hintText: isPrimary ? 'e.g., Porch White' : 'e.g., Sunday Evening',
               labelStyle: TextStyle(color: NexGenPalette.textMedium),
-              hintStyle: TextStyle(color: NexGenPalette.textMedium.withOpacity(0.5)),
+              hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
               enabledBorder: OutlineInputBorder(
                 borderSide: BorderSide(color: NexGenPalette.line),
                 borderRadius: BorderRadius.circular(10),
@@ -435,10 +435,10 @@ class _PreferredWhiteSelectionPageState extends ConsumerState<PreferredWhiteSele
           child: SliderTheme(
             data: SliderThemeData(
               trackHeight: 3,
-              activeTrackColor: color.withOpacity(0.7),
-              inactiveTrackColor: color.withOpacity(0.15),
+              activeTrackColor: color.withValues(alpha: 0.7),
+              inactiveTrackColor: color.withValues(alpha: 0.15),
               thumbColor: color,
-              overlayColor: color.withOpacity(0.1),
+              overlayColor: color.withValues(alpha: 0.1),
             ),
             child: Slider(
               value: value.toDouble(),
@@ -504,14 +504,14 @@ class _WhiteSwatchCard extends StatelessWidget {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: NexGenPalette.cyan.withOpacity(0.4),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.4),
                     blurRadius: 12,
                     spreadRadius: 1,
                   ),
                 ]
               : [
                   BoxShadow(
-                    color: previewColor.withOpacity(0.2),
+                    color: previewColor.withValues(alpha: 0.2),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),

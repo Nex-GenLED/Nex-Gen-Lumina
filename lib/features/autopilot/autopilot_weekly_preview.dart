@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
-import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
@@ -317,23 +316,6 @@ class _DayDetailSheet extends ConsumerWidget {
             FilledButton(
               onPressed: () {
                 final settingsService = ref.read(autopilotSettingsServiceProvider);
-                // Build override payload
-                final colorArrays = colors
-                    .map((c) => [c.red, c.green, c.blue, 0])
-                    .toList();
-                final overridePayload = <String, dynamic>{
-                  'on': true,
-                  'bri': 200,
-                  'seg': [
-                    {
-                      'fx': 0,
-                      'sx': 128,
-                      'ix': 128,
-                      'pal': 0,
-                      'col': colorArrays,
-                    }
-                  ],
-                };
                 // Save override by generating a new schedule item
                 settingsService.generateAndPopulateSchedules();
                 Navigator.of(dialogContext).pop();
@@ -465,10 +447,10 @@ class _DayColumn extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 2),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: isToday ? NexGenPalette.cyan.withOpacity(0.1) : null,
+          color: isToday ? NexGenPalette.cyan.withValues(alpha: 0.1) : null,
           borderRadius: BorderRadius.circular(8),
           border: isToday
-              ? Border.all(color: NexGenPalette.cyan.withOpacity(0.5))
+              ? Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.5))
               : null,
         ),
         child: Column(
@@ -532,7 +514,7 @@ class _DayColumn extends StatelessWidget {
       height: 6,
       margin: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.grey.withOpacity(0.2),
+        color: Colors.grey.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(3),
       ),
     );
@@ -591,9 +573,9 @@ class _HappyHourBanner extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.amber.withOpacity(0.15),
+            color: Colors.amber.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.amber.withOpacity(0.4)),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
           ),
           child: Text(
             'Happy Hour Lock active $daysStr $startStr\u2013$endStr',
@@ -654,8 +636,8 @@ class _GameDayChipsRow extends StatelessWidget {
                 style: const TextStyle(fontSize: 12),
               ),
               onPressed: () => onDayTap?.call(item.scheduledTime),
-              backgroundColor: NexGenPalette.cyan.withOpacity(0.15),
-              side: BorderSide(color: NexGenPalette.cyan.withOpacity(0.3)),
+              backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.15),
+              side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
               tooltip: item.eventName ?? item.patternName,
             );
           },
@@ -896,7 +878,7 @@ class _ScheduleItemCard extends StatelessWidget {
         boxShadow: item.isApproved
             ? [
                 BoxShadow(
-                  color: primaryColor.withOpacity(0.4),
+                  color: primaryColor.withValues(alpha: 0.4),
                   blurRadius: 8,
                   spreadRadius: 0,
                 ),

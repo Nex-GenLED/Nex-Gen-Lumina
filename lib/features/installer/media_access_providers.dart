@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/services/user_service.dart';

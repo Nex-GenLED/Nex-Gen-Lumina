@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/analytics/analytics_providers.dart';
 import 'package:nexgen_command/features/whites/white_preference_providers.dart';

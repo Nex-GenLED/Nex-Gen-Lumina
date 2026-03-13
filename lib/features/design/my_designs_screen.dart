@@ -78,7 +78,7 @@ class _EmptyState extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withOpacity(0.1),
+                color: NexGenPalette.cyan.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -326,7 +326,7 @@ class _DesignCard extends StatelessWidget {
                   children: design.tags.map((tag) => Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: NexGenPalette.violet.withOpacity(0.2),
+                      color: NexGenPalette.violet.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -343,12 +343,12 @@ class _DesignCard extends StatelessWidget {
               // Footer
               Row(
                 children: [
-                  Icon(Icons.access_time, size: 14, color: Colors.white.withOpacity(0.4)),
+                  Icon(Icons.access_time, size: 14, color: Colors.white.withValues(alpha: 0.4)),
                   const SizedBox(width: 4),
                   Text(
                     _formatDate(design.updatedAt),
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
+                      color: Colors.white.withValues(alpha: 0.4),
                       fontSize: 12,
                     ),
                   ),
@@ -365,7 +365,7 @@ class _DesignCard extends StatelessWidget {
                     onPressed: onDelete,
                     icon: const Icon(Icons.delete_outline, size: 18),
                     tooltip: 'Delete',
-                    color: Colors.red.withOpacity(0.7),
+                    color: Colors.red.withValues(alpha: 0.7),
                     visualDensity: VisualDensity.compact,
                   ),
                 ],
@@ -414,7 +414,7 @@ class _ColorPreview extends StatelessWidget {
         color: colors.length == 1 ? colors.first : null,
         boxShadow: [
           BoxShadow(
-            color: colors.first.withOpacity(0.3),
+            color: colors.first.withValues(alpha: 0.3),
             blurRadius: 8,
             spreadRadius: 1,
           ),

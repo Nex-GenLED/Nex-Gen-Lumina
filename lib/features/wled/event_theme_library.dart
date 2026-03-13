@@ -49,8 +49,6 @@ class EventThemeLibrary {
     'birthday': EventTheme.birthday,
     'bday': EventTheme.birthday,
     'birt': EventTheme.birthday,
-    'celebration': EventTheme.birthday,
-
     // Baby shower
     'babyshower': EventTheme.babyShower,
     'baby': EventTheme.babyShower,

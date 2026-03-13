@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -61,7 +62,6 @@ class WledService implements WledRepository {
   int _simBri = 180;
   int _simSpeed = 128;
   Color _simColor = const Color(0xFFFFFFFF);
-  String? _simLedMap;
 
   WledService(this.baseUrl) {
     try {
@@ -297,7 +297,6 @@ class WledService implements WledRepository {
   /// Returns true on success.
   Future<bool> uploadLedMapJson(String jsonContent) async {
     if (_simulate) {
-      _simLedMap = jsonContent;
       return true;
     }
     try {
@@ -309,7 +308,6 @@ class WledService implements WledRepository {
       // Build multipart body manually: data (file) + path
       final builder = BytesBuilder();
       void write(String s) => builder.add(utf8.encode(s));
-      void writeBytes(List<int> b) => builder.add(b);
 
       // Part 1: data (file)
       write('--$boundary\r\n');

@@ -1,5 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
@@ -76,11 +80,6 @@ class ScheduleSyncService {
       }
     }
 
-    debugPrint('ScheduleSync: Built ${timers.length} timer entries');
-    for (int i = 0; i < timers.length; i++) {
-      debugPrint('  Timer $i: ${timers[i]}');
-    }
-
     // Return the cfg payload - only send configured timers, no padding needed
     return {
       'timers': {
@@ -134,7 +133,6 @@ class ScheduleSyncService {
   Future<ScheduleSyncResult> syncAll(WidgetRef ref, List<ScheduleItem> schedules) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
-      debugPrint('ScheduleSync: No WLED device selected');
       return ScheduleSyncResult(
         success: false,
         error: 'No WLED device selected',
@@ -142,7 +140,6 @@ class ScheduleSyncService {
     }
 
     final enabled = schedules.where((s) => s.enabled).toList();
-    debugPrint('ScheduleSync: Syncing ${enabled.length} enabled schedules');
 
     // Step 1: Assign preset IDs and save presets to device
     final List<ScheduleItem> updatedSchedules = [];
@@ -151,7 +148,6 @@ class ScheduleSyncService {
 
     for (final schedule in enabled) {
       if (nextPresetId > _lastSchedulePresetId) {
-        debugPrint('ScheduleSync: Maximum preset limit reached (${_lastSchedulePresetId - _firstSchedulePresetId + 1} schedules)');
         break;
       }
 
@@ -159,34 +155,56 @@ class ScheduleSyncService {
       final presetId = schedule.presetId ?? nextPresetId;
       if (schedule.presetId == null) nextPresetId++;
 
-      if (schedule.hasWledPayload) {
-        // Save the WLED payload as a preset on the device
-        debugPrint('ScheduleSync: Saving preset $presetId for "${schedule.actionLabel}"');
-        final saved = await repo.savePreset(
-          presetId: presetId,
-          state: schedule.wledPayload!,
-          presetName: schedule.actionLabel,
-        );
-
-        if (!saved) {
-          presetErrors.add('Failed to save preset for "${schedule.actionLabel}"');
-          debugPrint('ScheduleSync: ❌ Failed to save preset $presetId');
-        } else {
-          debugPrint('ScheduleSync: ✅ Saved preset $presetId');
+      // If this schedule uses audio reactivity, build a WLED payload
+      // with a random audio-reactive effect from the controller
+      var effectiveSchedule = schedule;
+      if (schedule.useAudioReactive == true) {
+        final ip = ref.read(selectedDeviceIpProvider);
+        if (ip != null) {
+          final capAsync = ref.read(audioCapabilityProvider(ip));
+          final cap = capAsync.valueOrNull;
+          if (cap != null && cap.isSupported && cap.audioReactiveEffects.isNotEmpty) {
+            final rng = math.Random();
+            final randomFxId = cap.audioReactiveEffects[
+                rng.nextInt(cap.audioReactiveEffects.length)];
+            final audioPayload = <String, dynamic>{
+              'on': true,
+              'seg': [
+                {
+                  'fx': randomFxId,
+                  'sx': 128,
+                  'ix': 128,
+                }
+              ],
+            };
+            effectiveSchedule = schedule.copyWith(
+              wledPayload: audioPayload,
+            );
+          }
         }
       }
 
-      updatedSchedules.add(schedule.copyWith(presetId: presetId));
+      if (effectiveSchedule.hasWledPayload) {
+        final saved = await repo.savePreset(
+          presetId: presetId,
+          state: effectiveSchedule.wledPayload!,
+          presetName: effectiveSchedule.actionLabel,
+        );
+
+        if (!saved) {
+          presetErrors.add('Failed to save preset for "${effectiveSchedule.actionLabel}"');
+        }
+      }
+
+      updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
     }
 
     // Step 2: Build and push timer configuration
     final payload = buildCfgPayload(updatedSchedules);
-    debugPrint('ScheduleSync: Timer payload = $payload');
 
     try {
       final ok = await repo.applyConfig(payload);
       if (!ok) {
-        debugPrint('ScheduleSync: applyConfig returned false');
         return ScheduleSyncResult(
           success: false,
           error: 'Failed to save timer configuration',
@@ -195,7 +213,6 @@ class ScheduleSyncService {
         );
       }
 
-      debugPrint('ScheduleSync: ✅ Successfully synced schedules to device');
       return ScheduleSyncResult(
         success: true,
         presetErrors: presetErrors,

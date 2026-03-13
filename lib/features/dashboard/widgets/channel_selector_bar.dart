@@ -160,7 +160,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
           for (final ch in channels)
             _buildChip(
               label: ch.name,
-              selected: isAllMode || selectedIds!.contains(ch.id),
+              selected: isAllMode || selectedIds.contains(ch.id),
               onTap: () => _toggleChannel(ch.id, channels, selectedIds),
             ),
         ],

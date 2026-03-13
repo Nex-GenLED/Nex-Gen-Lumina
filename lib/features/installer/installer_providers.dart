@@ -165,8 +165,6 @@ class InstallerModeNotifier extends StateNotifier<bool> {
     }
 
     final dealerCode = enteredPin.substring(0, 2);
-    // installerCode is extracted for documentation; we query by fullPin
-    // final installerCode = enteredPin.substring(2, 4);
 
     try {
       // Look up the installer in Firestore

@@ -2,7 +2,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_progress_bar.dart';
 import 'package:nexgen_command/theme.dart';
@@ -104,7 +103,7 @@ class _ExitDemoDialog extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal.withOpacity(0.9),
+              color: NexGenPalette.gunmetal.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: NexGenPalette.line),
             ),
@@ -116,9 +115,9 @@ class _ExitDemoDialog extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: NexGenPalette.amber.withOpacity(0.1),
+                    color: NexGenPalette.amber.withValues(alpha: 0.1),
                     border: Border.all(
-                      color: NexGenPalette.amber.withOpacity(0.3),
+                      color: NexGenPalette.amber.withValues(alpha: 0.3),
                     ),
                   ),
                   child: const Icon(
@@ -300,8 +299,8 @@ class DemoGlassCard extends StatelessWidget {
             padding: padding ?? const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: isSelected
-                  ? NexGenPalette.cyan.withOpacity(0.1)
-                  : NexGenPalette.gunmetal.withOpacity(0.6),
+                  ? NexGenPalette.cyan.withValues(alpha: 0.1)
+                  : NexGenPalette.gunmetal.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isSelected
@@ -312,7 +311,7 @@ class DemoGlassCard extends StatelessWidget {
               boxShadow: isSelected
                   ? [
                       BoxShadow(
-                        color: NexGenPalette.cyan.withOpacity(0.2),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.2),
                         blurRadius: 12,
                         spreadRadius: 2,
                       ),
@@ -347,10 +346,10 @@ class DemoInfoBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bannerColor.withOpacity(0.1),
+        color: bannerColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: bannerColor.withOpacity(0.3),
+          color: bannerColor.withValues(alpha: 0.3),
         ),
       ),
       child: Row(

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +9,6 @@ import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_ser
 import 'package:nexgen_command/features/sports_alerts/services/game_schedule_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/models/autopilot_activity_entry.dart';
 import 'package:nexgen_command/models/autopilot_override.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';

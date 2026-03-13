@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/features/wled/current_colors_editor_screen.dart';
+import 'package:nexgen_command/features/audio/screens/audio_reactive_screen.dart';
 import 'package:nexgen_command/features/site/settings_page.dart';
 import 'package:nexgen_command/features/site/user_profile_screen.dart';
 import 'package:nexgen_command/features/site/edit_profile_screen.dart';
@@ -276,6 +277,12 @@ class AppRouter {
         name: 'design-studio',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.audioReactive,
+        name: 'audio-reactive',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const NoTransitionPage(child: AudioReactiveScreen()),
       ),
       GoRoute(
         path: AppRoutes.myDesigns,
@@ -664,6 +671,7 @@ class AppRoutes {
   static const String subUsers = '/settings/users';
   static const String myWhites = '/settings/my-whites';
   static const String autopilotSchedule = '/autopilot-schedule';
+  static const String audioReactive = '/audio-reactive';
   // Demo experience routes
   static const String demoCode = '/demo-code';
   static const String demoWelcome = '/demo';

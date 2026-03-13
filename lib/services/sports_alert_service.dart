@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 
 /// Top-10 team primary colors (RGB).

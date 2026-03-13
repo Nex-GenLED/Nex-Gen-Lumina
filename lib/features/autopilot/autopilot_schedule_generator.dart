@@ -14,7 +14,6 @@
 // This class deliberately has NO Flutter/Riverpod dependencies so it can be
 // unit-tested in isolation and called from any context.
 
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color;
@@ -52,9 +51,6 @@ class AutopilotScheduleGenerator {
   /// Transition buffer kept on each side of a protected user block so that
   /// an autopilot event never runs right up to the edge of a user event.
   static const Duration _transitionBuffer = Duration(minutes: 5);
-
-  /// Minimum slot length.  Slots shorter than this are skipped.
-  static const Duration _minSlotDuration = Duration(minutes: 30);
 
   // ── Public entry point ──────────────────────────────────────────────────
 

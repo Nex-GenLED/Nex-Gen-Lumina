@@ -9,8 +9,6 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
-import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
-import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';

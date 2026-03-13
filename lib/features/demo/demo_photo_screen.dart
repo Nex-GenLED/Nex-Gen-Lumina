@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -114,7 +113,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
               aspectRatio: 16 / 10,
               child: Container(
                 decoration: BoxDecoration(
-                  color: NexGenPalette.gunmetal.withOpacity(0.5),
+                  color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: _capturedPhoto != null
@@ -125,7 +124,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                   boxShadow: _capturedPhoto != null
                       ? [
                           BoxShadow(
-                            color: NexGenPalette.cyan.withOpacity(0.2),
+                            color: NexGenPalette.cyan.withValues(alpha: 0.2),
                             blurRadius: 12,
                             spreadRadius: 2,
                           ),
@@ -151,7 +150,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                                 vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.7),
+                                color: Colors.black.withValues(alpha: 0.7),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Row(
@@ -184,7 +183,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                           Icon(
                             Icons.home_outlined,
                             size: 64,
-                            color: NexGenPalette.textMedium.withOpacity(0.5),
+                            color: NexGenPalette.textMedium.withValues(alpha: 0.5),
                           ),
                           const SizedBox(height: 16),
                           Text(
@@ -200,7 +199,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: NexGenPalette.textMedium
-                                          .withOpacity(0.7),
+                                          .withValues(alpha: 0.7),
                                     ),
                             textAlign: TextAlign.center,
                           ),
@@ -240,7 +239,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                 children: [
                   Expanded(
                     child: Divider(
-                      color: NexGenPalette.line.withOpacity(0.5),
+                      color: NexGenPalette.line.withValues(alpha: 0.5),
                     ),
                   ),
                   Padding(
@@ -254,7 +253,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
                   ),
                   Expanded(
                     child: Divider(
-                      color: NexGenPalette.line.withOpacity(0.5),
+                      color: NexGenPalette.line.withValues(alpha: 0.5),
                     ),
                   ),
                 ],

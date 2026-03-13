@@ -343,7 +343,6 @@ class PatternComposer {
     switch (spacingRule.type) {
       case SpacingType.pattern:
         // N on, M off repeating pattern
-        final cycleLength = spacingRule.onCount + spacingRule.offCount;
         int position = 0;
         bool isOn = spacingRule.startWithOn;
 
