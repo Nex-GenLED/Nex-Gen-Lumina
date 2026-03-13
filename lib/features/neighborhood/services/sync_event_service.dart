@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/sync_event.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Firestore backend for Autopilot Sync Events and sessions.
 ///
@@ -44,14 +45,14 @@ class SyncEventService {
   Future<String> createSyncEvent(String groupId, SyncEvent event) async {
     final doc = _syncEventsCol(groupId).doc();
     final withId = event.copyWith(id: doc.id, createdBy: _uid ?? '');
-    await doc.set(withId.toFirestore());
+    await doc.set(UserService.sanitizeForFirestore(withId.toFirestore()));
     debugPrint('[SyncEventService] Created sync event: ${doc.id}');
     return doc.id;
   }
 
   /// Update an existing sync event.
   Future<void> updateSyncEvent(String groupId, SyncEvent event) async {
-    await _syncEventsCol(groupId).doc(event.id).update(event.toFirestore());
+    await _syncEventsCol(groupId).doc(event.id).update(UserService.sanitizeForFirestore(event.toFirestore()));
   }
 
   /// Delete a sync event and any associated pending sessions.
@@ -136,7 +137,7 @@ class SyncEventService {
   ) async {
     final doc = _syncSessionsCol(groupId).doc();
     final withId = session.copyWith(id: doc.id);
-    await doc.set(withId.toFirestore());
+    await doc.set(UserService.sanitizeForFirestore(withId.toFirestore()));
     debugPrint('[SyncEventService] Created session: ${doc.id}');
     return doc.id;
   }

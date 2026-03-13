@@ -29,7 +29,7 @@ import 'package:timezone/data/latest.dart' as tz;
 /// the offline queue. Clearing persistence once breaks the crash loop.
 ///
 /// Version-gated via SharedPreferences so it only runs once per recovery.
-const _kFirestoreCacheClearVersion = 2; // bump to re-trigger after a new fix
+const _kFirestoreCacheClearVersion = 3; // bump to re-trigger after a new fix
 
 Future<void> _clearFirestoreCacheIfNeeded() async {
   try {
@@ -78,7 +78,17 @@ Future<void> main() async {
   // invalid types in the offline queue — this one-time flush prevents the
   // crash-on-launch loop. Gated by a version flag so it only runs once.
   if (!kIsWeb && Platform.isIOS) {
+    // Terminate the default Firestore instance BEFORE clearing persistence —
+    // clearPersistence() silently fails if listeners are already active.
+    try {
+      await FirebaseFirestore.instance.terminate();
+    } catch (_) {}
     await _clearFirestoreCacheIfNeeded();
+    // Disable offline persistence on iOS to prevent future SIGABRT crash loops.
+    // The app requires network for WLED control anyway; this eliminates the
+    // offline queue as a crash vector entirely.
+    FirebaseFirestore.instance.settings =
+        const Settings(persistenceEnabled: false);
   }
 
   // Seed reviewer account for App Store review (no-op if already exists)

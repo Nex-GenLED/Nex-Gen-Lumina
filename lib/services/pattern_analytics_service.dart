@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/models/pattern_analytics_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for recording and retrieving pattern analytics for global learning.
 ///
@@ -358,7 +359,7 @@ class PatternAnalyticsService {
           uniqueUsers: userId != null ? 1 : 0,
         );
 
-        await docRef.set(analytics.toFirestore());
+        await docRef.set(UserService.sanitizeForFirestore(analytics.toFirestore()));
       } else {
         // Update existing entry
         final updates = <String, dynamic>{

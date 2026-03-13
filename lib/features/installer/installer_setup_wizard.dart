@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/installer/screens/controller_setup_scree
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/installation_model.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
@@ -561,7 +562,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         primaryUserPhone: customerInfo.phone,
       );
 
-      await installationRef.set(installation.toJson());
+      await installationRef.set(UserService.sanitizeForFirestore(installation.toJson()));
 
       // 5. Create UserModel with Primary role + installer preference draft
       final userModel = UserModel(
@@ -594,7 +595,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         welcomeCompleted: false,
       );
 
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(userModel.toJson());
+      await FirebaseFirestore.instance.collection('users').doc(userId).set(UserService.sanitizeForFirestore(userModel.toJson()));
 
       // 6. Create installation record for tracking/analytics
       final installationRecord = InstallationRecord(
@@ -614,7 +615,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       await FirebaseFirestore.instance
           .collection('installation_records')
           .doc(installationRef.id)
-          .set(installationRecord.toMap());
+          .set(UserService.sanitizeForFirestore(installationRecord.toMap()));
 
       // 7. Increment installer's installation count
       final installerQuery = await FirebaseFirestore.instance

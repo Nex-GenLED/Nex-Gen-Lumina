@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 
 /// Type of feedback for a suggestion.
@@ -208,7 +209,7 @@ class PreferenceLearningService {
           .doc(userId)
           .collection('autopilot_feedback')
           .doc(feedback.id)
-          .set(feedback.toJson());
+          .set(UserService.sanitizeForFirestore(feedback.toJson()));
 
       // Trigger preference recalculation
       await _updateLearnedPreferences(userId);
@@ -404,7 +405,7 @@ class PreferenceLearningService {
           .doc(userId)
           .collection('learned_preferences')
           .doc('current')
-          .set(learned.toJson());
+          .set(UserService.sanitizeForFirestore(learned.toJson()));
 
       debugPrint('PreferenceLearning: Updated preferences from ${feedbackList.length} feedback records');
     } catch (e) {

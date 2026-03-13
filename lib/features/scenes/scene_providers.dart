@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/scenes/scene_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/smart_pattern.dart';
 
 /// Service for scene CRUD operations
@@ -38,7 +39,7 @@ class SceneService {
       updatedAt: DateTime.now(),
     );
 
-    await docRef.set(updatedScene.toFirestore());
+    await docRef.set(UserService.sanitizeForFirestore(updatedScene.toFirestore()));
     return docRef.id;
   }
 

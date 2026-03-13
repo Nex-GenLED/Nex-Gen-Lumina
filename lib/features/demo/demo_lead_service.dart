@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for managing demo leads in Firestore.
 ///
@@ -35,7 +36,7 @@ class DemoLeadService {
           : _leadsCollection.doc(lead.id);
 
       final leadWithId = lead.copyWith(id: docRef.id);
-      await docRef.set(leadWithId.toJson());
+      await docRef.set(UserService.sanitizeForFirestore(leadWithId.toJson()));
 
       // Trigger email notification via Cloud Function
       // The Cloud Function listens to new documents in demo_leads
@@ -58,7 +59,7 @@ class DemoLeadService {
   /// Update an existing lead.
   Future<void> updateLead(DemoLead lead) async {
     try {
-      await _leadsCollection.doc(lead.id).update(lead.toJson());
+      await _leadsCollection.doc(lead.id).update(UserService.sanitizeForFirestore(lead.toJson()));
     } catch (e) {
       if (kDebugMode) {
         print('DemoLeadService: Error updating lead: $e');

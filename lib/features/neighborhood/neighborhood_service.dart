@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'neighborhood_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for managing neighborhood sync groups in Firestore.
 class NeighborhoodService {
@@ -60,7 +61,7 @@ class NeighborhoodService {
       longitude: longitude,
     );
 
-    await docRef.set(group.toFirestore());
+    await docRef.set(UserService.sanitizeForFirestore(group.toFirestore()));
 
     // Add creator as first member
     final member = NeighborhoodMember(
@@ -70,7 +71,7 @@ class NeighborhoodService {
       lastSeen: now,
       isOnline: true,
     );
-    await docRef.collection('members').doc(uid).set(member.toFirestore());
+    await docRef.collection('members').doc(uid).set(UserService.sanitizeForFirestore(member.toFirestore()));
 
     debugPrint('Created neighborhood group: ${group.name} (${group.inviteCode})');
     return group;
@@ -448,7 +449,7 @@ class NeighborhoodService {
       createdAt: DateTime.now(),
     );
 
-    await docRef.set(newSchedule.toFirestore());
+    await docRef.set(UserService.sanitizeForFirestore(newSchedule.toFirestore()));
     debugPrint('Created schedule: ${newSchedule.patternName}');
     return newSchedule;
   }
@@ -459,7 +460,7 @@ class NeighborhoodService {
         .doc(schedule.groupId)
         .collection('schedules')
         .doc(schedule.id)
-        .update(schedule.toFirestore());
+        .update(UserService.sanitizeForFirestore(schedule.toFirestore()));
     debugPrint('Updated schedule: ${schedule.patternName}');
   }
 

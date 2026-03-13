@@ -14,6 +14,7 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
@@ -99,7 +100,7 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     try {
       await FirebaseFirestore.instance
           .doc('users/${user.uid}/patterns/${updatedPattern.id}')
-          .set(updatedPattern.toJson(), SetOptions(merge: true));
+          .set(UserService.sanitizeForFirestore(updatedPattern.toJson()), SetOptions(merge: true));
 
       // Also save as WLED preset if possible
       final repo = ref.read(wledRepositoryProvider);

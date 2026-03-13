@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.d
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:uuid/uuid.dart';
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ class AutopilotEventRepository {
       // 2. Write new events.
       for (final event in events) {
         final ref = _autopilotCol(uid).doc(event.id);
-        batch.set(ref, event.toFirestore());
+        batch.set(ref, UserService.sanitizeForFirestore(event.toFirestore()));
       }
 
       await batch.commit();
@@ -127,7 +128,7 @@ class AutopilotEventRepository {
     try {
       await _autopilotCol(uid)
           .doc(event.id)
-          .set(event.toFirestore(), SetOptions(merge: true));
+          .set(UserService.sanitizeForFirestore(event.toFirestore()), SetOptions(merge: true));
     } catch (e) {
       debugPrint('❌ AutopilotEventRepository.updateEvent: $e');
     }
@@ -187,7 +188,7 @@ class AutopilotEventRepository {
   Future<String?> addUserEvent(String uid, UserEvent event) async {
     try {
       final ref = _userEventsCol(uid).doc(event.id);
-      await ref.set(event.toFirestore());
+      await ref.set(UserService.sanitizeForFirestore(event.toFirestore()));
       return event.id;
     } catch (e) {
       debugPrint('❌ AutopilotEventRepository.addUserEvent: $e');
@@ -229,7 +230,7 @@ class AutopilotEventRepository {
       // Remove the autopilot event.
       batch.delete(_autopilotCol(uid).doc(autopilotEvent.id));
       // Create the protected user event.
-      batch.set(_userEventsCol(uid).doc(userEvent.id), userEvent.toFirestore());
+      batch.set(_userEventsCol(uid).doc(userEvent.id), UserService.sanitizeForFirestore(userEvent.toFirestore()));
       await batch.commit();
 
       return userEvent;
@@ -315,7 +316,7 @@ class AutopilotEventRepository {
         batch.delete(_autopilotCol(uid).doc(id));
       }
       for (final event in diff.toWrite) {
-        batch.set(_autopilotCol(uid).doc(event.id), event.toFirestore());
+        batch.set(_autopilotCol(uid).doc(event.id), UserService.sanitizeForFirestore(event.toFirestore()));
       }
 
       await batch.commit();

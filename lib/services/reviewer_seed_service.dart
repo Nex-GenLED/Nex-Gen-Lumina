@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Seeds a pre-configured reviewer account for App Store review.
 ///
@@ -52,7 +53,7 @@ class ReviewerSeedService {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(reviewerUserId)
-          .set(reviewerModel.toJson());
+          .set(UserService.sanitizeForFirestore(reviewerModel.toJson()));
 
       // Create reviewer installation document
       await FirebaseFirestore.instance

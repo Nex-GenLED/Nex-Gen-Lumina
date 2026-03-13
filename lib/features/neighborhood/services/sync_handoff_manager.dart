@@ -15,6 +15,7 @@ import '../models/paused_session_state.dart';
 import '../models/session_duration_type.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import '../neighborhood_providers.dart';
 import 'autopilot_sync_trigger.dart' show syncEventServiceProvider;
 import 'sync_event_service.dart';
@@ -729,7 +730,7 @@ class SyncHandoffManager {
           .doc(uid)
           .collection('handoff')
           .doc('current')
-          .set(pausedState.toJson());
+          .set(UserService.sanitizeForFirestore(pausedState.toJson()));
     } catch (e) {
       debugPrint('[SyncHandoffManager] Failed to store paused state: $e');
     }

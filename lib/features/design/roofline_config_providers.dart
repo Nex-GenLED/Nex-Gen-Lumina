@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Service for CRUD operations on roofline configurations in Firestore.
@@ -40,7 +41,7 @@ class RooflineConfigService {
     String userId,
     RooflineConfiguration config,
   ) async {
-    await _configDoc(userId).set(config.toJson());
+    await _configDoc(userId).set(UserService.sanitizeForFirestore(config.toJson()));
   }
 
   /// Delete the user's roofline configuration.
