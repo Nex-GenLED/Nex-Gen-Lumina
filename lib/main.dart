@@ -29,7 +29,7 @@ import 'package:timezone/data/latest.dart' as tz;
 /// the offline queue. Clearing persistence once breaks the crash loop.
 ///
 /// Version-gated via SharedPreferences so it only runs once per recovery.
-const _kFirestoreCacheClearVersion = 1; // bump to re-trigger after a new fix
+const _kFirestoreCacheClearVersion = 2; // bump to re-trigger after a new fix
 
 Future<void> _clearFirestoreCacheIfNeeded() async {
   try {

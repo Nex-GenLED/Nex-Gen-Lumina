@@ -76,7 +76,9 @@ class UserService {
   ///
   /// This prevents the native iOS Firestore SDK (FSTUserDataReader) from
   /// crashing with SIGABRT when encountering unsupported types.
-  Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) {
+  ///
+  /// Static so all write paths (update, set, add) can use it.
+  static Map<String, dynamic> sanitizeForFirestore(Map<String, dynamic> data) {
     final result = <String, dynamic>{};
     for (final entry in data.entries) {
       final sanitized = _sanitizeValue(entry.value);
@@ -87,12 +89,22 @@ class UserService {
     return result;
   }
 
+  // Keep the old name as a forwarding alias for internal callers.
+  Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) =>
+      sanitizeForFirestore(data);
+
   /// Sanitize a single value for Firestore. Returns null if the value is null.
-  dynamic _sanitizeValue(dynamic value) {
+  static dynamic _sanitizeValue(dynamic value) {
     if (value == null) return null;
 
     // Already Firestore-safe primitives
-    if (value is String || value is bool || value is int || value is double) {
+    if (value is String || value is bool || value is int) {
+      return value;
+    }
+
+    // Doubles: NaN and Infinity crash Firestore on iOS
+    if (value is double) {
+      if (value.isNaN || value.isInfinite) return null;
       return value;
     }
 
@@ -143,7 +155,9 @@ class UserService {
   Future<void> updateUserProfile(String userId, Map<String, dynamic> fields) async {
     try {
       fields['updated_at'] = FieldValue.serverTimestamp();
-      await _firestore.collection('users').doc(userId).update(fields);
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore(fields),
+      );
     } catch (e) {
       debugPrint('Error updating user profile: $e');
       rethrow;
@@ -212,7 +226,7 @@ class UserService {
         if (speed != null) 'speed': speed,
         if (intensity != null) 'intensity': intensity,
       };
-      await _firestore.collection('users').doc(userId).collection('pattern_usage').add(data);
+      await _firestore.collection('users').doc(userId).collection('pattern_usage').add(sanitizeForFirestore(data));
     } catch (e) {
       debugPrint('logPatternUsage failed: $e');
     }
@@ -313,12 +327,12 @@ class UserService {
     try {
       final favorites = _firestore.collection('users').doc(userId).collection('favorites');
 
-      await favorites.add({
+      await favorites.add(sanitizeForFirestore({
         ...patternData,
         'added_at': FieldValue.serverTimestamp(),
         'usage_count': 0,
         'auto_added': patternData['auto_added'] ?? false,
-      });
+      }));
 
       debugPrint('✅ Added pattern to favorites: ${patternData['pattern_name']}');
     } catch (e) {
@@ -408,11 +422,11 @@ class UserService {
           .collection('users')
           .doc(userId)
           .collection('suggestions')
-          .add({
+          .add(sanitizeForFirestore({
         ...suggestion,
         'created_at': FieldValue.serverTimestamp(),
         'dismissed': false,
-      });
+      }));
 
       debugPrint('✅ Created suggestion: ${suggestion['title']}');
     } catch (e) {
@@ -468,10 +482,10 @@ class UserService {
           .collection('users')
           .doc(userId)
           .collection('detected_habits')
-          .add({
+          .add(sanitizeForFirestore({
         ...habit,
         'detected_at': FieldValue.serverTimestamp(),
-      });
+      }));
 
       debugPrint('✅ Saved detected habit: ${habit['description']}');
     } catch (e) {
@@ -655,10 +669,12 @@ class UserService {
   /// Returns true if the write was confirmed on the server.
   Future<bool> saveSchedules(String userId, List<ScheduleItem> schedules) async {
     final success = await _writeWithRetry(() async {
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'schedules': schedules.map((e) => e.toJson()).toList(),
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
     });
 
     if (!success) {
@@ -680,10 +696,12 @@ class UserService {
   /// Returns true if the write was confirmed on the server.
   Future<bool> addSchedule(String userId, ScheduleItem schedule) async {
     final success = await _writeWithRetry(() async {
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': FieldValue.arrayUnion([schedule.toJson()]),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'schedules': FieldValue.arrayUnion([sanitizeForFirestore(schedule.toJson())]),
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
     });
 
     if (!success) {
@@ -710,10 +728,12 @@ class UserService {
               .toList() ??
           [];
 
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'schedules': schedules.map((e) => e.toJson()).toList(),
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
     });
 
     if (!success) {
@@ -739,10 +759,12 @@ class UserService {
               .toList() ??
           [];
 
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'schedules': schedules.map((e) => e.toJson()).toList(),
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
     });
 
     if (!success) {
