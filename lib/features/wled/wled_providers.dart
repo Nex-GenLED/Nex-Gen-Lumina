@@ -48,20 +48,15 @@ final isRemoteModeProvider = Provider<bool>((ref) {
   return status == ConnectivityStatus.remote;
 });
 
-/// Provides a WledRepository based on Demo Mode, webhook configuration, and
-/// network location.
+/// Provides a WledRepository based on Demo Mode, network location, and
+/// webhook configuration.
 ///
 /// Priority:
 /// 1. Demo Mode              → DemoWledRepository
-/// 2. Webhook URL saved      → CloudRelayRepository / MqttRelayRepository
-///                             (EXCLUSIVE — ignores current network)
-/// 3. No webhook, on home WiFi → WledService (direct HTTP)
-/// 4. No webhook, remote/offline → null (commands blocked, no silent fallback)
-///
-/// IMPORTANT: When a webhook URL is saved the user has explicitly chosen remote
-/// routing. The app NEVER silently falls back to the local IP while a webhook
-/// is configured — that would hide a broken remote path and give a false sense
-/// of success.
+/// 2. On home WiFi (local)   → WledService (direct HTTP — fastest, always preferred)
+/// 3. Remote + webhook saved → CloudRelayRepository / MqttRelayRepository
+/// 4. Remote, no webhook     → null (commands blocked)
+/// 5. Offline                → null
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   // ── 1. Demo / reviewer mode ───────────────────────────────────────────────
   final isDemo = ref.watch(demoModeProvider);
@@ -85,18 +80,32 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     orElse: () => null,
   );
 
-  // ── 4. WEBHOOK TAKES ABSOLUTE PRIORITY ───────────────────────────────────
+  // ── 4. Determine network location ────────────────────────────────────────
+  final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
+    data: (status) => status,
+    orElse: () => ConnectivityStatus.local,
+  );
+
+  // ── 5. LOCAL NETWORK → always use direct HTTP ──────────────────────────
   //
-  // If the user has saved a webhook URL and enabled remote access, ALL commands
-  // must route through that endpoint — regardless of which network the phone is
-  // currently on. We intentionally do NOT check connectivity status here.
-  //
-  // Rationale: the user configured the webhook so they can control their lights
-  // from anywhere. Overriding that with direct-IP commands when at home would
-  // silently break remote-access testing and give a false "working" signal.
+  // When the user is on the same WiFi as the controller, direct HTTP is
+  // faster and more reliable than any relay. Use it regardless of whether
+  // a webhook is configured — the webhook is for remote access, not local.
+  if (connectivityStatus == ConnectivityStatus.local) {
+    debugPrint('🏠 WledRepository: Local mode — direct HTTP to $ip');
+    return WledService('http://$ip');
+  }
+
+  // ── 6. REMOTE / OFFLINE → use webhook relay if configured ──────────────
   final webhookUrl = userProfile?.webhookUrl;
   final hasWebhook = webhookUrl != null && webhookUrl.isNotEmpty;
 
+  if (connectivityStatus == ConnectivityStatus.offline) {
+    debugPrint('📵 WledRepository: Offline — no repository');
+    return null;
+  }
+
+  // Remote network with webhook configured and enabled
   if (hasWebhook && userProfile?.remoteAccessEnabled == true) {
     final controllerId = ref.watch(selectedControllerIdProvider);
 
@@ -105,7 +114,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     if (userProfile?.mqttRelayEnabled == true &&
         backendService.isAuthenticated &&
         controllerId != null) {
-      debugPrint('📡 WledRepository: MQTT relay (webhook-priority mode)');
+      debugPrint('📡 WledRepository: MQTT relay (remote mode)');
       return MqttRelayRepository(
         backendService: backendService,
         deviceId: controllerId,
@@ -114,7 +123,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     }
 
     if (userId != null && controllerId != null) {
-      debugPrint('☁️ WledRepository: Webhook relay — exclusive endpoint');
+      debugPrint('☁️ WledRepository: Webhook relay — remote access');
       debugPrint('   Webhook URL: $webhookUrl');
       return CloudRelayRepository(
         userId: userId,
@@ -124,35 +133,13 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
       );
     }
 
-    // Webhook is configured but userId/controllerId are temporarily unavailable
-    // (e.g. profile still loading). Return null — do NOT fall back to local IP.
+    // Webhook configured but userId/controllerId temporarily unavailable.
     debugPrint('⚠️ WledRepository: Webhook configured but userId/controllerId '
-        'unavailable — blocking commands (will not fall back to local IP)');
+        'unavailable — blocking commands');
     return null;
-  }
-
-  // ── 5. No webhook: route by network location ──────────────────────────────
-  //
-  // Only reaches here when the user has NOT saved a webhook URL (or remote
-  // access is disabled). Use the connectivity status to decide.
-  final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
-    data: (status) => status,
-    orElse: () => ConnectivityStatus.local,
-  );
-
-  if (connectivityStatus == ConnectivityStatus.offline) {
-    debugPrint('📵 WledRepository: Offline — no repository');
-    return null;
-  }
-
-  if (connectivityStatus == ConnectivityStatus.local) {
-    debugPrint('🏠 WledRepository: Local mode (no webhook saved)');
-    return WledService('http://$ip');
   }
 
   // Remote network, no webhook configured — cannot route commands.
-  // Return null so the UI can surface a meaningful error instead of silently
-  // attempting a local-IP connection that will time out off-network.
   debugPrint('⚠️ WledRepository: Remote network but no webhook URL saved — '
       'commands blocked. Configure a webhook URL in Remote Access settings.');
   return null;
