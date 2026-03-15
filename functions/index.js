@@ -282,6 +282,14 @@ exports.executeWledCommand = onDocumentCreated(
 
       const baseUrl = commandData.webhookUrl.replace(/\/$/, ""); // Remove trailing slash
 
+      // The Dart app stores payload as a JSON string in Firestore (to avoid
+      // nested-array issues with the iOS Firestore SDK). Detect this and avoid
+      // double-encoding: if it's already a string, use it directly; if it's an
+      // object (legacy or bridge-written), JSON.stringify it.
+      const rawPayload = commandData.payload;
+      const payloadString =
+        typeof rawPayload === "string" ? rawPayload : JSON.stringify(rawPayload);
+
       switch (commandData.type) {
         case "getState":
           endpoint = `${baseUrl}/json/state`;
@@ -297,16 +305,18 @@ exports.executeWledCommand = onDocumentCreated(
         case "configureSyncSender":
         case "renameSegment":
         case "applyToSegments":
+        case "savePreset":
+        case "loadPreset":
           endpoint = `${baseUrl}/json/state`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
           break;
         case "applyConfig":
           endpoint = `${baseUrl}/json/cfg`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
           break;
         default:
           endpoint = `${baseUrl}/json/state`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
       }
 
       console.log(`📡 Calling ${method} ${endpoint}`);
@@ -349,10 +359,12 @@ exports.executeWledCommand = onDocumentCreated(
 
       console.log(`✅ Command executed successfully`);
 
-      // Update command with success result
+      // Update command with success result.
+      // Store result as a JSON string (matching Dart-side convention) to avoid
+      // nested-array structures that crash the iOS Firestore SDK.
       await commandRef.update({
         status: "completed",
-        result: result,
+        result: typeof result === "string" ? result : JSON.stringify(result),
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     } catch (error) {
