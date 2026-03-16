@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 /// Represents a single automation schedule for lights/patterns.
@@ -86,7 +88,7 @@ class ScheduleItem {
         'repeatDays': repeatDays,
         'actionLabel': actionLabel,
         'enabled': enabled,
-        if (wledPayload != null) 'wledPayload': wledPayload,
+        if (wledPayload != null) 'wledPayload': jsonEncode(wledPayload),
         if (presetId != null) 'presetId': presetId,
         if (useAudioReactive != null) 'useAudioReactive': useAudioReactive,
       };
@@ -98,7 +100,9 @@ class ScheduleItem {
         repeatDays: (json['repeatDays'] as List).map((e) => e.toString()).toList(),
         actionLabel: json['actionLabel'] as String,
         enabled: json['enabled'] as bool,
-        wledPayload: json['wledPayload'] as Map<String, dynamic>?,
+        wledPayload: json['wledPayload'] is String
+            ? (jsonDecode(json['wledPayload'] as String) as Map<String, dynamic>?)
+            : json['wledPayload'] as Map<String, dynamic>?,
         presetId: json['presetId'] as int?,
         useAudioReactive: json['useAudioReactive'] as bool?,
       );

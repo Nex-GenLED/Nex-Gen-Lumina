@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Trigger types for autopilot schedule items.
@@ -114,7 +116,9 @@ class AutopilotScheduleItem {
         orElse: () => AutopilotTrigger.custom,
       ),
       confidenceScore: (json['confidence_score'] as num?)?.toDouble() ?? 0.5,
-      wledPayload: Map<String, dynamic>.from(json['wled_payload'] as Map? ?? {}),
+      wledPayload: json['wled_payload'] is String
+          ? Map<String, dynamic>.from(jsonDecode(json['wled_payload'] as String) as Map? ?? {})
+          : Map<String, dynamic>.from(json['wled_payload'] as Map? ?? {}),
       colors: (json['colors'] as List?)?.cast<int>(),
       effectId: json['effect_id'] as int?,
       paletteId: json['palette_id'] as int?,
@@ -144,7 +148,7 @@ class AutopilotScheduleItem {
       'reason': reason,
       'trigger': trigger.name,
       'confidence_score': confidenceScore,
-      'wled_payload': wledPayload,
+      'wled_payload': jsonEncode(wledPayload),
       if (colors != null) 'colors': colors,
       if (effectId != null) 'effect_id': effectId,
       if (paletteId != null) 'palette_id': paletteId,

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Represents aggregated analytics for a pattern query across all users.
@@ -264,7 +266,9 @@ class PatternFeedbackEvent {
       refinementType: data['refinement_type'] as String?,
       feedbackReason: data['feedback_reason'] as String?,
       createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      wledPayload: data['wled_payload'] as Map<String, dynamic>?,
+      wledPayload: data['wled_payload'] is String
+          ? (jsonDecode(data['wled_payload'] as String) as Map<String, dynamic>?)
+          : data['wled_payload'] as Map<String, dynamic>?,
     );
   }
 
@@ -284,7 +288,7 @@ class PatternFeedbackEvent {
       if (refinementType != null) 'refinement_type': refinementType,
       if (feedbackReason != null) 'feedback_reason': feedbackReason,
       'created_at': Timestamp.fromDate(createdAt),
-      if (wledPayload != null) 'wled_payload': wledPayload,
+      if (wledPayload != null) 'wled_payload': jsonEncode(wledPayload),
     };
   }
 }

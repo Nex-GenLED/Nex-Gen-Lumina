@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
@@ -321,7 +323,7 @@ class Scene {
           'category': libraryPattern!.category,
         },
       if ((type == SceneType.system || type == SceneType.snapshot) && wledPayload != null)
-        'wled_payload': wledPayload,
+        'wled_payload': jsonEncode(wledPayload),
     };
   }
 
@@ -359,7 +361,10 @@ class Scene {
         category: patternData['category'] as String? ?? '',
       );
     } else if (data['wled_payload'] != null) {
-      wledPayload = Map<String, dynamic>.from(data['wled_payload'] as Map);
+      final raw = data['wled_payload'];
+      wledPayload = raw is String
+          ? Map<String, dynamic>.from(jsonDecode(raw) as Map)
+          : Map<String, dynamic>.from(raw as Map);
     }
 
     return Scene(

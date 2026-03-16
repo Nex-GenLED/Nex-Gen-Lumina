@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -44,7 +46,9 @@ class PatternUsageEvent {
       brightness: (data['brightness'] as num?)?.toInt(),
       speed: (data['speed'] as num?)?.toInt(),
       intensity: (data['intensity'] as num?)?.toInt(),
-      wledPayload: data['wled'] as Map<String, dynamic>?,
+      wledPayload: data['wled'] is String
+          ? (jsonDecode(data['wled'] as String) as Map<String, dynamic>?)
+          : data['wled'] as Map<String, dynamic>?,
       patternName: data['pattern_name'] as String?,
     );
   }
@@ -60,7 +64,7 @@ class PatternUsageEvent {
       if (brightness != null) 'brightness': brightness,
       if (speed != null) 'speed': speed,
       if (intensity != null) 'intensity': intensity,
-      if (wledPayload != null) 'wled': wledPayload,
+      if (wledPayload != null) 'wled': jsonEncode(wledPayload),
       if (patternName != null) 'pattern_name': patternName,
     };
   }

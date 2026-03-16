@@ -7,6 +7,8 @@
 // regeneration.  User-created protected events live in a separate subcollection
 // (see user_event.dart).
 
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -193,7 +195,7 @@ class AutopilotEvent {
         'is_protected': false,
         'generated_at': Timestamp.fromDate(generatedAt),
         'week_generation': weekGeneration,
-        if (wledPayload != null) 'wled_payload': wledPayload,
+        if (wledPayload != null) 'wled_payload': jsonEncode(wledPayload),
         // ignore: deprecated_member_use
         if (displayColor != null) 'display_color': displayColor!.value,
         'confidence_score': confidenceScore,
@@ -216,7 +218,9 @@ class AutopilotEvent {
       sourceDetail: data['source_detail'] as String? ?? '',
       generatedAt: (data['generated_at'] as Timestamp).toDate(),
       weekGeneration: (data['week_generation'] as num?)?.toInt() ?? 0,
-      wledPayload: data['wled_payload'] as Map<String, dynamic>?,
+      wledPayload: data['wled_payload'] is String
+          ? (jsonDecode(data['wled_payload'] as String) as Map<String, dynamic>?)
+          : data['wled_payload'] as Map<String, dynamic>?,
       displayColor: color,
       confidenceScore: (data['confidence_score'] as num?)?.toDouble() ?? 0.6,
     );

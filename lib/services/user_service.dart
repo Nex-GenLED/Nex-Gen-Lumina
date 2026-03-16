@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -220,7 +221,9 @@ class UserService {
         if (effectId != null) 'effect_id': effectId,
         if (effectName != null) 'effect_name': effectName,
         if (paletteId != null) 'palette_id': paletteId,
-        if (wled != null) 'wled': wled,
+        // Serialize WLED payload as JSON string to avoid nested arrays
+        // (iOS Firestore SDK crashes on arrays of arrays)
+        if (wled != null) 'wled': jsonEncode(wled),
         if (patternName != null) 'pattern_name': patternName,
         if (brightness != null) 'brightness': brightness,
         if (speed != null) 'speed': speed,
