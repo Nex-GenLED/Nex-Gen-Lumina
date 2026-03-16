@@ -105,11 +105,11 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     return null;
   }
 
-  // Remote network with webhook configured and enabled
-  if (hasWebhook && userProfile?.remoteAccessEnabled == true) {
+  // Remote network with remote access enabled
+  if (userProfile?.remoteAccessEnabled == true) {
     final controllerId = ref.watch(selectedControllerIdProvider);
 
-    // MQTT relay takes priority over webhook if configured and authenticated.
+    // MQTT relay takes priority if configured and authenticated.
     final backendService = ref.watch(luminaBackendServiceProvider);
     if (userProfile?.mqttRelayEnabled == true &&
         backendService.isAuthenticated &&
@@ -123,25 +123,28 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     }
 
     if (userId != null && controllerId != null) {
-      debugPrint('☁️ WledRepository: Webhook relay — remote access');
-      debugPrint('   Webhook URL: $webhookUrl');
+      // Webhook mode: Cloud Function forwards to webhook URL.
+      // Bridge mode (no webhook): Cloud Function skips, ESP32 bridge polls
+      // Firestore and executes locally.
+      final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
+      debugPrint('☁️ WledRepository: $mode — remote access');
       return CloudRelayRepository(
         userId: userId,
         controllerId: controllerId,
         controllerIp: ip,
-        webhookUrl: webhookUrl,
+        webhookUrl: webhookUrl ?? '',
       );
     }
 
-    // Webhook configured but userId/controllerId temporarily unavailable.
-    debugPrint('⚠️ WledRepository: Webhook configured but userId/controllerId '
+    // Remote access enabled but userId/controllerId temporarily unavailable.
+    debugPrint('⚠️ WledRepository: Remote access enabled but userId/controllerId '
         'unavailable — blocking commands');
     return null;
   }
 
-  // Remote network, no webhook configured — cannot route commands.
-  debugPrint('⚠️ WledRepository: Remote network but no webhook URL saved — '
-      'commands blocked. Configure a webhook URL in Remote Access settings.');
+  // Remote network, remote access not enabled — cannot route commands.
+  debugPrint('⚠️ WledRepository: Remote network but remote access not enabled — '
+      'commands blocked. Enable remote access in settings.');
   return null;
 });
 

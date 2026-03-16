@@ -27,7 +27,8 @@
     <application
         android:label="Lumina"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name="com.nexgenled.command.MainActivity"
             android:exported="true"

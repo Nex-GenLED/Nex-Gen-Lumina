@@ -1,15 +1,31 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+
+// ─── Remote access mode ──────────────────────────────────────────────────────
+
+/// How remote commands are relayed to the WLED controller.
+enum RemoteAccessMode {
+  /// ESP32 bridge on local network polls Firestore for commands.
+  /// No port forwarding or Dynamic DNS needed.
+  bridge,
+
+  /// Cloud Function forwards commands to a webhook URL.
+  /// Requires Dynamic DNS + port forwarding.
+  webhook,
+}
 
 // ─── Health check state ───────────────────────────────────────────────────────
 
@@ -51,7 +67,13 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   _WebhookCheckResult _webhookCheck =
       const _WebhookCheckResult(_WebhookStatus.idle);
 
+  _WebhookCheckResult _bridgeCheck =
+      const _WebhookCheckResult(_WebhookStatus.idle);
+
   Timer? _pollingTimer;
+
+  /// The current remote access mode — derived from user profile on load.
+  RemoteAccessMode _mode = RemoteAccessMode.bridge;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -60,13 +82,18 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final url = ref.read(currentUserProfileProvider).maybeWhen(
-            data: (u) => u?.webhookUrl,
+      final profile = ref.read(currentUserProfileProvider).maybeWhen(
+            data: (u) => u,
             orElse: () => null,
           );
+      final url = profile?.webhookUrl;
       if (url != null && url.isNotEmpty) {
         _webhookUrlController.text = url;
+        _mode = RemoteAccessMode.webhook;
         _runHealthCheck(url);
+      } else {
+        _mode = RemoteAccessMode.bridge;
+        _runBridgeCheck();
       }
       _startPolling();
     });
@@ -75,8 +102,12 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      final url = _webhookUrlController.text.trim();
-      if (url.isNotEmpty) _runHealthCheck(url);
+      if (_mode == RemoteAccessMode.webhook) {
+        final url = _webhookUrlController.text.trim();
+        if (url.isNotEmpty) _runHealthCheck(url);
+      } else {
+        _runBridgeCheck();
+      }
     }
   }
 
@@ -93,8 +124,12 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   void _startPolling() {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      final url = _webhookUrlController.text.trim();
-      if (url.isNotEmpty) _runHealthCheck(url);
+      if (_mode == RemoteAccessMode.webhook) {
+        final url = _webhookUrlController.text.trim();
+        if (url.isNotEmpty) _runHealthCheck(url);
+      } else {
+        _runBridgeCheck();
+      }
     });
   }
 
@@ -180,6 +215,86 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       return _WebhookCheckResult(
         _WebhookStatus.disconnected,
         errorMessage: 'Unexpected error: $e',
+      );
+    }
+  }
+
+  // ── Bridge health check ────────────────────────────────────────────────────
+
+  /// Tests bridge connectivity by writing a lightweight ping command to
+  /// Firestore and checking if the bridge picks it up within 10 seconds.
+  Future<void> _runBridgeCheck() async {
+    if (!mounted) return;
+
+    setState(() {
+      _bridgeCheck = const _WebhookCheckResult(_WebhookStatus.checking);
+    });
+
+    final result = await _checkBridge();
+    if (!mounted) return;
+    setState(() => _bridgeCheck = result);
+  }
+
+  Future<_WebhookCheckResult> _checkBridge() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return const _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'Not signed in.',
+      );
+    }
+
+    try {
+      final commandsRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('commands');
+
+      // Write a ping command (no webhook URL → bridge mode)
+      final docRef = await commandsRef.add({
+        'type': 'getInfo',
+        'payload': '{}',
+        'controllerId': '',
+        'controllerIp': ref.read(selectedDeviceIpProvider) ?? '',
+        'webhookUrl': '',
+        'createdAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+
+      // Poll for up to 10 seconds
+      for (var i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        final snap = await docRef.get();
+        final status = snap.data()?['status'] as String?;
+        if (status == 'completed') {
+          // Clean up test command
+          await docRef.delete();
+          return _WebhookCheckResult(
+            _WebhookStatus.connected,
+            checkedAt: DateTime.now(),
+          );
+        }
+        if (status == 'failed') {
+          final error = snap.data()?['error'] as String? ?? 'Unknown error';
+          await docRef.delete();
+          return _WebhookCheckResult(
+            _WebhookStatus.disconnected,
+            errorMessage: 'Bridge reached controller but got an error: $error',
+          );
+        }
+      }
+
+      // Timeout — bridge didn't pick it up
+      await docRef.update({'status': 'timeout'});
+      return const _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'No response from ESP32 Bridge within 10 seconds. '
+            'Check that the bridge is powered on and connected to WiFi.',
+      );
+    } catch (e) {
+      return _WebhookCheckResult(
+        _WebhookStatus.disconnected,
+        errorMessage: 'Error testing bridge: $e',
       );
     }
   }
@@ -373,7 +488,12 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
         children: [
           _buildNetworkStatusCard(connectivityStatus, isRemote, isEnabled),
           const SizedBox(height: 16),
-          _buildWebhookStatusCard(),
+
+          // Connection status card (bridge or webhook)
+          if (_mode == RemoteAccessMode.bridge)
+            _buildBridgeStatusCard()
+          else
+            _buildWebhookStatusCard(),
           const SizedBox(height: 16),
 
           // Enable/Disable toggle
@@ -392,6 +512,10 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             ),
           ),
 
+          const SizedBox(height: 16),
+
+          // Connection Mode selector
+          _buildModeSelector(),
           const SizedBox(height: 16),
 
           // Home Network section
@@ -469,118 +593,278 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             ),
           ),
 
-          const SizedBox(height: 16),
-
-          // Webhook URL section
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.link, color: NexGenPalette.cyan),
-                        const SizedBox(width: 8),
-                        Text('Webhook URL',
-                            style: Theme.of(context).textTheme.titleMedium),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Enter your Dynamic DNS URL that points to your home network. '
-                      'This is how the cloud will reach your WLED controller.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _webhookUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'Webhook URL',
-                        hintText: 'https://myhome.duckdns.org:8080',
-                        prefixIcon: Icon(Icons.https),
+          // Webhook URL section (only in webhook mode)
+          if (_mode == RemoteAccessMode.webhook) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.link, color: NexGenPalette.cyan),
+                          const SizedBox(width: 8),
+                          Text('Webhook URL',
+                              style: Theme.of(context).textTheme.titleMedium),
+                        ],
                       ),
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Please enter a webhook URL';
-                        }
-                        final url = value.trim();
-                        if (!url.startsWith('http://') &&
-                            !url.startsWith('https://')) {
-                          return 'URL must start with http:// or https://';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed:
-                                _webhookCheck.status == _WebhookStatus.checking
-                                    ? null
-                                    : () {
-                                        final url = _webhookUrlController.text
-                                            .trim();
-                                        if (url.isEmpty) {
-                                          _showSnackBar(
-                                              'Please enter a webhook URL first',
-                                              isError: true);
-                                          return;
-                                        }
-                                        _runHealthCheck(url);
-                                      },
-                            icon: _webhookCheck.status ==
-                                    _WebhookStatus.checking
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.network_check),
-                            label: const Text('Test'),
-                          ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Enter your Dynamic DNS URL that points to your home network. '
+                        'This is how the cloud will reach your WLED controller.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _webhookUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Webhook URL',
+                          hintText: 'https://myhome.duckdns.org:8080',
+                          prefixIcon: Icon(Icons.https),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: _isSaving ? null : _saveWebhookUrl,
-                            icon: _isSaving
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.black,
-                                    ),
-                                  )
-                                : const Icon(Icons.save, color: Colors.black),
-                            label: const Text('Save'),
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter a webhook URL';
+                          }
+                          final url = value.trim();
+                          if (!url.startsWith('http://') &&
+                              !url.startsWith('https://')) {
+                            return 'URL must start with http:// or https://';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed:
+                                  _webhookCheck.status == _WebhookStatus.checking
+                                      ? null
+                                      : () {
+                                          final url = _webhookUrlController.text
+                                              .trim();
+                                          if (url.isEmpty) {
+                                            _showSnackBar(
+                                                'Please enter a webhook URL first',
+                                                isError: true);
+                                            return;
+                                          }
+                                          _runHealthCheck(url);
+                                        },
+                              icon: _webhookCheck.status ==
+                                      _WebhookStatus.checking
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.network_check),
+                              label: const Text('Test'),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: _isSaving ? null : _saveWebhookUrl,
+                              icon: _isSaving
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  : const Icon(Icons.save, color: Colors.black),
+                              label: const Text('Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+            const SizedBox(height: 16),
+            _buildSetupGuide(context),
+          ],
 
-          const SizedBox(height: 16),
-
-          _buildSetupGuide(context),
+          // Bridge mode info card
+          if (_mode == RemoteAccessMode.bridge) ...[
+            const SizedBox(height: 16),
+            _buildBridgeInfoCard(context),
+          ],
         ],
       ),
     );
   }
 
+  // ── Mode selector ─────────────────────────────────────────────────────────
+
+  Widget _buildModeSelector() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.settings_input_component, color: NexGenPalette.cyan),
+                const SizedBox(width: 8),
+                Text('Connection Mode',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _ModeOption(
+              icon: Icons.developer_board,
+              title: 'ESP32 Bridge',
+              subtitle: 'No port forwarding needed. Works with any ISP.',
+              selected: _mode == RemoteAccessMode.bridge,
+              onTap: () {
+                setState(() => _mode = RemoteAccessMode.bridge);
+                _runBridgeCheck();
+              },
+            ),
+            const SizedBox(height: 8),
+            _ModeOption(
+              icon: Icons.webhook,
+              title: 'Webhook (Dynamic DNS)',
+              subtitle: 'Requires port forwarding and a public IP.',
+              selected: _mode == RemoteAccessMode.webhook,
+              onTap: () {
+                setState(() => _mode = RemoteAccessMode.webhook);
+                final url = _webhookUrlController.text.trim();
+                if (url.isNotEmpty) _runHealthCheck(url);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Status cards ───────────────────────────────────────────────────────────
+
+  /// Bridge status card.
+  Widget _buildBridgeStatusCard() {
+    final check = _bridgeCheck;
+
+    final IconData icon;
+    final Color color;
+    final String title;
+    final String subtitle;
+
+    switch (check.status) {
+      case _WebhookStatus.checking:
+        icon = Icons.sync;
+        color = Colors.amber;
+        title = 'Testing Bridge...';
+        subtitle = 'Sending a test command via Firestore.';
+        break;
+      case _WebhookStatus.connected:
+        final ago = check.checkedAt != null
+            ? _formatAge(check.checkedAt!)
+            : '';
+        icon = Icons.check_circle;
+        color = Colors.green;
+        title = 'Bridge Connected';
+        subtitle = ago.isEmpty
+            ? 'Your ESP32 bridge is online and responding.'
+            : 'Last confirmed $ago.';
+        break;
+      case _WebhookStatus.disconnected:
+        icon = Icons.error_outline;
+        color = Colors.red;
+        title = 'Bridge Not Responding';
+        subtitle = check.errorMessage ?? 'Could not reach the ESP32 bridge.';
+        break;
+      case _WebhookStatus.idle:
+        icon = Icons.developer_board;
+        color = Colors.grey;
+        title = 'Bridge Status Unknown';
+        subtitle = 'Tap "Test Bridge" to check connectivity.';
+        break;
+    }
+
+    return Column(
+      children: [
+        _StatusCard(icon: icon, color: color, title: title, subtitle: subtitle),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _bridgeCheck.status == _WebhookStatus.checking
+                ? null
+                : _runBridgeCheck,
+            icon: _bridgeCheck.status == _WebhookStatus.checking
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.network_check),
+            label: const Text('Test Bridge'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Info card explaining bridge mode.
+  Widget _buildBridgeInfoCard(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: NexGenPalette.violet),
+                const SizedBox(width: 8),
+                Text('How Bridge Mode Works',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildGuideStep(
+              context,
+              1,
+              'ESP32 bridge on your network',
+              'A small ESP32 device plugged in at home stays connected '
+                  'to your WiFi and monitors for commands.',
+            ),
+            _buildGuideStep(
+              context,
+              2,
+              'Commands go through the cloud',
+              'When you\'re away, the app writes commands to Firebase. '
+                  'The bridge picks them up and sends them to your WLED controller.',
+            ),
+            _buildGuideStep(
+              context,
+              3,
+              'No port forwarding needed',
+              'Unlike webhook mode, bridge mode works with any ISP '
+                  'including T-Mobile, Starlink, and other CGNAT networks.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   /// Top card: network location (home / away / offline) — unchanged logic.
   Widget _buildNetworkStatusCard(
@@ -782,6 +1066,74 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Mode option radio tile ──────────────────────────────────────────────────
+
+class _ModeOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ModeOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? NexGenPalette.cyan
+                : Colors.white.withValues(alpha: 0.1),
+            width: selected ? 2 : 1,
+          ),
+          color: selected
+              ? NexGenPalette.cyan.withValues(alpha: 0.1)
+              : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Icon(icon,
+                color: selected ? NexGenPalette.cyan : Colors.grey, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: selected ? NexGenPalette.cyan : null,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle, color: NexGenPalette.cyan, size: 20),
+          ],
+        ),
       ),
     );
   }
