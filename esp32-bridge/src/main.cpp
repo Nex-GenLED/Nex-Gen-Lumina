@@ -333,6 +333,16 @@ void executeCommand(const String& commandId, JsonObject& fields) {
 // ============================================================================
 
 String convertFirestorePayloadToJson(JsonObject& fields) {
+  // The Dart app stores payload as a JSON string (to avoid nested-array
+  // issues with the iOS Firestore SDK). Check for stringValue first.
+  if (fields["payload"]["stringValue"]) {
+    String payloadStr = fields["payload"]["stringValue"].as<String>();
+    DEBUG_PRINT("  Payload (string): ");
+    DEBUG_PRINTLN(payloadStr);
+    return payloadStr;
+  }
+
+  // Legacy fallback: payload stored as a Firestore mapValue
   JsonObject payload = fields["payload"]["mapValue"]["fields"];
   if (payload.isNull()) {
     return "{}";
