@@ -152,6 +152,23 @@ class LuminaSmartScheduler {
     65: 'Fire',
   };
 
+  /// Visual category groups — effects within the same group look similar,
+  /// so we spread across groups before repeating within one.
+  static const Map<String, List<int>> _visualGroups = {
+    'pulse':   [2, 63],      // Breathe, Candle
+    'chase':   [12, 41],     // Theater Chase, Running
+    'sparkle': [43, 52],     // Twinkle, Fireworks
+    'solid':   [0],          // Solid
+  };
+
+  /// Returns the visual group key for an effect ID, or null if unmapped.
+  static String? _groupOf(int fxId) {
+    for (final entry in _visualGroups.entries) {
+      if (entry.value.contains(fxId)) return entry.key;
+    }
+    return null;
+  }
+
   /// Day-of-week energy multipliers applied to speed.
   static const Map<int, double> _dayEnergyMultiplier = {
     1: 0.70,  // Monday    — calm, fresh start
@@ -162,6 +179,125 @@ class LuminaSmartScheduler {
     6: 1.00,  // Saturday  — peak energy
     7: 0.75,  // Sunday    — reflective, winding down
   };
+
+  // -----------------------------------------------------------------------
+  // Variety-aware effect rotation
+  // -----------------------------------------------------------------------
+
+  /// Builds a deduplicated, visually varied effect rotation.
+  ///
+  /// For [VarietyPreferenceLevel.consistent], returns the same effect repeated.
+  /// For [VarietyPreferenceLevel.subtle], alternates between 2 effects from
+  /// different visual groups.
+  /// For [varied] and [eclectic], spreads across visual groups round-robin
+  /// before repeating within a group, and never repeats an fx ID until the
+  /// pool is exhausted.
+  static List<int> _buildVarietyRotation({
+    required List<int> pool,
+    required int count,
+    required UserVarietyProfile profile,
+  }) {
+    if (pool.isEmpty) return List.filled(count, 0);
+
+    // Consistent: same effect every day — no rotation needed.
+    if (profile.level == VarietyPreferenceLevel.consistent) {
+      return List.filled(count, pool.first);
+    }
+
+    // Subtle: pick at most 2 effects from DIFFERENT visual groups.
+    if (profile.level == VarietyPreferenceLevel.subtle) {
+      final picks = _pickFromDifferentGroups(pool, 2);
+      return List.generate(count, (i) => picks[i % picks.length]);
+    }
+
+    // Varied / Eclectic: spread across all visual groups, then fill.
+    final ordered = _spreadByVisualGroup(pool);
+
+    // For eclectic users, boost effects they've recently engaged with
+    // to the front if they exist in the pool.
+    final List<int> final_;
+    if (profile.level == VarietyPreferenceLevel.eclectic &&
+        profile.recentEffectIds.isNotEmpty) {
+      final boosted = ordered
+          .where((id) => profile.recentEffectIds.contains(id))
+          .toList();
+      final rest = ordered
+          .where((id) => !profile.recentEffectIds.contains(id))
+          .toList();
+      final_ = [...boosted, ...rest];
+    } else {
+      final_ = ordered;
+    }
+
+    // Generate rotation: cycle through the ordered list without repeating
+    // until the pool is exhausted.
+    return List.generate(count, (i) => final_[i % final_.length]);
+  }
+
+  /// Pick up to [maxPicks] effects from the pool, preferring effects
+  /// from different visual groups.
+  static List<int> _pickFromDifferentGroups(List<int> pool, int maxPicks) {
+    final result = <int>[];
+    final usedGroups = <String>{};
+
+    // First pass: one per group
+    for (final id in pool) {
+      if (result.length >= maxPicks) break;
+      final group = _groupOf(id);
+      if (group != null && usedGroups.contains(group)) continue;
+      result.add(id);
+      if (group != null) usedGroups.add(group);
+    }
+
+    // If we still need more, fill from remaining pool
+    for (final id in pool) {
+      if (result.length >= maxPicks) break;
+      if (!result.contains(id)) result.add(id);
+    }
+
+    return result.isEmpty ? [pool.first] : result;
+  }
+
+  /// Reorders the pool so that consecutive entries come from different
+  /// visual groups as much as possible. Round-robins across groups,
+  /// picking one effect per group per round.
+  static List<int> _spreadByVisualGroup(List<int> pool) {
+    // Bucket effects by visual group
+    final buckets = <String, List<int>>{};
+    final ungrouped = <int>[];
+
+    for (final id in pool) {
+      final group = _groupOf(id);
+      if (group != null) {
+        (buckets[group] ??= []).add(id);
+      } else {
+        ungrouped.add(id);
+      }
+    }
+
+    // Round-robin across groups
+    final result = <int>[];
+    final groupKeys = buckets.keys.toList();
+    final indices = {for (final k in groupKeys) k: 0};
+    bool added = true;
+
+    while (added) {
+      added = false;
+      for (final key in groupKeys) {
+        final bucket = buckets[key]!;
+        final idx = indices[key]!;
+        if (idx < bucket.length) {
+          result.add(bucket[idx]);
+          indices[key] = idx + 1;
+          added = true;
+        }
+      }
+    }
+
+    // Append ungrouped effects at the end
+    result.addAll(ungrouped);
+    return result;
+  }
 
   // -----------------------------------------------------------------------
   // Main entry point
@@ -183,14 +319,30 @@ class LuminaSmartScheduler {
     final today = DateTime.now();
 
     final basePool = isHolidayTheme ? _holidayEffectPool : _teamEffectPool;
-    final effectPool = [
+    var effectPool = [
       ...theme.suggestedEffects,
       ...basePool,
     ].toSet().toList();
 
-    final effectRotation = userProfile.buildEffectRotation(
-      themeEffects: effectPool,
+    // --- Motion filter: if user asked for "motion" or "animated",
+    // remove Solid (fx 0) from the pool entirely.
+    final promptLower = command.lightingIntent.toLowerCase();
+    if (promptLower.contains('motion') || promptLower.contains('animated')) {
+      effectPool.removeWhere((id) => id == 0);
+      if (effectPool.isEmpty) effectPool = [2]; // fallback to Breathe
+    }
+
+    // --- Minimum variety warning
+    if (effectPool.length < dayCount) {
+      debugPrint('⚠️ AutopilotScheduler: only ${effectPool.length} distinct '
+          'effects available for $dayCount-day request — some effects will repeat');
+    }
+
+    // --- Build variety-aware rotation using visual group spreading
+    final effectRotation = _buildVarietyRotation(
+      pool: effectPool,
       count: dayCount,
+      profile: userProfile,
     );
 
     final dynamicParams = userProfile.buildDynamicVariation(count: dayCount);
