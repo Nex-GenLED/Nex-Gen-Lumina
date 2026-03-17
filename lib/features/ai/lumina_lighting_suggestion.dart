@@ -163,7 +163,9 @@ class LuminaLightingSuggestion {
       responseText: responseText,
       colors: preview.colors,
       palette: PaletteInfo(
-        name: preview.patternName ?? 'Custom Palette',
+        name: preview.patternName ??
+            wledPayload?['patternName'] as String? ??
+            'Custom Palette',
         colorNames: preview.colorNames,
       ),
       effect: EffectInfo(

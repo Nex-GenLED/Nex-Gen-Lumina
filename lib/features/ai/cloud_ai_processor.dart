@@ -84,7 +84,18 @@ class CloudAIProcessor {
     Map<String, dynamic>? wled;
     final candidate = obj['wled'];
     if (candidate is Map<String, dynamic>) {
-      wled = candidate;
+      // Merge rich metadata into the WLED payload so downstream
+      // _extractPreview() can find patternName, colors, and effect info.
+      wled = {
+        ...candidate,
+        if (obj['patternName'] != null) 'patternName': obj['patternName'],
+        if (obj['colors'] != null) 'colors': obj['colors'],
+        if (obj['effect'] != null) 'effect': obj['effect'],
+        if (obj['speed'] != null && !candidate.containsKey('speed'))
+          'speed': obj['speed'],
+        if (obj['intensity'] != null && !candidate.containsKey('intensity'))
+          'intensity': obj['intensity'],
+      };
     } else if (obj.containsKey('seg') ||
         obj.containsKey('on') ||
         obj.containsKey('bri')) {

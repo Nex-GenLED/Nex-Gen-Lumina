@@ -494,7 +494,8 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                 effectName: preview.effectName,
               );
         }
-        final label = preview?.patternName;
+        final label = preview?.patternName ??
+            wled['patternName'] as String?;
         if (label != null) {
           ref.read(activePresetLabelProvider.notifier).state = label;
         } else {
