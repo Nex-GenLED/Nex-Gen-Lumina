@@ -20,9 +20,19 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 
-/// Connectivity status provider that checks if user is on home network.
-/// Uses the user's saved homeSsid from their profile.
-final wledConnectivityStatusProvider = FutureProvider<ConnectivityStatus>((ref) async {
+/// Connectivity status stream that checks if user is on home network.
+///
+/// Polls every 10 seconds using the user's saved homeSsidHash from their
+/// profile. Re-evaluates whenever the user profile changes (e.g. after
+/// saving a new home SSID in Remote Access settings).
+///
+/// Also invalidated on app resume via [_connectivityRefreshProvider] so a
+/// fresh SSID check runs immediately when the user opens the app.
+final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) {
+  // Watch the refresh counter — incrementing it restarts this stream,
+  // which clears the SSID cache and forces a fresh network check.
+  ref.watch(_connectivityRefreshProvider);
+
   final connectivityService = ref.watch(connectivityServiceProvider);
   final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
     data: (user) => user,
@@ -30,20 +40,35 @@ final wledConnectivityStatusProvider = FutureProvider<ConnectivityStatus>((ref) 
   );
 
   final homeSsidHash = userProfile?.homeSsidHash;
-  final isHome = await connectivityService.isOnHomeNetwork(homeSsidHash);
 
-  if (!await connectivityService.hasWifiConnection()) {
-    return ConnectivityStatus.offline;
-  }
+  // Clear cached SSID so the first emission uses a live value.
+  connectivityService.clearCache();
 
-  return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
+  return connectivityService.watchConnectivity(homeSsidHash);
 });
 
+/// Counter that, when incremented, forces [wledConnectivityStatusProvider]
+/// to restart its stream and re-check the network.
+final _connectivityRefreshProvider = StateProvider<int>((ref) => 0);
+
+/// Call this to force an immediate network re-check (e.g. on app resume).
+void refreshConnectivityStatus(WidgetRef ref) {
+  ref.read(connectivityServiceProvider).clearCache();
+  ref.read(_connectivityRefreshProvider.notifier).state++;
+}
+
+/// Overload for use inside providers / notifiers (Ref instead of WidgetRef).
+void refreshConnectivityStatusFromRef(Ref ref) {
+  ref.read(connectivityServiceProvider).clearCache();
+  ref.read(_connectivityRefreshProvider.notifier).state++;
+}
+
 /// Whether the app is currently in remote mode (cloud relay).
+/// Returns false while the connectivity check is still loading.
 final isRemoteModeProvider = Provider<bool>((ref) {
   final status = ref.watch(wledConnectivityStatusProvider).maybeWhen(
     data: (s) => s,
-    orElse: () => ConnectivityStatus.local,
+    orElse: () => null,
   );
   return status == ConnectivityStatus.remote;
 });
@@ -81,10 +106,20 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   );
 
   // ── 4. Determine network location ────────────────────────────────────────
+  //
+  // IMPORTANT: While the connectivity stream is loading (no data yet),
+  // return null so we don't send commands to the wrong destination.
+  // The poller safely skips when the repo is null, and the stream emits
+  // its first value almost immediately (< 1s) so the gap is brief.
   final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
     data: (status) => status,
-    orElse: () => ConnectivityStatus.local,
+    orElse: () => null, // loading or error — don't assume local
   );
+
+  if (connectivityStatus == null) {
+    debugPrint('⏳ WledRepository: Connectivity check in progress — waiting');
+    return null;
+  }
 
   // ── 5. LOCAL NETWORK → always use direct HTTP ──────────────────────────
   //
@@ -92,7 +127,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   // faster and more reliable than any relay. Use it regardless of whether
   // a webhook is configured — the webhook is for remote access, not local.
   if (connectivityStatus == ConnectivityStatus.local) {
-    debugPrint('🏠 WledRepository: Local mode — direct HTTP to $ip');
+    debugPrint('🏠 BridgeRouter: routing via LOCAL, url=http://$ip');
     return WledService('http://$ip');
   }
 
@@ -114,7 +149,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     if (userProfile?.mqttRelayEnabled == true &&
         backendService.isAuthenticated &&
         controllerId != null) {
-      debugPrint('📡 WledRepository: MQTT relay (remote mode)');
+      debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=mqtt://$controllerId (MQTT relay)');
       return MqttRelayRepository(
         backendService: backendService,
         deviceId: controllerId,
@@ -127,7 +162,8 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
       // Bridge mode (no webhook): Cloud Function skips, ESP32 bridge polls
       // Firestore and executes locally.
       final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
-      debugPrint('☁️ WledRepository: $mode — remote access');
+      final bridgeTarget = hasWebhook ? webhookUrl : 'firestore://$userId/commands';
+      debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=$bridgeTarget ($mode)');
       return CloudRelayRepository(
         userId: userId,
         controllerId: controllerId,
@@ -499,7 +535,27 @@ class WledNotifier extends Notifier<WledStateModel> {
       return;
     }
     final service = ref.read(wledRepositoryProvider);
-    if (service == null) return;
+    if (service == null) {
+      // Surface the reason so the UI can react (red dot + message).
+      final connStatus = ref.read(wledConnectivityStatusProvider).maybeWhen(
+        data: (s) => s,
+        orElse: () => null,
+      );
+      if (connStatus == ConnectivityStatus.remote) {
+        debugPrint('❌ Command blocked: on remote network but remote access '
+            'not configured or userId/controllerId unavailable');
+      } else if (connStatus == null) {
+        debugPrint('⏳ Command blocked: connectivity check still in progress');
+      } else {
+        debugPrint('❌ Command blocked: no repository (offline or no device selected)');
+      }
+      // Mark disconnected so the UI shows the red dot immediately
+      // rather than waiting for a poll timeout.
+      if (state.connected) {
+        state = state.copyWith(connected: false);
+      }
+      return;
+    }
 
     // Record manual override for schedule enforcement
     if (isManualChange) {

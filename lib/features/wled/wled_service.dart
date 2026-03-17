@@ -187,13 +187,14 @@ class WledService implements WledRepository {
       debugPrint('📥 WLED Response: ${response.statusCode}');
       debugPrint('   Body: ${response.body}');
 
+      debugPrint('🔍 BridgeRouter: send result=${response.statusCode}, error=none');
       if (response.statusCode >= 200 && response.statusCode < 300) {
         debugPrint('✅ WLED JSON API success');
         return true;
       }
       debugPrint('❌ WLED JSON API error ${response.statusCode}: ${response.body}');
     } catch (e) {
-      debugPrint('❌ WLED JSON API exception: $e');
+      debugPrint('🔍 BridgeRouter: send result=EXCEPTION, error=$e');
     }
 
     return false;

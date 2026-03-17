@@ -93,6 +93,9 @@ class MqttRelayRepository implements WledRepository {
 
     final result = await _backendService.sendWledState(deviceId, payload);
 
+    debugPrint('🔍 BridgeRouter: send result=${result.success ? "ok" : "failed"}, '
+        'error=${result.success ? "none" : result.error ?? "unknown"}');
+
     if (result.success) {
       // Update local cache with the state we just sent
       _updateCache(payload);

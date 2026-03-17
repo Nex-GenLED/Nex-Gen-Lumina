@@ -143,6 +143,10 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       debugPrint('🔄 App resumed from background');
 
+      // Re-check network location (local vs remote) so the correct
+      // repository (WledService vs CloudRelayRepository) is used.
+      refreshConnectivityStatus(ref);
+
       // Refresh WLED connection immediately
       try {
         ref.read(wledStateProvider.notifier).refreshConnection();

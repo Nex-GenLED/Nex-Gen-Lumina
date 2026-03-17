@@ -378,26 +378,31 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: state.connected
-                      ? NexGenPalette.cyan
-                      : Colors.red.withValues(alpha: 0.8),
-                ),
-              ),
+              Builder(builder: (_) {
+                final isRemote = ref.watch(isRemoteModeProvider);
+                final dotColor = state.connected
+                    ? (isRemote ? const Color(0xFFAB47BC) : NexGenPalette.cyan)
+                    : (isRemote ? const Color(0xFFAB47BC).withValues(alpha: 0.4)
+                                : Colors.red.withValues(alpha: 0.8));
+                return Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
+                );
+              }),
               const SizedBox(width: 5),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 120),
-                child: Text(
-                  displayName,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: state.connected ? Colors.white : Colors.grey,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Builder(builder: (_) {
+                  final isRemote = ref.watch(isRemoteModeProvider);
+                  return Text(
+                    isRemote && !state.connected ? '$displayName (remote)' : displayName,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: state.connected ? Colors.white : Colors.grey,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  );
+                }),
               ),
               if (controllers.length > 1) ...[
                 const SizedBox(width: 4),

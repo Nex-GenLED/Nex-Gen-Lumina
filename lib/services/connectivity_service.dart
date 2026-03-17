@@ -112,16 +112,38 @@ class ConnectivityService {
   }
 
   /// Stream that emits connectivity status changes.
-  /// Polls every 10 seconds to detect network changes.
-  Stream<ConnectivityStatus> watchConnectivity(String? homeSsid) {
-    return Stream.periodic(const Duration(seconds: 10), (_) async {
-      final hasWifi = await hasWifiConnection();
-      if (!hasWifi) {
-        return ConnectivityStatus.offline;
-      }
-      final isHome = await isOnHomeNetwork(homeSsid);
-      return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
-    }).asyncMap((future) => future);
+  /// Emits immediately on subscription, then polls every 10 seconds.
+  Stream<ConnectivityStatus> watchConnectivity(String? homeSsid) async* {
+    // Emit immediately so callers don't wait 10s for the first value.
+    yield await _checkConnectivity(homeSsid);
+
+    // Then poll every 10 seconds.
+    await for (final status in Stream.periodic(
+      const Duration(seconds: 10),
+      (_) => _checkConnectivity(homeSsid),
+    ).asyncMap((future) => future)) {
+      yield status;
+    }
+  }
+
+  /// Single connectivity check (shared by initial + periodic emissions).
+  Future<ConnectivityStatus> _checkConnectivity(String? homeSsid) async {
+    final sw = Stopwatch()..start();
+    final hasWifi = await hasWifiConnection();
+    if (!hasWifi) {
+      sw.stop();
+      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=N/A (no wifi), '
+          'source=hasWifiConnection, age=${sw.elapsedMilliseconds}ms');
+      return ConnectivityStatus.offline;
+    }
+    final isHome = await isOnHomeNetwork(homeSsid);
+    sw.stop();
+    final checkMethod = (homeSsid == null || homeSsid.isEmpty)
+        ? 'no-hash-configured(assume-local)'
+        : 'ssid-hash-compare';
+    debugPrint('🔍 BridgeRouter: isOnHomeNetwork=$isHome, '
+        'source=$checkMethod, age=${sw.elapsedMilliseconds}ms');
+    return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
   }
 }
 

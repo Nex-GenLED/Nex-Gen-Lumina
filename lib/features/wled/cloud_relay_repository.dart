@@ -87,14 +87,14 @@ class CloudRelayRepository implements WledRepository {
       }
 
       if (result.status == CommandStatus.completed) {
-        debugPrint('✅ CloudRelay: Command completed successfully');
+        debugPrint('🔍 BridgeRouter: send result=completed, error=none');
         return result.result;
       } else {
-        debugPrint('❌ CloudRelay: Command failed: ${result.error}');
+        debugPrint('🔍 BridgeRouter: send result=failed, error=${result.error}');
         return null;
       }
     } catch (e) {
-      debugPrint('❌ CloudRelay: Error executing command: $e');
+      debugPrint('🔍 BridgeRouter: send result=EXCEPTION, error=$e');
       return null;
     }
   }

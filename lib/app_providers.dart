@@ -110,22 +110,16 @@ final connectivityServiceProvider = Provider<ConnectivityService>((ref) => Conne
 
 // Note: userServiceProvider is defined in user_profile_providers.dart
 
-/// Current connectivity status (local, remote, or offline).
-/// Updates every 10 seconds when watching.
-final connectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) {
-  final connectivityService = ref.watch(connectivityServiceProvider);
-  // Get home SSID from user profile (needs currentUserProfileProvider from site_providers)
-  // For now, we'll use a simple approach - this will be wired up properly in wled_providers
-  return connectivityService.watchConnectivity(null);
-});
-
 /// Whether the user is currently on their home (local) network.
 /// Defaults to true if we can't determine (to preserve existing local-first behavior).
+///
+/// NOTE: The authoritative network check lives in [wledConnectivityStatusProvider]
+/// (wled_providers.dart). This provider exists for non-WLED code that needs a
+/// quick local-network boolean without pulling in the full WLED dependency tree.
+/// It re-evaluates when the connectivity service or user profile changes.
 final isLocalNetworkProvider = FutureProvider<bool>((ref) async {
-  ref.watch(connectivityServiceProvider);
-  // This will be properly wired to user's homeSsid in wled_providers.dart
-  // For now, return true as a safe default
-  return true;
+  final service = ref.watch(connectivityServiceProvider);
+  return service.isOnHomeNetwork(null); // null = no profile → assume local
 });
 
 /// Remote access configuration from user profile.
