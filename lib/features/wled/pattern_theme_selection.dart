@@ -276,7 +276,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         return Column(
                           children: [
                             const _KelvinReferenceChart(),
-                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2)),
                           ],
                         );
                       }

@@ -47,6 +47,9 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Number of consecutive LEDs per color group in repeating patterns.
   final int colorGroupSize;
 
+  /// Number of dark (off) LEDs after each lit group.
+  final int spacing;
+
   const AnimatedRooflineOverlay({
     super.key,
     this.previewColors,
@@ -60,6 +63,7 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
     this.useBoxFitCover = false,
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 
   @override
@@ -165,6 +169,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             useBoxFitCover: widget.useBoxFitCover,
             backgroundColor: widget.backgroundColor,
             colorGroupSize: widget.colorGroupSize,
+            spacing: widget.spacing,
           ),
           size: Size.infinite,
         );

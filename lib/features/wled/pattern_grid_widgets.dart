@@ -24,8 +24,11 @@ class LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
   final Color? parentAccent;
   final List<Color>? parentGradient;
+  /// Override the default folder card aspect ratio (width / height).
+  /// Higher values produce shorter cards.
+  final double? folderAspectRatio;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient});
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio});
 
   @override
   Widget build(BuildContext context) {
@@ -38,19 +41,22 @@ class LibraryNodeGrid extends StatelessWidget {
       );
     }
 
-    // Detect if this grid shows palettes → single-column list layout
-    final allPalettes = children.every((n) => n.isPalette);
+    // Detect if this grid is mostly palettes (e.g. architectural temp
+    // folder with spacing palettes + one Brightness Gradients folder).
+    // Use a compact single-column list for these mixed cases too.
+    final mostlyPalettes = children.where((n) => n.isPalette).length >
+        children.length / 2;
 
-    if (allPalettes) {
+    if (mostlyPalettes) {
       return ListView.builder(
         padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
         itemCount: children.length,
         itemBuilder: (context, index) {
           final node = children[index];
           return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
-              height: 56,
+              height: 44,
               child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
             ),
           );
@@ -61,11 +67,11 @@ class LibraryNodeGrid extends StatelessWidget {
     // Folders: 2-column grid with hero cards
     return GridView.builder(
       padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.4,
+        childAspectRatio: folderAspectRatio ?? 1.4,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
@@ -439,9 +445,94 @@ class LibraryNodeCard extends StatelessWidget {
       // Only animate the first 8 visible palette cards
       final shouldAnimate = index == null || index! < 8;
       return _buildPaletteCard(context, animate: shouldAnimate);
+    } else if (node.parentId != null && node.parentId!.startsWith('arch_k')) {
+      // Compact folder card inside architectural temperature folders
+      return _buildCompactFolderCard(context);
     } else {
       return _buildFolderCard(context);
     }
+  }
+
+  /// Compact folder card for architectural sub-folders (e.g. Brightness Gradients
+  /// inside a Kelvin temperature folder). Renders as a row matching palette cards,
+  /// with an 8-dot gradient preview fading from full to ~30% brightness.
+  Widget _buildCompactFolderCard(BuildContext context) {
+    final accentColor = _getFolderThemeColor();
+    final icon = _iconForNode();
+    final colors = node.themeColors;
+    final baseColor = (colors != null && colors.isNotEmpty) ? colors.first : accentColor;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          context.push('/explore/library/${node.id}', extra: {
+            'name': node.name,
+            'accentColor': accentColor.toARGB32(),
+          });
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: NexGenPalette.matteBlack,
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                accentColor.withValues(alpha: 0.12),
+                NexGenPalette.matteBlack,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: accentColor.withValues(alpha: 0.30), width: 0.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                // 8-dot gradient preview: full → dim → full
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(8, (i) {
+                    // Smooth fade: 1.0, 0.9, 0.7, 0.45, 0.3, 0.45, 0.7, 0.9
+                    const levels = [1.0, 0.9, 0.7, 0.45, 0.3, 0.45, 0.7, 0.9];
+                    final level = levels[i];
+                    final r = ((baseColor.r * 255).round() * level).round().clamp(0, 255);
+                    final g = ((baseColor.g * 255).round() * level).round().clamp(0, 255);
+                    final b = ((baseColor.b * 255).round() * level).round().clamp(0, 255);
+                    return Container(
+                      width: 8,
+                      height: 8,
+                      margin: EdgeInsets.only(right: i < 7 ? 3 : 0),
+                      decoration: BoxDecoration(
+                        color: Color.fromARGB(255, r, g, b),
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(width: 10),
+                Icon(icon, size: 14, color: accentColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: TextStyle(
+                      color: accentColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.5), size: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Build a subfolder card with gradient background, glow orb, icon, and pixel strip
@@ -570,16 +661,16 @@ class LibraryNodeCard extends StatelessWidget {
     );
   }
 
-  /// Build a palette card with color dot indicators
+  /// Build a palette card with LED-pattern dot indicators
   Widget _buildPaletteCard(BuildContext context, {bool animate = true}) {
     final colors = node.themeColors;
     final hasColors = colors != null && colors.isNotEmpty;
     final primaryColor = hasColors ? colors.first : NexGenPalette.cyan;
 
-    // Limit to maximum 4 representative colors
-    final displayColors = hasColors
-        ? (colors.length <= 4 ? colors : colors.sublist(0, 4))
-        : <Color>[];
+    // Determine on/off dot pattern from architectural metadata
+    final grouping = node.metadata?['grouping'] as int?;
+    final spacing = node.metadata?['spacing'] as int?;
+    final hasSpacing = grouping != null && spacing != null;
 
     return Material(
       color: Colors.transparent,
@@ -592,7 +683,7 @@ class LibraryNodeCard extends StatelessWidget {
             'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
           });
         },
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         splashColor: primaryColor.withValues(alpha: 0.08),
         highlightColor: primaryColor.withValues(alpha: 0.04),
         child: Container(
@@ -606,44 +697,57 @@ class LibraryNodeCard extends StatelessWidget {
                 NexGenPalette.matteBlack,
               ],
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: primaryColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Row(
               children: [
-                // Color dots (1-4 max) with subtle glow
-                if (displayColors.isNotEmpty) ...[
+                // LED dot preview — 8 dots showing the on/off pattern
+                if (hasSpacing) ...[
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(8, (i) {
+                      final cycle = grouping + spacing;
+                      final lit = cycle == 0 || spacing == 0 || (i % cycle) < grouping;
+                      return Container(
+                        width: 8,
+                        height: 8,
+                        margin: EdgeInsets.only(right: i < 7 ? 3 : 0),
+                        decoration: BoxDecoration(
+                          color: lit
+                              ? primaryColor
+                              : primaryColor.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(width: 10),
+                ] else if (hasColors) ...[
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      for (var i = 0; i < displayColors.length; i++)
+                      for (var i = 0; i < (colors.length <= 4 ? colors.length : 4); i++)
                         Container(
-                          width: 10,
-                          height: 10,
-                          margin: EdgeInsets.only(right: i < displayColors.length - 1 ? 4 : 0),
+                          width: 8,
+                          height: 8,
+                          margin: EdgeInsets.only(right: i < 3 ? 3 : 0),
                           decoration: BoxDecoration(
-                            color: displayColors[i],
+                            color: colors[i],
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: displayColors[i].withValues(alpha: 0.6),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ],
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                 ] else ...[
-                  const Icon(Icons.palette_outlined, color: Colors.white24, size: 16),
-                  const SizedBox(width: 12),
+                  const Icon(Icons.palette_outlined, color: Colors.white24, size: 14),
+                  const SizedBox(width: 10),
                 ],
                 // Palette name
                 Expanded(
@@ -651,7 +755,7 @@ class LibraryNodeCard extends StatelessWidget {
                     node.name,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
                     maxLines: 1,

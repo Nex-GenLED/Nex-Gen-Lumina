@@ -921,7 +921,8 @@ class PatternRepository {
         }
       }
 
-      // Brightness Gradients folder — sibling to the spacing patterns above
+      // Brightness Gradients folder — appears first (sortOrder -1) before
+      // "All On" and the spacing patterns.
       final gradientsFolderId = 'arch_${style.id}_gradients';
       nodes.add(LibraryNode(
         id: gradientsFolderId,
@@ -930,7 +931,7 @@ class PatternRepository {
         nodeType: LibraryNodeType.folder,
         parentId: 'arch_${style.id}',
         themeColors: style.colors,
-        sortOrder: patternIndex,
+        sortOrder: -1,
       ));
 
       // Add gradient preset patterns inside the folder

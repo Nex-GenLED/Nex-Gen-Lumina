@@ -742,12 +742,16 @@ class _ColorwayEffectSelectorPageState
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   return AnimatedRooflineOverlay(
-                    previewColors: _paletteColors,
+                    previewColors: _isBrightnessGradient
+                        ? _gradientColorsForPreset(ref.watch(selectorGradientPresetProvider))
+                        : _paletteColors,
                     previewEffectId: effectId,
                     previewSpeed: speed,
                     forceOn: true,
                     targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
                     useBoxFitCover: true,
+                    colorGroupSize: ref.watch(selectorColorGroupProvider),
+                    spacing: ref.watch(selectorSpacingProvider),
                   );
                 },
               ),
@@ -1042,16 +1046,25 @@ class _ColorwayEffectSelectorPageState
   Widget _buildColorLayoutPreview(int colorGroup) {
     final colors = _paletteColors.take(3).toList();
     if (colors.isEmpty) colors.add(Colors.white);
+    final spc = ref.watch(selectorSpacingProvider);
+    final cycle = colorGroup + spc;
 
     final dots = <Widget>[];
     for (int i = 0; i < 18; i++) {
-      final colorIndex = (i ~/ colorGroup) % colors.length;
+      final bool lit = spc == 0 || cycle == 0 || (i % cycle) < colorGroup;
+      final Color dotColor;
+      if (lit) {
+        final colorIndex = (i ~/ colorGroup) % colors.length;
+        dotColor = colors[colorIndex];
+      } else {
+        dotColor = colors.first.withValues(alpha: 0.10);
+      }
       dots.add(Container(
         width: 14,
         height: 14,
         margin: const EdgeInsets.only(right: 2),
         decoration: BoxDecoration(
-          color: colors[colorIndex],
+          color: dotColor,
           shape: BoxShape.circle,
           border: Border.all(
             color: NexGenPalette.line,

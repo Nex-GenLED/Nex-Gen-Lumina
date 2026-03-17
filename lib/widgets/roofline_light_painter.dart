@@ -42,6 +42,10 @@ class RooflineLightPainter extends CustomPainter {
   /// With colorGroupSize=2 and 3 colors: AABBCCAABBCC...
   final int colorGroupSize;
 
+  /// Number of dark (off) LEDs after each lit group.
+  /// With colorGroupSize=1 and spacing=2: ● ○ ○ ● ○ ○ ...
+  final int spacing;
+
   RooflineLightPainter({
     required this.colors,
     this.animationPhase = 0.0,
@@ -57,6 +61,7 @@ class RooflineLightPainter extends CustomPainter {
     this.useBoxFitCover = false,
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 
   @override
@@ -319,7 +324,9 @@ class RooflineLightPainter extends CustomPainter {
   /// Paint solid color along the roofline path - every pixel is color1.
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final color = colors.first;
+    final cycle = colorGroupSize + spacing;
     for (int i = 0; i < positions.length; i++) {
+      if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
       _drawLedDot(canvas, positions[i], color, brightness);
     }
   }
@@ -330,8 +337,10 @@ class RooflineLightPainter extends CustomPainter {
     final breatheIntensity = 0.3 + (breathePhase + 1) / 2 * 0.7;
     final effectiveBrightness = brightness * breatheIntensity;
     final color = colors.first;
+    final cycle = colorGroupSize + spacing;
 
     for (int i = 0; i < positions.length; i++) {
+      if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
       _drawLedDot(canvas, positions[i], color, effectiveBrightness);
     }
   }
@@ -628,6 +637,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.imageAlignment != imageAlignment ||
         oldDelegate.useBoxFitCover != useBoxFitCover ||
         oldDelegate.backgroundColor != backgroundColor ||
-        oldDelegate.colorGroupSize != colorGroupSize;
+        oldDelegate.colorGroupSize != colorGroupSize ||
+        oldDelegate.spacing != spacing;
   }
 }
