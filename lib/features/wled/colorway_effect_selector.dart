@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
@@ -45,12 +46,30 @@ class _ColorwayEffectSelectorPageState
   @override
   void initState() {
     super.initState();
-    // Initialize selector state with defaults
+    // Initialize selector state from palette metadata (architectural patterns
+    // store grouping/spacing here) or fall back to defaults.
+    final meta = widget.paletteNode.metadata;
+    final initGrouping = (meta?['grouping'] as int?) ?? (meta?['bandWidth'] as int?) ?? 1;
+    final initSpacing = (meta?['spacing'] as int?) ?? 0;
+    final isBrGradient = meta?['type'] == 'brightness_gradient';
+    // Resolve initial gradient preset index from node ID suffix
+    int initPreset = 0;
+    if (isBrGradient) {
+      final nodeId = widget.paletteNode.id;
+      final suffix = nodeId.contains('_gradients_') ? nodeId.split('_gradients_').last : '';
+      final presets = PatternRepository.brightnessGradientPresets;
+      for (var pi = 0; pi < presets.length; pi++) {
+        if (presets[pi].id == suffix) { initPreset = pi; break; }
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(selectorEffectIdProvider.notifier).state = 0;
       ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state = 128;
-      ref.read(selectorColorGroupProvider.notifier).state = 1;
+      ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
+      ref.read(selectorSpacingProvider.notifier).state = initSpacing;
+      ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
+      ref.read(selectorBreathingProvider.notifier).state = false;
       ref.read(selectorMotionTypeProvider.notifier).state = null;
       ref.read(selectorColorBehaviorProvider.notifier).state = null;
     });
@@ -62,35 +81,75 @@ class _ColorwayEffectSelectorPageState
     super.dispose();
   }
 
+  /// Whether this palette node carries architectural spacing metadata.
+  bool get _isArchitectural =>
+      widget.paletteNode.metadata?['grouping'] != null &&
+      widget.paletteNode.metadata?['spacing'] != null;
+
+  /// Whether this palette node is a brightness gradient pattern.
+  bool get _isBrightnessGradient =>
+      widget.paletteNode.metadata?['type'] == 'brightness_gradient';
+
+  /// Compute gradient colors from the base (100%) color and preset steps.
+  List<Color> _gradientColorsForPreset(int presetIndex) {
+    final presets = PatternRepository.brightnessGradientPresets;
+    final preset = presets[presetIndex.clamp(0, presets.length - 1)];
+    final baseColor = widget.paletteNode.themeColors!.first;
+    final r = (baseColor.r * 255).round();
+    final g = (baseColor.g * 255).round();
+    final b = (baseColor.b * 255).round();
+    return preset.steps
+        .map((pct) => Color.fromARGB(
+              255,
+              (r * pct).round().clamp(0, 255),
+              (g * pct).round().clamp(0, 255),
+              (b * pct).round().clamp(0, 255),
+            ))
+        .toList();
+  }
+
   /// Returns the effective WLED effect ID. When effect 0 (Solid) is selected
   /// with multiple palette colors, substitutes effect 83 (Solid Pattern)
   /// which distributes colors in repeating blocks using `grp`.
+  /// Architectural patterns keep effect 0 — their spacing comes from grp/spc,
+  /// not from multi-color distribution.
   int _effectiveEffectId(int selectedId) {
-    if (selectedId == 0 && _paletteColors.length > 1) return 83;
+    if (selectedId == 0 && _paletteColors.length > 1 && !_isArchitectural) return 83;
     return selectedId;
   }
 
   void _sendToWled() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 150), () async {
-      final effectId = ref.read(selectorEffectIdProvider);
-      final speed = ref.read(selectorSpeedProvider);
-      final intensity = ref.read(selectorIntensityProvider);
-      final colorGroup = ref.read(selectorColorGroupProvider);
       final demoMode = ref.read(demoModeProvider);
-
       if (demoMode) return;
 
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
 
-      // Build WLED payload
-      final cols = _paletteColors
-          .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-          .toList();
-      if (cols.isEmpty) {
-        cols.add(rgbToRgbw(255, 255, 255));
+      final colorGroup = ref.read(selectorColorGroupProvider);
+      final spacing = ref.read(selectorSpacingProvider);
+
+      // For brightness gradients, derive colors and effect from gradient state
+      final List<List<int>> cols;
+      final int fxId;
+      final int speed;
+      if (_isBrightnessGradient) {
+        final presetIdx = ref.read(selectorGradientPresetProvider);
+        final breathing = ref.read(selectorBreathingProvider);
+        final gradColors = _gradientColorsForPreset(presetIdx);
+        cols = PatternRepository.colorsToWledCol(gradColors);
+        fxId = breathing ? 2 : 83;
+        speed = breathing ? 100 : 0;
+      } else {
+        final effectId = ref.read(selectorEffectIdProvider);
+        cols = _paletteColors
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+            .toList();
+        if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+        fxId = _effectiveEffectId(effectId);
+        speed = ref.read(selectorSpeedProvider);
       }
 
       var payload = <String, dynamic>{
@@ -98,11 +157,12 @@ class _ColorwayEffectSelectorPageState
         'bri': 255,
         'seg': [
           {
-            'fx': _effectiveEffectId(effectId),
+            'fx': fxId,
             'sx': speed,
-            'ix': intensity,
+            'ix': ref.read(selectorIntensityProvider),
             'pal': 5, // "Colors Only" palette
             'grp': colorGroup,
+            'spc': spacing,
             'col': cols,
           }
         ]
@@ -117,12 +177,30 @@ class _ColorwayEffectSelectorPageState
   }
 
   Future<void> _applyPattern() async {
-    final effectId = ref.read(selectorEffectIdProvider);
-    final speed = ref.read(selectorSpeedProvider);
-    final intensity = ref.read(selectorIntensityProvider);
     final colorGroup = ref.read(selectorColorGroupProvider);
+    final spacing = ref.read(selectorSpacingProvider);
+    final intensity = ref.read(selectorIntensityProvider);
 
-    final effectName = WledEffectsCatalog.getName(effectId);
+    // Resolve effect, speed, and colors depending on pattern type
+    final int fxId;
+    final int speed;
+    final List<Color> previewColors;
+    final String effectName;
+    if (_isBrightnessGradient) {
+      final breathing = ref.read(selectorBreathingProvider);
+      final presetIdx = ref.read(selectorGradientPresetProvider);
+      previewColors = _gradientColorsForPreset(presetIdx);
+      fxId = breathing ? 2 : 83;
+      speed = breathing ? 100 : 0;
+      effectName = breathing ? 'Breathing' : 'Static';
+    } else {
+      final effectId = ref.read(selectorEffectIdProvider);
+      previewColors = _paletteColors;
+      fxId = _effectiveEffectId(effectId);
+      speed = ref.read(selectorSpeedProvider);
+      effectName = WledEffectsCatalog.getName(effectId);
+    }
+
     final notifier = ref.read(wledStateProvider.notifier);
     final currentState = ref.read(wledStateProvider);
     bool appliedToDevice = false;
@@ -130,12 +208,16 @@ class _ColorwayEffectSelectorPageState
     // Try to send to device
     final repo = ref.read(wledRepositoryProvider);
     if (repo != null) {
-      final cols = _paletteColors
-          .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-          .toList();
-      if (cols.isEmpty) {
-        cols.add(rgbToRgbw(255, 255, 255));
+      final List<List<int>> cols;
+      if (_isBrightnessGradient) {
+        cols = PatternRepository.colorsToWledCol(previewColors);
+      } else {
+        final raw = previewColors
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+            .toList();
+        if (raw.isEmpty) raw.add(rgbToRgbw(255, 255, 255));
+        cols = raw;
       }
 
       var payload = <String, dynamic>{
@@ -143,11 +225,12 @@ class _ColorwayEffectSelectorPageState
         'bri': 255,
         'seg': [
           {
-            'fx': _effectiveEffectId(effectId),
+            'fx': fxId,
             'sx': speed,
             'ix': intensity,
             'pal': 5,
             'grp': colorGroup,
+            'spc': spacing,
             'col': cols,
           }
         ]
@@ -155,15 +238,11 @@ class _ColorwayEffectSelectorPageState
 
       // Apply channel filter so all targeted segments receive the pattern
       final channels = ref.read(effectiveChannelIdsProvider);
-      debugPrint('🎯 Apply pattern: effectiveChannels=$channels');
       if (channels.isNotEmpty) {
         payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      } else {
-        debugPrint('⚠️ Apply pattern: No channels found — payload goes to default segment only');
       }
 
       try {
-        debugPrint('📤 Apply pattern payload: $payload');
         await repo.applyJson(payload);
         appliedToDevice = currentState.connected;
       } catch (e) {
@@ -173,8 +252,8 @@ class _ColorwayEffectSelectorPageState
 
     // Always update local preview state so roofline shows on house image
     notifier.applyLocalPreview(
-      colors: _paletteColors,
-      effectId: effectId,
+      colors: previewColors,
+      effectId: fxId,
       speed: speed,
       intensity: intensity,
       effectName: '${widget.paletteNode.name} - $effectName',
@@ -207,16 +286,25 @@ class _ColorwayEffectSelectorPageState
     final motionFilter = ref.watch(selectorMotionTypeProvider);
     final colorFilter = ref.watch(selectorColorBehaviorProvider);
 
-    final effect = WledEffectsCatalog.getById(effectId);
-    // Show color layout when the effect natively supports it, OR when
-    // Solid (effect 0) is selected with multiple palette colors — the user
-    // needs to choose how colors are distributed (we'll use Solid Pattern
-    // under the hood to make it work).
-    final hasMultipleColors = _paletteColors.length > 1;
-    final showColorLayout =
-        (effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors);
+    // For brightness gradient patterns, derive preview colors from the active preset
+    final gradientPresetIdx = ref.watch(selectorGradientPresetProvider);
+    final breathing = ref.watch(selectorBreathingProvider);
+    final gradientPreviewColors = _isBrightnessGradient
+        ? _gradientColorsForPreset(gradientPresetIdx)
+        : _paletteColors;
+    final gradientPreviewFx = _isBrightnessGradient
+        ? (breathing ? 2 : 83)
+        : effectId;
+    final gradientPreviewSpeed = _isBrightnessGradient
+        ? (breathing ? 100 : 0)
+        : speed;
 
-    // Build filtered effect list
+    final effect = WledEffectsCatalog.getById(effectId);
+    final hasMultipleColors = _paletteColors.length > 1;
+    final showColorLayout = !_isBrightnessGradient &&
+        ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
+
+    // Build filtered effect list (only used for non-gradient patterns)
     final bool showingTopPicks = motionFilter == null && colorFilter == null;
     final List<WledEffect> displayEffects = showingTopPicks
         ? WledEffectsCatalog.topPicks
@@ -225,8 +313,6 @@ class _ColorwayEffectSelectorPageState
             colorBehavior: colorFilter,
           );
 
-    // This widget is embedded in the library browser, so no Scaffold needed.
-    // Use CustomScrollView so the entire page scrolls (preview, sliders, effects).
     return CustomScrollView(
       slivers: [
         // Channel/Area selector
@@ -247,7 +333,7 @@ class _ColorwayEffectSelectorPageState
                 Expanded(
                   child: Row(
                     children: [
-                      for (final color in _paletteColors.take(3))
+                      for (final color in gradientPreviewColors.take(3))
                         Container(
                           width: 24,
                           height: 24,
@@ -261,32 +347,33 @@ class _ColorwayEffectSelectorPageState
                     ],
                   ),
                 ),
-                // Open in full pattern editor
-                SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: IconButton(
-                    onPressed: () {
-                      final effectId = ref.read(selectorEffectIdProvider);
-                      final speed = ref.read(selectorSpeedProvider);
-                      final intensity = ref.read(selectorIntensityProvider);
-                      final pattern = EditablePattern.fromGradientColors(
-                        id: widget.paletteNode.id,
-                        name: widget.paletteNode.name,
-                        colors: _paletteColors,
-                        effectId: effectId,
-                        speed: speed,
-                        intensity: intensity,
-                      );
-                      context.push(AppRoutes.editPattern, extra: pattern);
-                    },
-                    icon: const Icon(Icons.tune, size: 22),
-                    tooltip: 'Open in Pattern Editor',
-                    style: IconButton.styleFrom(
-                      foregroundColor: NexGenPalette.textMedium,
+                // Open in full pattern editor (not applicable for gradients)
+                if (!_isBrightnessGradient)
+                  SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: IconButton(
+                      onPressed: () {
+                        final effectId = ref.read(selectorEffectIdProvider);
+                        final speed = ref.read(selectorSpeedProvider);
+                        final intensity = ref.read(selectorIntensityProvider);
+                        final pattern = EditablePattern.fromGradientColors(
+                          id: widget.paletteNode.id,
+                          name: widget.paletteNode.name,
+                          colors: _paletteColors,
+                          effectId: effectId,
+                          speed: speed,
+                          intensity: intensity,
+                        );
+                        context.push(AppRoutes.editPattern, extra: pattern);
+                      },
+                      icon: const Icon(Icons.tune, size: 22),
+                      tooltip: 'Open in Pattern Editor',
+                      style: IconButton.styleFrom(
+                        foregroundColor: NexGenPalette.textMedium,
+                      ),
                     ),
                   ),
-                ),
                 // Apply button
                 ElevatedButton.icon(
                   onPressed: _applyPattern,
@@ -305,103 +392,298 @@ class _ColorwayEffectSelectorPageState
           ),
         ),
 
-        // Roofline preview (house image + LED pixel overlay)
-        SliverToBoxAdapter(child: _buildRooflinePreview(effectId, speed)),
+        // Roofline preview
+        SliverToBoxAdapter(child: _buildRooflinePreview(gradientPreviewFx, gradientPreviewSpeed)),
 
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-        // Color layout selector (conditional)
-        if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+        // ---- Brightness Gradient controls ----
+        if (_isBrightnessGradient) ...[
+          SliverToBoxAdapter(child: _buildGradientPresetSelector(gradientPresetIdx)),
+          const SliverToBoxAdapter(child: SizedBox(height: 4)),
+          SliverToBoxAdapter(child: _buildBandWidthSelector(colorGroup)),
+          const SliverToBoxAdapter(child: SizedBox(height: 4)),
+          SliverToBoxAdapter(child: _buildBreathingToggle(breathing)),
+          SliverPadding(padding: EdgeInsets.only(bottom: navBarTotalHeight(context))),
+        ],
 
-        // Speed slider (per-effect profile with non-linear curve)
-        SliverToBoxAdapter(
-          child: EffectSpeedSlider(
-            rawSpeed: speed,
-            effectId: effectId,
-            onChanged: (raw) {
-              ref.read(selectorSpeedProvider.notifier).state = raw;
-              _sendToWled();
-            },
+        // ---- Standard effect controls ----
+        if (!_isBrightnessGradient) ...[
+          // Color layout selector (conditional)
+          if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+
+          // Speed slider
+          SliverToBoxAdapter(
+            child: EffectSpeedSlider(
+              rawSpeed: speed,
+              effectId: effectId,
+              onChanged: (raw) {
+                ref.read(selectorSpeedProvider.notifier).state = raw;
+                _sendToWled();
+              },
+            ),
           ),
-        ),
 
-        // Intensity slider
-        SliverToBoxAdapter(
-          child: _buildSlider(
-            label: 'Intensity',
-            value: intensity,
-            onChanged: (v) {
-              ref.read(selectorIntensityProvider.notifier).state = v.round();
-              _sendToWled();
-            },
+          // Intensity slider
+          SliverToBoxAdapter(
+            child: _buildSlider(
+              label: 'Intensity',
+              value: intensity,
+              onChanged: (v) {
+                ref.read(selectorIntensityProvider.notifier).state = v.round();
+                _sendToWled();
+              },
+            ),
           ),
-        ),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-        // Motion type filter chips
-        SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+          // Motion type filter chips
+          SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 6)),
+          const SliverToBoxAdapter(child: SizedBox(height: 6)),
 
-        // Color behavior filter chips
-        SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+          // Color behavior filter chips
+          SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-        // Section header
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Text(
-                  showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
-                  style: TextStyle(
-                    color: NexGenPalette.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-                if (!showingTopPicks) ...[
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () {
-                      ref.read(selectorMotionTypeProvider.notifier).state = null;
-                      ref.read(selectorColorBehaviorProvider.notifier).state = null;
-                    },
-                    child: Text(
-                      'Clear filters',
-                      style: TextStyle(
-                        color: NexGenPalette.cyan,
-                        fontSize: 11,
-                      ),
+          // Section header
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Text(
+                    showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
+                    style: TextStyle(
+                      color: NexGenPalette.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
                     ),
                   ),
+                  if (!showingTopPicks) ...[
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        ref.read(selectorMotionTypeProvider.notifier).state = null;
+                        ref.read(selectorColorBehaviorProvider.notifier).state = null;
+                      },
+                      child: Text(
+                        'Clear filters',
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 6)),
+          const SliverToBoxAdapter(child: SizedBox(height: 6)),
 
-        // Effect list
-        SliverPadding(
-          padding: EdgeInsets.only(left: 16, right: 16, bottom: navBarTotalHeight(context)),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final effect = displayEffects[index];
-                final isSelected = effect.id == effectId;
-                return _buildEffectTile(effect, isSelected);
-              },
-              childCount: displayEffects.length,
+          // Effect list
+          SliverPadding(
+            padding: EdgeInsets.only(left: 16, right: 16, bottom: navBarTotalHeight(context)),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final effect = displayEffects[index];
+                  final isSelected = effect.id == effectId;
+                  return _buildEffectTile(effect, isSelected);
+                },
+                childCount: displayEffects.length,
+              ),
             ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Brightness Gradient Controls
+  // ---------------------------------------------------------------------------
+
+  /// CONTROL 1 — Gradient Preset Selector (horizontal pill chips)
+  Widget _buildGradientPresetSelector(int activeIndex) {
+    final presets = PatternRepository.brightnessGradientPresets;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Brightness Pattern',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: List.generate(presets.length, (i) {
+              final preset = presets[i];
+              final isSelected = i == activeIndex;
+              return GestureDetector(
+                onTap: () {
+                  ref.read(selectorGradientPresetProvider.notifier).state = i;
+                  _sendToWled();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                        : NexGenPalette.gunmetal,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    preset.name,
+                    style: TextStyle(
+                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 8),
+          // LED dot preview showing the brightness gradient pattern
+          _buildGradientDotPreview(activeIndex, ref.watch(selectorColorGroupProvider)),
+        ],
+      ),
+    );
+  }
+
+  /// Shows a row of LED dots at varying brightness levels for the active preset.
+  Widget _buildGradientDotPreview(int presetIndex, int bandWidth) {
+    final colors = _gradientColorsForPreset(presetIndex);
+    final dots = <Widget>[];
+    for (int i = 0; i < 18; i++) {
+      final colorIdx = (i ~/ bandWidth) % colors.length;
+      dots.add(Container(
+        width: 14,
+        height: 14,
+        margin: const EdgeInsets.only(right: 2),
+        decoration: BoxDecoration(
+          color: colors[colorIdx],
+          shape: BoxShape.circle,
+          border: Border.all(color: NexGenPalette.line, width: 0.5),
+        ),
+      ));
+    }
+    return Row(
+      children: [
+        Text('Pattern:', style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 11)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: dots),
           ),
         ),
       ],
+    );
+  }
+
+  /// CONTROL 2 — Band Width Selector (1 LED or 2 LED per brightness step)
+  Widget _buildBandWidthSelector(int activeBandWidth) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'LEDs per Step',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
+          ),
+          const Spacer(),
+          for (final bw in [1, 2]) ...[
+            if (bw == 2) const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                ref.read(selectorColorGroupProvider.notifier).state = bw;
+                _sendToWled();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: activeBandWidth == bw
+                      ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                      : NexGenPalette.gunmetal,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.line,
+                    width: activeBandWidth == bw ? 2 : 1,
+                  ),
+                ),
+                child: Text(
+                  '$bw LED',
+                  style: TextStyle(
+                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                    fontSize: 13,
+                    fontWeight: activeBandWidth == bw ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// CONTROL 3 — Breathing Toggle
+  Widget _buildBreathingToggle(bool isBreathing) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'Breathing',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 13),
+          ),
+          const Spacer(),
+          Switch(
+            value: isBreathing,
+            onChanged: (v) {
+              ref.read(selectorBreathingProvider.notifier).state = v;
+              _sendToWled();
+            },
+            activeThumbColor: NexGenPalette.cyan,
+            activeTrackColor: NexGenPalette.cyan.withValues(alpha: 0.3),
+            inactiveThumbColor: NexGenPalette.textSecondary,
+            inactiveTrackColor: NexGenPalette.gunmetal,
+          ),
+        ],
+      ),
     );
   }
 

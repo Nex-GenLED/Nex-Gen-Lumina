@@ -584,6 +584,15 @@ final selectorIntensityProvider = StateProvider<int>((ref) => 128);
 /// Color layout (LEDs per color, 1-5) in the effect selector.
 final selectorColorGroupProvider = StateProvider<int>((ref) => 1);
 
+/// Spacing (dark LEDs between lit groups, 0-4) in the effect selector.
+final selectorSpacingProvider = StateProvider<int>((ref) => 0);
+
+/// Active gradient preset index for brightness gradient patterns.
+final selectorGradientPresetProvider = StateProvider<int>((ref) => 0);
+
+/// Breathing toggle for brightness gradient patterns.
+final selectorBreathingProvider = StateProvider<bool>((ref) => false);
+
 /// Which mood categories are expanded in the effect list.
 final selectorExpandedMoodsProvider = StateProvider<Set<SelectorMood>>((ref) => {SelectorMood.calm});
 

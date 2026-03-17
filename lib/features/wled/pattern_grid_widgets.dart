@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
@@ -221,9 +222,16 @@ class LibraryNodeCard extends StatelessWidget {
     // NCAA parent folder colors
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const Color(0xFF1A237E);
 
-    // Architectural Kelvin folders -- use the node's own theme color
+    // Architectural Kelvin folders -- use the warm end of the node's theme
+    // but enforce a minimum saturation so higher-K folders stay visible.
     if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.isNotEmpty) {
-      return node.themeColors!.first;
+      final c = node.themeColors!.first;
+      final hsl = HSLColor.fromColor(c);
+      if (hsl.saturation < 0.35) {
+        // Cool/daylight whites are too desaturated — boost saturation
+        return hsl.withSaturation(0.55).withLightness(hsl.lightness.clamp(0, 0.7)).toColor();
+      }
+      return c;
     }
 
     // Inherit color from parentId when direct ID doesn't match
@@ -347,9 +355,17 @@ class LibraryNodeCard extends StatelessWidget {
     if (id.startsWith('ncaabb_')) return const [Color(0xFFFF8F00), Color(0xFFE65100)];
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const [Color(0xFF3949AB), Color(0xFF1A237E)];
 
-    // Architectural Kelvin folders -- use the node's own theme colors
+    // Architectural Kelvin folders -- use the node's own theme colors but
+    // boost saturation for higher-K temperatures so the card gradient is visible.
     if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.length >= 2) {
-      return [node.themeColors![0], node.themeColors![1]];
+      Color boost(Color c) {
+        final hsl = HSLColor.fromColor(c);
+        if (hsl.saturation < 0.35) {
+          return hsl.withSaturation(0.50).withLightness(hsl.lightness.clamp(0, 0.75)).toColor();
+        }
+        return c;
+      }
+      return [boost(node.themeColors![0]), boost(node.themeColors![1])];
     }
 
     // Inherit gradient from parentId when direct ID doesn't match
@@ -1117,10 +1133,31 @@ class PatternCard extends ConsumerWidget {
     return 0;
   }
 
+  /// Check if this pattern is a brightness gradient and extract its colors.
+  List<Color>? _getGradientColors() {
+    final meta = pattern.wledPayload['_gradientMeta'];
+    if (meta is! Map || meta['isGradient'] != true) return null;
+    // Gradient colors are stored in themeColors on the PatternItem's payload col
+    // Reconstruct from the payload col (RGBW) back to display colors — or use
+    // the theme colors directly since they're already Flutter Colors.
+    return _getColors();
+  }
+
+  int _getGradientBandWidth() {
+    try {
+      final seg = pattern.wledPayload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        return (seg.first['grp'] as int?) ?? 1;
+      }
+    } catch (_) {}
+    return 1;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = _getColors();
     final effectId = _getEffectId();
+    final gradientColors = _getGradientColors();
 
     return GestureDetector(
       onTap: () async {
@@ -1138,11 +1175,17 @@ class PatternCard extends ConsumerWidget {
             // Animated effect preview - more prominent for compact cards
             Expanded(
               flex: 3,
-              child: EffectPreviewWidget(
-                effectId: effectId,
-                colors: colors,
-                borderRadius: 10,
-              ),
+              child: gradientColors != null
+                  ? _GradientDotPreview(
+                      gradientColors: gradientColors,
+                      bandWidth: _getGradientBandWidth(),
+                      borderRadius: 10,
+                    )
+                  : EffectPreviewWidget(
+                      effectId: effectId,
+                      colors: colors,
+                      borderRadius: 10,
+                    ),
             ),
             // Pattern info - compact for 4-column layout
             Padding(
@@ -1304,6 +1347,9 @@ class PatternCard extends ConsumerWidget {
       }
     }
 
+    // Detect brightness gradient patterns
+    final gradientMeta = payload['_gradientMeta'] as Map<String, dynamic>?;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1316,6 +1362,7 @@ class PatternCard extends ConsumerWidget {
         grouping: grouping,
         spacing: spacing,
         colors: colors,
+        gradientMeta: gradientMeta,
       ),
     );
   }
@@ -1331,6 +1378,10 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
   final int spacing;
   final List<Color> colors;
 
+  /// Non-null when the pattern is a brightness gradient.
+  /// Contains 'isGradient', 'presetId', 'baseColorValue'.
+  final Map<String, dynamic>? gradientMeta;
+
   const _PatternAdjustmentBottomSheet({
     required this.patternName,
     required this.effectId,
@@ -1339,6 +1390,7 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
     required this.grouping,
     required this.spacing,
     required this.colors,
+    this.gradientMeta,
   });
 
   @override
@@ -1354,6 +1406,13 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   late bool _reverse;
   Timer? _debounce;
 
+  // Brightness gradient state
+  late bool _isGradient;
+  String _gradientPresetId = 'gentle';
+  int _bandWidth = 1;
+  bool _breathing = false;
+  Color _gradientBaseColor = Colors.white;
+
   @override
   void initState() {
     super.initState();
@@ -1363,6 +1422,16 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _spacing = widget.spacing;
     _effectId = widget.effectId;
     _reverse = false;
+
+    // Initialise gradient state from metadata
+    final gm = widget.gradientMeta;
+    _isGradient = gm?['isGradient'] == true;
+    if (_isGradient) {
+      _gradientPresetId = (gm?['presetId'] as String?) ?? 'gentle';
+      _bandWidth = widget.grouping; // bandWidth was stored as grp
+      _breathing = _effectId == 2; // fx 2 = Breathe
+      _gradientBaseColor = Color(gm?['baseColorValue'] as int? ?? 0xFFFFFFFF);
+    }
   }
 
   @override
@@ -1384,9 +1453,53 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     });
   }
 
+  /// Recompute gradient colors from the current preset + base color and
+  /// send the full segment payload (col + fx + grp) to the device.
+  void _applyGradientChange() {
+    // Find the selected preset's brightness steps
+    final presets = PatternRepository.brightnessGradientPresets;
+    final preset = presets.firstWhere(
+      (p) => p.id == _gradientPresetId,
+      orElse: () => presets.first,
+    );
+
+    final r = _gradientBaseColor.red;
+    final g = _gradientBaseColor.green;
+    final b = _gradientBaseColor.blue;
+
+    final gradientColors = preset.steps
+        .map((pct) => Color.fromARGB(
+              255,
+              (r * pct).round(),
+              (g * pct).round(),
+              (b * pct).round(),
+            ))
+        .toList();
+
+    final col = PatternRepository.colorsToWledCol(gradientColors);
+    final fx = _breathing ? 2 : 83;
+    final sx = _breathing ? 100 : 0;
+
+    setState(() {
+      _effectId = fx;
+      _speed = sx;
+      _grouping = _bandWidth;
+    });
+
+    _applyChange({
+      'fx': fx,
+      'col': col,
+      'grp': _bandWidth,
+      'spc': 0,
+      'sx': sx,
+      'pal': 5,
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isStatic = _effectId == 0;
+    // Solid (0) and non-breathing gradients (83) are static — hide speed/direction controls
+    final isStatic = _effectId == 0 || (_isGradient && !_breathing);
 
     return Container(
       decoration: BoxDecoration(
@@ -1470,6 +1583,99 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 ],
               ),
               const SizedBox(height: 20),
+
+              // ── Brightness Gradient controls ──
+              if (_isGradient) ...[
+                // CONTROL 1 — Gradient Preset Selector
+                Row(
+                  children: [
+                    const Icon(Icons.gradient, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Gradient', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 34,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: PatternRepository.brightnessGradientPresets.map((preset) {
+                      final selected = preset.id == _gradientPresetId;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(
+                            preset.name,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: selected ? Colors.black : Colors.white70,
+                            ),
+                          ),
+                          selected: selected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.gunmetal90,
+                          side: BorderSide(
+                            color: selected ? NexGenPalette.cyan : NexGenPalette.line,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onSelected: (_) {
+                            setState(() => _gradientPresetId = preset.id);
+                            _applyGradientChange();
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // CONTROL 2 — Band Width Selector
+                Row(
+                  children: [
+                    const Icon(Icons.view_column, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('Band Width', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(value: 1, label: Text('1 LED', style: TextStyle(fontSize: 12))),
+                        ButtonSegment(value: 2, label: Text('2 LED', style: TextStyle(fontSize: 12))),
+                      ],
+                      selected: {_bandWidth},
+                      onSelectionChanged: (s) {
+                        setState(() => _bandWidth = s.first);
+                        _applyGradientChange();
+                      },
+                      style: ButtonStyle(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // CONTROL 3 — Breathing Toggle
+                Row(
+                  children: [
+                    const Icon(Icons.air, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('Breathing', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    Switch(
+                      value: _breathing,
+                      activeColor: NexGenPalette.cyan,
+                      onChanged: (v) {
+                        setState(() => _breathing = v);
+                        _applyGradientChange();
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Speed slider with per-effect profile (hide for static effects)
               if (!isStatic) ...[
                 EffectSpeedSlider(
@@ -1524,49 +1730,55 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 ),
                 const SizedBox(height: 16),
               ],
-              // Pixel layout section
-              Row(
-                children: [
-                  const Icon(Icons.grid_view, color: NexGenPalette.cyan, size: 20),
-                  const SizedBox(width: 8),
-                  Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Grouping slider
-              _buildSliderRow(
-                icon: Icons.blur_on,
-                label: 'Grouping',
-                value: _grouping.toDouble(),
-                min: 1,
-                max: 10,
-                divisions: 9,
-                onChanged: (v) {
-                  setState(() => _grouping = v.round());
-                  _applyChange({'grp': _grouping});
-                },
-              ),
-              const SizedBox(height: 8),
-              // Spacing slider
-              _buildSliderRow(
-                icon: Icons.space_bar,
-                label: 'Spacing',
-                value: _spacing.toDouble(),
-                min: 0,
-                max: 10,
-                divisions: 10,
-                onChanged: (v) {
-                  setState(() => _spacing = v.round());
-                  _applyChange({'spc': _spacing});
-                },
-              ),
-              const SizedBox(height: 16),
+              // Pixel layout section (hidden for gradient patterns — band width replaces it)
+              if (!_hidePixelLayout) ...[
+                Row(
+                  children: [
+                    const Icon(Icons.grid_view, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Grouping slider
+                _buildSliderRow(
+                  icon: Icons.blur_on,
+                  label: 'Grouping',
+                  value: _grouping.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  onChanged: (v) {
+                    setState(() => _grouping = v.round());
+                    _applyChange({'grp': _grouping});
+                  },
+                ),
+                const SizedBox(height: 8),
+                // Spacing slider
+                _buildSliderRow(
+                  icon: Icons.space_bar,
+                  label: 'Spacing',
+                  value: _spacing.toDouble(),
+                  min: 0,
+                  max: 10,
+                  divisions: 10,
+                  onChanged: (v) {
+                    setState(() => _spacing = v.round());
+                    _applyChange({'spc': _spacing});
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+
+  // Hide generic grouping/spacing sliders for gradient patterns — those are
+  // controlled by the dedicated Band Width selector above.
+  bool get _hidePixelLayout => _isGradient;
 
   Widget _buildSliderRow({
     required IconData icon,
@@ -1605,4 +1817,108 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
       ],
     );
   }
+}
+
+/// Pixel-dot preview that simulates a brightness gradient on a miniature LED strip.
+/// Each dot's color is determined by cycling through [gradientColors] at [bandWidth].
+class _GradientDotPreview extends StatelessWidget {
+  final List<Color> gradientColors;
+  final int bandWidth;
+  final double borderRadius;
+
+  const _GradientDotPreview({
+    required this.gradientColors,
+    required this.bandWidth,
+    this.borderRadius = 10,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(borderRadius),
+        topRight: Radius.circular(borderRadius),
+      ),
+      child: Container(
+        color: Colors.black,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            const dotSize = 6.0;
+            const spacing = 2.0;
+            const step = dotSize + spacing;
+            final cols = (constraints.maxWidth / step).floor().clamp(1, 100);
+            final rows = (constraints.maxHeight / step).floor().clamp(1, 20);
+
+            final bw = bandWidth.clamp(1, 4);
+            final stepCount = gradientColors.length;
+
+            return CustomPaint(
+              painter: _GradientDotPainter(
+                gradientColors: gradientColors,
+                bandWidth: bw,
+                stepCount: stepCount,
+                cols: cols,
+                rows: rows,
+                dotSize: dotSize,
+                spacing: spacing,
+              ),
+              size: Size(constraints.maxWidth, constraints.maxHeight),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _GradientDotPainter extends CustomPainter {
+  final List<Color> gradientColors;
+  final int bandWidth;
+  final int stepCount;
+  final int cols;
+  final int rows;
+  final double dotSize;
+  final double spacing;
+
+  _GradientDotPainter({
+    required this.gradientColors,
+    required this.bandWidth,
+    required this.stepCount,
+    required this.cols,
+    required this.rows,
+    required this.dotSize,
+    required this.spacing,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final step = dotSize + spacing;
+    // Centre the dot grid within the available space
+    final xOffset = (size.width - cols * step + spacing) / 2;
+    final yOffset = (size.height - rows * step + spacing) / 2;
+    final radius = dotSize / 2;
+    final paint = Paint();
+
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        final i = row * cols + col;
+        // bandWidth determines how many consecutive dots share a step
+        final colorIndex = (i ~/ bandWidth) % stepCount;
+        paint.color = gradientColors[colorIndex];
+
+        canvas.drawCircle(
+          Offset(xOffset + col * step + radius, yOffset + row * step + radius),
+          radius,
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GradientDotPainter old) =>
+      gradientColors != old.gradientColors ||
+      bandWidth != old.bandWidth ||
+      cols != old.cols ||
+      rows != old.rows;
 }

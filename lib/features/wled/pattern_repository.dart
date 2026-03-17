@@ -252,7 +252,9 @@ class PatternRepository {
     }
   }
 
-  static List<List<int>> _colorsToWledCol(List<Color> colors) {
+  /// Convert Flutter Colors to WLED RGBW col arrays (up to 3 slots).
+  /// Public so the adjustment panel can recompute colors for gradient presets.
+  static List<List<int>> colorsToWledCol(List<Color> colors) {
     // WLED col expects up to 3 color slots; keep first 3 theme colors
     // Force W=0 to keep saturated colors accurate - WLED handles GRB conversion
     // Also strip noise channels from dominant colors to prevent pink/magenta
@@ -299,7 +301,7 @@ class PatternRepository {
   /// Generate pattern items for a given sub-category using its theme palette.
   /// Uses creative naming combining the theme name with effect types.
   Future<List<PatternItem>> generatePatternsForTheme(SubCategory subCat) async {
-    final List<List<int>> col = _colorsToWledCol(subCat.themeColors);
+    final List<List<int>> col = colorsToWledCol(subCat.themeColors);
     // Determine a backdrop image based on parent category if possible
     final catImage = _categories.firstWhere((c) => c.id == subCat.parentCategoryId, orElse: () => _categories.first).imageUrl;
 
@@ -837,6 +839,17 @@ class PatternRepository {
     (id: 'k6500', name: '6500K', desc: 'Moonlight', colors: [Color(0xFFFFFEFA), Color(0xFFEEF2FF)]),
   ];
 
+  /// Brightness gradient preset definitions.
+  /// Public so the adjustment panel can offer preset switching.
+  static const brightnessGradientPresets = [
+    (id: 'gentle',   name: 'Gentle Fade',   desc: 'Subtle brightness taper',         steps: [1.0, 0.85, 0.70]),
+    (id: 'medium',   name: 'Medium Fade',   desc: 'Balanced brightness falloff',     steps: [1.0, 0.75, 0.50]),
+    (id: 'deep',     name: 'Deep Fade',     desc: 'Dramatic brightness drop',        steps: [1.0, 0.60, 0.30]),
+    (id: 'stair',    name: 'Staircase',     desc: 'Even thirds brightness steps',    steps: [1.0, 0.66, 0.33]),
+    (id: 'duo',      name: 'Duo Alternate', desc: 'Two-step bright/dim alternation', steps: [1.0, 0.70]),
+    (id: 'pulse',    name: 'Soft Pulse',    desc: 'Rhythmic bright-dim-bright wave', steps: [1.0, 0.80, 1.0, 0.60]),
+  ];
+
   /// Galaxy & Starlight style definitions - combines with dim levels
   static const _galaxyDimLevels = [
     (level: 50, name: '50%', desc: 'Half brightness dim'),
@@ -906,6 +919,53 @@ class PatternRepository {
           ));
           patternIndex++;
         }
+      }
+
+      // Brightness Gradients folder — sibling to the spacing patterns above
+      final gradientsFolderId = 'arch_${style.id}_gradients';
+      nodes.add(LibraryNode(
+        id: gradientsFolderId,
+        name: 'Brightness Gradients',
+        description: 'Graduated brightness patterns in ${style.desc.toLowerCase()}',
+        nodeType: LibraryNodeType.folder,
+        parentId: 'arch_${style.id}',
+        themeColors: style.colors,
+        sortOrder: patternIndex,
+      ));
+
+      // Add gradient preset patterns inside the folder
+      final baseColor = style.colors[0];
+      final baseR = baseColor.red;
+      final baseG = baseColor.green;
+      final baseB = baseColor.blue;
+
+      for (var gi = 0; gi < brightnessGradientPresets.length; gi++) {
+        final preset = brightnessGradientPresets[gi];
+        final gradientColors = preset.steps
+            .map((pct) => Color.fromARGB(
+                  255,
+                  (baseR * pct).round(),
+                  (baseG * pct).round(),
+                  (baseB * pct).round(),
+                ))
+            .toList();
+
+        nodes.add(LibraryNode(
+          id: 'arch_${style.id}_gradients_${preset.id}',
+          name: preset.name,
+          description: preset.desc,
+          nodeType: LibraryNodeType.palette,
+          parentId: gradientsFolderId,
+          themeColors: gradientColors,
+          sortOrder: gi,
+          metadata: {
+            'type': 'brightness_gradient',
+            'gradientColors': gradientColors,
+            'bandWidth': 1,
+            'breathing': false,
+            'suggestedEffects': [83],
+          },
+        ));
       }
     }
 
@@ -1131,7 +1191,7 @@ class PatternRepository {
     if (!node.isPalette) return [];
 
     final colors = node.themeColors!;
-    final col = _colorsToWledCol(colors);
+    final col = colorsToWledCol(colors);
 
     // Check for special pattern types
     final isGalaxyPattern = node.metadata?['isGalaxyPattern'] == true;
@@ -1148,6 +1208,11 @@ class PatternRepository {
     // Handle Twinkle patterns (bright + twinkling)
     if (isTwinklePattern) {
       return _generateTwinklePatterns(node, col);
+    }
+
+    // Handle Brightness Gradient patterns
+    if (node.metadata?['type'] == 'brightness_gradient') {
+      return _generateBrightnessGradientPatterns(node);
     }
 
     // For architectural spacing patterns, generate fewer effects focused on solid/simple
@@ -1199,6 +1264,84 @@ class PatternRepository {
         },
       ));
     }
+
+    return items;
+  }
+
+  /// Generate patterns for a brightness gradient palette node.
+  /// Produces a static variant and a breathing variant from the gradient metadata.
+  List<PatternItem> _generateBrightnessGradientPatterns(LibraryNode node) {
+    final gradientColors = (node.metadata?['gradientColors'] as List?)
+        ?.cast<Color>() ?? node.themeColors!;
+    final bandWidth = (node.metadata?['bandWidth'] as int?) ?? 1;
+    final col = colorsToWledCol(gradientColors);
+
+    // Extract the base color (full brightness) from the node's parent style.
+    // The first gradient color is always the 100% step, which IS the base color.
+    final baseColor = gradientColors.first;
+
+    // Determine which preset this node represents from its ID suffix
+    final nodeId = node.id;
+    final presetId = nodeId.contains('_gradients_')
+        ? nodeId.split('_gradients_').last
+        : 'gentle';
+
+    // Shared gradient metadata embedded in payload so the adjustment panel
+    // can detect gradient patterns and offer preset/bandWidth/breathing controls.
+    final gradientMeta = {
+      'isGradient': true,
+      'presetId': presetId,
+      'baseColorValue': baseColor.value,
+    };
+
+    final items = <PatternItem>[];
+    final categoryId = _findRootCategoryId(node.id);
+
+    // Static variant — Solid Pattern (fx 83)
+    items.add(PatternItem(
+      id: 'gen_${node.id}_static',
+      name: '${node.name} – Static',
+      imageUrl: '',
+      categoryId: categoryId,
+      wledPayload: {
+        'on': true,
+        'bri': 200,
+        '_gradientMeta': gradientMeta,
+        'seg': [
+          {
+            'fx': 83,
+            'col': col,
+            'grp': bandWidth,
+            'spc': 0,
+            'sx': 0,
+            'pal': 5,
+          }
+        ],
+      },
+    ));
+
+    // Breathing variant — Breathe effect (fx 2)
+    items.add(PatternItem(
+      id: 'gen_${node.id}_breathe',
+      name: '${node.name} – Breathing',
+      imageUrl: '',
+      categoryId: categoryId,
+      wledPayload: {
+        'on': true,
+        'bri': 200,
+        '_gradientMeta': gradientMeta,
+        'seg': [
+          {
+            'fx': 2,
+            'col': col,
+            'grp': bandWidth,
+            'spc': 0,
+            'sx': 100,
+            'pal': 5,
+          }
+        ],
+      },
+    ));
 
     return items;
   }
