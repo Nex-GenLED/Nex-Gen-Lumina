@@ -76,8 +76,34 @@ class CloudRelayRepository implements WledRepository {
 
       debugPrint('☁️ CloudRelay: Command queued with ID: $commandId');
 
+      // ── BEGIN BridgeDiag ──────────────────────────────────────────
+      final diagSw = Stopwatch()..start();
+      debugPrint('BridgeDiag: command written → docId=$commandId, controllerIp=$controllerIp');
+      StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? diagSub;
+      diagSub = _commandsRef.doc(commandId).snapshots().listen((snap) {
+        final data = snap.data();
+        final status = data?['status'] ?? 'unknown';
+        final elapsed = diagSw.elapsedMilliseconds;
+        debugPrint('BridgeDiag: doc status changed → $status at ${elapsed}ms');
+      }, onError: (e) {
+        debugPrint('BridgeDiag: snapshot listener error → $e');
+      });
+      // Auto-cancel after 30s
+      Future.delayed(const Duration(seconds: 30), () {
+        if (diagSw.isRunning) {
+          debugPrint('BridgeDiag: 30s timeout — document never acknowledged by bridge');
+          diagSw.stop();
+        }
+        diagSub?.cancel();
+      });
+      // ── END BridgeDiag ────────────────────────────────────────────
+
       // Wait for the command to complete
       final result = await _waitForCompletion(commandId);
+
+      // Stop diag stopwatch so the 30s timeout message won't fire
+      diagSw.stop();
+      diagSub?.cancel();
 
       if (result == null) {
         debugPrint('❌ CloudRelay: Command timed out');

@@ -380,10 +380,21 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             children: [
               Builder(builder: (_) {
                 final isRemote = ref.watch(isRemoteModeProvider);
-                final dotColor = state.connected
-                    ? (isRemote ? const Color(0xFFAB47BC) : NexGenPalette.cyan)
-                    : (isRemote ? const Color(0xFFAB47BC).withValues(alpha: 0.4)
-                                : Colors.red.withValues(alpha: 0.8));
+                final bridgeOk = ref.watch(bridgeReachableProvider) == true;
+                // Three states:
+                //   local + connected        → cyan
+                //   remote + bridge reachable → teal (bridge active)
+                //   anything else             → red (offline)
+                final Color dotColor;
+                if (state.connected) {
+                  dotColor = isRemote
+                      ? const Color(0xFF26A69A) // teal — connected via bridge
+                      : NexGenPalette.cyan;     // cyan — local
+                } else if (isRemote && bridgeOk) {
+                  dotColor = const Color(0xFF26A69A); // teal — bridge confirmed
+                } else {
+                  dotColor = Colors.red.withValues(alpha: 0.8);
+                }
                 return Container(
                   width: 7,
                   height: 7,
@@ -395,10 +406,23 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 constraints: const BoxConstraints(maxWidth: 120),
                 child: Builder(builder: (_) {
                   final isRemote = ref.watch(isRemoteModeProvider);
+                  final bridgeOk = ref.watch(bridgeReachableProvider) == true;
+                  final String label;
+                  final Color textColor;
+                  if (state.connected) {
+                    label = isRemote ? '$displayName (bridge)' : displayName;
+                    textColor = Colors.white;
+                  } else if (isRemote && bridgeOk) {
+                    label = '$displayName (bridge)';
+                    textColor = Colors.white70;
+                  } else {
+                    label = displayName;
+                    textColor = Colors.grey;
+                  }
                   return Text(
-                    isRemote && !state.connected ? '$displayName (remote)' : displayName,
+                    label,
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: state.connected ? Colors.white : Colors.grey,
+                      color: textColor,
                     ),
                     overflow: TextOverflow.ellipsis,
                   );

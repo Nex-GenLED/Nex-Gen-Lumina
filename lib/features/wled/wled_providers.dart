@@ -73,6 +73,16 @@ final isRemoteModeProvider = Provider<bool>((ref) {
   return status == ConnectivityStatus.remote;
 });
 
+/// Shared bridge reachability state.
+///
+/// Set to `true` by the Remote Access screen (or any future code) when a
+/// Firestore round-trip through the ESP32 bridge succeeds. Set to `false`
+/// when a bridge test fails or times out. `null` means "never tested yet."
+///
+/// The home-screen indicator reads this to decide whether to show
+/// "bridge active" (green/teal) vs "offline" (red) when in remote mode.
+final bridgeReachableProvider = StateProvider<bool?>((ref) => null);
+
 /// Provides a WledRepository based on Demo Mode, network location, and
 /// webhook configuration.
 ///
@@ -280,14 +290,26 @@ class WledNotifier extends Notifier<WledStateModel> {
       if (service == null) return;
       if (_posting) return; // avoid fighting with user updates
       final data = await service.getState();
+      final isRemote = ref.read(isRemoteModeProvider);
       if (data == null) {
         if (state.connected) {
           state = state.copyWith(connected: false);
+        }
+        // Only mark bridge unreachable after a failed poll if no prior
+        // successful test exists (avoid flicker from a single slow poll).
+        if (isRemote && ref.read(bridgeReachableProvider) == true) {
+          // bridge was previously confirmed — don't downgrade on one miss
+        } else if (isRemote) {
+          ref.read(bridgeReachableProvider.notifier).state = false;
         }
         _ensureReconnectTimer();
         return;
       }
       _cancelReconnectTimer();
+      // Successful poll in remote mode confirms bridge is working.
+      if (isRemote) {
+        ref.read(bridgeReachableProvider.notifier).state = true;
+      }
       try {
         final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
         final bri = (data['bri'] as int?) ?? state.brightness;
