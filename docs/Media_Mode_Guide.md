@@ -6,7 +6,7 @@
 
 ## Overview
 
-Media Mode provides the Nex-Gen marketing and content team with temporary access to customer lighting systems for video shoots, photography sessions, and promotional content creation.
+Media Mode provides the Nex-Gen marketing and content team with temporary access to customer lighting systems for video shoots, photography sessions, and promotional content creation. In Lumina v2.1, Media Mode integrates with the updated five-tab navigation (Home, Schedule, Lumina, Explore, System) and benefits from improved connectivity monitoring, including the bridge health indicator on the Home screen.
 
 ---
 
@@ -16,7 +16,7 @@ Media Mode provides the Nex-Gen marketing and content team with temporary access
 Search for any customer by email address or street address to locate their lighting system in the database.
 
 ### 2. Control Lighting
-Temporarily adjust colors, patterns, brightness, and effects for video shoots and photo sessions. Create the perfect lighting for your content.
+Temporarily adjust colors, patterns, brightness, and effects for video shoots and photo sessions. Browse the full pattern library via the **Explore** tab and apply effects in real time to create the perfect lighting for your content.
 
 ### 3. View-Only Access
 Control lights during your session without the ability to modify customer schedules, settings, or account information. Customer data remains protected.
@@ -50,27 +50,31 @@ Example: A7X2K9
 
 ## Using the Media Dashboard
 
+### Bridge Health Indicator
+
+When you enter a customer's system, the **Home** tab displays a bridge health indicator showing the connectivity status of the customer's ESP32 bridge. This lets you quickly confirm the system is reachable before starting your shoot. A green indicator means the bridge is online and responsive; amber or red signals a connectivity issue that may affect your session.
+
 ### Search for Customers
 - Enter customer email or street address
 - Results show matching customer systems
 - Tap a customer to view their system
 
 ### "View As" Mode
-- When viewing a customer, you see their dashboard
+- When viewing a customer, you see their Home dashboard
 - Control their lights as if you were them
-- A banner indicates you're in "View As" mode
+- A banner indicates you are in "View As" mode
 - Tap the X on the banner to exit and return to search
 
 ### Available Controls
 - Power on/off
 - Brightness adjustment
-- Pattern/effect selection
+- Pattern/effect selection (via the **Explore** tab)
 - Color changes
 - Speed and intensity
 
 ### Restricted Actions
-- Cannot modify schedules
-- Cannot change system settings
+- Cannot modify schedules (the **Schedule** tab is read-only)
+- Cannot change system settings (the **System** tab is locked)
 - Cannot access customer account info
 - Cannot add/remove controllers
 - Cannot invite users
@@ -91,29 +95,11 @@ Example: A7X2K9
 ## Best Practices
 
 1. **Coordinate with Sales:** Confirm customer has agreed to content creation
-2. **Document Settings:** Note original settings before making changes
-3. **Restore After Use:** Return lights to customer's preferred state
-4. **Schedule Appropriately:** Avoid accessing systems during evening hours unless arranged
-5. **Report Issues:** If you notice system problems, report to support
-
----
-
-## Troubleshooting
-
-**Code Not Working?**
-- Verify you're entering the code correctly (case-sensitive)
-- Check if your code has expired
-- Contact your team lead for a new code
-
-**Customer Not Found?**
-- Try searching by email instead of address
-- Verify spelling of customer information
-- Customer may not have completed onboarding
-
-**Cannot Control Lights?**
-- Customer's system may be offline
-- Check if controllers are powered on
-- System may be in a restricted mode
+2. **Check Bridge Status:** Verify the bridge health indicator on the Home screen shows green before beginning your session
+3. **Document Settings:** Note original settings before making changes
+4. **Restore After Use:** Return lights to customer's preferred state
+5. **Schedule Appropriately:** Avoid accessing systems during evening hours unless arranged
+6. **Report Issues:** If you notice system problems, report to support
 
 ---
 
@@ -127,4 +113,8 @@ Example: A7X2K9
 
 ---
 
-*Nex-Gen LED Systems - Media Mode Guide v1.0*
+For troubleshooting, see the separate Lumina Troubleshooting Guide.
+
+---
+
+*Nex-Gen LED Systems - Media Mode Guide v2.1*

@@ -38,8 +38,8 @@ The Lumina installation system uses a two-tier structure:
 
 | Role | Description |
 |------|-------------|
-| **Dealer** | Your company. Each dealer gets a unique 2-digit code (01–99). |
-| **Installer** | A technician under your dealership. Each installer gets a 2-digit code (01–99). |
+| **Dealer** | Your company. Each dealer gets a unique 2-digit code (01--99). |
+| **Installer** | A technician under your dealership. Each installer gets a 2-digit code (01--99). |
 
 Every installer receives a **4-digit PIN** combining both codes. For example, if your dealer code is **03** and an installer's code is **12**, their PIN is **0312**.
 
@@ -105,9 +105,9 @@ From the Admin Portal you can:
 
 ---
 
-## 4. Installer Mode — Step by Step
+## 4. Installer Mode --- Step by Step
 
-Installer Mode is a guided 4-step wizard that sets up a customer's Lumina system and creates their user account.
+Installer Mode is a guided 5-step wizard that sets up a customer's Lumina system and creates their user account.
 
 ### Entering Installer Mode
 
@@ -137,7 +137,7 @@ Enter the homeowner's details:
 | Field | Required | Notes |
 |-------|----------|-------|
 | Full Name | Yes | Customer's name |
-| Email | Yes | Must be unique — this becomes their login |
+| Email | Yes | Must be unique --- this becomes their login |
 | Phone | No | For contact purposes |
 | Address | No | Street address |
 | City | No | |
@@ -146,7 +146,7 @@ Enter the homeowner's details:
 | Notes | No | Any special instructions |
 
 <div class="tip">
-<strong>Tip:</strong> The email address is checked for uniqueness in real-time. If the customer already has a Lumina account, you'll see an error — contact Nex-Gen support to link existing accounts.
+<strong>Tip:</strong> The email address is checked for uniqueness in real-time. If the customer already has a Lumina account, you'll see an error --- contact Nex-Gen support to link existing accounts.
 </div>
 
 Tap **Next** to proceed.
@@ -160,7 +160,7 @@ This step connects the physical WLED controllers you've installed.
 **2a. Discover Controllers**
 
 - Make sure your phone/tablet is on the **same WiFi network** as the controllers
-- Tap **Scan for Controllers** — the app uses mDNS to find WLED devices
+- Tap **Scan for Controllers** --- the app uses mDNS to find WLED devices
 - Available controllers appear in a list with their IP addresses
 
 **2b. Select Controllers**
@@ -177,7 +177,7 @@ This step connects the physical WLED controllers you've installed.
 
 - Tap the **Test** button next to each controller
 - A green checkmark confirms the controller is responding
-- A red X means the controller is unreachable — check power and WiFi
+- A red X means the controller is unreachable --- check power and WiFi
 
 **2e. Add New Controllers via Bluetooth** (optional)
 
@@ -250,9 +250,9 @@ Use the slider to set the customer's preferred intensity:
 
 | Level | Style |
 |-------|-------|
-| Low (0.0) | Soft and tasteful — gentle fades, warm whites |
-| Medium (0.5) | Balanced — seasonal colors and patterns |
-| High (1.0) | Maximum impact — full animations, celebration mode |
+| Low (0.0) | Soft and tasteful --- gentle fades, warm whites |
+| Medium (0.5) | Balanced --- seasonal colors and patterns |
+| High (1.0) | Maximum impact --- full animations, celebration mode |
 
 #### Auto-Pilot Autonomy
 
@@ -260,7 +260,7 @@ How much should the AI manage automatically?
 
 | Level | Behavior |
 |-------|----------|
-| **Ask Me First** | Passive — always waits for user approval |
+| **Ask Me First** | Passive --- always waits for user approval |
 | **Smart Suggestions** | Shows weekly preview, auto-applies if no response in 24 hours |
 | **Full Auto-Pilot** | Fully automatic, no approval needed |
 
@@ -270,7 +270,7 @@ Toggle this ON for customers who prefer a simplified interface:
 
 - Large, easy-to-tap buttons
 - Only Home and Settings tabs visible
-- 3–5 favorite patterns for quick access
+- 3--5 favorite patterns for quick access
 - Great for older users or first-time smart home owners
 - Customers can switch to Full Mode anytime in Settings
 
@@ -295,7 +295,7 @@ A dialog displays the customer's login credentials:
 SETUP COMPLETE!
 
 CUSTOMER LOGIN CREDENTIALS
-───────────────────────────
+----------------------------
 Name:               Jane Smith
 Email:              jane@email.com
 Temporary Password: Xk9mB2nQ
@@ -305,10 +305,10 @@ Customer should change their password after first login.
 
 **Actions available:**
 
-- **Copy Email** — copies just the email
-- **Copy Password** — copies just the password
-- **Copy All** — copies everything
-- **Done** — finishes the setup
+- **Copy Email** --- copies just the email
+- **Copy Password** --- copies just the password
+- **Copy All** --- copies everything
+- **Done** --- finishes the setup
 
 <div class="warning">
 <strong>Important:</strong> Write down or copy these credentials before tapping Done. The temporary password cannot be retrieved later. If lost, the customer must use "Forgot Password" to reset.
@@ -325,7 +325,11 @@ Give the customer their credentials and walk them through:
 3. **Enter the email and temporary password** you provided
 4. **Change their password** when prompted
 5. **Complete the Welcome Wizard** (permissions + white selection)
-6. **Dashboard appears** — their system is ready to use
+6. **Dashboard appears** --- their system is ready to use
+
+<div class="tip">
+<strong>Bridge Health Check:</strong> When the customer first opens the app (and on every subsequent launch), Lumina automatically runs a bridge health check. The app pings the ESP32 bridge via Firestore and waits for an acknowledgment. The result appears as a status indicator on the home screen --- a green icon means the bridge is online and reachable, while a grey icon means the bridge did not respond. If the bridge shows as unreachable after a fresh install, verify that the bridge is powered on and connected to the customer's WiFi network.
+</div>
 
 <div class="tip">
 <strong>Pro Tip:</strong> Take 2 minutes to show the customer the dashboard. Toggle a preset, adjust brightness, and say "Try asking Lumina to set the lights to warm white." This builds confidence and reduces support calls.
@@ -333,7 +337,33 @@ Give the customer their credentials and walk them through:
 
 ---
 
-## 6. Resuming an Incomplete Setup
+## 6. Configuring Remote Access
+
+For customers who want to control their lights away from home, Remote Access must be configured before you leave the job site.
+
+### Where to Find It
+
+1. Open the **System** tab (gear icon in the bottom navigation)
+2. Tap the **Remote Access** tab along the top
+3. The tab shows a quick status summary (enabled/disabled, bridge status, home WiFi SSID)
+4. Tap the **Set Up Remote Access** button (or **Remote Access Settings** if already enabled) to open the full configuration screen
+
+### What to Configure
+
+On the Remote Access settings screen:
+
+- **Enable Remote Access** toggle
+- **Home WiFi SSID** --- the network name the controllers are connected to (used to detect whether the customer is home or away)
+- **Bridge connection** --- confirm the ESP32 bridge is online (the bridge health indicator should show green)
+- **Webhook URL** (if applicable) --- for advanced integrations
+
+<div class="tip">
+<strong>Tip:</strong> The bridge health check runs automatically on every app launch. If the bridge shows as unreachable during setup, power-cycle the ESP32 and wait 30 seconds before retrying.
+</div>
+
+---
+
+## 7. Resuming an Incomplete Setup
 
 If you exit the wizard before completing, your progress is saved automatically.
 
@@ -347,7 +377,7 @@ Next time you enter Installer Mode:
 
 ---
 
-## 7. Warranty & Installation Records
+## 8. Warranty & Installation Records
 
 Each completed installation automatically creates a warranty record:
 
@@ -361,33 +391,6 @@ Each completed installation automatically creates a warranty record:
 | **Address** | Customer's installation address |
 
 These records are accessible to the Nex-Gen support team for warranty claims.
-
----
-
-## 8. Troubleshooting
-
-### "No controllers found" during scan
-
-- Confirm your device is on the **same WiFi network** as the controllers
-- Check that controllers are powered on and the LEDs are lit
-- Try manually entering the controller's IP address
-- Restart the controller (unplug for 10 seconds, plug back in)
-
-### PIN not working
-
-- Verify you're entering all 4 digits (dealer code + installer code)
-- Confirm your installer account is active with your dealer admin
-- After 5 failed attempts, you must wait or contact your admin
-
-### Customer email already exists
-
-- The customer may have created a Lumina account previously
-- Contact Nex-Gen support to link the existing account to the new installation
-
-### Session expired during setup
-
-- Your progress was auto-saved
-- Re-enter Installer Mode and resume from where you left off
 
 ---
 
@@ -409,4 +412,8 @@ Email: support@nexgenled.com
 
 ---
 
-*Nex-Gen Lumina v2.1 — Dealer & Installer Guide — March 2026*
+For troubleshooting, see the separate **Lumina Troubleshooting Guide**.
+
+---
+
+*Nex-Gen Lumina v2.1 --- Dealer & Installer Guide --- March 2026*
