@@ -45,6 +45,16 @@ class NotificationsService {
         }
         return;
       }
+
+      // Commercial notification deep-links (prefixed with "commercial:")
+      if (payload.startsWith('commercial:')) {
+        final route = payload.substring('commercial:'.length);
+        final context = navigatorKey?.currentContext;
+        if (context != null) {
+          context.push(route);
+        }
+        return;
+      }
     } catch (e) {
       debugPrint('Notification response handler failed: $e');
     }
@@ -132,6 +142,97 @@ class NotificationsService {
       );
     } catch (e) {
       debugPrint('Show habit notification failed: $e');
+    }
+  }
+
+  // ===========================================================================
+  // COMMERCIAL NOTIFICATIONS
+  // ===========================================================================
+
+  static const _commercialChannel = AndroidNotificationDetails(
+    'commercial',
+    'Commercial Alerts',
+    channelDescription: 'Alerts for commercial lighting management',
+    importance: Importance.high,
+    priority: Priority.high,
+    styleInformation: BigTextStyleInformation(''),
+  );
+  static const _commercialDetails =
+      NotificationDetails(android: _commercialChannel, iOS: DarwinNotificationDetails());
+
+  /// CONTROLLER_OFFLINE — a controller at a location is not responding.
+  static Future<void> showControllerOffline(String locationName) async {
+    try {
+      await _plugin.show(
+        6001,
+        'Controller Offline',
+        'A controller at $locationName is not responding.',
+        _commercialDetails,
+        payload: 'commercial:${AppRoutes.commercialHome}',
+      );
+    } catch (e) {
+      debugPrint('Commercial notification failed: $e');
+    }
+  }
+
+  /// HOLIDAY_CONFLICT — upcoming holiday that may affect schedule.
+  static Future<void> showHolidayConflict(String date) async {
+    try {
+      await _plugin.show(
+        6002,
+        'Holiday Schedule Conflict',
+        'Upcoming holiday on $date \u2014 confirm your schedule.',
+        _commercialDetails,
+        payload: 'commercial:${AppRoutes.commercialHome}',
+      );
+    } catch (e) {
+      debugPrint('Commercial notification failed: $e');
+    }
+  }
+
+  /// GAME_DAY_ALERT — team game today, Game Day mode activating.
+  static Future<void> showGameDayAlert(
+      String teamName, String gameTime, String leadTime) async {
+    try {
+      await _plugin.show(
+        6003,
+        'Game Day Alert',
+        '$teamName game today at $gameTime \u2014 Game Day mode activating at $leadTime.',
+        _commercialDetails,
+        payload: 'commercial:${AppRoutes.commercialHome}',
+      );
+    } catch (e) {
+      debugPrint('Commercial notification failed: $e');
+    }
+  }
+
+  /// CORPORATE_PUSH_RECEIVED — org has updated your schedule.
+  static Future<void> showCorporatePushReceived(String orgName) async {
+    try {
+      await _plugin.show(
+        6004,
+        'Schedule Updated',
+        '$orgName has updated your schedule.',
+        _commercialDetails,
+        payload: 'commercial:${AppRoutes.commercialHome}',
+      );
+    } catch (e) {
+      debugPrint('Commercial notification failed: $e');
+    }
+  }
+
+  /// LOCK_EXPIRING — corporate schedule lock expires in 24 hours.
+  static Future<void> showLockExpiring(String locationName) async {
+    try {
+      await _plugin.show(
+        6005,
+        'Lock Expiring Soon',
+        'Corporate schedule lock at $locationName expires in 24 hours.',
+        _commercialDetails,
+        payload: 'commercial:${AppRoutes.commercialHome}',
+      );
+    } catch (e) {
+      debugPrint('Commercial notification failed: $e');
     }
   }
 

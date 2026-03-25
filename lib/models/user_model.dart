@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/models/sub_user_permissions.dart';
+import 'package:nexgen_command/models/commercial/business_profile.dart';
+import 'package:nexgen_command/models/commercial/channel_role.dart';
+import 'package:nexgen_command/models/commercial/day_part.dart';
+import 'package:nexgen_command/models/commercial/commercial_team.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/utils/input_validation.dart';
 
@@ -227,6 +231,26 @@ class UserModel {
   /// User's preferred complement white (RGBW map from WhitePreset.toJson())
   final Map<String, dynamic>? preferredWhiteComplement;
 
+  // ========== Commercial Profile ==========
+
+  /// Full commercial business profile (null for residential users).
+  final BusinessProfile? commercialProfile;
+
+  /// Channel-to-venue-role mappings for commercial venues.
+  final List<ChannelRole> channelRoles;
+
+  /// Named time windows within a business day (e.g. "Happy Hour").
+  final List<DayPart> dayParts;
+
+  /// Sports teams configured for commercial game-day automation.
+  final List<CommercialTeam> commercialTeams;
+
+  /// Permission level: 'store_staff' | 'store_manager' | 'corporate_admin'
+  final String commercialPermissionLevel;
+
+  /// Organization ID for multi-location commercial users (null for single-location).
+  final String? organizationId;
+
   UserModel({
     required this.id,
     required String email,
@@ -297,6 +321,13 @@ class UserModel {
     // White preferences
     this.preferredWhitePrimary,
     this.preferredWhiteComplement,
+    // Commercial profile
+    this.commercialProfile,
+    this.channelRoles = const [],
+    this.dayParts = const [],
+    this.commercialTeams = const [],
+    this.commercialPermissionLevel = 'store_manager',
+    this.organizationId,
   })  :
         // SECURITY: Validate and sanitize all user inputs
         email = InputValidation.validateEmail(email) ?? email,
@@ -432,6 +463,28 @@ class UserModel {
       // White preferences
       preferredWhitePrimary: json['preferred_white_primary'] as Map<String, dynamic>?,
       preferredWhiteComplement: json['preferred_white_complement'] as Map<String, dynamic>?,
+      // Commercial profile
+      commercialProfile: json['commercial_profile'] != null
+          ? BusinessProfile.fromJson(json['commercial_profile'] as Map<String, dynamic>)
+          : null,
+      channelRoles: (json['channel_roles'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ChannelRole.fromJson(e))
+              .toList() ??
+          const [],
+      dayParts: (json['day_parts'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => DayPart.fromJson(e))
+              .toList() ??
+          const [],
+      commercialTeams: (json['commercial_teams'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => CommercialTeam.fromJson(e))
+              .toList() ??
+          const [],
+      commercialPermissionLevel:
+          (json['commercial_permission_level'] as String?) ?? 'store_manager',
+      organizationId: json['organization_id'] as String?,
     );
   }
 
@@ -523,6 +576,13 @@ class UserModel {
       // White preferences
       if (preferredWhitePrimary != null) 'preferred_white_primary': preferredWhitePrimary,
       if (preferredWhiteComplement != null) 'preferred_white_complement': preferredWhiteComplement,
+      // Commercial profile
+      if (commercialProfile != null) 'commercial_profile': commercialProfile!.toJson(),
+      if (channelRoles.isNotEmpty) 'channel_roles': channelRoles.map((e) => e.toJson()).toList(),
+      if (dayParts.isNotEmpty) 'day_parts': dayParts.map((e) => e.toJson()).toList(),
+      if (commercialTeams.isNotEmpty) 'commercial_teams': commercialTeams.map((e) => e.toJson()).toList(),
+      'commercial_permission_level': commercialPermissionLevel,
+      if (organizationId != null) 'organization_id': organizationId,
     };
   }
 
@@ -596,6 +656,13 @@ class UserModel {
     // White preferences
     Map<String, dynamic>? preferredWhitePrimary,
     Map<String, dynamic>? preferredWhiteComplement,
+    // Commercial profile
+    BusinessProfile? commercialProfile,
+    List<ChannelRole>? channelRoles,
+    List<DayPart>? dayParts,
+    List<CommercialTeam>? commercialTeams,
+    String? commercialPermissionLevel,
+    String? organizationId,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -667,6 +734,13 @@ class UserModel {
       // White preferences
       preferredWhitePrimary: preferredWhitePrimary ?? this.preferredWhitePrimary,
       preferredWhiteComplement: preferredWhiteComplement ?? this.preferredWhiteComplement,
+      // Commercial profile
+      commercialProfile: commercialProfile ?? this.commercialProfile,
+      channelRoles: channelRoles ?? this.channelRoles,
+      dayParts: dayParts ?? this.dayParts,
+      commercialTeams: commercialTeams ?? this.commercialTeams,
+      commercialPermissionLevel: commercialPermissionLevel ?? this.commercialPermissionLevel,
+      organizationId: organizationId ?? this.organizationId,
     );
   }
 

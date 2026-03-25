@@ -66,6 +66,9 @@ import 'package:nexgen_command/features/demo/demo_photo_screen.dart';
 import 'package:nexgen_command/features/demo/demo_roofline_screen.dart';
 import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
 import 'package:nexgen_command/route_guards.dart';
+// Commercial mode imports
+import 'package:nexgen_command/screens/commercial/CommercialHomeScreen.dart';
+import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_wizard.dart';
 
 /// Slide + fade transition for Explore sub-routes.
 CustomTransitionPage<void> _exploreFadeSlide({
@@ -356,6 +359,22 @@ class AppRouter {
         name: 'admin-dashboard',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
+      ),
+
+      // ===== COMMERCIAL MODE ROUTES (root navigator) =====
+      GoRoute(
+        path: AppRoutes.commercialHome,
+        name: 'commercial-home',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: CommercialHomeScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialOnboarding,
+        name: 'commercial-onboarding',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(fullscreenDialog: true, child: CommercialOnboardingWizard()),
       ),
 
       // ===== STATEFUL SHELL ROUTE (persistent bottom nav) =====
@@ -690,4 +709,7 @@ class AppRoutes {
   static const String autopilotCalendar = '/autopilot/calendar';
 
   static const String zoneSetup = '/settings/zone-setup';
+  // Commercial mode routes
+  static const String commercialHome = '/commercial';
+  static const String commercialOnboarding = '/commercial/onboarding';
 }

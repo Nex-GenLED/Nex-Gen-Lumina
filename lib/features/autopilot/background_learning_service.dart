@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/neighborhood/services/sync_event_backgro
 import 'package:nexgen_command/services/suggestion_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/screens/commercial/commercial_mode_providers.dart';
 
 /// Background service for running periodic habit analysis and suggestion generation.
 ///
@@ -69,6 +70,12 @@ class BackgroundLearningService {
   /// Must be called from a Riverpod-aware context.
   static Future<void> checkAndRunSundayRegen(WidgetRef ref) async {
     try {
+      // Commercial mode uses the day-part scheduler — skip standard autopilot
+      // regeneration so the two systems don't conflict.
+      final isCommercial =
+          await ref.read(commercialModeEnabledProvider.future);
+      if (isCommercial) return;
+
       final enabled = ref.read(autopilotEnabledProvider);
       if (!enabled) return;
 
@@ -230,6 +237,11 @@ class BackgroundLearningService {
   /// singleton with no access to the provider graph.
   static Future<void> runAutopilotRegenIfNeeded(WidgetRef ref) async {
     try {
+      // Commercial mode uses day-part scheduler — skip autopilot regen.
+      final isCommercial =
+          await ref.read(commercialModeEnabledProvider.future);
+      if (isCommercial) return;
+
       final enabled = ref.read(autopilotEnabledProvider);
       final needsRegen = ref.read(needsScheduleRegenerationProvider);
 
