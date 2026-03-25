@@ -18,6 +18,7 @@ import 'package:nexgen_command/services/lumina_backend_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 
 /// Connectivity status stream that checks if user is on home network.
@@ -83,114 +84,137 @@ final isRemoteModeProvider = Provider<bool>((ref) {
 /// "bridge active" (green/teal) vs "offline" (red) when in remote mode.
 final bridgeReachableProvider = StateProvider<bool?>((ref) => null);
 
-/// Provides a WledRepository based on Demo Mode, network location, and
-/// webhook configuration.
+/// One-time startup bridge health check.
+///
+/// Runs when the authenticated user has a registered controller. Writes a
+/// ping document to Firestore and waits up to 15 s for the ESP32 bridge to
+/// acknowledge it. The result is exposed as [BridgeHealth] for future UI use.
+final bridgeHealthProvider = FutureProvider<BridgeHealth>((ref) async {
+  final userId = ref.watch(authStateProvider).maybeWhen(
+    data: (user) => user?.uid,
+    orElse: () => null,
+  );
+  final controllerId = ref.watch(selectedControllerIdProvider);
+  final ip = ref.watch(selectedDeviceIpProvider);
+
+  // Can't run the check without auth + a registered controller.
+  if (userId == null || controllerId == null || ip == null) {
+    return BridgeHealth.unreachable;
+  }
+
+  final service = BridgeHealthService();
+  return service.check(userId: userId, controllerIp: ip);
+});
+
+/// Provides a WledRepository based on Demo Mode, controller registration,
+/// and network connectivity.
 ///
 /// Priority:
-/// 1. Demo Mode              → DemoWledRepository
-/// 2. On home WiFi (local)   → WledService (direct HTTP — fastest, always preferred)
-/// 3. Remote + webhook saved → CloudRelayRepository / MqttRelayRepository
-/// 4. Remote, no webhook     → null (commands blocked)
-/// 5. Offline                → null
+/// 1.  Demo / reviewer mode                         → DemoWledRepository
+/// 2.  No selected device IP                        → null
+/// 3.  Connectivity loading                         → null (wait for check)
+/// 4.  Offline                                      → null
+/// 5.  MQTT relay configured + authenticated        → MqttRelayRepository
+/// 6.  userId + controllerId available (any network) → CloudRelayRepository
+///     (bridge handles local & remote — ESP32 forwards locally on home WiFi)
+/// 7.  Local WiFi, no userId/controllerId           → WledService (direct HTTP fallback)
+/// 8.  Everything else                              → null
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   // ── 1. Demo / reviewer mode ───────────────────────────────────────────────
   final isDemo = ref.watch(demoModeProvider);
-  if (isDemo) return DemoWledRepository();
+  if (isDemo) {
+    debugPrint('RepositoryInit: selected=DemoWledRepository, network=n/a, hasControllerId=n/a');
+    return DemoWledRepository();
+  }
 
   final userId = ref.watch(authStateProvider).maybeWhen(
     data: (user) => user?.uid,
     orElse: () => null,
   );
   if (userId == ReviewerSeedService.reviewerUserId) {
+    debugPrint('RepositoryInit: selected=DemoWledRepository, network=n/a, hasControllerId=n/a');
     return DemoWledRepository();
   }
 
   // ── 2. Require a selected device ─────────────────────────────────────────
   final ip = ref.watch(selectedDeviceIpProvider);
-  if (ip == null) return null;
+  if (ip == null) {
+    debugPrint('RepositoryInit: selected=null, network=n/a, hasControllerId=n/a');
+    return null;
+  }
 
-  // ── 3. User profile ───────────────────────────────────────────────────────
+  // ── 3. Network location ──────────────────────────────────────────────────
+  final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
+    data: (status) => status,
+    orElse: () => null,
+  );
+
+  if (connectivityStatus == null) {
+    debugPrint('RepositoryInit: selected=null, network=null (loading), hasControllerId=n/a');
+    return null;
+  }
+
+  // ── 4. Offline → no repository ───────────────────────────────────────────
+  if (connectivityStatus == ConnectivityStatus.offline) {
+    debugPrint('RepositoryInit: selected=null, network=offline, hasControllerId=n/a');
+    return null;
+  }
+
+  // ── 5. User profile + controller ID ──────────────────────────────────────
   final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
     data: (user) => user,
     orElse: () => null,
   );
-
-  // ── 4. Determine network location ────────────────────────────────────────
-  //
-  // IMPORTANT: While the connectivity stream is loading (no data yet),
-  // return null so we don't send commands to the wrong destination.
-  // The poller safely skips when the repo is null, and the stream emits
-  // its first value almost immediately (< 1s) so the gap is brief.
-  final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
-    data: (status) => status,
-    orElse: () => null, // loading or error — don't assume local
-  );
-
-  if (connectivityStatus == null) {
-    debugPrint('⏳ WledRepository: Connectivity check in progress — waiting');
-    return null;
-  }
-
-  // ── 5. LOCAL NETWORK → always use direct HTTP ──────────────────────────
-  //
-  // When the user is on the same WiFi as the controller, direct HTTP is
-  // faster and more reliable than any relay. Use it regardless of whether
-  // a webhook is configured — the webhook is for remote access, not local.
-  if (connectivityStatus == ConnectivityStatus.local) {
-    debugPrint('🏠 BridgeRouter: routing via LOCAL, url=http://$ip');
-    return WledService('http://$ip');
-  }
-
-  // ── 6. REMOTE / OFFLINE → use webhook relay if configured ──────────────
+  final controllerId = ref.watch(selectedControllerIdProvider);
   final webhookUrl = userProfile?.webhookUrl;
-  final hasWebhook = webhookUrl != null && webhookUrl.isNotEmpty;
 
-  if (connectivityStatus == ConnectivityStatus.offline) {
-    debugPrint('📵 WledRepository: Offline — no repository');
-    return null;
-  }
-
-  // Remote network with remote access enabled
+  // ── 5. MQTT relay (highest-priority relay, unchanged) ────────────────────
   if (userProfile?.remoteAccessEnabled == true) {
-    final controllerId = ref.watch(selectedControllerIdProvider);
-
-    // MQTT relay takes priority if configured and authenticated.
     final backendService = ref.watch(luminaBackendServiceProvider);
     if (userProfile?.mqttRelayEnabled == true &&
         backendService.isAuthenticated &&
         controllerId != null) {
-      debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=mqtt://$controllerId (MQTT relay)');
+      debugPrint('RepositoryInit: selected=MqttRelayRepository, '
+          'network=${connectivityStatus.name}, hasControllerId=$controllerId');
       return MqttRelayRepository(
         backendService: backendService,
         deviceId: controllerId,
         deviceSerial: null,
       );
     }
-
-    if (userId != null && controllerId != null) {
-      // Webhook mode: Cloud Function forwards to webhook URL.
-      // Bridge mode (no webhook): Cloud Function skips, ESP32 bridge polls
-      // Firestore and executes locally.
-      final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
-      final bridgeTarget = hasWebhook ? webhookUrl : 'firestore://$userId/commands';
-      debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=$bridgeTarget ($mode)');
-      return CloudRelayRepository(
-        userId: userId,
-        controllerId: controllerId,
-        controllerIp: ip,
-        webhookUrl: webhookUrl ?? '',
-      );
-    }
-
-    // Remote access enabled but userId/controllerId temporarily unavailable.
-    debugPrint('⚠️ WledRepository: Remote access enabled but userId/controllerId '
-        'unavailable — blocking commands');
-    return null;
   }
 
-  // Remote network, remote access not enabled — cannot route commands.
-  debugPrint('⚠️ WledRepository: Remote network but remote access not enabled — '
-      'commands blocked. Enable remote access in settings.');
+  // ── 6. Bridge path — userId + controllerId on ANY network ────────────────
+  //
+  // When the user has a registered controller, route through the bridge
+  // regardless of local vs remote. On home WiFi the ESP32 bridge relays
+  // locally; off WiFi it relays remotely — same Firestore command path.
+  if (userId != null && controllerId != null) {
+    final hasWebhook = webhookUrl != null && webhookUrl.isNotEmpty;
+    final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
+    final bridgeTarget = hasWebhook ? webhookUrl : 'firestore://$userId/commands';
+    debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=$bridgeTarget ($mode, '
+        'network=${connectivityStatus.name})');
+    debugPrint('RepositoryInit: selected=CloudRelayRepository, '
+        'network=${connectivityStatus.name}, hasControllerId=$controllerId');
+    return CloudRelayRepository(
+      userId: userId,
+      controllerId: controllerId,
+      controllerIp: ip,
+      webhookUrl: webhookUrl ?? '',
+    );
+  }
+
+  // ── 7. Fallback — no registered controller, local WiFi only ──────────────
+  if (connectivityStatus == ConnectivityStatus.local) {
+    debugPrint('RepositoryInit: selected=WledService, '
+        'network=${connectivityStatus.name}, hasControllerId=$controllerId');
+    return WledService('http://$ip');
+  }
+
+  // ── 8. Everything else — no relay path available ─────────────────────────
+  debugPrint('RepositoryInit: selected=null, '
+      'network=${connectivityStatus.name}, hasControllerId=$controllerId');
   return null;
 });
 

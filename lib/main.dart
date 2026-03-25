@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_notification_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -106,6 +107,9 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       _initializeVoiceServices();
       // Check for today's game-day items and start monitoring
       BackgroundLearningService.startTodayGameDayMonitoring(ref);
+      // One-time bridge health check — triggers the FutureProvider which
+      // writes a ping doc and watches for the ESP32 to acknowledge it.
+      _runBridgeHealthCheck();
     });
   }
 
@@ -128,6 +132,22 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
         ref.read(androidShortcutServiceProvider);
       }
     }
+  }
+
+  /// Kick off the one-time bridge health check by reading the FutureProvider.
+  /// The provider handles all Firestore writes, snapshot listening, and logging.
+  void _runBridgeHealthCheck() {
+    // Reading the provider is enough — Riverpod runs the future on first read.
+    // We listen so we can update bridgeReachableProvider with the result.
+    ref.listenManual(bridgeHealthProvider, (prev, next) {
+      next.whenData((health) {
+        if (health == BridgeHealth.alive) {
+          ref.read(bridgeReachableProvider.notifier).state = true;
+        } else if (health == BridgeHealth.unreachable) {
+          ref.read(bridgeReachableProvider.notifier).state = false;
+        }
+      });
+    });
   }
 
   @override
