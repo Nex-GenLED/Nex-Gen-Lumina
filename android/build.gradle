@@ -5,7 +5,7 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.3.2'
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.23'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0'
         // Google Services plugin for Firebase (required for google-services.json processing)
         classpath 'com.google.gms:google-services:4.4.2'
     }
@@ -15,6 +15,18 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+
+    // Force kotlin-stdlib to match the Kotlin compiler version (2.1.0).
+    // Without this, transitive dependencies can pull in a newer stdlib
+    // (e.g. 2.3.10) whose metadata is incompatible with the 2.1.0 compiler.
+    configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'org.jetbrains.kotlin'
+                    && details.requested.name.startsWith('kotlin-stdlib')) {
+                details.useVersion '2.1.0'
+            }
+        }
     }
 }
 

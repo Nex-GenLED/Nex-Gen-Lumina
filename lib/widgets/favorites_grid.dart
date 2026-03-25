@@ -91,15 +91,12 @@ class FavoritesGrid extends ConsumerWidget {
           child: CircularProgressIndicator(),
         ),
       ),
-      error: (error, stack) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(
-            'Error loading favorites',
-            style: TextStyle(color: Colors.red[300]),
-          ),
-        ),
-      ),
+      error: (error, stack) {
+        // Firestore index/permission errors should not block the UI —
+        // show the empty state so the rest of the home screen is usable.
+        debugPrint('FavoritesGrid: error loading favorites: $error');
+        return _buildEmptyState(context, ref);
+      },
     );
   }
 

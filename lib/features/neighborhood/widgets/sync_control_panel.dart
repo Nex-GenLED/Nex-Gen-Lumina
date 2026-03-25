@@ -7,6 +7,7 @@ import '../../wled/wled_models.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
+import '../services/group_autopilot_service.dart';
 import 'game_day_setup_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1416,6 +1417,146 @@ class _PerHouseRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GROUP AUTOPILOT — Member opt-in/out card for Sync Control Center
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Displays the Group Autopilot opt-in/opt-out toggle for each member's
+/// home card in the host's Sync Control Center.
+///
+/// Opted-out members show a muted/grey state. Only the member themselves
+/// can toggle back in — the host cannot force opt a member back in.
+class GroupAutopilotMemberCard extends ConsumerWidget {
+  final NeighborhoodMember member;
+  final bool isCurrentUser;
+  final String groupId;
+
+  const GroupAutopilotMemberCard({
+    super.key,
+    required this.member,
+    required this.isCurrentUser,
+    required this.groupId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final optInAsync = ref.watch(_memberOptInFamily(member.oderId));
+    final isOptedIn = optInAsync.valueOrNull ?? true;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isOptedIn
+            ? Colors.grey.shade900.withValues(alpha: 0.5)
+            : Colors.grey.shade900.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isOptedIn
+              ? Colors.cyan.withValues(alpha: 0.3)
+              : Colors.grey.shade800.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Status indicator dot
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isOptedIn ? Colors.cyan : Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Member name
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  member.displayName,
+                  style: TextStyle(
+                    color: isOptedIn
+                        ? Colors.grey.shade200
+                        : Colors.grey.shade500,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isOptedIn ? 'Opted in' : 'Opted out',
+                  style: TextStyle(
+                    color: isOptedIn
+                        ? Colors.cyan.shade300
+                        : Colors.grey.shade600,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Toggle — only enabled for the current user
+          if (isCurrentUser)
+            SizedBox(
+              height: 28,
+              child: Switch.adaptive(
+                value: isOptedIn,
+                onChanged: (value) async {
+                  final service = ref.read(_groupAutopilotServiceProvider);
+                  await service.setOptIn(groupId, value);
+                  ref.invalidate(_memberOptInFamily(member.oderId));
+                },
+                activeTrackColor: Colors.cyan.withValues(alpha: 0.5),
+                activeThumbColor: Colors.cyan,
+                inactiveTrackColor: Colors.grey.shade700,
+              ),
+            )
+          else
+            // For non-current users (host view), show status label
+            Text(
+              isOptedIn ? 'Group Autopilot' : 'Excluded',
+              style: TextStyle(
+                color: isOptedIn
+                    ? Colors.cyan.withValues(alpha: 0.7)
+                    : Colors.grey.shade600,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Family provider: opt-in status per member for the active group.
+final _memberOptInFamily =
+    FutureProvider.family<bool, String>((ref, userId) async {
+  final groupId = ref.watch(activeNeighborhoodIdProvider);
+  if (groupId == null) return true;
+  final service = ref.watch(_groupAutopilotServiceProvider);
+  return service.getMemberOptIn(groupId, userId);
+});
+
+final _groupAutopilotServiceProvider =
+    Provider<_GroupAutopilotServiceLazy>((ref) {
+  return _GroupAutopilotServiceLazy();
+});
+
+/// Lazy import wrapper to avoid circular deps — delegates to the real service.
+class _GroupAutopilotServiceLazy {
+  late final _inner = GroupAutopilotService();
+
+  Future<bool> getMemberOptIn(String groupId, String userId) =>
+      _inner.getMemberOptIn(groupId, userId);
+
+  Future<void> setOptIn(String groupId, bool optIn) =>
+      _inner.setOptIn(groupId, optIn);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

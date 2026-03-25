@@ -18,6 +18,7 @@ import '../neighborhood_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import '../neighborhood_providers.dart';
 import 'autopilot_sync_trigger.dart' show syncEventServiceProvider;
+import 'group_autopilot_service.dart';
 import 'sync_event_service.dart';
 import 'sync_notification_service.dart';
 
@@ -822,6 +823,32 @@ class SyncHandoffManager {
       default:
         return null;
     }
+  }
+
+  // ── GROUP AUTOPILOT AWARENESS ──────────────────────────────────────
+
+  /// Fetch the current set of opted-in member IDs for a group's autopilot.
+  ///
+  /// Always call this before broadcasting any game day command — a member
+  /// may have opted out after the session was configured. Returns an empty
+  /// list if all members opted out (caller should cancel the broadcast
+  /// silently — do not error).
+  Future<List<String>> resolveGroupAutopilotMembers(String groupId) async {
+    final service = GroupAutopilotService(firestore: _firestore);
+    final members = await service.refreshActiveMemberIds(groupId);
+    if (members.isEmpty) {
+      debugPrint(
+        '[SyncHandoffManager] No opted-in members for group $groupId — '
+        'cancelling broadcast silently',
+      );
+    }
+    return members;
+  }
+
+  /// Check if a specific user is currently opted in to a group's autopilot.
+  Future<bool> isMemberOptedIn(String groupId, String userId) async {
+    final service = GroupAutopilotService(firestore: _firestore);
+    return service.getMemberOptIn(groupId, userId);
   }
 
   void dispose() {

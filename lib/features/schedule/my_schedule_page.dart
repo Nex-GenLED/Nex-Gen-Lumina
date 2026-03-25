@@ -26,6 +26,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/schedule_type_badge.dart';
 import 'package:nexgen_command/widgets/section_header.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -1914,66 +1915,81 @@ class _ScheduleCard extends ConsumerWidget {
         ? '${item.timeLabel} → ${item.offTimeLabel}'
         : item.timeLabel;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.line, width: 1),
+    // Extract preview colors from WLED payload if available
+    final previewColors = <Color>[];
+    if (item.wledPayload != null) {
+      final seg = item.wledPayload!['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final col = seg[0] is Map ? seg[0]['col'] : null;
+        if (col is List) {
+          for (final c in col.take(3)) {
+            if (c is List && c.length >= 3) {
+              previewColors.add(Color.fromRGBO(c[0] as int, c[1] as int, c[2] as int, 1.0));
+            }
+          }
+        }
+      }
+    }
+
+    // Extract effect name from action label
+    final effectName = item.actionLabel.startsWith('Pattern: ')
+        ? item.actionLabel.substring(9)
+        : null;
+
+    // Build recurrence label
+    final recurrence = item.repeatDays.length == 7
+        ? 'Daily'
+        : item.repeatDays.length == 5 &&
+                item.repeatDays.every((d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].contains(d))
+            ? 'Weekdays'
+            : item.repeatDays.join(', ');
+
+    return ScheduleIdentityCard(
+      type: ScheduleEntryType.personalAutopilot,
+      patternName: effectName ?? item.actionLabel,
+      previewColors: previewColors,
+      effectName: effectName != null ? item.actionLabel : null,
+      timeLabel: timeDisplay,
+      recurrenceLabel: recurrence,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Edit',
+            onPressed: () => showScheduleEditor(context, ref, editing: item),
+            icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 18),
+            constraints: const BoxConstraints(minWidth: 32),
+            padding: EdgeInsets.zero,
           ),
-          padding: const EdgeInsets.all(14),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            // Left: Time + Days
-            SizedBox(
-              width: 130,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(timeDisplay, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh)),
-                const SizedBox(height: 4),
-                Text(item.repeatDays.join(', '), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium)),
-              ]),
-            ),
-            const SizedBox(width: 12),
-            // Middle: Action
-            Expanded(child: Text(item.actionLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium)),
-            const SizedBox(width: 12),
-            // Edit / Delete actions
-            IconButton(
-              tooltip: 'Edit',
-              onPressed: () => showScheduleEditor(context, ref, editing: item),
-              icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Delete',
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Delete schedule?'),
-                    content: const Text('This action cannot be undone.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                      FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
-                    ],
-                  ),
-                );
-                if (ok == true) {
-                  notifier.remove(item.id);
-                }
-              },
-              icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 20),
-            ),
-            const SizedBox(width: 6),
-            // Right: Toggle
-            CupertinoSwitch(
-              value: item.enabled,
-              activeColor: NexGenPalette.cyan,
-              onChanged: (v) => notifier.toggle(item.id, v),
-            ),
-          ]),
-        ),
+          IconButton(
+            tooltip: 'Delete',
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Delete schedule?'),
+                  content: const Text('This action cannot be undone.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                    FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                notifier.remove(item.id);
+              }
+            },
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 18),
+            constraints: const BoxConstraints(minWidth: 32),
+            padding: EdgeInsets.zero,
+          ),
+          const SizedBox(width: 4),
+          CupertinoSwitch(
+            value: item.enabled,
+            activeColor: NexGenPalette.cyan,
+            onChanged: (v) => notifier.toggle(item.id, v),
+          ),
+        ],
       ),
     );
   }

@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../../../theme.dart';
+import '../../autopilot/game_day_autopilot_config.dart';
+import '../../autopilot/game_day_autopilot_providers.dart';
+import '../../autopilot/game_day_autopilot_service.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../wled/wled_models.dart';
@@ -615,6 +617,13 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+
+        // ── Game Day Autopilot toggle ──
+        _GameDayAutopilotSection(
+          teamSlug: _selectedSlug!,
+          team: team,
+        ),
         const SizedBox(height: 24),
 
         // ── Action buttons ──
@@ -714,6 +723,281 @@ class _GameDayResult {
   final GameDaySyncConfig config;
   final bool pushToGroup;
   const _GameDayResult(this.config, this.pushToGroup);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GAME DAY AUTOPILOT SECTION
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Autopilot toggle section shown in Step 2 of GameDaySetupScreen.
+///
+/// When toggled ON, shows a confirmation card with next game info and
+/// the selected design. Writes a [GameDayAutopilotConfig] to Firestore.
+class _GameDayAutopilotSection extends ConsumerStatefulWidget {
+  final String teamSlug;
+  final TeamColors team;
+
+  const _GameDayAutopilotSection({
+    required this.teamSlug,
+    required this.team,
+  });
+
+  @override
+  ConsumerState<_GameDayAutopilotSection> createState() =>
+      _GameDayAutopilotSectionState();
+}
+
+class _GameDayAutopilotSectionState
+    extends ConsumerState<_GameDayAutopilotSection> {
+  DateTime? _nextGameDate;
+  bool _loadingNextGame = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchNextGame();
+  }
+
+  Future<void> _fetchNextGame() async {
+    setState(() => _loadingNextGame = true);
+    try {
+      final date = await ref
+          .read(gameDayAutopilotNotifierProvider.notifier)
+          .fetchNextGame(widget.teamSlug);
+      if (mounted) {
+        setState(() {
+          _nextGameDate = date;
+          _loadingNextGame = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingNextGame = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = ref.watch(teamAutopilotEnabledProvider(widget.teamSlug));
+    final config = ref.watch(teamAutopilotConfigProvider(widget.teamSlug));
+    final session =
+        ref.watch(teamAutopilotSessionProvider(widget.teamSlug));
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade900.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isEnabled
+              ? widget.team.primary.withValues(alpha: 0.4)
+              : Colors.grey.shade800,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row with toggle
+          Row(
+            children: [
+              Icon(
+                Icons.bolt,
+                color: isEnabled
+                    ? widget.team.primary
+                    : Colors.grey.shade500,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Game Day Autopilot',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Lights activate 30 min before game start, off 30 min after.',
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: isEnabled,
+                onChanged: (v) {
+                  ref
+                      .read(gameDayAutopilotNotifierProvider.notifier)
+                      .toggleAutopilot(teamSlug: widget.teamSlug, enabled: v);
+                },
+                activeColor: widget.team.primary,
+              ),
+            ],
+          ),
+
+          // Expanded details when enabled
+          if (isEnabled) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: widget.team.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: widget.team.primary.withValues(alpha: 0.15),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Next game info
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today,
+                          color: Colors.grey.shade400, size: 14),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Next game: ',
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (_loadingNextGame)
+                        SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: widget.team.primary,
+                          ),
+                        )
+                      else
+                        Text(
+                          _nextGameDate != null
+                              ? _formatGameDate(_nextGameDate!)
+                              : 'No upcoming games',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Design info
+                  Row(
+                    children: [
+                      Icon(Icons.palette,
+                          color: Colors.grey.shade400, size: 14),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Design: ',
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 12,
+                        ),
+                      ),
+                      Text(
+                        config?.designLabel ?? 'Auto-selected',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // Active session status
+                  if (session != null && session.isActive) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: widget.team.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _sessionIcon(session.phase),
+                            color: widget.team.primary,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _sessionLabel(session.phase),
+                            style: TextStyle(
+                              color: widget.team.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatGameDate(DateTime date) {
+    final local = date.toLocal();
+    final now = DateTime.now();
+    final diff = date.difference(now);
+    final time = _formatTime12(local);
+
+    if (diff.inDays == 0 && diff.inMinutes > -120) {
+      return 'Today at $time';
+    } else if (diff.inDays == 1 || (diff.inDays == 0 && local.day != now.day)) {
+      return 'Tomorrow at $time';
+    } else {
+      const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day} at $time';
+    }
+  }
+
+  String _formatTime12(DateTime dt) {
+    final hour = dt.hour;
+    final minute = dt.minute;
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    return '$h12:${minute.toString().padLeft(2, '0')} $period';
+  }
+
+  IconData _sessionIcon(AutopilotSessionPhase phase) => switch (phase) {
+        AutopilotSessionPhase.preGame => Icons.timer,
+        AutopilotSessionPhase.liveGame => Icons.sports,
+        AutopilotSessionPhase.postGame => Icons.timelapse,
+        _ => Icons.bolt,
+      };
+
+  String _sessionLabel(AutopilotSessionPhase phase) => switch (phase) {
+        AutopilotSessionPhase.preGame => 'PRE-GAME ACTIVE',
+        AutopilotSessionPhase.liveGame => 'LIVE GAME',
+        AutopilotSessionPhase.postGame => 'POST-GAME COUNTDOWN',
+        _ => 'AUTOPILOT',
+      };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

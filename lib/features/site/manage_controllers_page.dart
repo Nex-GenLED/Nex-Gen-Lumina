@@ -110,7 +110,7 @@ class _ControllerTile extends ConsumerWidget {
             _DetailRow(label: 'IP Address', value: item.ip),
             _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
             if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
-            _DetailRow(label: 'Wi-Fi Configured', value: item.wifiConfigured == true ? 'Yes' : 'No'),
+            _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
             if (item.createdAt != null)
               _DetailRow(label: 'Added', value: _formatDate(item.createdAt)),
             if (item.updatedAt != null)

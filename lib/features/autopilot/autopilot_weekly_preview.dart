@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/schedule_type_badge.dart';
 
 /// Provider for the generated weekly schedule.
 final weeklyScheduleProvider =
@@ -850,7 +851,7 @@ class _ScheduleListViewState extends State<_ScheduleListView> {
   }
 }
 
-/// Card displaying a single scheduled item.
+/// Card displaying a single scheduled item using the visual identity system.
 ///
 /// When [item.isApproved] is true, the card shows a glowing shadow using the
 /// item's primary WLED color.
@@ -868,13 +869,45 @@ class _ScheduleItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryColor = _getPrimaryColor();
+    final displayColors = _extractColors();
+    final isGameDay = item.trigger == AutopilotTrigger.gameDay ||
+        item.trigger == AutopilotTrigger.sportsScoreAlert;
+
+    // Build trailing action buttons
+    Widget? trailing;
+    if (onEdit != null || onApprove != null) {
+      trailing = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (onEdit != null)
+            IconButton(
+              icon: const Icon(Icons.edit, size: 18),
+              onPressed: onEdit,
+              tooltip: 'Override pattern',
+              constraints: const BoxConstraints(minWidth: 32),
+              padding: EdgeInsets.zero,
+            ),
+          if (onApprove != null)
+            IconButton(
+              icon: Icon(
+                item.isApproved ? Icons.check_circle : Icons.check_circle_outline,
+                size: 18,
+                color: item.isApproved ? Colors.green : Colors.grey,
+              ),
+              onPressed: onApprove,
+              tooltip: item.isApproved ? 'Approved' : 'Approve',
+              constraints: const BoxConstraints(minWidth: 32),
+              padding: EdgeInsets.zero,
+            ),
+        ],
+      );
+    }
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: item.isApproved
             ? [
                 BoxShadow(
@@ -885,85 +918,22 @@ class _ScheduleItemCard extends StatelessWidget {
               ]
             : null,
       ),
-      child: Card(
-        margin: EdgeInsets.zero,
-        child: ListTile(
-          contentPadding: const EdgeInsets.all(12),
-          leading: _buildColorPreview(),
-          title: Text(
-            item.patternName,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 4),
-              Text(item.reason),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    Icons.schedule,
-                    size: 14,
-                    color: Colors.grey[500],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _formatTime(item.scheduledTime),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Icon(
-                    _getTriggerIcon(item.trigger),
-                    size: 14,
-                    color: Colors.grey[500],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    item.trigger.displayName,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          trailing: (onEdit != null || onApprove != null)
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (onEdit != null)
-                      IconButton(
-                        icon: const Icon(Icons.edit, size: 20),
-                        onPressed: onEdit,
-                        tooltip: 'Override pattern',
-                        constraints: const BoxConstraints(minWidth: 36),
-                        padding: EdgeInsets.zero,
-                      ),
-                    if (onApprove != null)
-                      IconButton(
-                        icon: Icon(
-                          item.isApproved ? Icons.check_circle : Icons.check_circle_outline,
-                          size: 20,
-                          color: item.isApproved ? Colors.green : Colors.grey,
-                        ),
-                        onPressed: onApprove,
-                        tooltip: item.isApproved ? 'Approved' : 'Approve',
-                        constraints: const BoxConstraints(minWidth: 36),
-                        padding: EdgeInsets.zero,
-                      ),
-                  ],
-                )
-              : Icon(
-                  item.isApproved ? Icons.check_circle : Icons.pending,
-                  color: item.isApproved ? Colors.green : Colors.grey,
-                ),
-        ),
+      child: ScheduleIdentityCard(
+        type: isGameDay
+            ? ScheduleEntryType.gameDayAutopilot
+            : ScheduleEntryType.personalAutopilot,
+        patternName: item.patternName,
+        previewColors: displayColors,
+        effectName: item.reason,
+        timeLabel: _formatTime(item.scheduledTime),
+        recurrenceLabel: item.repeatDays.isEmpty
+            ? item.trigger.displayName
+            : item.repeatDays.join(', '),
+        teamName: isGameDay ? item.eventName : null,
+        gameDayTiming: isGameDay && item.durationMinutes != null
+            ? '${item.durationMinutes} min duration'
+            : null,
+        trailing: trailing,
       ),
     );
   }
@@ -979,10 +949,9 @@ class _ScheduleItemCard extends StatelessWidget {
     return NexGenPalette.cyan;
   }
 
-  Widget _buildColorPreview() {
+  List<Color> _extractColors() {
     final colors = item.wledPayload['seg']?[0]?['col'] as List?;
     final displayColors = <Color>[];
-
     if (colors != null) {
       for (final colorArray in colors.take(3)) {
         if (colorArray is List && colorArray.length >= 3) {
@@ -995,22 +964,7 @@ class _ScheduleItemCard extends StatelessWidget {
         }
       }
     }
-
-    if (displayColors.isEmpty) {
-      displayColors.add(Colors.grey);
-    }
-
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        gradient: displayColors.length > 1
-            ? LinearGradient(colors: displayColors)
-            : null,
-        color: displayColors.length == 1 ? displayColors.first : null,
-      ),
-    );
+    return displayColors;
   }
 
   String _formatTime(DateTime time) {
@@ -1018,30 +972,5 @@ class _ScheduleItemCard extends StatelessWidget {
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
-  }
-
-  IconData _getTriggerIcon(AutopilotTrigger trigger) {
-    switch (trigger) {
-      case AutopilotTrigger.holiday:
-        return Icons.celebration;
-      case AutopilotTrigger.gameDay:
-        return Icons.sports_football;
-      case AutopilotTrigger.sportsScoreAlert:
-        return Icons.notifications_active;
-      case AutopilotTrigger.sunset:
-        return Icons.wb_twilight;
-      case AutopilotTrigger.sunrise:
-        return Icons.wb_sunny;
-      case AutopilotTrigger.weeknight:
-        return Icons.nights_stay;
-      case AutopilotTrigger.weekend:
-        return Icons.weekend;
-      case AutopilotTrigger.seasonal:
-        return Icons.eco;
-      case AutopilotTrigger.learned:
-        return Icons.psychology;
-      case AutopilotTrigger.custom:
-        return Icons.star;
-    }
   }
 }

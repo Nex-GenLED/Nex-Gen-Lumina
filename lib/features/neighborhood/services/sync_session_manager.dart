@@ -8,6 +8,7 @@ import '../models/sync_event.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
+import 'group_autopilot_service.dart';
 import 'sync_celebration_service.dart';
 import 'sync_handoff_manager.dart';
 import 'sync_notification_service.dart';
@@ -449,8 +450,33 @@ class SyncSessionManager {
     SyncEvent event,
     List<String> participantUids,
   ) async {
+    // ── Group autopilot: re-fetch opted-in members before broadcast ──
+    // A member may have opted out after the session was configured.
+    final autopilotService = GroupAutopilotService();
+    final autopilotConfig = await autopilotService.getGroupAutopilot(groupId);
+    List<String> effectiveUids = participantUids;
+    if (autopilotConfig != null && autopilotConfig.enabled) {
+      final optedIn = await autopilotService.refreshActiveMemberIds(groupId);
+      if (optedIn.isEmpty) {
+        debugPrint(
+          '[SyncSessionManager] All members opted out of group autopilot '
+          '— cancelling broadcast silently',
+        );
+        return;
+      }
+      // Intersect session participants with opted-in members
+      effectiveUids =
+          participantUids.where((uid) => optedIn.contains(uid)).toList();
+      if (effectiveUids.isEmpty) return;
+    }
+
     final assignment = event.basePattern.toSyncAssignment();
-    final members = _ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
+    final allMembers =
+        _ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
+    // Filter members list to only those who are opted in
+    final members = allMembers
+        .where((m) => effectiveUids.contains(m.oderId))
+        .toList();
     final engine = _ref.read(neighborhoodSyncEngineProvider);
 
     var command = engine.createSyncCommand(

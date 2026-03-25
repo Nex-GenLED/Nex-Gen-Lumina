@@ -135,7 +135,7 @@ class _MyControllersTab extends ConsumerWidget {
             _DetailRow(label: 'IP Address', value: item.ip),
             _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
             if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
-            _DetailRow(label: 'Wi-Fi Configured', value: item.wifiConfigured == true ? 'Yes' : 'No'),
+            _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
             if (item.createdAt != null)
               _DetailRow(label: 'Added', value: _formatDate(item.createdAt!)),
             if (item.updatedAt != null)
@@ -773,47 +773,87 @@ class _EmptyControllersState extends StatelessWidget {
   }
 }
 
-/// Remote Access tab - quick overview with link to full settings page
+/// Remote Access tab — navigates directly to the full Remote Access screen.
+///
+/// Previously this was a summary card + "Configure" button, which felt
+/// redundant since the tab itself is already labelled "Remote Access".
+/// Now it shows a slim status bar and opens the config screen immediately.
 class _RemoteAccessTab extends ConsumerWidget {
   const _RemoteAccessTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
-      data: (u) => u,
-      orElse: () => null,
-    );
     final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
       data: (s) => s,
       orElse: () => ConnectivityStatus.local,
     );
-
+    final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
+      data: (u) => u,
+      orElse: () => null,
+    );
     final isEnabled = userProfile?.remoteAccessEnabled ?? false;
-    final hasWebhookUrl = userProfile?.webhookUrl?.isNotEmpty ?? false;
     final homeSsid = userProfile?.homeSsid;
+    final hasWebhookUrl = userProfile?.webhookUrl?.isNotEmpty ?? false;
+    final bridgeAlive = ref.watch(bridgeReachableProvider);
+
+    // Derive a single status line
+    String statusLabel;
+    Color statusColor;
+    IconData statusIcon;
+
+    if (connectivityStatus == ConnectivityStatus.local) {
+      statusLabel = 'On Home Network — direct connection';
+      statusColor = Colors.green;
+      statusIcon = Icons.home;
+    } else if (connectivityStatus == ConnectivityStatus.remote && isEnabled) {
+      statusLabel = bridgeAlive == true
+          ? 'Remote — bridge connected'
+          : 'Remote — bridge offline';
+      statusColor = bridgeAlive == true ? NexGenPalette.cyan : Colors.orange;
+      statusIcon = bridgeAlive == true ? Icons.cloud_done : Icons.cloud_off;
+    } else if (connectivityStatus == ConnectivityStatus.offline) {
+      statusLabel = 'Offline';
+      statusColor = Colors.red;
+      statusIcon = Icons.signal_wifi_off;
+    } else {
+      statusLabel = 'Away from home — remote access disabled';
+      statusColor = Colors.orange;
+      statusIcon = Icons.cloud_off;
+    }
 
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       child: ListView(children: [
-        // Status Card
-        _buildStatusCard(context, connectivityStatus, isEnabled),
+        // ── Compact status banner ──────────────────────────────────────
+        Card(
+          color: statusColor.withValues(alpha: 0.1),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(statusIcon, color: statusColor, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    statusLabel,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         const SizedBox(height: 16),
 
-        // Configuration Status
+        // ── Quick-glance config chips ──────────────────────────────────
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.settings_outlined, color: NexGenPalette.cyan),
-                    const SizedBox(width: 8),
-                    Text('Configuration', style: Theme.of(context).textTheme.titleMedium),
-                  ],
-                ),
-                const SizedBox(height: 16),
                 _ConfigItem(
                   icon: Icons.power_settings_new,
                   label: 'Remote Access',
@@ -822,51 +862,17 @@ class _RemoteAccessTab extends ConsumerWidget {
                 ),
                 const Divider(height: 24),
                 _ConfigItem(
-                  icon: Icons.link,
-                  label: 'Webhook URL',
-                  value: hasWebhookUrl ? 'Configured' : 'Not Set',
-                  valueColor: hasWebhookUrl ? Colors.green : Colors.orange,
-                ),
-                const Divider(height: 24),
-                _ConfigItem(
                   icon: Icons.home,
                   label: 'Home Network',
                   value: homeSsid ?? 'Not Set',
                   valueColor: homeSsid != null ? Colors.green : Colors.orange,
                 ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Configure Button
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.cloud_outlined, color: NexGenPalette.cyan),
-                    const SizedBox(width: 8),
-                    Text('Remote Access Settings', style: Theme.of(context).textTheme.titleLarge),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Configure your webhook URL and home network to control your lights from anywhere.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => context.push(AppRoutes.remoteAccess),
-                    icon: const Icon(Icons.settings, color: Colors.black),
-                    label: const Text('Configure Remote Access'),
-                  ),
+                const Divider(height: 24),
+                _ConfigItem(
+                  icon: Icons.router_outlined,
+                  label: 'Bridge / Webhook',
+                  value: hasWebhookUrl ? 'Webhook' : (isEnabled ? 'ESP32 Bridge' : 'Not Set'),
+                  valueColor: (isEnabled || hasWebhookUrl) ? Colors.green : Colors.orange,
                 ),
               ],
             ),
@@ -874,109 +880,16 @@ class _RemoteAccessTab extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
 
-        // Info Card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.info_outline, color: NexGenPalette.violet),
-                    const SizedBox(width: 8),
-                    Text('How It Works', style: Theme.of(context).textTheme.titleMedium),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Remote access allows you to control your WLED lights when you\'re away from home. '
-                  'Commands are sent through a secure cloud relay to your home network.\n\n'
-                  'Requirements:\n'
-                  '• Dynamic DNS service (e.g., DuckDNS)\n'
-                  '• Port forwarding configured on your router\n'
-                  '• Home network saved in the app',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
+        // ── Single action button ──────────────────────────────────────
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => context.push(AppRoutes.remoteAccess),
+            icon: const Icon(Icons.settings, color: Colors.black),
+            label: Text(isEnabled ? 'Remote Access Settings' : 'Set Up Remote Access'),
           ),
         ),
       ]),
-    );
-  }
-
-  Widget _buildStatusCard(BuildContext context, ConnectivityStatus status, bool isEnabled) {
-    IconData icon;
-    Color color;
-    String title;
-    String subtitle;
-
-    switch (status) {
-      case ConnectivityStatus.local:
-        icon = Icons.home;
-        color = Colors.green;
-        title = 'On Home Network';
-        subtitle = 'Using direct local connection';
-        break;
-      case ConnectivityStatus.remote:
-        if (isEnabled) {
-          icon = Icons.cloud;
-          color = NexGenPalette.cyan;
-          title = 'Remote Mode Active';
-          subtitle = 'Using cloud relay';
-        } else {
-          icon = Icons.cloud_off;
-          color = Colors.orange;
-          title = 'Away from Home';
-          subtitle = 'Remote access not enabled';
-        }
-        break;
-      case ConnectivityStatus.offline:
-        icon = Icons.signal_wifi_off;
-        color = Colors.red;
-        title = 'Offline';
-        subtitle = 'No network connection';
-        break;
-    }
-
-    return Card(
-      color: color.withValues(alpha: 0.1),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 28),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

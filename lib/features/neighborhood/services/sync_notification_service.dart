@@ -81,6 +81,12 @@ enum SyncNotificationType {
 
   /// Victory celebration before handing back to longForm.
   handoffVictory,
+
+  /// Host set Game Day Autopilot for the group.
+  groupAutopilotSet,
+
+  /// Group autopilot was cancelled (host opted out or disabled).
+  groupAutopilotCancelled,
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -116,6 +122,8 @@ class SyncNotificationService {
   static const _kHandoffResumedId = 7008;
   static const _kHandoffOvertimeId = 7009;
   static const _kHandoffVictoryId = 7010;
+  static const _kGroupAutopilotSetId = 7011;
+  static const _kGroupAutopilotCancelledId = 7012;
 
   SyncNotificationService({
     FirebaseMessaging? messaging,
@@ -430,6 +438,43 @@ class SyncNotificationService {
     );
   }
 
+  // ── Group Autopilot Notifications ────────────────────────────────────
+
+  /// Notify opted-in members that the host set Game Day Autopilot for the group.
+  Future<void> notifyGroupAutopilotSet({
+    required String groupId,
+    required List<String> participantUids,
+    required String hostName,
+    required String teamName,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: 'Game Day Autopilot',
+      body:
+          "$hostName set Game Day Autopilot for $teamName — you're included. "
+          'Tap to opt out.',
+      type: SyncNotificationType.groupAutopilotSet,
+      data: {'groupId': groupId, 'teamName': teamName},
+    );
+  }
+
+  /// Notify all members that group autopilot was cancelled.
+  Future<void> notifyGroupAutopilotCancelled({
+    required String groupId,
+    required List<String> participantUids,
+    required String reason,
+  }) async {
+    await notifyParticipants(
+      groupId: groupId,
+      participantUids: participantUids,
+      title: 'Group Autopilot Cancelled',
+      body: reason,
+      type: SyncNotificationType.groupAutopilotCancelled,
+      data: {'groupId': groupId},
+    );
+  }
+
   // ── Foreground Notification Handling ────────────────────────────────
 
   /// Handle messages received while app is in the foreground.
@@ -561,6 +606,10 @@ class SyncNotificationService {
         return _kHandoffOvertimeId;
       case SyncNotificationType.handoffVictory:
         return _kHandoffVictoryId;
+      case SyncNotificationType.groupAutopilotSet:
+        return _kGroupAutopilotSetId;
+      case SyncNotificationType.groupAutopilotCancelled:
+        return _kGroupAutopilotCancelledId;
     }
   }
 
@@ -647,6 +696,9 @@ class SyncNotificationService {
         return prefs.sessionStart;
       case SyncNotificationType.handoffOvertimeDelay:
         return prefs.sessionEnd;
+      case SyncNotificationType.groupAutopilotSet:
+      case SyncNotificationType.groupAutopilotCancelled:
+        return true; // Always send group autopilot notifications
     }
   }
 
@@ -698,6 +750,10 @@ class SyncNotificationService {
           break;
         case SyncNotificationType.handoffOvertimeDelay:
           if (prefs.sessionEnd) eligible.add(uid);
+          break;
+        case SyncNotificationType.groupAutopilotSet:
+        case SyncNotificationType.groupAutopilotCancelled:
+          eligible.add(uid); // Always notify about group autopilot changes
           break;
       }
     }
