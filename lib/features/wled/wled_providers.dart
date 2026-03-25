@@ -332,79 +332,7 @@ class WledNotifier extends Notifier<WledStateModel> {
         ref.read(bridgeReachableProvider.notifier).state = true;
       }
       try {
-        final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
-        final bri = (data['bri'] as int?) ?? state.brightness;
-        int speed = state.speed;
-        int intensity = state.intensity;
-
-        // WLED 'seg' in /json/state can be either a List or a single Map depending on build.
-        final dynamic segAny = data['seg'];
-        Map<dynamic, dynamic>? firstSeg;
-        if (segAny is List && segAny.isNotEmpty) {
-          final s0 = segAny.first;
-          if (s0 is Map) firstSeg = s0;
-        } else if (segAny is Map) {
-          firstSeg = segAny;
-        }
-
-        int effectId = state.effectId;
-        int paletteId = state.paletteId;
-
-        if (firstSeg != null) {
-          final sx = firstSeg['sx'];
-          if (sx is int) speed = sx;
-
-          // Parse intensity (ix)
-          final ix = firstSeg['ix'];
-          if (ix is int) intensity = ix;
-
-          // Parse effect ID (fx)
-          final fx = firstSeg['fx'];
-          if (fx is int) effectId = fx;
-
-          // Parse palette ID (pal)
-          final pal = firstSeg['pal'];
-          if (pal is int) paletteId = pal;
-
-          final cols = firstSeg['col'];
-          if (cols is List && cols.isNotEmpty && cols.first is List) {
-            // Extract the full color sequence (all colors in segment)
-            final List<Color> colorSequence = [];
-            Color? primaryColor;
-            int ww = state.warmWhite;
-
-            for (final c in cols) {
-              if (c is List && c.length >= 3) {
-                final rr = (c[0] as num).toInt().clamp(0, 255);
-                final gg = (c[1] as num).toInt().clamp(0, 255);
-                final bb = (c[2] as num).toInt().clamp(0, 255);
-
-                // Skip black/off colors in the sequence display
-                if (rr > 0 || gg > 0 || bb > 0) {
-                  colorSequence.add(Color.fromARGB(255, rr, gg, bb));
-                }
-
-                // First color becomes primary
-                if (primaryColor == null) {
-                  primaryColor = Color.fromARGB(255, rr, gg, bb);
-                  if (c.length >= 4) {
-                    ww = (c[3] as num).toInt().clamp(0, 255);
-                  }
-                }
-              }
-            }
-
-            if (primaryColor != null) {
-              state = state.copyWith(
-                color: primaryColor,
-                warmWhite: ww,
-                colorSequence: colorSequence,
-              );
-            }
-          }
-        }
-
-        state = state.copyWith(isOn: isOn, brightness: bri, speed: speed, intensity: intensity, effectId: effectId, paletteId: paletteId, connected: true);
+        _applyStateData(data);
       } catch (e) {
         debugPrint('WLED parse state error: $e');
       }
@@ -422,6 +350,104 @@ class WledNotifier extends Notifier<WledStateModel> {
     });
   }
 
+  /// Parse a full /json/state response and update all state fields.
+  /// Used by both polling and refreshConnection to avoid duplication.
+  void _applyStateData(Map<String, dynamic> data) {
+    final prevEffectId = state.effectId;
+    final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
+    final bri = (data['bri'] as int?) ?? state.brightness;
+    int speed = state.speed;
+    int intensity = state.intensity;
+
+    // WLED 'seg' in /json/state can be either a List or a single Map depending on build.
+    final dynamic segAny = data['seg'];
+    Map<dynamic, dynamic>? firstSeg;
+    if (segAny is List && segAny.isNotEmpty) {
+      final s0 = segAny.first;
+      if (s0 is Map) firstSeg = s0;
+    } else if (segAny is Map) {
+      firstSeg = segAny;
+    }
+
+    int effectId = state.effectId;
+    int paletteId = state.paletteId;
+    bool reverse = state.reverse;
+
+    if (firstSeg != null) {
+      final sx = firstSeg['sx'];
+      if (sx is int) speed = sx;
+
+      final ix = firstSeg['ix'];
+      if (ix is int) intensity = ix;
+
+      final fx = firstSeg['fx'];
+      if (fx is int) effectId = fx;
+
+      final pal = firstSeg['pal'];
+      if (pal is int) paletteId = pal;
+
+      final rev = firstSeg['rev'];
+      if (rev is bool) reverse = rev;
+
+      final cols = firstSeg['col'];
+      if (cols is List && cols.isNotEmpty && cols.first is List) {
+        final List<Color> colorSequence = [];
+        Color? primaryColor;
+        int ww = state.warmWhite;
+
+        for (final c in cols) {
+          if (c is List && c.length >= 3) {
+            final rr = (c[0] as num).toInt().clamp(0, 255);
+            final gg = (c[1] as num).toInt().clamp(0, 255);
+            final bb = (c[2] as num).toInt().clamp(0, 255);
+
+            if (rr > 0 || gg > 0 || bb > 0) {
+              colorSequence.add(Color.fromARGB(255, rr, gg, bb));
+            }
+
+            if (primaryColor == null) {
+              primaryColor = Color.fromARGB(255, rr, gg, bb);
+              if (c.length >= 4) {
+                ww = (c[3] as num).toInt().clamp(0, 255);
+              }
+            }
+          }
+        }
+
+        if (primaryColor != null) {
+          state = state.copyWith(
+            color: primaryColor,
+            warmWhite: ww,
+            colorSequence: colorSequence,
+          );
+        }
+      }
+    }
+
+    state = state.copyWith(
+      isOn: isOn,
+      brightness: bri,
+      speed: speed,
+      intensity: intensity,
+      effectId: effectId,
+      paletteId: paletteId,
+      reverse: reverse,
+      connected: true,
+    );
+
+    // Mark that we have received a live fetch
+    ref.read(wledStateFreshProvider.notifier).state = true;
+
+    // Clear stale preset label when the live effect diverges from what was
+    // cached in SharedPreferences. This ensures the "Now Playing" name always
+    // reflects the actual controller state after a fresh fetch.
+    if (effectId != prevEffectId) {
+      try {
+        ref.read(activePresetLabelProvider.notifier).clear();
+      } catch (_) {}
+    }
+  }
+
   void _ensureReconnectTimer() {
     if (_reconnectTimer?.isActive == true) return;
     _reconnectTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
@@ -431,8 +457,8 @@ class WledNotifier extends Notifier<WledStateModel> {
         final data = await service.getState();
         if (data != null) {
           _cancelReconnectTimer();
-          // Mark reconnected; next poll will refresh values
-          state = state.copyWith(connected: true);
+          _applyStateData(data);
+          _startPolling();
         }
       } catch (e) {
         debugPrint('Reconnect ping failed: $e');
@@ -450,6 +476,8 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Force refresh connection state - call when app resumes from background
   Future<void> refreshConnection() async {
     debugPrint('🔄 WledNotifier: Refreshing connection...');
+    // Mark state as stale until fresh data arrives
+    ref.read(wledStateFreshProvider.notifier).state = false;
     final service = ref.read(wledRepositoryProvider);
     if (service == null) {
       debugPrint('🔄 WledNotifier: No repository available');
@@ -461,11 +489,17 @@ class WledNotifier extends Notifier<WledStateModel> {
       if (data != null) {
         debugPrint('🔄 WledNotifier: Connection restored');
         _cancelReconnectTimer();
-        // Parse and update state immediately
-        final isOn = (data['on'] as bool?) ?? state.isOn;
-        final bri = (data['bri'] as int?) ?? state.brightness;
-        state = state.copyWith(isOn: isOn, brightness: bri, connected: true);
-        // Restart polling to ensure fresh data
+        // Full state parse — colors, effect, speed, reverse, etc.
+        _applyStateData(data);
+        // Query RGBW support if not yet done
+        if (!_infoQueried) {
+          _infoQueried = true;
+          try {
+            final rgbw = await service.supportsRgbw();
+            state = state.copyWith(supportsRgbw: rgbw);
+          } catch (_) {}
+        }
+        // Restart polling to keep state fresh
         _startPolling();
       } else {
         debugPrint('🔄 WledNotifier: Connection failed, starting reconnect timer');
@@ -684,3 +718,9 @@ class WledNotifier extends Notifier<WledStateModel> {
 }
 
 final wledStateProvider = NotifierProvider<WledNotifier, WledStateModel>(WledNotifier.new);
+
+/// Whether the WLED state has been fetched live from the controller at least
+/// once since launch or the most recent app resume. Reset to false on resume
+/// so the dashboard can show a "Last Known State" indicator until fresh data
+/// arrives.
+final wledStateFreshProvider = StateProvider<bool>((ref) => false);

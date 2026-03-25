@@ -103,6 +103,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     int effectiveSpeed;
     int effectiveBrightness;
     bool isOn;
+    bool effectiveReverse = false;
 
     if (widget.previewColors != null) {
       // Widget-level preview override
@@ -122,13 +123,14 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
       effectiveBrightness = widget.brightness ?? 255;
       isOn = true;
     } else {
-      // Live WLED state
-      effectiveColors = [wledState.color];
+      // Live WLED state — use full color sequence from controller
+      effectiveColors = wledState.displayColors;
       effectiveEffectId = wledState.effectId;
       // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
       effectiveSpeed = (wledState.speed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? wledState.brightness;
       isOn = widget.forceOn ?? wledState.isOn;
+      effectiveReverse = wledState.reverse;
     }
 
     // Get mask from widget or provider
@@ -170,6 +172,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             backgroundColor: widget.backgroundColor,
             colorGroupSize: widget.colorGroupSize,
             spacing: widget.spacing,
+            reverse: effectiveReverse,
           ),
           size: Size.infinite,
         );

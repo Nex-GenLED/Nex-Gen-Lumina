@@ -12,6 +12,9 @@ class WledStateModel {
   final int effectId; // WLED fx value (0-255)
   final int paletteId; // WLED palette value
 
+  /// Whether the first segment's effect direction is reversed (WLED seg[0].rev)
+  final bool reverse;
+
   /// Full color sequence from the pattern (all segment colors)
   /// This preserves multi-color patterns like "Chiefs Red + Chiefs Gold"
   final List<Color> colorSequence;
@@ -35,6 +38,7 @@ class WledStateModel {
     required this.supportsRgbw,
     this.effectId = 0,
     this.paletteId = 0,
+    this.reverse = false,
     this.colorSequence = const [],
     this.colorNames = const [],
     this.customEffectName,
@@ -51,6 +55,7 @@ class WledStateModel {
     bool? supportsRgbw,
     int? effectId,
     int? paletteId,
+    bool? reverse,
     List<Color>? colorSequence,
     List<String>? colorNames,
     String? customEffectName,
@@ -67,6 +72,7 @@ class WledStateModel {
         supportsRgbw: supportsRgbw ?? this.supportsRgbw,
         effectId: effectId ?? this.effectId,
         paletteId: paletteId ?? this.paletteId,
+        reverse: reverse ?? this.reverse,
         colorSequence: colorSequence ?? this.colorSequence,
         colorNames: colorNames ?? this.colorNames,
         customEffectName: clearCustomEffectName ? null : (customEffectName ?? this.customEffectName),
@@ -89,6 +95,7 @@ class WledStateModel {
         supportsRgbw: false,
         effectId: 0,
         paletteId: 0,
+        reverse: false,
         colorSequence: [],
         colorNames: [],
         customEffectName: null,

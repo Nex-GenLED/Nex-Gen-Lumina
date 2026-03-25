@@ -643,21 +643,28 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
             if (state.isOn)
               Positioned.fill(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
-                    return AnimatedRooflineOverlay(
-                      previewColors: state.displayColors,
-                      previewEffectId: state.effectId,
-                      previewSpeed: state.speed,
-                      brightness: state.brightness,
-                      forceOn: state.isOn,
-                      targetAspectRatio: targetAspectRatio,
-                      imageAlignment: const Offset(0, 0.4),
-                      useBoxFitCover: true,
-                    );
-                  },
-                ),
+                child: Consumer(builder: (context, ref, _) {
+                  final isFresh = ref.watch(wledStateFreshProvider);
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
+                      return AnimatedOpacity(
+                        opacity: isFresh ? 1.0 : 0.5,
+                        duration: const Duration(milliseconds: 400),
+                        child: AnimatedRooflineOverlay(
+                          previewColors: state.displayColors,
+                          previewEffectId: state.effectId,
+                          previewSpeed: state.speed,
+                          brightness: state.brightness,
+                          forceOn: state.isOn,
+                          targetAspectRatio: targetAspectRatio,
+                          imageAlignment: const Offset(0, 0.4),
+                          useBoxFitCover: true,
+                        ),
+                      );
+                    },
+                  );
+                }),
               ),
             // Gradient overlay for legibility
             Positioned.fill(
@@ -683,6 +690,27 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       : const Color(0xFF00D4FF),
                 ),
               ),
+            // "Last Known State" indicator when stale data is showing
+            Consumer(builder: (context, ref, _) {
+              final isFresh = ref.watch(wledStateFreshProvider);
+              final isConnected = state.connected;
+              if (isFresh || !state.isOn) return const SizedBox.shrink();
+              return Positioned(
+                top: 12,
+                left: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isConnected ? 'Syncing...' : 'Last Known State',
+                    style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              );
+            }),
             _buildPresetChips(context, ref),
             _buildAddPhotoButton(context, ref),
             // Now Playing bar — owns the full bottom chrome including brightness + tune

@@ -46,6 +46,9 @@ class RooflineLightPainter extends CustomPainter {
   /// With colorGroupSize=1 and spacing=2: ● ○ ○ ● ○ ○ ...
   final int spacing;
 
+  /// Whether the animation direction is reversed (WLED seg.rev).
+  final bool reverse;
+
   RooflineLightPainter({
     required this.colors,
     this.animationPhase = 0.0,
@@ -62,6 +65,7 @@ class RooflineLightPainter extends CustomPainter {
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
     this.spacing = 0,
+    this.reverse = false,
   });
 
   @override
@@ -128,7 +132,12 @@ class RooflineLightPainter extends CustomPainter {
     final effectiveLedCount = ledCount ?? (totalLength / 8).round().clamp(10, 75);
 
     // Get positions along the path for each virtual LED
-    final ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
+    var ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
+
+    // Reverse LED order when WLED segment reverse flag is set
+    if (reverse) {
+      ledPositions = ledPositions.reversed.toList();
+    }
 
     switch (category) {
       case EffectCategory.solid:
@@ -638,6 +647,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.useBoxFitCover != useBoxFitCover ||
         oldDelegate.backgroundColor != backgroundColor ||
         oldDelegate.colorGroupSize != colorGroupSize ||
-        oldDelegate.spacing != spacing;
+        oldDelegate.spacing != spacing ||
+        oldDelegate.reverse != reverse;
   }
 }
