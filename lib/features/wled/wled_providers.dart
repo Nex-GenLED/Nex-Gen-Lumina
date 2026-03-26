@@ -294,6 +294,11 @@ class WledNotifier extends Notifier<WledStateModel> {
   bool _posting = false;
   bool _infoQueried = false;
 
+  /// Consecutive remote poll failures. After 3, bridge is marked unreachable
+  /// even if it was previously confirmed — prevents stale "Connected" status.
+  int _consecutiveRemoteFailures = 0;
+  static const _maxRemoteFailuresBeforeDowngrade = 3;
+
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
@@ -316,12 +321,13 @@ class WledNotifier extends Notifier<WledStateModel> {
         if (state.connected) {
           state = state.copyWith(connected: false);
         }
-        // Only mark bridge unreachable after a failed poll if no prior
-        // successful test exists (avoid flicker from a single slow poll).
-        if (isRemote && ref.read(bridgeReachableProvider) == true) {
-          // bridge was previously confirmed — don't downgrade on one miss
-        } else if (isRemote) {
-          ref.read(bridgeReachableProvider.notifier).state = false;
+        // Track consecutive failures in remote mode. Downgrade bridge status
+        // after repeated failures to prevent stale "Connected" indicator.
+        if (isRemote) {
+          _consecutiveRemoteFailures++;
+          if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
+            ref.read(bridgeReachableProvider.notifier).state = false;
+          }
         }
         _ensureReconnectTimer();
         return;
@@ -329,6 +335,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       _cancelReconnectTimer();
       // Successful poll in remote mode confirms bridge is working.
       if (isRemote) {
+        _consecutiveRemoteFailures = 0;
         ref.read(bridgeReachableProvider.notifier).state = true;
       }
       try {

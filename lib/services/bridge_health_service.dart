@@ -3,12 +3,19 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-/// One-time startup check that verifies the ESP32 bridge is actively
-/// polling Firestore for commands.
+/// Startup check that verifies the ESP32 bridge is actively polling
+/// Firestore for commands. Re-run on app resume to catch connectivity changes.
 ///
 /// Writes a lightweight 'ping' document to the user's commands collection
 /// and watches for the bridge to acknowledge it by changing the `status`
 /// field away from `'pending'`.
+///
+/// TODO(firmware): The ESP32 bridge should write a continuous heartbeat
+/// document to `/users/{uid}/bridge_status` every 30 seconds containing
+/// `{ "lastSeen": <server timestamp>, "ip": "<local IP>" }`.
+/// This would allow the app to verify bridge liveness without sending a
+/// ping command, and enable a passive "last seen X seconds ago" indicator.
+/// Until this is implemented, the app relies on explicit ping round-trips.
 class BridgeHealthService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 

@@ -874,6 +874,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   // ── Status cards ───────────────────────────────────────────────────────────
 
   /// Bridge status card.
+  /// Uses manual test result if available, otherwise falls back to the
+  /// automatic bridge health check result from [bridgeReachableProvider].
   Widget _buildBridgeStatusCard() {
     final check = _bridgeCheck;
 
@@ -907,10 +909,25 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
         subtitle = check.errorMessage ?? 'Could not reach the ESP32 bridge.';
         break;
       case _WebhookStatus.idle:
-        icon = Icons.developer_board;
-        color = Colors.grey;
-        title = 'Bridge Status Unknown';
-        subtitle = 'Tap "Test Bridge" to check connectivity.';
+        // No manual test run yet — use automatic health check result.
+        final bridgeState = ref.watch(bridgeReachableProvider);
+        if (bridgeState == true) {
+          icon = Icons.check_circle;
+          color = Colors.green;
+          title = 'Bridge Connected';
+          subtitle = 'Confirmed via automatic health check.';
+        } else if (bridgeState == false) {
+          icon = Icons.warning_amber_rounded;
+          color = Colors.amber;
+          title = 'Relay Online — Waiting for Bridge';
+          subtitle = 'Firestore is reachable but the ESP32 bridge has not '
+              'responded. Check that the bridge is powered on and connected to WiFi.';
+        } else {
+          icon = Icons.developer_board;
+          color = Colors.grey;
+          title = 'Bridge Status Unknown';
+          subtitle = 'Tap "Test Bridge" to check connectivity.';
+        }
         break;
     }
 

@@ -106,7 +106,8 @@ class CloudRelayRepository implements WledRepository {
       diagSub?.cancel();
 
       if (result == null) {
-        debugPrint('❌ CloudRelay: Command timed out');
+        debugPrint('❌ CloudRelay: Command sent but not confirmed by controller. '
+            'Bridge may be offline. (type=$type, docId=$commandId)');
         // Mark as timeout
         await docRef.update({'status': 'timeout'});
         return null;

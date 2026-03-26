@@ -167,6 +167,10 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       // repository (WledService vs CloudRelayRepository) is used.
       refreshConnectivityStatus(ref);
 
+      // Re-run bridge health check so the status indicator reflects
+      // current reality, not a stale startup result.
+      ref.invalidate(bridgeHealthProvider);
+
       // Refresh WLED connection immediately
       try {
         ref.read(wledStateProvider.notifier).refreshConnection();
