@@ -137,8 +137,9 @@ class LuminaBrain {
     }
 
     // TIER 0: Smart team resolution with fuzzy matching + user context
-    // Skip when query is clearly about schedules/time — prevents "sunset" fuzzy-matching "suns"
-    if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt)) {
+    // Only run when the query explicitly mentions sports/teams — prevents
+    // "fireworks" or "exciting design" from fuzzy-matching team aliases.
+    if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt) && _isSportsRequest(userPrompt)) {
       List<String>? userTeams;
       String? userLocation;
       try {
@@ -158,11 +159,9 @@ class LuminaBrain {
         userLocation: userLocation,
       );
 
+      // Only return team response for high-confidence matches (>= 0.8).
+      // Low-confidence fuzzy matches fall through to Tier 1/3 for better handling.
       if (teamResult != null && teamResult.isHighConfidence) {
-        final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
-        final response = _buildCanonicalTeamResponse(teamResult.team, context);
-        return response;
-      } else if (teamResult != null) {
         final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
         final response = _buildCanonicalTeamResponse(teamResult.team, context);
         return response;
@@ -191,6 +190,17 @@ class LuminaBrain {
 
     // TIER 3: Fall back to AI for new queries
     String contextBlock = _buildContextBlock(ref);
+
+    // Inject explicit time window constraint if the user specified clock times,
+    // so the AI doesn't fabricate a different time in its confirmation.
+    {
+      final compound = CompoundCommandDetector.detect(userPrompt);
+      if (compound.temporal != null && compound.temporal!.hasClockTime) {
+        final tw = compound.temporal!.timeWindowLabel;
+        contextBlock = '$contextBlock\n\nTIME CONSTRAINT: Apply this design $tw only. '
+            'Do not say "all day" or any other time — echo "$tw" in your confirmation.';
+      }
+    }
 
     if (isOpenEnded) {
       final avoidanceContext = historyService.getAvoidanceContext(limit: 5);
@@ -225,6 +235,25 @@ class LuminaBrain {
 
     // Extract and cache the pattern from AI response
     final parsed = _extractJsonFromContent(aiResponse);
+
+    // Validate: reject AI responses that reference sports teams when the user
+    // didn't ask for sports content.
+    if (parsed != null && !_isSportsRequest(userPrompt)) {
+      final patternName = (parsed.object['patternName'] as String? ?? '').toLowerCase();
+      final thought = (parsed.object['thought'] as String? ?? '').toLowerCase();
+      // Check if the AI injected sports team references
+      const sportsIndicators = ['fc', 'nfl', 'mlb', 'nba', 'nhl', 'mls',
+        'game day', 'gameday', 'team colors', 'championship'];
+      final hasSportsRef = sportsIndicators.any((s) =>
+          patternName.contains(s) || thought.contains(s));
+      if (hasSportsRef) {
+        debugPrint('🚫 Rejected AI response: sports team reference in non-sports query. '
+            'Input: "$userPrompt" | patternName: "$patternName"');
+        // Return a generic helpful response instead
+        return "I couldn't find a matching design. Try describing the colors or mood you're looking for.";
+      }
+    }
+
     if (parsed != null && !isOpenEnded && hasSpecificTheme) {
       SemanticPatternMatcher.cachePattern(userPrompt, parsed.object);
     }
@@ -303,7 +332,8 @@ class LuminaBrain {
     }
 
     // --- Attempt team resolution if holiday didn't match ---
-    if (theme == null && !_isScheduleOrTimeQuery(lightingPrompt)) {
+    // Only resolve teams when the query explicitly mentions sports context.
+    if (theme == null && !_isScheduleOrTimeQuery(lightingPrompt) && _isSportsRequest(lightingPrompt)) {
       List<String>? userTeams;
       String? userLocation;
       try {
@@ -323,7 +353,7 @@ class LuminaBrain {
         userLocation: userLocation,
       );
 
-      if (teamResult != null) {
+      if (teamResult != null && teamResult.isHighConfidence) {
         final ledRgb = teamResult.team.ledOptimizedRgb;
         theme = ResolvedTheme(
           name: teamResult.team.officialName,
@@ -1178,6 +1208,43 @@ Rules:
       systemPrompt: systemContext,
       temperature: 0.1,
     );
+  }
+
+  /// Returns true when the query explicitly mentions a sport, team keyword,
+  /// or game-day context. Used to gate team color resolution — if this returns
+  /// false, the team resolver is skipped entirely to prevent false positives
+  /// like "fireworks" fuzzy-matching to "fire" team aliases.
+  static bool _isSportsRequest(String query) {
+    final lower = query.toLowerCase();
+    const sportsKeywords = [
+      'team', 'teams', 'game day', 'gameday', 'game night',
+      'sports', 'sport', 'football', 'baseball', 'basketball',
+      'hockey', 'soccer', 'nfl', 'mlb', 'nba', 'nhl', 'mls',
+      'ncaa', 'college', 'playoff', 'playoffs', 'super bowl',
+      'superbowl', 'world series', 'stanley cup', 'march madness',
+      'my team', 'my teams', 'our team', 'go team',
+      // Common team-related request patterns
+      'colors for the', 'show me the', 'give me the',
+    ];
+    // Check for explicit sports keywords
+    if (sportsKeywords.any((kw) => lower.contains(kw))) return true;
+
+    // Check if the query is primarily a team name (very short, 1-3 words)
+    // like "chiefs", "royals", "go royals" — let team resolver handle these
+    final words = lower.split(RegExp(r'\s+')).where((w) => w.length > 1).toList();
+    if (words.length <= 3) {
+      // Short queries that are just team names should go through
+      // But only if they don't contain design/effect keywords
+      const designKeywords = [
+        'design', 'effect', 'pattern', 'fireworks', 'twinkle',
+        'chase', 'rainbow', 'sparkle', 'fire', 'glitter', 'mood',
+        'calm', 'party', 'romantic', 'elegant', 'spooky', 'ocean',
+        'warm', 'cool', 'bright', 'dim', 'color', 'colours',
+      ];
+      if (designKeywords.any((kw) => lower.contains(kw))) return false;
+    }
+
+    return false;
   }
 
   static bool _isScheduleOrTimeQuery(String query) {

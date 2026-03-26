@@ -378,6 +378,51 @@ class WledService implements WledRepository {
   @override
   List<WledPreset> getPresets() => const [];
 
+  /// Cached preset names from GET /json/presets. Cleared on dispose.
+  Map<int, String>? _presetNamesCache;
+
+  @override
+  Future<Map<int, String>> fetchPresetNames() async {
+    if (_presetNamesCache != null) return _presetNamesCache!;
+
+    if (_simulate) {
+      _presetNamesCache = {1: 'Warm White', 2: 'Chill', 3: 'Party'};
+      return _presetNamesCache!;
+    }
+
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final req = await client.getUrl(_uri('/json/presets'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: false);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final decoded = jsonDecode(body);
+        if (decoded is Map) {
+          final result = <int, String>{};
+          for (final entry in decoded.entries) {
+            final id = int.tryParse(entry.key.toString());
+            if (id != null && id > 0 && entry.value is Map) {
+              final name = entry.value['n'];
+              if (name is String && name.trim().isNotEmpty) {
+                result[id] = name.trim();
+              }
+            }
+          }
+          _presetNamesCache = result;
+          debugPrint('📋 Fetched ${result.length} WLED preset names');
+          return result;
+        }
+      }
+      debugPrint('WLED fetchPresetNames status ${res.statusCode}');
+    } catch (e) {
+      debugPrint('WLED fetchPresetNames error: $e');
+    }
+    return const {};
+  }
+
   @override
   Future<bool> savePreset({
     required int presetId,

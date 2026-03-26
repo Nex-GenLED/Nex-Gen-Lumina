@@ -181,6 +181,10 @@ class DemoWledRepository implements WledRepository {
   List<WledPreset> getPresets() => _presets;
 
   @override
+  Future<Map<int, String>> fetchPresetNames() async =>
+      {for (int i = 0; i < _presets.length; i++) i + 1: _presets[i].name};
+
+  @override
   Future<WledHardwareConfig?> getConfig() async {
     return WledHardwareConfig(
       totalLeds: _totalLedCount,

@@ -354,10 +354,14 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Used by both polling and refreshConnection to avoid duplication.
   void _applyStateData(Map<String, dynamic> data) {
     final prevEffectId = state.effectId;
+    final prevPresetId = state.presetId;
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
     int speed = state.speed;
     int intensity = state.intensity;
+
+    // Parse active preset ID from WLED state (0 = no preset active)
+    final ps = (data['ps'] is num) ? (data['ps'] as num).toInt() : state.presetId;
 
     // WLED 'seg' in /json/state can be either a List or a single Map depending on build.
     final dynamic segAny = data['seg'];
@@ -431,6 +435,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       intensity: intensity,
       effectId: effectId,
       paletteId: paletteId,
+      presetId: ps,
       reverse: reverse,
       connected: true,
     );
@@ -438,13 +443,37 @@ class WledNotifier extends Notifier<WledStateModel> {
     // Mark that we have received a live fetch
     ref.read(wledStateFreshProvider.notifier).state = true;
 
+    // Resolve preset name from WLED when ps > 0 and preset changed or label
+    // is empty. This is Priority 1 in the label hierarchy — the authoritative
+    // name straight from the controller.
+    if (ps > 0 && (ps != prevPresetId || ref.read(activePresetLabelProvider) == null)) {
+      _resolvePresetName(ps);
+    }
+
     // Clear stale preset label when the live effect diverges from what was
-    // cached in SharedPreferences. This ensures the "Now Playing" name always
-    // reflects the actual controller state after a fresh fetch.
-    if (effectId != prevEffectId) {
+    // cached in SharedPreferences AND no WLED preset is active.
+    // When ps > 0, the preset lookup above will set the correct label.
+    if (effectId != prevEffectId && ps <= 0) {
       try {
         ref.read(activePresetLabelProvider.notifier).clear();
       } catch (_) {}
+    }
+  }
+
+  /// Fetches preset names from the WLED controller and sets the active label.
+  Future<void> _resolvePresetName(int presetId) async {
+    final service = ref.read(wledRepositoryProvider);
+    if (service == null) return;
+
+    try {
+      final presetNames = await service.fetchPresetNames();
+      final name = presetNames[presetId];
+      if (name != null && name.isNotEmpty) {
+        ref.read(activePresetLabelProvider.notifier).state = name;
+        debugPrint('🏷️ Resolved WLED preset $presetId → "$name"');
+      }
+    } catch (e) {
+      debugPrint('🏷️ Preset name lookup failed for $presetId: $e');
     }
   }
 

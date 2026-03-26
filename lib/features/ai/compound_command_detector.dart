@@ -35,12 +35,22 @@ class TemporalIntent {
   /// ISO weekday numbers for custom recurrence (1=Mon … 7=Sun). Empty = all.
   final List<int> weekdays;
 
+  /// Parsed clock-time start hour (24h format), or null if not specified.
+  /// e.g., "from 7pm" → 19, "from 7-10pm" → 19
+  final int? startHour;
+
+  /// Parsed clock-time end hour (24h format), or null if not specified.
+  /// e.g., "to 10pm" → 22, "until midnight" → 0
+  final int? endHour;
+
   const TemporalIntent({
     required this.recurrence,
     required this.startTrigger,
     required this.endTrigger,
     required this.dayCount,
     this.weekdays = const [],
+    this.startHour,
+    this.endHour,
   });
 
   bool get usesSunsetSunrise =>
@@ -49,10 +59,33 @@ class TemporalIntent {
   bool get usesDuskDawn =>
       startTrigger == TimeTrigger.dusk || endTrigger == TimeTrigger.dawn;
 
+  /// Whether specific clock hours were parsed from the user's request.
+  bool get hasClockTime => startHour != null || endHour != null;
+
+  /// Human-readable time window string for prompt injection.
+  String get timeWindowLabel {
+    if (startHour != null && endHour != null) {
+      return 'from ${_formatHour(startHour!)} to ${_formatHour(endHour!)}';
+    } else if (startHour != null) {
+      return 'starting at ${_formatHour(startHour!)}';
+    } else if (endHour != null) {
+      return 'until ${_formatHour(endHour!)}';
+    }
+    return '';
+  }
+
+  static String _formatHour(int h) {
+    if (h == 0 || h == 24) return '12am';
+    if (h == 12) return '12pm';
+    return h > 12 ? '${h - 12}pm' : '${h}am';
+  }
+
   @override
   String toString() =>
       'TemporalIntent(recurrence=${recurrence.name}, days=$dayCount, '
-      'start=${startTrigger.name}, end=${endTrigger.name})';
+      'start=${startTrigger.name}, end=${endTrigger.name}'
+      '${startHour != null ? ", startHour=$startHour" : ""}'
+      '${endHour != null ? ", endHour=$endHour" : ""})';
 }
 
 /// The result of detecting a compound (lighting + scheduling) command.
@@ -149,6 +182,25 @@ class CompoundCommandDetector {
     caseSensitive: false,
   );
 
+  /// Clock time patterns — "from 7-10pm", "from 7pm to 10pm", "at 8pm",
+  /// "until midnight", "7:30pm-10pm", etc.
+  static final _clockTimeRangePattern = RegExp(
+    r'\bfrom\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b',
+    caseSensitive: false,
+  );
+  static final _clockTimeAtPattern = RegExp(
+    r'\bat\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b',
+    caseSensitive: false,
+  );
+  static final _clockTimeUntilPattern = RegExp(
+    r'\b(?:until|till|til)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b',
+    caseSensitive: false,
+  );
+  static final _midnightPattern = RegExp(
+    r'\b(?:until|till|til)\s+midnight\b',
+    caseSensitive: false,
+  );
+
   // -----------------------------------------------------------------------
   // Strip patterns — temporal language removed to isolate lighting intent
   // -----------------------------------------------------------------------
@@ -165,7 +217,11 @@ class CompoundCommandDetector {
     r'sunset\s+to\s+sunrise|dusk\s+to\s+dawn|'
     r'at\s+sunset|at\s+sunrise|at\s+dusk|at\s+dawn|'
     r'sunrise|sunset|dusk|dawn|'
-    r'weeknights?|weekdays?|weekends?'
+    r'weeknights?|weekdays?|weekends?|'
+    r'from\s+\d{1,2}(?::\d{2})?\s*[ap]m?\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*[ap]m|'
+    r'at\s+\d{1,2}(?::\d{2})?\s*[ap]m|'
+    r'(?:until|till|til)\s+\d{1,2}(?::\d{2})?\s*[ap]m|'
+    r'(?:until|till|til)\s+midnight'
     r')\b',
     caseSensitive: false,
   );
@@ -194,7 +250,11 @@ class CompoundCommandDetector {
         _weekdaysPattern.hasMatch(lower) ||
         _tonightPattern.hasMatch(lower) ||
         _sunsetPattern.hasMatch(lower) ||
-        _duskPattern.hasMatch(lower);
+        _duskPattern.hasMatch(lower) ||
+        _clockTimeRangePattern.hasMatch(lower) ||
+        _clockTimeAtPattern.hasMatch(lower) ||
+        _clockTimeUntilPattern.hasMatch(lower) ||
+        _midnightPattern.hasMatch(lower);
 
     if (!hasTemporalSignal) {
       return CompoundCommandResult(
@@ -270,12 +330,54 @@ class CompoundCommandDetector {
       if (_dawnPattern.hasMatch(lower)) endTrigger = TimeTrigger.dawn;
     }
 
+    // Parse specific clock times ("from 7-10pm", "at 8pm", "until midnight")
+    int? startHour;
+    int? endHour;
+
+    final clockRange = _clockTimeRangePattern.firstMatch(lower);
+    if (clockRange != null) {
+      final sh = int.tryParse(clockRange.group(1) ?? '');
+      final sAmPm = clockRange.group(3)?.toLowerCase() ?? clockRange.group(6)?.toLowerCase();
+      final eh = int.tryParse(clockRange.group(4) ?? '');
+      final eAmPm = clockRange.group(6)?.toLowerCase();
+
+      if (sh != null) startHour = _to24Hour(sh, sAmPm ?? eAmPm ?? 'pm');
+      if (eh != null) endHour = _to24Hour(eh, eAmPm ?? 'pm');
+
+      startTrigger = TimeTrigger.specificTime;
+      endTrigger = TimeTrigger.specificTime;
+    } else if (_midnightPattern.hasMatch(lower)) {
+      endHour = 0;
+      endTrigger = TimeTrigger.specificTime;
+    } else {
+      final atMatch = _clockTimeAtPattern.firstMatch(lower);
+      if (atMatch != null) {
+        final h = int.tryParse(atMatch.group(1) ?? '');
+        final ampm = atMatch.group(3)?.toLowerCase() ?? 'pm';
+        if (h != null) {
+          startHour = _to24Hour(h, ampm);
+          startTrigger = TimeTrigger.specificTime;
+        }
+      }
+      final untilMatch = _clockTimeUntilPattern.firstMatch(lower);
+      if (untilMatch != null) {
+        final h = int.tryParse(untilMatch.group(1) ?? '');
+        final ampm = untilMatch.group(3)?.toLowerCase() ?? 'pm';
+        if (h != null) {
+          endHour = _to24Hour(h, ampm);
+          endTrigger = TimeTrigger.specificTime;
+        }
+      }
+    }
+
     return TemporalIntent(
       recurrence: recurrence,
       startTrigger: startTrigger,
       endTrigger: endTrigger,
       dayCount: dayCount,
       weekdays: weekdays,
+      startHour: startHour,
+      endHour: endHour,
     );
   }
 
@@ -301,6 +403,15 @@ class CompoundCommandDetector {
     result = result.replaceAll(RegExp(r'^(a|an|the)\s+', caseSensitive: false), '');
 
     return result.trim();
+  }
+
+  /// Convert 12-hour time to 24-hour. e.g., (7, "pm") → 19, (12, "am") → 0
+  static int _to24Hour(int hour, String amPm) {
+    if (amPm == 'am') {
+      return hour == 12 ? 0 : hour;
+    } else {
+      return hour == 12 ? 12 : hour + 12;
+    }
   }
 
   static int _wordToInt(String word) {

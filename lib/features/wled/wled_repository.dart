@@ -58,6 +58,11 @@ abstract class WledRepository {
 
   /// Optional: presets for demo mode. Real implementations may return empty.
   List<WledPreset> getPresets() => const [];
+
+  /// Fetches all preset names from the device via GET /json/presets.
+  /// Returns a map of preset ID → preset name.
+  /// Implementations should cache the result to avoid repeated fetches.
+  Future<Map<int, String>> fetchPresetNames() async => const {};
 }
 
 /// A single LED output bus (hardware channel) on the WLED controller.

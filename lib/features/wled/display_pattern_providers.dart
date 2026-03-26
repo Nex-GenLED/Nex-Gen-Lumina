@@ -1,50 +1,46 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/utils/color_name_utils.dart';
 
 /// Computed display name for the currently active pattern/effect.
-/// Implements the fallback hierarchy:
-/// 1. Lights off → "Lights Off"
-/// 2. Active preset label (library pattern or saved design) → as-is
-/// 3. Warm White detection → "Warm White"
-/// 4. AI color names available → "[Effect] · [Color Name]"
-/// 5. Derived color name → "[Effect] · [Color Name]"
-/// 6. Color is white/uninteresting → just effect name
-/// 7. Absolute fallback → "Custom"
+///
+/// Label resolution hierarchy:
+///   Priority 1: WLED preset name (resolved from ps + /json/presets lookup,
+///               stored in activePresetLabelProvider by _resolvePresetName)
+///   Priority 2: activePresetLabelProvider value (app-set label from library
+///               pattern, saved design, or quick control — only if effectId
+///               matches current state)
+///   Priority 3: Warm White detection (RGBW strip, white channel active, solid)
+///   Priority 4: Effect name only (e.g. "Glitter", "Chase") — never color
+///   Priority 5: "Custom" — absolute fallback
+///
+/// The old "[color] [effect]" generated strings (e.g. "Blue Streaking",
+/// "Orange Solid") have been removed entirely — they were never accurate
+/// enough to show the user.
 final displayPatternNameProvider = Provider<String>((ref) {
   final wledState = ref.watch(wledStateProvider);
 
+  // Off state
   if (!wledState.isOn) return 'Lights Off';
 
+  // Priority 1 & 2: activePresetLabelProvider holds either the WLED preset
+  // name (set by _resolvePresetName when ps > 0) or an app-set label
   final activePreset = ref.watch(activePresetLabelProvider);
   if (activePreset != null && activePreset.isNotEmpty) return activePreset;
 
+  // Priority 3: Warm White detection
   if (wledState.supportsRgbw && wledState.warmWhite > 0 && wledState.effectId == 0) {
     return 'Warm White';
   }
 
+  // Priority 4: Effect name only — no color prefix/suffix
   final effectName = wledState.effectName;
-
-  // Use AI-provided color names if available
-  if (wledState.colorNames.isNotEmpty) {
-    return '$effectName · ${wledState.colorNames.first}';
-  }
-
-  // Generate color name from primary color
-  final colorName = richColorName(wledState.color);
-
-  // For solid effect with a meaningful color, show both
-  if (wledState.effectId == 0 && colorName != 'White') {
-    return 'Solid · $colorName';
-  }
-
-  // If color is white or generic, just show effect name
-  if (colorName == 'White') {
+  if (effectName.isNotEmpty && effectName != 'Effect #${wledState.effectId}') {
     return effectName;
   }
 
-  return '$effectName · $colorName';
+  // Priority 5: Absolute fallback
+  return 'Custom';
 });
 
 /// Whether the current lighting config is an unsaved custom state.

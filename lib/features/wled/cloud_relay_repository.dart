@@ -312,6 +312,9 @@ class CloudRelayRepository implements WledRepository {
   List<WledPreset> getPresets() => const [];
 
   @override
+  Future<Map<int, String>> fetchPresetNames() async => const {};
+
+  @override
   Future<bool> updateSegmentConfig({
     required int segmentId,
     int? start,

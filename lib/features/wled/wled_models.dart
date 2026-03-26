@@ -11,6 +11,7 @@ class WledStateModel {
   final bool supportsRgbw;
   final int effectId; // WLED fx value (0-255)
   final int paletteId; // WLED palette value
+  final int presetId; // WLED ps value (0 = no preset active)
 
   /// Whether the first segment's effect direction is reversed (WLED seg[0].rev)
   final bool reverse;
@@ -38,6 +39,7 @@ class WledStateModel {
     required this.supportsRgbw,
     this.effectId = 0,
     this.paletteId = 0,
+    this.presetId = 0,
     this.reverse = false,
     this.colorSequence = const [],
     this.colorNames = const [],
@@ -55,6 +57,7 @@ class WledStateModel {
     bool? supportsRgbw,
     int? effectId,
     int? paletteId,
+    int? presetId,
     bool? reverse,
     List<Color>? colorSequence,
     List<String>? colorNames,
@@ -72,6 +75,7 @@ class WledStateModel {
         supportsRgbw: supportsRgbw ?? this.supportsRgbw,
         effectId: effectId ?? this.effectId,
         paletteId: paletteId ?? this.paletteId,
+        presetId: presetId ?? this.presetId,
         reverse: reverse ?? this.reverse,
         colorSequence: colorSequence ?? this.colorSequence,
         colorNames: colorNames ?? this.colorNames,
@@ -95,6 +99,7 @@ class WledStateModel {
         supportsRgbw: false,
         effectId: 0,
         paletteId: 0,
+        presetId: 0,
         reverse: false,
         colorSequence: [],
         colorNames: [],
