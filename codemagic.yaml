@@ -17,6 +17,15 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd ios && pod install
+      - name: Set build number from Codemagic
+        script: |
+          # Auto-increment build number so iOS treats each IPA as a new version
+          BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}
+          echo "Using build number: $BUILD_NUM"
+          # Extract version name (e.g. 2.1.1) and replace build number
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          sed -i "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
+          echo "Updated to: $(grep '^version:' pubspec.yaml)"
       - name: Build Unsigned IPA
         script: |
           # 1. Generate Flutter build files without building
