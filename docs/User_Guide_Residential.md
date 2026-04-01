@@ -169,7 +169,18 @@ The app has 5 tabs along the bottom of the screen:
 4. Tap any pattern to **preview it live** on your lights
 5. Tap the **heart icon** to save it as a favorite for quick access later
 
-### Saving a Scene
+### Built-In Scenes
+
+Your system includes several pre-made scenes:
+
+| Scene | Description |
+|-------|-------------|
+| **Off** | Lights off |
+| **Warm White** | Your chosen warm white |
+| **Bright White** | Your chosen bright white |
+| **Night Light** | Dim, gentle glow |
+
+### Saving a Custom Scene
 
 You can save your current lighting setup so you can recall it anytime:
 
@@ -375,7 +386,75 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 13. Quick Reference Card
+## 13. Daily Use Scenarios
+
+### Evening Routine
+
+1. **Open Lumina** — Dashboard loads with live status
+2. **Tap "Run Schedule"** — tonight's scheduled pattern activates
+3. Or **ask Lumina:** "Warm white for the evening"
+4. **Adjust brightness** with the slider as needed
+5. **Before bed:** Tap the power button or say "Turn off"
+
+### Game Day
+
+1. Lumina may suggest: "Game day tonight — Chiefs colors ready?"
+2. Tap **Yes** to apply
+3. Or ask: "Chiefs colors" or "Game day mode"
+4. Lights automatically return to your regular schedule after the game
+
+### Holiday Season
+
+1. Auto-Pilot activates holiday themes around your selected holidays
+2. Or browse **Explore** → **Holidays** → choose a theme
+3. Schedule it: "Schedule Christmas lights from sunset to 11 PM"
+
+### Hosting a Party
+
+1. Ask Lumina: "Party mode" or "Something fun and colorful"
+2. Or browse **Explore** → **Mood** → **Party** / **Energetic**
+3. Enable **Audio Reactive** mode if available for music sync
+
+---
+
+## 14. Troubleshooting
+
+### Lights not responding
+
+- Verify WiFi connection (same network as controller)
+- Check controller power — look for status LED on the device
+- Force-close the app and reopen
+- In the app: **System** → **Controllers** → tap **Refresh**
+
+### App says "No controllers found"
+
+- Ensure your phone has WiFi and Location permissions enabled
+- On iPhone: Check Settings → Lumina → Local Network is ON
+- Try adding the controller manually by IP address
+
+### Patterns look different than expected
+
+- Check brightness level — dim settings mute colors
+- Verify which lighting area/channel is selected
+- Some effects are designed for specific LED counts
+
+### Forgot your password
+
+- On the login screen, tap **Forgot Password**
+- Enter your email address
+- Check your inbox for a reset link
+- Create a new password
+
+### Remote access not working
+
+- Verify Remote Access is **enabled** in Settings
+- For Bridge mode: check that the ESP32 bridge device is powered on
+- For Webhook mode: verify port forwarding and Dynamic DNS
+- Test connectivity from the Remote Access settings screen
+
+---
+
+## 15. Quick Reference Card
 
 | Action | How |
 |--------|-----|

@@ -14,7 +14,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -199,6 +201,9 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           // ── Pending changes banner ──────────────────────────────────────
           if (pending != null)
             _PendingChangesBanner(pending: pending),
+
+          // ── Schedule overload warning ──────────────────────────────────
+          const ScheduleOverloadBanner(),
 
           // ── Main scroll area ────────────────────────────────────────────
           Expanded(
@@ -414,16 +419,39 @@ class _PendingChangesBanner extends ConsumerWidget {
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             ),
-            onPressed: () {
-              ref
-                  .read(calendarScheduleProvider.notifier)
-                  .applyEntries(pending.changes);
+            onPressed: () async {
+              final notifier = ref.read(calendarScheduleProvider.notifier);
+
+              // Check for conflicts with recurring schedules
+              final conflicts =
+                  notifier.checkConflictsForEntries(pending.changes);
+              ConflictResolution? resolution;
+              if (conflicts.hasConflicts) {
+                if (!context.mounted) return;
+                resolution =
+                    await showScheduleConflictDialog(context, conflicts);
+                if (resolution == ConflictResolution.cancel) return;
+              }
+
+              final ok = await notifier.applyEntries(
+                pending.changes,
+                resolution: resolution,
+              );
               // Jump to first changed date so user sees it immediately
               if (pending.changes.isNotEmpty) {
                 ref.read(selectedCalendarDateProvider.notifier).state =
                     pending.changes.first.dateKey;
               }
               ref.read(pendingCalendarProvider.notifier).state = null;
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(ok
+                      ? 'Schedule saved'
+                      : 'Schedule could not be saved. Please try again.'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
             },
             child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w700)),
           ),

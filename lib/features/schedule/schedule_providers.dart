@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -91,6 +95,27 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     );
   }
 
+  // ─── Conflict detection ─────────────────────────────────────────
+
+  /// Check for conflicts before adding a schedule.
+  /// Returns info the caller can pass to [showScheduleConflictDialog].
+  ScheduleConflictInfo checkConflictsForAdd(ScheduleItem item,
+      {String? excludeId}) {
+    final calEntries = _ref.read(calendarScheduleProvider);
+    return ScheduleConflictInfo(
+      conflictingItems: ScheduleConflictDetector.findItemConflicts(
+        incoming: item,
+        existing: state,
+        excludeId: excludeId,
+      ),
+      conflictingEntryKeys: ScheduleConflictDetector.findEntryConflictsForItem(
+        item: item,
+        calendarEntries: calEntries,
+      ),
+      calendarEntries: calEntries,
+    );
+  }
+
   // ─── Mutations ─────────────────────────────────────────────────
 
   /// Toggle a schedule's enabled state
@@ -127,12 +152,27 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     _isMutating = false;
   }
 
-  /// Add a new schedule
-  Future<void> add(ScheduleItem item) async {
+  /// Add a new schedule.
+  /// Pass [resolution] after showing the conflict dialog to handle overlaps.
+  Future<void> add(ScheduleItem item,
+      {ConflictResolution? resolution}) async {
     final userId = _userId;
     if (userId == null) {
       debugPrint('SchedulesNotifier: Cannot add - no user signed in');
       return;
+    }
+
+    // ── Conflict resolution (before optimistic update) ───────────
+    if (resolution == ConflictResolution.cancel) return;
+    if (resolution == ConflictResolution.removeExisting) {
+      final conflicts = checkConflictsForAdd(item);
+      for (final c in conflicts.conflictingItems) {
+        await remove(c.id);
+      }
+      final calNotifier = _ref.read(calendarScheduleProvider.notifier);
+      for (final key in conflicts.conflictingEntryKeys) {
+        await calNotifier.removeEntry(key);
+      }
     }
 
     _isMutating = true;
@@ -323,16 +363,80 @@ class ScheduleFinder {
   /// Returns null if no schedule is currently active.
   ///
   /// Logic:
-  /// 1. Filter schedules that apply to today's day of week
-  /// 2. For each schedule, check if we're within its on/off window
-  /// 3. If a schedule has no off time, it stays active until another schedule starts
-  /// 4. Return the most recently started schedule that is still active
+  /// 1. Check CalendarEntry for today (date-specific override, highest priority)
+  /// 2. Filter recurring schedules that apply to today's day of week
+  /// 3. For each schedule, check if we're within its on/off window
+  /// 4. If a schedule has no off time, it stays active until another schedule starts
+  /// 5. Return the most recently started schedule that is still active
   static ScheduleItem? findCurrentSchedule(
     List<ScheduleItem> schedules,
     DateTime now, {
     double? latitude,
     double? longitude,
+    Map<String, CalendarEntry>? calendarEntries,
   }) {
+    // Date-specific entries take priority over recurring schedules for today
+    if (calendarEntries != null) {
+      final todayKey = calendarDateKey(now);
+      final entry = calendarEntries[todayKey];
+      if (entry != null && entry.brightness > 0 && entry.onTime != null) {
+        final onParts = entry.onTime!.split(':');
+        if (onParts.length == 2) {
+          final onHour = int.tryParse(onParts[0]) ?? 0;
+          final onMinute = int.tryParse(onParts[1]) ?? 0;
+          final onDt = DateTime(now.year, now.month, now.day, onHour, onMinute);
+
+          if (!now.isBefore(onDt)) {
+            // Check off time (if any)
+            bool withinWindow = true;
+            if (entry.offTime != null) {
+              final offParts = entry.offTime!.split(':');
+              if (offParts.length == 2) {
+                final offHour = int.tryParse(offParts[0]) ?? 0;
+                final offMinute = int.tryParse(offParts[1]) ?? 0;
+                final offDt = DateTime(now.year, now.month, now.day, offHour, offMinute);
+
+                // Same-day window: on < off means off is today
+                if (offDt.isAfter(onDt)) {
+                  withinWindow = now.isBefore(offDt);
+                }
+                // Overnight window (off <= on): always active after onTime today
+              }
+            }
+
+            if (withinWindow) {
+              // Synthesise a ScheduleItem so downstream consumers work unchanged
+              final onLabel =
+                  '${onHour == 0 ? 12 : onHour > 12 ? onHour - 12 : onHour}:'
+                  '${onMinute.toString().padLeft(2, '0')} '
+                  '${onHour < 12 ? 'AM' : 'PM'}';
+              String? offLabel;
+              if (entry.offTime != null) {
+                final offParts = entry.offTime!.split(':');
+                if (offParts.length == 2) {
+                  final oh = int.tryParse(offParts[0]) ?? 0;
+                  final om = int.tryParse(offParts[1]) ?? 0;
+                  offLabel =
+                      '${oh == 0 ? 12 : oh > 12 ? oh - 12 : oh}:'
+                      '${om.toString().padLeft(2, '0')} '
+                      '${oh < 12 ? 'AM' : 'PM'}';
+                }
+              }
+
+              return ScheduleItem(
+                id: 'cal_${entry.dateKey}',
+                timeLabel: onLabel,
+                offTimeLabel: offLabel,
+                repeatDays: const [],
+                actionLabel: 'Pattern: ${entry.patternName}',
+                enabled: true,
+              );
+            }
+          }
+        }
+      }
+    }
+
     if (schedules.isEmpty) return null;
 
     // Get today's day abbreviation (Sun, Mon, Tue, Wed, Thu, Fri, Sat)
@@ -460,9 +564,11 @@ class ScheduleFinder {
 }
 
 /// Provider that returns the currently applicable schedule item based on
-/// the current time and day of week.
+/// the current time and day of week.  Date-specific [CalendarEntry] overrides
+/// take priority over recurring schedules.
 final currentScheduledActionProvider = Provider<ScheduleItem?>((ref) {
   final schedules = ref.watch(schedulesProvider);
+  final calEntries = ref.watch(calendarScheduleProvider);
   final user = ref.watch(currentUserProfileProvider).maybeWhen(
         data: (u) => u,
         orElse: () => null,
@@ -474,5 +580,6 @@ final currentScheduledActionProvider = Provider<ScheduleItem?>((ref) {
     now,
     latitude: user?.latitude,
     longitude: user?.longitude,
+    calendarEntries: calEntries,
   );
 });

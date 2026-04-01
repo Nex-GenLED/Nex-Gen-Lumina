@@ -84,6 +84,47 @@ class CalendarEntry {
     );
   }
 
+  /// Serialize to Firestore-safe map.
+  Map<String, dynamic> toJson() => {
+        'dateKey': dateKey,
+        'patternName': patternName,
+        'color': color != null
+            ? '#${color!.value.toRadixString(16).padLeft(8, '0').substring(2)}'
+            : null,
+        'onTime': onTime,
+        'offTime': offTime,
+        'brightness': brightness,
+        'type': type.name,
+        'autopilot': autopilot,
+        'note': note,
+      };
+
+  /// Deserialize from Firestore map.
+  factory CalendarEntry.fromJson(Map<String, dynamic> json) {
+    Color? color;
+    final colorStr = json['color'] as String?;
+    if (colorStr != null && colorStr.startsWith('#') && colorStr.length == 7) {
+      try {
+        color = Color(int.parse('FF${colorStr.substring(1)}', radix: 16));
+      } catch (_) {}
+    }
+
+    return CalendarEntry(
+      dateKey: json['dateKey'] as String,
+      patternName: json['patternName'] as String? ?? 'Custom',
+      color: color,
+      onTime: json['onTime'] as String?,
+      offTime: json['offTime'] as String?,
+      brightness: (json['brightness'] as num?)?.toInt() ?? 85,
+      type: CalendarEntryType.values.firstWhere(
+        (e) => e.name == json['type'],
+        orElse: () => CalendarEntryType.user,
+      ),
+      autopilot: json['autopilot'] as bool? ?? false,
+      note: json['note'] as String?,
+    );
+  }
+
   /// Display-friendly on→off time string.
   String get timeRangeLabel {
     if (onTime == null) return '—';

@@ -7,7 +7,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -28,7 +34,13 @@ String _dayName(int wd) => const [
 
 class CalendarScheduleNotifier
     extends StateNotifier<Map<String, CalendarEntry>> {
-  CalendarScheduleNotifier() : super(_buildHolidayDefaults());
+  final Ref _ref;
+  final String? _userId;
+
+  CalendarScheduleNotifier(this._ref, this._userId)
+      : super(_buildHolidayDefaults()) {
+    _loadFromFirestore();
+  }
 
   // Seed with well-known holiday presets so the calendar is never empty.
   static Map<String, CalendarEntry> _buildHolidayDefaults() {
@@ -71,21 +83,110 @@ class CalendarScheduleNotifier
     return m;
   }
 
+  /// Load user-saved entries from Firestore and merge on top of holiday
+  /// defaults. Firestore entries win on date-key conflicts.
+  Future<void> _loadFromFirestore() async {
+    final uid = _userId;
+    if (uid == null) return;
+    try {
+      final userService = _ref.read(userServiceProvider);
+      final saved = await userService.loadCalendarEntries(uid);
+      if (saved.isNotEmpty) {
+        final merged = Map<String, CalendarEntry>.from(state);
+        merged.addAll(saved);
+        state = merged;
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to load calendar entries: $e');
+    }
+  }
+
+  // ─── Conflict detection ─────────────────────────────────────────
+
+  /// Check incoming entries against recurring schedules.
+  /// Returns info the caller can pass to [showScheduleConflictDialog].
+  ScheduleConflictInfo checkConflictsForEntries(List<CalendarEntry> entries) {
+    final recurringSchedules = _ref.read(schedulesProvider);
+    final seen = <String, ScheduleItem>{};
+    for (final entry in entries) {
+      final entryDate = DateTime.parse(entry.dateKey);
+      for (final item in ScheduleConflictDetector.findItemConflictsForEntry(
+        entry: entry,
+        entryDate: entryDate,
+        recurringItems: recurringSchedules,
+      )) {
+        seen[item.id] = item;
+      }
+    }
+    return ScheduleConflictInfo(conflictingItems: seen.values.toList());
+  }
+
+  // ─── Mutations ─────────────────────────────────────────────────
+
   /// Apply a list of date-specific entries, overwriting any existing
-  /// entries for those dates.
-  void applyEntries(List<CalendarEntry> entries) {
+  /// entries for those dates.  Persists non-holiday entries to Firestore.
+  /// Pass [resolution] after showing the conflict dialog to handle overlaps.
+  /// Returns true if the Firestore write succeeded.
+  Future<bool> applyEntries(List<CalendarEntry> entries,
+      {ConflictResolution? resolution}) async {
+    // ── Conflict resolution (before optimistic update) ───────────
+    if (resolution == ConflictResolution.cancel) return false;
+    if (resolution == ConflictResolution.removeExisting) {
+      final conflicts = checkConflictsForEntries(entries);
+      final schedNotifier = _ref.read(schedulesProvider.notifier);
+      for (final item in conflicts.conflictingItems) {
+        await schedNotifier.remove(item.id);
+      }
+    }
+
+    // Optimistic local update
     final next = Map<String, CalendarEntry>.from(state);
     for (final e in entries) {
       next[e.dateKey] = e;
     }
     state = next;
+
+    // Persist user entries to Firestore
+    final uid = _userId;
+    if (uid == null) return false;
+    try {
+      final userService = _ref.read(userServiceProvider);
+      final toSave = Map<String, CalendarEntry>.fromEntries(
+        next.entries.where((e) => e.value.type != CalendarEntryType.holiday),
+      );
+      final ok = await userService.saveCalendarEntries(uid, toSave);
+      if (!ok) {
+        debugPrint('❌ applyEntries: Firestore write failed');
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('❌ applyEntries: $e');
+      return false;
+    }
   }
 
   /// Remove a specific date override, reverting it to the autopilot/recurring
-  /// fallback.
-  void removeEntry(String dateKey) {
+  /// fallback.  Persists to Firestore.
+  Future<bool> removeEntry(String dateKey) async {
     final next = Map<String, CalendarEntry>.from(state)..remove(dateKey);
     state = next;
+
+    final uid = _userId;
+    if (uid == null) return false;
+    try {
+      final userService = _ref.read(userServiceProvider);
+      final toSave = Map<String, CalendarEntry>.fromEntries(
+        next.entries.where((e) => e.value.type != CalendarEntryType.holiday),
+      );
+      final ok = await userService.saveCalendarEntries(uid, toSave);
+      if (!ok) {
+        debugPrint('❌ removeEntry: Firestore write failed');
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('❌ removeEntry: $e');
+      return false;
+    }
   }
 
   CalendarEntry? entryFor(String dateKey) => state[dateKey];
@@ -93,7 +194,13 @@ class CalendarScheduleNotifier
 
 final calendarScheduleProvider =
     StateNotifierProvider<CalendarScheduleNotifier, Map<String, CalendarEntry>>(
-  (ref) => CalendarScheduleNotifier(),
+  (ref) {
+    final userId = ref.watch(authStateProvider).maybeWhen(
+          data: (u) => u?.uid,
+          orElse: () => null,
+        );
+    return CalendarScheduleNotifier(ref, userId);
+  },
 );
 
 // ─── UI Navigation State ──────────────────────────────────────────────────────

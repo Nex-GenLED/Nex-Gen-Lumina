@@ -15,6 +15,8 @@ import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/data/metro_builders.dart';
+import 'package:nexgen_command/app_router.dart';
+import 'package:go_router/go_router.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -461,6 +463,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 }),
                 vibeLevel: _vibeLevel,
                 onVibeChanged: (v) => setState(() => _vibeLevel = v),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.lightbulb_outline, color: Colors.amber[200]),
+                  title: const Text('My Whites'),
+                  subtitle: const Text('Set your go-to white lighting for everyday use.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push(AppRoutes.myWhites),
+                ),
               ),
               const SizedBox(height: 16),
               _HoaGuardianCard(

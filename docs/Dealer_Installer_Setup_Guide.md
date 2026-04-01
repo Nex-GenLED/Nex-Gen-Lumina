@@ -107,7 +107,7 @@ From the Admin Portal you can:
 
 ## 4. Installer Mode --- Step by Step
 
-Installer Mode is a guided 5-step wizard that sets up a customer's Lumina system and creates their user account.
+Installer Mode is a guided 6-step wizard that sets up a customer's Lumina system and creates their user account.
 
 ### Entering Installer Mode
 
@@ -194,7 +194,129 @@ Tap **Next** to proceed.
 
 ---
 
-### Step 3: Zone Configuration
+### Step 3: Roofline Configuration
+
+> **This step is critical.** Incorrect roofline configuration will cause patterns to display incorrectly, colors to appear on wrong sections, chase effects to run the wrong direction, AI recommendations to fail, and anchor point lighting to break. Complete all sub-steps accurately.
+
+The Roofline Wizard has 5 sub-steps.
+
+#### 3a. LED Count & Controller Info
+
+**Select Active Channels**
+Controllers support up to 8 output channels. Select which are in use. Most residential installs use **Channel 1 only**.
+
+**Enter Total LED Count**
+Enter the **exact** total number of LEDs installed (1--2600). This number must match the physical LED count. Count LEDs at junction boxes if unsure.
+
+**Controller Location**
+Describe where the controller is mounted (e.g., "Garage attic", "Basement utility room", "Behind soffit near front door").
+
+**LED Start Location (LED #1)**
+Describe where the first LED is physically located (e.g., "Front left corner of house", "Above garage door, left side").
+
+**LED Direction**
+Select the overall direction LEDs were installed: Left to Right, Right to Left, Clockwise, or Counter-clockwise.
+
+**LED End Location**
+Describe where the last LED is located (e.g., "Front right corner, returning to start").
+
+**Architecture Type**
+Select the roof style that best matches:
+
+| Type | Description |
+|------|-------------|
+| Ranch | Flat or minimal peaks |
+| Gabled | Single peak/gable |
+| Multi-Gabled | Multiple peaks |
+| Complex | Mixed features, dormers, valleys |
+| Modern | Contemporary, unique shapes |
+| Colonial | Traditional with dormers |
+
+#### 3b. Segment Definition
+
+Segments divide the roofline into logical sections. They **must** be added in the order LEDs are physically connected, starting from LED #1.
+
+**Segment Types**
+
+| Type | Use For |
+|------|---------|
+| **Run** | Straight horizontal/diagonal section |
+| **Corner** | 90° corner where roofline changes direction |
+| **Peak** | Roof apex/gable point |
+| **Column** | Vertical pillar or post |
+| **Connector** | Transition between sections |
+
+**For each segment, enter:**
+
+1. **Name** — Descriptive label (e.g., "Front Left Eave", "Main Peak")
+2. **LED Count** — Exact number of LEDs in this segment (all segments must add up to the total)
+3. **Type** — Select from the table above
+4. **Direction** — Which way LEDs flow (Left to Right, Right to Left, Upward, Downward)
+5. **Location** — Where on the house (Front, Back, Left Side, Right Side)
+6. **Is Prominent** — Check if this is a focal point (peaks, front sections)
+
+**Example Roofline (200 LEDs)**
+
+| # | Name | LEDs | Type | Direction |
+|---|------|------|------|-----------|
+| 1 | Left Eave | 45 | Run | L→R |
+| 2 | Left Corner | 8 | Corner | Upward |
+| 3 | Left Gable | 35 | Run | Upward |
+| 4 | Main Peak | 6 | Peak | L→R |
+| 5 | Right Gable | 35 | Run | Downward |
+| 6 | Right Corner | 8 | Corner | Downward |
+| 7 | Right Eave | 45 | Run | L→R |
+| 8 | Return | 18 | Run | L→R |
+
+**Total:** 45+8+35+6+35+8+45+18 = **200**
+
+#### 3c. Anchor Point Identification
+
+Anchor points are special LEDs where accent effects focus (peaks, corners). The system uses these for voice commands like "Light up the peaks", corner accent patterns, and chase animation reversal points.
+
+For each segment:
+
+1. Review auto-detected anchor points
+2. Adjust LED index if the anchor is not centered correctly
+3. Set anchor zone size (default: 2 LEDs)
+
+**Anchor Types**
+
+| Type | Description |
+|------|-------------|
+| Peak | Apex of a gable/roof |
+| Corner | Where roofline changes direction |
+| Boundary | Start/end of a segment |
+| Center | Middle of a segment |
+| Custom | User-defined special point |
+
+#### 3d. Review & Save
+
+Before saving, verify:
+
+- Total LED count matches physical installation
+- All segments add up to total LED count
+- Segment order follows physical LED wiring
+- Peaks and corners are marked correctly
+- Directions are accurate for each segment
+- Anchor points are positioned correctly
+
+Tap **Save Configuration** to complete.
+
+#### 3e. Test the Configuration
+
+After saving:
+
+- Turn lights on/off
+- Test a pattern and confirm it displays correctly across segments
+- Test brightness control
+- Verify chase direction is correct
+
+Tap **Next** to proceed.
+
+---
+
+### Step 4: Zone Configuration
 
 Choose how the system is organized:
 
@@ -223,7 +345,7 @@ Tap **Next** to proceed.
 
 ---
 
-### Step 4: Customer Preferences (Handoff)
+### Step 5: Customer Preferences (Handoff)
 
 This step configures the customer's initial experience. These settings personalize the Autopilot AI and overall app behavior.
 
@@ -276,7 +398,7 @@ Toggle this ON for customers who prefer a simplified interface:
 
 ---
 
-### Step 5: Complete Setup
+### Step 6: Complete Setup
 
 When you tap **Complete Setup**, the app:
 
@@ -415,9 +537,10 @@ Example: Dealer 03 + Installer 12 = **0312**
 ### Setup Steps
 1. Customer Information (name, email, address)
 2. Controller Setup (discover, select, name, test)
-3. Zone Configuration (residential or commercial)
-4. Customer Preferences (teams, holidays, vibe, autonomy)
-5. Complete & Hand Off (credentials screen)
+3. Roofline Configuration (segments, anchors, directions)
+4. Zone Configuration (residential or commercial)
+5. Customer Preferences (teams, holidays, vibe, autonomy)
+6. Complete & Hand Off (credentials screen)
 
 ### Support
 Email: support@nexgenled.com
