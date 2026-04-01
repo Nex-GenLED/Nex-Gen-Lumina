@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/properties/property_models.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
@@ -53,6 +55,7 @@ class MyPropertiesScreen extends ConsumerWidget {
                 onEdit: (property) => _showEditPropertyDialog(context, ref, property),
                 onDelete: (property) => _confirmDeleteProperty(context, ref, property),
                 onSetPrimary: (property) => _setPrimaryProperty(ref, property),
+                onLinkControllers: (property) => _showLinkControllersSheet(context, ref, property),
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
@@ -187,6 +190,17 @@ class MyPropertiesScreen extends ConsumerWidget {
     );
   }
 
+  void _showLinkControllersSheet(BuildContext context, WidgetRef ref, Property property) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _LinkControllersSheet(property: property),
+    );
+  }
+
   void _confirmDeleteProperty(BuildContext context, WidgetRef ref, Property property) {
     showDialog(
       context: context,
@@ -285,6 +299,7 @@ class _PropertiesList extends StatelessWidget {
   final Function(Property) onEdit;
   final Function(Property) onDelete;
   final Function(Property) onSetPrimary;
+  final Function(Property) onLinkControllers;
 
   const _PropertiesList({
     required this.properties,
@@ -293,6 +308,7 @@ class _PropertiesList extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onSetPrimary,
+    required this.onLinkControllers,
   });
 
   @override
@@ -311,6 +327,7 @@ class _PropertiesList extends StatelessWidget {
           onEdit: () => onEdit(property),
           onDelete: () => onDelete(property),
           onSetPrimary: property.isPrimary ? null : () => onSetPrimary(property),
+          onLinkControllers: () => onLinkControllers(property),
         );
       },
     );
@@ -324,6 +341,7 @@ class _PropertyCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback? onSetPrimary;
+  final VoidCallback onLinkControllers;
 
   const _PropertyCard({
     required this.property,
@@ -332,6 +350,7 @@ class _PropertyCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.onSetPrimary,
+    required this.onLinkControllers,
   });
 
   IconData _getIcon(String iconName) {
@@ -451,11 +470,33 @@ class _PropertyCard extends StatelessWidget {
                           ),
                         ],
                         const SizedBox(height: 4),
-                        Text(
-                          '${property.controllerIds.length} controller${property.controllerIds.length == 1 ? '' : 's'}',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 12,
+                        GestureDetector(
+                          onTap: onLinkControllers,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                property.controllerIds.isEmpty
+                                    ? Icons.add_link
+                                    : Icons.link,
+                                size: 14,
+                                color: property.controllerIds.isEmpty
+                                    ? NexGenPalette.cyan
+                                    : Colors.white.withValues(alpha: 0.5),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                property.controllerIds.isEmpty
+                                    ? 'Tap to link controllers'
+                                    : '${property.controllerIds.length} controller${property.controllerIds.length == 1 ? '' : 's'}',
+                                style: TextStyle(
+                                  color: property.controllerIds.isEmpty
+                                      ? NexGenPalette.cyan
+                                      : Colors.white.withValues(alpha: 0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -484,6 +525,15 @@ class _PropertyCard extends StatelessWidget {
                         visualDensity: VisualDensity.compact,
                       ),
                     ),
+                  TextButton.icon(
+                    onPressed: onLinkControllers,
+                    icon: const Icon(Icons.settings_input_antenna, size: 18),
+                    label: const Text('Controllers'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: NexGenPalette.cyan,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                   TextButton.icon(
                     onPressed: onEdit,
                     icon: const Icon(Icons.edit, size: 18),
@@ -704,6 +754,188 @@ class _PropertyDialogState extends ConsumerState<_PropertyDialog> {
               : const Text('Save'),
         ),
       ],
+    );
+  }
+}
+
+/// Bottom sheet for linking/unlinking controllers to a property
+class _LinkControllersSheet extends ConsumerWidget {
+  final Property property;
+
+  const _LinkControllersSheet({required this.property});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controllersAsync = ref.watch(controllersStreamProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            'Link Controllers to "${property.name}"',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Toggle controllers to assign them to this property.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          controllersAsync.when(
+            data: (controllers) {
+              if (controllers.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.wifi_find, size: 48, color: Colors.white.withValues(alpha: 0.3)),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No controllers found',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Discover a WLED controller first from the System tab.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: controllers.length,
+                  itemBuilder: (context, index) {
+                    final controller = controllers[index];
+                    final isLinked = property.controllerIds.contains(controller.id);
+
+                    return _ControllerLinkTile(
+                      controller: controller,
+                      isLinked: isLinked,
+                      onToggle: () async {
+                        final manager = ref.read(propertyManagerProvider);
+                        if (isLinked) {
+                          await manager.unlinkController(property.id, controller.id);
+                        } else {
+                          await manager.linkController(property.id, controller.id);
+                        }
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (error, _) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'Error loading controllers',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ControllerLinkTile extends StatefulWidget {
+  final ControllerInfo controller;
+  final bool isLinked;
+  final Future<void> Function() onToggle;
+
+  const _ControllerLinkTile({
+    required this.controller,
+    required this.isLinked,
+    required this.onToggle,
+  });
+
+  @override
+  State<_ControllerLinkTile> createState() => _ControllerLinkTileState();
+}
+
+class _ControllerLinkTileState extends State<_ControllerLinkTile> {
+  bool _toggling = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = widget.controller.name ?? widget.controller.ip;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: widget.isLinked
+              ? NexGenPalette.cyan.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          Icons.developer_board,
+          color: widget.isLinked ? NexGenPalette.cyan : Colors.white54,
+        ),
+      ),
+      title: Text(
+        name,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        widget.controller.ip,
+        style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+      ),
+      trailing: _toggling
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Switch(
+              value: widget.isLinked,
+              activeThumbColor: NexGenPalette.cyan,
+              onChanged: (_) async {
+                setState(() => _toggling = true);
+                await widget.onToggle();
+                if (mounted) setState(() => _toggling = false);
+              },
+            ),
     );
   }
 }

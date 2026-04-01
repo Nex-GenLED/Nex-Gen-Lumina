@@ -48,24 +48,115 @@ class AddressSuggestion {
   }
 }
 
-/// Lightweight geocoding via OpenStreetMap Nominatim (no API key required).
-/// Best-effort; rate-limited service. Do not spam requests.
+/// Lightweight geocoding using Photon (primary) with Nominatim fallback.
+/// Both are free, no API key required. Photon provides much better
+/// fuzzy/partial matching for address autocomplete.
 class GeocodingService {
   const GeocodingService();
 
   /// Search for address suggestions as the user types.
+  /// Uses Photon (komoot.io) for better partial-address matching,
+  /// falls back to Nominatim if Photon returns no results.
   Future<List<AddressSuggestion>> searchAddresses(String query, {int limit = 5}) async {
     final trimmed = query.trim();
     if (trimmed.length < 3) return [];
 
+    // Try Photon first — much better at partial/fuzzy address matching
+    final photonResults = await _searchPhoton(trimmed, limit: limit);
+    if (photonResults.isNotEmpty) return photonResults;
+
+    // Fall back to Nominatim
+    return _searchNominatim(trimmed, limit: limit);
+  }
+
+  /// Photon geocoder — designed for autocomplete, great fuzzy matching.
+  Future<List<AddressSuggestion>> _searchPhoton(String query, {int limit = 5}) async {
+    try {
+      final uri = Uri.parse(
+        'https://photon.komoot.io/api/'
+        '?q=${Uri.encodeComponent(query)}'
+        '&limit=$limit'
+        '&lang=en'
+        '&layer=house&layer=street',
+      );
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(uri);
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      req.headers.set(HttpHeaders.userAgentHeader, 'NexGenCommand/1.0');
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final features = data['features'] as List? ?? [];
+
+        return features.map((feature) {
+          final props = (feature as Map<String, dynamic>)['properties'] as Map<String, dynamic>? ?? {};
+          final geometry = feature['geometry'] as Map<String, dynamic>? ?? {};
+          final coords = geometry['coordinates'] as List? ?? [0, 0];
+          final lon = (coords[0] as num?)?.toDouble() ?? 0;
+          final lat = (coords[1] as num?)?.toDouble() ?? 0;
+
+          final houseNumber = props['housenumber'] as String?;
+          final street = props['street'] as String?;
+          final city = props['city'] as String?;
+          final state = props['state'] as String?;
+          final postcode = props['postcode'] as String?;
+          final name = props['name'] as String?;
+          final type = props['type'] as String?;
+
+          // Build short address
+          final parts = <String>[];
+          if (houseNumber != null && street != null) {
+            parts.add('$houseNumber $street');
+          } else if (name != null && name.isNotEmpty) {
+            parts.add(name);
+          } else if (street != null) {
+            parts.add(street);
+          }
+          if (city != null) parts.add(city);
+          if (state != null) parts.add(state);
+          if (postcode != null) parts.add(postcode);
+
+          final shortAddr = parts.isNotEmpty ? parts.join(', ') : (name ?? '');
+
+          // Build full display name
+          final allParts = <String>[...parts];
+          final country = props['country'] as String?;
+          if (country != null && !allParts.contains(country)) allParts.add(country);
+          final displayName = allParts.join(', ');
+
+          return AddressSuggestion(
+            displayName: displayName,
+            shortAddress: shortAddr,
+            lat: lat,
+            lon: lon,
+            type: type,
+            houseNumber: houseNumber,
+            street: street,
+            city: city,
+            state: state,
+            postcode: postcode,
+          );
+        }).toList();
+      }
+    } catch (e) {
+      debugPrint('GeocodingService: Photon search error $e');
+    }
+    return [];
+  }
+
+  /// Nominatim fallback — more complete database, slower fuzzy matching.
+  Future<List<AddressSuggestion>> _searchNominatim(String query, {int limit = 5}) async {
     try {
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
         '?format=json'
         '&limit=$limit'
         '&addressdetails=1'
-        '&countrycodes=us'
-        '&q=${Uri.encodeComponent(trimmed)}',
+        '&dedupe=1'
+        '&q=${Uri.encodeComponent(query)}',
       );
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
       final req = await client.getUrl(uri);
@@ -85,7 +176,6 @@ class GeocodingService {
             final displayName = map['display_name'] as String? ?? '';
             final type = map['type'] as String?;
 
-            // Build a shorter address from address details
             final addr = map['address'] as Map<String, dynamic>?;
             String shortAddr = displayName;
             if (addr != null) {
@@ -105,12 +195,9 @@ class GeocodingService {
               if (state != null) parts.add(state);
               if (postcode != null) parts.add(postcode);
 
-              if (parts.isNotEmpty) {
-                shortAddr = parts.join(', ');
-              }
+              if (parts.isNotEmpty) shortAddr = parts.join(', ');
             }
 
-            // Extract individual address components
             final houseNumber = addr?['house_number'] as String?;
             final road = addr?['road'] as String?;
             final cityVal = addr?['city'] ?? addr?['town'] ?? addr?['village'];
@@ -132,10 +219,10 @@ class GeocodingService {
           }).toList();
         }
       } else {
-        debugPrint('GeocodingService: search status ${res.statusCode}');
+        debugPrint('GeocodingService: Nominatim search status ${res.statusCode}');
       }
     } catch (e) {
-      debugPrint('GeocodingService: search error $e');
+      debugPrint('GeocodingService: Nominatim search error $e');
     }
     return [];
   }

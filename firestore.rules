@@ -172,6 +172,21 @@ service cloud.firestore {
         // Users can delete their geofences
         allow delete: if isOwner(userId);
       }
+
+      // Properties subcollection - user's properties (homes, locations)
+      match /properties/{propertyId} {
+        // Users can read their own properties, media users can view for content
+        allow read: if canReadUserData(userId);
+
+        // Users can create properties
+        allow create: if isOwner(userId);
+
+        // Users can update their properties
+        allow update: if isOwner(userId);
+
+        // Users can delete their properties
+        allow delete: if isOwner(userId);
+      }
     }
     
     // Sites - private to each user
