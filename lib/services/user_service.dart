@@ -586,6 +586,25 @@ class UserService {
     }
   }
 
+  /// Save the bridge IP and mark the bridge as paired.
+  /// Also auto-enables remote access.
+  Future<void> saveBridgeConfig(String userId, {required String bridgeIp}) async {
+    try {
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'bridge_ip': bridgeIp,
+          'bridge_paired': true,
+          'remote_access_enabled': true,
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
+      debugPrint('Bridge config saved: ip=$bridgeIp');
+    } catch (e) {
+      debugPrint('saveBridgeConfig failed: $e');
+      rethrow;
+    }
+  }
+
   /// Clear all remote access configuration (webhook URL, home SSID, disable).
   Future<void> clearRemoteAccessConfig(String userId) async {
     try {
@@ -597,6 +616,9 @@ class UserService {
         // Also clean up legacy plain-text fields if they exist
         'webhook_url': FieldValue.delete(),
         'home_ssid': FieldValue.delete(),
+        // Clear bridge config
+        'bridge_ip': FieldValue.delete(),
+        'bridge_paired': false,
         'remote_access_enabled': false,
         'updated_at': FieldValue.serverTimestamp(),
       });

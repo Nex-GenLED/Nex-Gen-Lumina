@@ -31,6 +31,7 @@ import 'package:nexgen_command/features/site/lumina_studio_screen.dart';
 import 'package:nexgen_command/features/site/manage_controllers_page.dart';
 import 'package:nexgen_command/features/site/system_management_screen.dart';
 import 'package:nexgen_command/features/site/remote_access_screen.dart';
+import 'package:nexgen_command/features/site/bridge_setup_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
@@ -570,6 +571,12 @@ class AppRouter {
                     pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
                   ),
                   GoRoute(
+                    path: 'bridge-setup',
+                    name: 'bridge-setup',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(child: BridgeSetupScreen()),
+                  ),
+                  GoRoute(
                     path: 'voice-assistants',
                     name: 'voice-assistants',
                     parentNavigatorKey: _systemNavigatorKey,
@@ -658,6 +665,7 @@ class AppRoutes {
   static const String luminaStudio = '/settings/studio';
   static const String geofenceSetup = '/settings/geofence';
   static const String remoteAccess = '/settings/remote-access';
+  static const String bridgeSetup = '/settings/bridge-setup';
   static const String luminaAI = '/lumina-ai';
   static const String designStudio = '/design-studio';
   static const String editPattern = '/edit-pattern';

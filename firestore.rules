@@ -129,10 +129,22 @@ service cloud.firestore {
         // Users can create commands (sent from app when remote)
         allow create: if isOwner(userId);
 
-        // Users can update commands (status updates from relay)
+        // Users can update commands (status updates from relay/bridge)
         allow update: if isOwner(userId);
 
         // Users can delete commands (cleanup)
+        allow delete: if isOwner(userId);
+      }
+
+      // Bridge status subcollection - heartbeat and status from ESP32 bridge
+      match /bridge_status/{docId} {
+        // Users can read their own bridge status, media users can view
+        allow read: if canReadUserData(userId);
+
+        // Bridge writes heartbeat (authenticated as the owner)
+        allow create, update: if isOwner(userId);
+
+        // Allow cleanup
         allow delete: if isOwner(userId);
       }
 

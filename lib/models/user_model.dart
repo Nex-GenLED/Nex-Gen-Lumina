@@ -145,6 +145,12 @@ class UserModel {
   /// Lumina Backend URL (for MQTT relay)
   final String? luminaBackendUrl;
 
+  // Bridge configuration
+  /// Local IP (or mDNS hostname) of the paired Lumina Bridge
+  final String? bridgeIp;
+  /// Whether a Lumina Bridge has been set up and paired
+  final bool bridgePaired;
+
   /// Whether the user has completed the welcome wizard/tutorial
   final bool welcomeCompleted;
 
@@ -290,6 +296,8 @@ class UserModel {
     this.remoteAccessEnabled = false,
     this.mqttRelayEnabled = false,
     String? luminaBackendUrl,
+    this.bridgeIp,
+    this.bridgePaired = false,
     this.welcomeCompleted = false,
     this.featureTourCompleted = false,
     this.rooflineMask,
@@ -403,6 +411,8 @@ class UserModel {
       remoteAccessEnabled: (json['remote_access_enabled'] as bool?) ?? false,
       mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
       luminaBackendUrl: json['lumina_backend_url'] as String?,
+      bridgeIp: json['bridge_ip'] as String?,
+      bridgePaired: (json['bridge_paired'] as bool?) ?? false,
       welcomeCompleted: (json['welcome_completed'] as bool?) ?? false,
       featureTourCompleted: (json['feature_tour_completed'] as bool?) ?? false,
       rooflineMask: json['roofline_mask'] as Map<String, dynamic>?,
@@ -544,6 +554,8 @@ class UserModel {
       'remote_access_enabled': remoteAccessEnabled,
       'mqtt_relay_enabled': mqttRelayEnabled,
       'lumina_backend_url': luminaBackendUrl,
+      if (bridgeIp != null) 'bridge_ip': bridgeIp,
+      'bridge_paired': bridgePaired,
       'welcome_completed': welcomeCompleted,
       'feature_tour_completed': featureTourCompleted,
       'roofline_mask': rooflineMask,
@@ -625,6 +637,8 @@ class UserModel {
     bool? remoteAccessEnabled,
     bool? mqttRelayEnabled,
     String? luminaBackendUrl,
+    String? bridgeIp,
+    bool? bridgePaired,
     bool? welcomeCompleted,
     bool? featureTourCompleted,
     Map<String, dynamic>? rooflineMask,
@@ -703,6 +717,8 @@ class UserModel {
       remoteAccessEnabled: remoteAccessEnabled ?? this.remoteAccessEnabled,
       mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
       luminaBackendUrl: luminaBackendUrl ?? this.luminaBackendUrl,
+      bridgeIp: bridgeIp ?? this.bridgeIp,
+      bridgePaired: bridgePaired ?? this.bridgePaired,
       welcomeCompleted: welcomeCompleted ?? this.welcomeCompleted,
       featureTourCompleted: featureTourCompleted ?? this.featureTourCompleted,
       rooflineMask: rooflineMask ?? this.rooflineMask,

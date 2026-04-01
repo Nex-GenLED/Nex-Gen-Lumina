@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/app_providers.dart';
@@ -14,6 +15,8 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 
 // ─── Diagnostic: end-to-end bridge ping ──────────────────────────────────────
 
@@ -815,8 +818,40 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             _buildSetupGuide(context),
           ],
 
-          // Bridge mode info card
+          // Bridge mode info card + setup button
           if (_mode == RemoteAccessMode.bridge) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.bridgeSetup),
+                icon: Icon(
+                  userProfile?.bridgePaired == true
+                      ? Icons.settings
+                      : Icons.add_link,
+                  color: Colors.black,
+                ),
+                label: Text(
+                  userProfile?.bridgePaired == true
+                      ? 'Reconfigure Bridge'
+                      : 'Set Up Bridge',
+                ),
+              ),
+            ),
+            if (userProfile?.bridgePaired == true &&
+                userProfile?.bridgeIp != null) ...[
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.developer_board,
+                      color: NexGenPalette.cyan),
+                  title: const Text('Paired Bridge'),
+                  subtitle: Text(userProfile!.bridgeIp!),
+                  trailing: Icon(Icons.check_circle,
+                      color: Colors.green, size: 20),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             _buildBridgeInfoCard(context),
           ],
@@ -931,6 +966,8 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
         break;
     }
 
+    final user = FirebaseAuth.instance.currentUser;
+
     return Column(
       children: [
         _StatusCard(icon: icon, color: color, title: title, subtitle: subtitle),
@@ -951,6 +988,47 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             label: const Text('Test Bridge'),
           ),
         ),
+        if (user != null) ...[
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(Icons.person_outline, color: NexGenPalette.cyan, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Your User ID',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: Colors.grey,
+                                )),
+                        const SizedBox(height: 2),
+                        SelectableText(
+                          user.uid,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Copy User ID',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: user.uid));
+                      _showSnackBar('User ID copied to clipboard');
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

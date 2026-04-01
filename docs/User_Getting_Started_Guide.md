@@ -324,15 +324,14 @@ By default, Lumina controls your lights over your home WiFi. To control them whe
 
 ### Bridge Mode (Recommended)
 
-If your installer set up an ESP32 Bridge device:
+If your installer set up a Lumina Bridge device:
 
 1. Go to **System** → **Remote Access**
-2. Select **ESP32 Bridge** as the connection mode
-3. Toggle **Enable Remote Access** on
-4. Tap **Detect Home Network** while connected to your home WiFi
-5. Tap **Test Bridge** to verify the bridge is responding
+2. Toggle **Enable Remote Access** on
+3. Tap **Detect Home Network** while connected to your home WiFi
+4. Tap **Test Bridge** to verify the bridge is responding
 
-That's it! When you leave home, commands automatically route through the bridge.
+That's it! When you leave home, commands automatically route through the bridge. The bridge is a small device on your home network that relays commands from the cloud to your WLED controller. It has its own web dashboard you can access at `http://<bridge-ip>/` to check its status.
 
 ### Webhook Mode (Advanced)
 

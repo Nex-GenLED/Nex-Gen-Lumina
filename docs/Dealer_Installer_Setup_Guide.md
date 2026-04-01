@@ -339,26 +339,38 @@ Give the customer their credentials and walk them through:
 
 ## 6. Configuring Remote Access
 
-For customers who want to control their lights away from home, Remote Access must be configured before you leave the job site.
+For customers who want to control their lights away from home, Remote Access must be configured before you leave the job site. This requires a **Lumina Bridge** --- a small ESP32 device that stays plugged in at the customer's home and relays commands from the cloud to the WLED controller.
 
-### Where to Find It
+### Setting Up the Lumina Bridge
+
+Before configuring remote access in the app, the bridge device itself must be set up:
+
+1. **Flash the Lumina Bridge firmware** onto an ESP32 using PlatformIO (see the [ESP32 Bridge Setup Guide](ESP32_Bridge_Setup_Guide.md) for detailed instructions)
+2. **Connect to the bridge's WiFi AP** (`Lumina-XXXX`) from your phone
+3. **Walk through the 3-step setup wizard:**
+   - **Step 1:** Connect the bridge to the customer's home WiFi
+   - **Step 2:** Enter the bridge's Firebase credentials (email/password)
+   - **Step 3:** Enter the customer's Lumina user ID and WLED controller IP
+4. The bridge reboots and begins polling Firestore for commands
+
+After setup, you can verify the bridge is working by opening `http://<bridge-ip>/` in a browser to see the bridge dashboard. All three status indicators (WiFi, Firebase Auth, User Paired) should show green.
+
+### Configuring Remote Access in the App
 
 1. Open the **System** tab (gear icon in the bottom navigation)
 2. Tap the **Remote Access** tab along the top
 3. The tab shows a quick status summary (enabled/disabled, bridge status, home WiFi SSID)
 4. Tap the **Set Up Remote Access** button (or **Remote Access Settings** if already enabled) to open the full configuration screen
 
-### What to Configure
-
 On the Remote Access settings screen:
 
 - **Enable Remote Access** toggle
-- **Home WiFi SSID** --- the network name the controllers are connected to (used to detect whether the customer is home or away)
-- **Bridge connection** --- confirm the ESP32 bridge is online (the bridge health indicator should show green)
-- **Webhook URL** (if applicable) --- for advanced integrations
+- **Home WiFi SSID** --- tap **Detect Home Network** while connected to the customer's WiFi (used to detect whether the customer is home or away)
+- **Bridge connection** --- confirm the Lumina Bridge is online (the bridge health indicator should show green)
+- **Webhook URL** (if applicable) --- for advanced/DIY integrations only
 
 <div class="tip">
-<strong>Tip:</strong> The bridge health check runs automatically on every app launch. If the bridge shows as unreachable during setup, power-cycle the ESP32 and wait 30 seconds before retrying.
+<strong>Tip:</strong> The bridge health check runs automatically on every app launch. If the bridge shows as unreachable during setup, check the bridge dashboard at <code>http://&lt;bridge-ip&gt;/</code> to diagnose the issue. Power-cycle the ESP32 and wait 30 seconds before retrying.
 </div>
 
 ---
