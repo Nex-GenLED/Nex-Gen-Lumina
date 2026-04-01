@@ -60,6 +60,7 @@ The app controls WLED devices (permanent LED light controllers) over HTTP and op
 **Firestore Collections:**
 - `/users/{uid}` - User profiles (see `UserModel` in [lib/models/user_model.dart](lib/models/user_model.dart))
 - `/users/{uid}/controllers` - User's registered WLED controllers
+- `/users/{uid}/properties` - User's properties/locations with linked controller IDs
 - `/users/{uid}/schedules` - Scheduled automations
 
 **Initialization:** Firebase is initialized in [lib/main.dart](lib/main.dart) with fallback handling for missing native config files.
@@ -117,6 +118,26 @@ Local network discovery via mDNS (see [lib/features/discovery/device_discovery.d
 - Scans for `_wled._tcp` service announcements on local network
 - Returns list of `DiscoveredDevice` with IP addresses
 - Selected device IP is stored in `selectedDeviceIpProvider`
+
+### Property Management
+
+Users can manage multiple properties/locations (see [lib/features/properties/](lib/features/properties/)):
+
+- **Property model** ([lib/features/properties/property_models.dart](lib/features/properties/property_models.dart)): `Property` with name, address, icon, linked controller IDs, geofence config
+- **Providers** ([lib/features/properties/properties_providers.dart](lib/features/properties/properties_providers.dart)): `userPropertiesProvider` (stream), `selectedPropertyProvider`, `propertyManagerProvider`
+- **UI** ([lib/features/properties/my_properties_screen.dart](lib/features/properties/my_properties_screen.dart)): Property CRUD with controller linking via bottom sheet
+- Controllers are linked/unlinked to properties via `PropertyManager.linkController()` / `unlinkController()`
+- Firestore path: `/users/{uid}/properties/{propertyId}`
+
+### Address Autocomplete / Geocoding
+
+Address input uses Google Places Autocomplete (New) as primary, with Photon (OSM) as fallback (see [lib/features/schedule/geocoding_service.dart](lib/features/schedule/geocoding_service.dart)):
+
+- **Google Places API (New)** requires `places.googleapis.com` enabled in Google Cloud Console
+- API key is pulled from `DefaultFirebaseOptions` (platform-appropriate key)
+- Results are returned immediately from autocomplete without detail fetching for speed
+- **Photon** (komoot.io) fallback: free, no API key, OSM-based fuzzy matching
+- Widget: [lib/widgets/address_autocomplete.dart](lib/widgets/address_autocomplete.dart) — debounced overlay dropdown
 
 ### Geofencing
 

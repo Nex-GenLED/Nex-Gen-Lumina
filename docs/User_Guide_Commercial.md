@@ -287,7 +287,42 @@ Use the R, G, B, and W sliders to create a custom white tone for your property. 
 
 ---
 
-## 9. Remote Access
+## 9. My Properties
+
+Commercial accounts can manage multiple properties (e.g., multiple storefronts, office buildings, or mixed-use sites) from a single Lumina account.
+
+### Accessing My Properties
+
+1. Go to the **System** tab
+2. Tap **My Properties**
+
+### Adding a Property
+
+1. Tap the **+** button or **Add Property**
+2. Enter a name (e.g., "Downtown Storefront", "Warehouse")
+3. Start typing the address --- Google Places will suggest matching addresses as you type. Tap a suggestion to auto-fill, or type the full address manually.
+4. Choose an icon that represents the property
+5. Tap **Save**
+
+### Linking Controllers to a Property
+
+After creating a property, link the WLED controllers installed at that location:
+
+1. Tap the **Controllers** button on the property card
+2. A list of all your registered controllers appears with toggle switches
+3. Toggle on each controller that belongs to this property
+4. Changes save automatically
+
+### Setting a Primary Property
+
+Set your most-used property as the primary (default) location:
+
+1. Tap **Set Primary** on the property card
+2. The primary property loads by default when you open the app
+
+---
+
+## 10. Remote Access
 
 Lumina supports controlling your lights from anywhere -- not just when you are on-site connected to the property WiFi.
 
@@ -310,7 +345,7 @@ You do not need to configure anything. The app detects your network and switches
 
 ---
 
-## 10. Managing Users
+## 11. Managing Users
 
 Commercial accounts support up to **20 users**. As the property manager, you control who has access to the lighting system.
 
@@ -342,7 +377,7 @@ Commercial accounts support up to **20 users**. As the property manager, you con
 
 ---
 
-## 11. Connection Status
+## 12. Connection Status
 
 The app displays your connection status so you always know the state of your system.
 
@@ -367,7 +402,7 @@ The app displays your connection status so you always know the state of your sys
 
 ---
 
-## 12. Quick Reference Card
+## 13. Quick Reference Card
 
 | Action | How |
 |--------|-----|

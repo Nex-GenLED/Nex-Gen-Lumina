@@ -139,14 +139,15 @@ Enter the homeowner's details:
 | Full Name | Yes | Customer's name |
 | Email | Yes | Must be unique --- this becomes their login |
 | Phone | No | For contact purposes |
-| Address | No | Street address |
-| City | No | |
-| State | No | |
-| ZIP Code | No | |
+| Address | No | Start typing and Google Places will suggest matching addresses. Tap a suggestion to auto-fill. You can also type the address manually if needed. |
 | Notes | No | Any special instructions |
 
 <div class="tip">
 <strong>Tip:</strong> The email address is checked for uniqueness in real-time. If the customer already has a Lumina account, you'll see an error --- contact Nex-Gen support to link existing accounts.
+</div>
+
+<div class="tip">
+<strong>Tip:</strong> The address field uses Google Places autocomplete for fast, accurate address entry. Just start typing the street address and select from the dropdown suggestions.
 </div>
 
 Tap **Next** to proceed.

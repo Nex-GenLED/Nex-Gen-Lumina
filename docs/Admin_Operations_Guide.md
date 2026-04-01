@@ -239,6 +239,7 @@ You can view all installation records from the Firebase Console under the `insta
 | `/installers/{id}` | Installer accounts (PIN, name, dealer, active status) | You (admin) |
 | `/installations/{id}` | Completed installation records (customer, warranty, controllers) | Installers (during setup) |
 | `/users/{uid}` | Customer accounts (profile, preferences, linked controllers) | Installer creates; customer owns |
+| `/users/{uid}/properties` | Customer properties (homes, locations) with linked controller IDs | Customer creates/manages |
 | `/dealerDemoCodes/{id}` | Demo/trial access codes for media team | You (admin, via Firebase Console) |
 
 ---
@@ -281,12 +282,19 @@ Your security rules enforce this access model:
 
 | Who | Can Do |
 |-----|--------|
-| **Regular users** | Read/write only their own data |
-| **Media/dealer/admin users** | Read any user's data (for customer lookup) |
+| **Regular users** | Read/write only their own data (profile, controllers, properties, schedules, geofences) |
+| **Media/dealer/admin users** | Read any user's data including properties (for customer lookup and content) |
 | **Installers** | Create installation records (with required fields) |
 | **Admins** | Full CRUD on dealers, installers, installations |
 
 The `user_role` field on each user's profile (`residential`, `media`, `dealer`, `admin`) determines their access level.
+
+**Subcollections under `/users/{uid}`** with owner-only write access and media/dealer/admin read access:
+- `controllers` — registered WLED controllers
+- `properties` — user's properties/locations with linked controller IDs
+- `commands` — cloud relay commands (bridge can also read/write)
+- `bridge_status` — ESP32 bridge heartbeat
+- `geofences` — location-based automation triggers
 
 ---
 

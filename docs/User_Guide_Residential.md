@@ -333,7 +333,49 @@ Your installer configured a small bridge device that stays connected to your hom
 
 ---
 
-## 10. Simple Mode
+## 10. My Properties
+
+If you have Lumina systems at multiple locations (main home, vacation house, lake house, etc.), the **My Properties** screen lets you organize them.
+
+### Accessing My Properties
+
+1. Go to the **System** tab
+2. Tap **My Properties**
+
+### Adding a Property
+
+1. Tap the **+** button or **Add Property**
+2. Enter a name (e.g., "Lake House", "Beach Condo")
+3. Start typing the address --- Google Places will suggest matching addresses as you type. Tap a suggestion to auto-fill, or type the full address manually.
+4. Choose an icon that represents the property
+5. Tap **Save**
+
+### Linking Controllers to a Property
+
+After creating a property, you need to link your WLED controllers to it:
+
+1. Tap the **Controllers** button on the property card
+2. A list of all your registered controllers appears
+3. Toggle the switch next to each controller that belongs to this property
+4. Changes save automatically
+
+You can also tap "Tap to link controllers" text on the property card as a shortcut.
+
+### Setting a Primary Property
+
+If you have multiple properties, set one as your primary (default) property:
+
+1. Tap **Set Primary** on the property card
+2. The primary property is highlighted and loads by default when you open the app
+
+### Editing or Deleting
+
+- Tap **Edit** on any property card to change the name, address, or icon
+- Tap **Delete** to remove a property (this unlinks all controllers but does not delete them)
+
+---
+
+## 11. Simple Mode
 
 If you prefer a streamlined, no-frills experience, Simple Mode is for you.
 
@@ -351,7 +393,7 @@ This is great for family members who just want to turn the lights on and off wit
 
 ---
 
-## 11. Adding Family Members
+## 12. Adding Family Members
 
 You can invite up to 5 family members to control your lights from their own phones.
 
@@ -370,7 +412,7 @@ Each family member gets their own login and can control the lights, set favorite
 
 ---
 
-## 12. Connection Status
+## 13. Connection Status
 
 The app keeps you informed about the connection to your lighting system:
 
@@ -386,7 +428,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 13. Daily Use Scenarios
+## 14. Daily Use Scenarios
 
 ### Evening Routine
 
@@ -417,7 +459,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 ### Lights not responding
 
@@ -454,7 +496,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 15. Quick Reference Card
+## 16. Quick Reference Card
 
 | Action | How |
 |--------|-----|
