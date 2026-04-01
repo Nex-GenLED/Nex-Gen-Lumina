@@ -108,7 +108,9 @@ class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
           await markWelcomeCompleted();
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('Error in WelcomeWizard markWelcomeCompleted (simulation): $e');
+        }
         if (!mounted) return;
         context.go(AppRoutes.dashboard);
       });
@@ -160,7 +162,9 @@ class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
   Future<void> _finishWizard() async {
     try {
       await markWelcomeCompleted();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in WelcomeWizard markWelcomeCompleted (finish): $e');
+    }
     if (!mounted) return;
     context.go(AppRoutes.discovery);
   }

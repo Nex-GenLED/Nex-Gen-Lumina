@@ -131,7 +131,9 @@ final _schedulesStreamProvider =
       try {
         final sched = CommercialSchedule.fromJson(doc.data());
         map[sched.locationId] = sched;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in fleet schedule parsing doc ${doc.id}: $e');
+      }
     }
     return map;
   });

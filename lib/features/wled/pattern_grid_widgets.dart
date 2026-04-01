@@ -1218,7 +1218,9 @@ class PatternCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getColors: $e');
+    }
     return [NexGenPalette.cyan, NexGenPalette.blue];
   }
 
@@ -1234,7 +1236,9 @@ class PatternCard extends ConsumerWidget {
           if (fx is int) return fx;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getEffectId: $e');
+    }
     return 0;
   }
 
@@ -1254,7 +1258,9 @@ class PatternCard extends ConsumerWidget {
       if (seg is List && seg.isNotEmpty) {
         return (seg.first['grp'] as int?) ?? 1;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getGradientBandWidth: $e');
+    }
     return 1;
   }
 
@@ -1369,7 +1375,9 @@ class PatternCard extends ConsumerWidget {
               : 128,
           effectName: pattern.name,
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in pattern grid applyLocalPreview: $e');
+      }
       ref.read(activePresetLabelProvider.notifier).state = pattern.name;
       // Update Explore page roofline preview
       ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
@@ -1433,7 +1441,9 @@ class PatternCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getColorsRgbw: $e');
+    }
     return [[255, 255, 255, 0]];
   }
 

@@ -118,7 +118,7 @@ class SportsTeamsDatabase {
 
     // Sort by score (highest first) and return the best match
     matches.sort((a, b) => b.score.compareTo(a.score));
-    return matches.first.team;
+    return matches.firstOrNull?.team;
   }
 
   // ---------------------------------------------------------------------------

@@ -47,7 +47,9 @@ class DdpService {
     _running = false;
     try {
       _socket?.close();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in DDP service closing socket: $e');
+    }
     _socket = null;
     debugPrint('DDP: stopped');
   }

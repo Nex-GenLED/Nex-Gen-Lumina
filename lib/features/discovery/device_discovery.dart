@@ -64,7 +64,9 @@ class DeviceDiscoveryService {
     } finally {
       try {
         client.stop();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in DeviceDiscovery stopping mDNS client: $e');
+      }
     }
 
     // Deduplicate by IP
@@ -92,7 +94,7 @@ final discoveredDevicesProvider = FutureProvider<List<DeviceEndpoint>>((ref) asy
   final service = ref.watch(deviceDiscoveryServiceProvider);
   final devices = await service.discover();
   // Prefer names containing nexgen-master or wled
-  final preferred = devices.where((d) => d.name.toLowerCase().contains('nexgen-master') || d.name.toLowerCase().contains('wled'));
+  final preferred = devices.where((d) => d.name.toLowerCase().contains('nexgen-master') || d.name.toLowerCase().contains('wled')).toList();
   if (preferred.isNotEmpty) {
     ref.read(selectedDeviceIpProvider.notifier).state = preferred.first.address.address;
   } else if (devices.isNotEmpty) {

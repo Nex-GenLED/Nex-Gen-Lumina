@@ -256,12 +256,11 @@ class _SeasonRenewalSheetState extends ConsumerState<_SeasonRenewalSheet> {
         excludedGameIds: _excludedGameIds.toList(),
       );
 
-      final notifier = ref.read(syncEventNotifierProvider.notifier);
-      final newId = await notifier.createSyncEvent(renewed);
+      final newId = await ref.read(syncEventNotifierProvider.notifier).createSyncEvent(renewed);
 
       if (newId != null && mounted) {
         // Optionally disable the old event
-        await notifier.updateSyncEvent(
+        await ref.read(syncEventNotifierProvider.notifier).updateSyncEvent(
           widget.event.copyWith(isEnabled: false),
         );
         Navigator.of(context).pop(true);

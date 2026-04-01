@@ -468,6 +468,8 @@ class PatternComposer {
     final sortedStops = List<GradientStop>.from(stops)
       ..sort((a, b) => a.position.compareTo(b.position));
 
+    if (sortedStops.isEmpty) return groups;
+
     for (int i = range.start; i <= range.end; i++) {
       final position = (i - range.start) / rangeLength;
 

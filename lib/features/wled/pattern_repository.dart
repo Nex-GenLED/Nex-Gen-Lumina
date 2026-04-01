@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -112,7 +113,9 @@ class PatternRepository {
         final first = seg.first;
         if (first is Map && first['fx'] is int) return first['fx'] as int;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in PatternRepository effectIdFromPayload: $e');
+    }
     return null;
   }
 

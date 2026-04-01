@@ -177,6 +177,7 @@ class TeamColorResolver {
     candidates.sort((a, b) => b.score.compareTo(a.score));
 
     // Normalise top score to 1.0, scale others proportionally
+    if (candidates.isEmpty) return null;
     final maxScore = candidates.first.score;
     if (maxScore <= 0) return null;
 

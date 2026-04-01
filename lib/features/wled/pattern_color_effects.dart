@@ -91,7 +91,9 @@ class _ColorAssignmentSheetState extends State<ColorAssignmentSheet> {
     _assignedColors = widget.availableColors.take(widget.slots).toList();
     // Pad if needed
     while (_assignedColors.length < widget.slots) {
-      _assignedColors.add(widget.availableColors.first);
+      _assignedColors.add(widget.availableColors.isNotEmpty
+          ? widget.availableColors.first
+          : Colors.white);
     }
   }
 

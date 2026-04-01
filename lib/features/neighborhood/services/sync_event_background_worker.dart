@@ -911,7 +911,9 @@ Future<void> _quickScoreCheck(
           },
         ],
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in sync background worker applying WLED pattern to $ip: $e');
+    }
   }
 }
 

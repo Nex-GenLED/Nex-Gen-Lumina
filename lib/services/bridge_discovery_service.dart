@@ -105,7 +105,9 @@ class BridgeDiscoveryService {
     } finally {
       try {
         client.stop();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in BridgeDiscovery stopping mDNS client: $e');
+      }
     }
 
     // Deduplicate by IP

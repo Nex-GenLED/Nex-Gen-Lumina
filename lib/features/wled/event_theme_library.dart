@@ -258,7 +258,10 @@ class EventTheme {
   });
 
   /// Primary pattern (always returned for neutral context)
-  GradientPattern get primaryPattern => patterns.first;
+  GradientPattern get primaryPattern {
+    assert(patterns.isNotEmpty, 'EventTheme must have at least one pattern');
+    return patterns.first;
+  }
 
   /// Returns a pattern by index (for variations)
   GradientPattern pattern(int index) => patterns[index % patterns.length];

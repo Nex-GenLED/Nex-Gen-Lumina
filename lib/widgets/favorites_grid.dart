@@ -203,13 +203,17 @@ class _FavoritePatternCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in favorites grid extracting colors from payload: $e');
+    }
 
     // Fallback: use pattern name heuristics (always returns non-empty)
     try {
       final fallback = _colorsFromPatternName(favorite.patternName);
       if (fallback.isNotEmpty) return fallback;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in favorites grid _colorsFromPatternName: $e');
+    }
 
     // Ultimate fallback - ensure we never return empty list
     return [NexGenPalette.violet, NexGenPalette.cyan];

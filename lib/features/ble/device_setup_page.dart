@@ -225,10 +225,12 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
           }
         }
         // Fallback: pick first writable as command
-        writeChar ??= improvService.characteristics.firstWhere(
-          (c) => (c.properties.write || c.properties.writeWithoutResponse),
-          orElse: () => improvService.characteristics.first,
-        );
+        if (writeChar == null && improvService.characteristics.isNotEmpty) {
+          writeChar = improvService.characteristics.firstWhere(
+            (c) => (c.properties.write || c.properties.writeWithoutResponse),
+            orElse: () => improvService.characteristics.first,
+          );
+        }
 
         _device = device;
       }

@@ -463,7 +463,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     if (effectId != prevEffectId && ps <= 0) {
       try {
         ref.read(activePresetLabelProvider.notifier).clear();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in WledNotifier clearing preset label: $e');
+      }
     }
   }
 
@@ -533,7 +535,9 @@ class WledNotifier extends Notifier<WledStateModel> {
           try {
             final rgbw = await service.supportsRgbw();
             state = state.copyWith(supportsRgbw: rgbw);
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('Error in WledNotifier querying RGBW support: $e');
+          }
         }
         // Restart polling to keep state fresh
         _startPolling();

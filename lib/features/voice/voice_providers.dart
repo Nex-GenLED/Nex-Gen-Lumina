@@ -252,16 +252,14 @@ void _applySceneByName(Ref ref, String sceneName) {
 void _setPower(Ref ref, bool on) {
   debugPrint('Voice: Setting power: $on');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-  notifier.togglePower(on);
+  ref.read(wledStateProvider.notifier).togglePower(on);
 }
 
 /// Set brightness level
 void _setBrightness(Ref ref, int level) {
   debugPrint('Voice: Setting brightness: $level');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-  notifier.setBrightness(level.clamp(0, 255));
+  ref.read(wledStateProvider.notifier).setBrightness(level.clamp(0, 255));
 }
 
 /// Set color from Siri shortcut
@@ -274,17 +272,15 @@ void _setColor(Ref ref, Map<String, dynamic> userInfo) {
 
   debugPrint('Voice: Setting color to $colorName: RGB($r, $g, $b) W:$w');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-
   // Ensure lights are on
-  notifier.togglePower(true);
+  ref.read(wledStateProvider.notifier).togglePower(true);
 
   // Set the color
-  notifier.setColor(Color.fromARGB(255, r, g, b));
+  ref.read(wledStateProvider.notifier).setColor(Color.fromARGB(255, r, g, b));
 
   // Set white channel if specified (for RGBW strips)
   if (w != null && w > 0) {
-    notifier.setWarmWhite(w);
+    ref.read(wledStateProvider.notifier).setWarmWhite(w);
   }
 
   // Update the preset label

@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
@@ -242,6 +243,18 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           Text('Already have an account?', style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
                           TextButton(onPressed: () => context.pop(), child: const Text('Log In')),
                         ]),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () async {
+                            final uri = Uri.parse('https://nex-genled.com/privacy-policy');
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          },
+                          child: Text(
+                            'By creating an account, you agree to our Privacy Policy.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                          ),
+                        ),
                       ]),
                     ),
                   ),

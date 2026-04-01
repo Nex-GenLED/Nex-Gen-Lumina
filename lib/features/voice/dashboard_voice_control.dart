@@ -123,8 +123,7 @@ class VoiceCommandHandler {
 
   Future<String> _handlePowerOn() async {
     try {
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.togglePower(true);
+      await ref.read(wledStateProvider.notifier).togglePower(true);
       ref.read(activePresetLabelProvider.notifier).state = 'On';
       return '✓ Turning on';
     } catch (e) {
@@ -135,8 +134,7 @@ class VoiceCommandHandler {
 
   Future<String> _handlePowerOff() async {
     try {
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.togglePower(false);
+      await ref.read(wledStateProvider.notifier).togglePower(false);
       ref.read(activePresetLabelProvider.notifier).state = 'Off';
       return '✓ Turning off';
     } catch (e) {
@@ -151,8 +149,7 @@ class VoiceCommandHandler {
       final currentBrightness = state.brightness;
       final newBrightness = (currentBrightness + 50).clamp(0, 255);
 
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.setBrightness(newBrightness);
+      await ref.read(wledStateProvider.notifier).setBrightness(newBrightness);
 
       final percent = ((newBrightness / 255) * 100).round();
       return '✓ Brightness increased to $percent%';
@@ -168,8 +165,7 @@ class VoiceCommandHandler {
       final currentBrightness = state.brightness;
       final newBrightness = (currentBrightness - 50).clamp(0, 255);
 
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.setBrightness(newBrightness);
+      await ref.read(wledStateProvider.notifier).setBrightness(newBrightness);
 
       final percent = ((newBrightness / 255) * 100).round();
       return '✓ Brightness decreased to $percent%';

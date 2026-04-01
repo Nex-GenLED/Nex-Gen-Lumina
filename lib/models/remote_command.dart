@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 /// Status of a remote command in the queue.
 enum CommandStatus {
@@ -53,7 +54,9 @@ class RemoteCommand {
     if (payloadData is String) {
       try {
         parsedPayload = jsonDecode(payloadData) as Map<String, dynamic>;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in RemoteCommand parsing payload JSON: $e');
+      }
     } else if (payloadData is Map<String, dynamic>) {
       parsedPayload = payloadData;
     }
@@ -64,7 +67,9 @@ class RemoteCommand {
     if (resultData is String) {
       try {
         parsedResult = jsonDecode(resultData) as Map<String, dynamic>;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in RemoteCommand parsing result JSON: $e');
+      }
     } else if (resultData is Map<String, dynamic>) {
       parsedResult = resultData;
     }

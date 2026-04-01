@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -158,12 +159,51 @@ class InstallerModeNotifier extends StateNotifier<bool> {
 
   /// Attempt to enter installer mode with the given 4-digit PIN
   /// PIN format: [DD][II] where DD = dealer code, II = installer code
+  /// Also supports a master installer PIN stored in Firestore.
   Future<bool> enterInstallerMode(String enteredPin) async {
     if (enteredPin.length != 4) {
       debugPrint('InstallerMode: PIN must be 4 digits');
       return false;
     }
 
+    // --- Check master installer PIN from Firestore first ---
+    try {
+      final masterDoc = await FirebaseFirestore.instance
+          .collection('app_config')
+          .doc('master_installer')
+          .get();
+
+      if (masterDoc.exists && masterDoc.data() != null) {
+        final storedHash = masterDoc.data()!['pin_hash'] as String?;
+        if (storedHash != null && storedHash.isNotEmpty) {
+          final enteredHash = sha256.convert(utf8.encode(enteredPin)).toString();
+          if (enteredHash == storedHash) {
+            debugPrint('InstallerMode: Authenticated via master installer PIN');
+            _ref.read(installerSessionProvider.notifier).state = InstallerSession(
+              installer: const InstallerInfo(
+                installerCode: '00',
+                dealerCode: '88',
+                name: 'Nex-Gen Administrator',
+              ),
+              dealer: const DealerInfo(
+                dealerCode: '88',
+                name: 'Nex-Gen Admin',
+                companyName: 'Nex-Gen LED Systems',
+              ),
+              authenticatedAt: DateTime.now(),
+            );
+            state = true;
+            _resetSessionTimer();
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('InstallerMode: Could not check master PIN (offline?): $e');
+      // Fall through to dealer/installer PIN check
+    }
+
+    // --- Check dealer/installer PIN from Firestore ---
     final dealerCode = enteredPin.substring(0, 2);
 
     try {
@@ -212,46 +252,6 @@ class InstallerModeNotifier extends StateNotifier<bool> {
       return true;
     } catch (e) {
       debugPrint('InstallerMode: Error validating PIN: $e');
-      // Master admin PIN for Nex-Gen administrative access
-      if (enteredPin == '8817') {
-        debugPrint('InstallerMode: Using master admin PIN');
-        _ref.read(installerSessionProvider.notifier).state = InstallerSession(
-          installer: const InstallerInfo(
-            installerCode: '17',
-            dealerCode: '88',
-            name: 'Nex-Gen Administrator',
-          ),
-          dealer: const DealerInfo(
-            dealerCode: '88',
-            name: 'Nex-Gen Admin',
-            companyName: 'Nex-Gen LED Systems',
-          ),
-          authenticatedAt: DateTime.now(),
-        );
-        state = true;
-        _resetSessionTimer();
-        return true;
-      }
-      // For development/testing, allow a development master PIN
-      if (enteredPin == '0000') {
-        debugPrint('InstallerMode: Using development master PIN');
-        _ref.read(installerSessionProvider.notifier).state = InstallerSession(
-          installer: const InstallerInfo(
-            installerCode: '00',
-            dealerCode: '00',
-            name: 'Development Installer',
-          ),
-          dealer: const DealerInfo(
-            dealerCode: '00',
-            name: 'Development',
-            companyName: 'Nex-Gen Development',
-          ),
-          authenticatedAt: DateTime.now(),
-        );
-        state = true;
-        _resetSessionTimer();
-        return true;
-      }
       return false;
     }
   }

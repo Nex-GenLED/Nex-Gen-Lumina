@@ -104,6 +104,7 @@ class SyncNotificationService {
 
   StreamSubscription? _tokenRefreshSub;
   StreamSubscription? _foregroundMessageSub;
+  StreamSubscription? _messageOpenedSub;
   bool _initialized = false;
 
   /// Android notification channel for sync events.
@@ -178,7 +179,8 @@ class SyncNotificationService {
         FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
     // Background message tap handler (app brought to foreground)
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
+    _messageOpenedSub =
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
 
     debugPrint('[SyncNotification] Initialized');
   }
@@ -765,6 +767,7 @@ class SyncNotificationService {
   void dispose() {
     _tokenRefreshSub?.cancel();
     _foregroundMessageSub?.cancel();
+    _messageOpenedSub?.cancel();
   }
 }
 

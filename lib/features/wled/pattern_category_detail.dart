@@ -749,10 +749,9 @@ class CategoryDetailScreen extends ConsumerWidget {
   }
 
   Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
-    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
     final success = isPinned
-        ? await notifier.unpinCategory(categoryId)
-        : await notifier.pinCategory(categoryId);
+        ? await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(categoryId)
+        : await ref.read(pinnedCategoriesNotifierProvider.notifier).pinCategory(categoryId);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

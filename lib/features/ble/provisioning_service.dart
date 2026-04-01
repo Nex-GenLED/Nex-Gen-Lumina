@@ -85,10 +85,13 @@ class ProvisioningService {
           resultChar ??= c;
         }
       }
-      writeChar ??= improvService.characteristics.firstWhere(
-        (c) => (c.properties.write || c.properties.writeWithoutResponse),
-        orElse: () => improvService.characteristics.first,
-      );
+      if (writeChar == null && improvService.characteristics.isNotEmpty) {
+        writeChar = improvService.characteristics.firstWhere(
+          (c) => (c.properties.write || c.properties.writeWithoutResponse),
+          orElse: () => improvService.characteristics.first,
+        );
+      }
+      if (writeChar == null) throw Exception('No writable characteristic found on device');
       // Subscribe to notifications on the write characteristic (common for Improv)
       try {
         await writeChar.setNotifyValue(true);
@@ -150,7 +153,9 @@ class ProvisioningService {
     } finally {
       try {
         await notifySub?.cancel();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in provision cancel notification subscription: $e');
+      }
     }
   }
 
@@ -176,7 +181,9 @@ class ProvisioningService {
       String text = '';
       try {
         text = utf8.decode(payload, allowMalformed: true);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in _parseImprovResponse utf8 decode: $e');
+      }
       return _extractIp(text);
     }
     return null;
@@ -217,7 +224,9 @@ class ProvisioningService {
     try {
       final list = await DeviceDiscoveryService().discover(timeout: const Duration(seconds: 3));
       return list.any((d) => d.address.address == ip);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in _verifyReachable mDNS fallback: $e');
+    }
     return false;
   }
 
@@ -365,10 +374,13 @@ class ProvisioningService {
           break;
         }
       }
-      writeChar ??= improvService.characteristics.firstWhere(
-        (c) => (c.properties.write || c.properties.writeWithoutResponse),
-        orElse: () => improvService.characteristics.first,
-      );
+      if (writeChar == null && improvService.characteristics.isNotEmpty) {
+        writeChar = improvService.characteristics.firstWhere(
+          (c) => (c.properties.write || c.properties.writeWithoutResponse),
+          orElse: () => improvService.characteristics.first,
+        );
+      }
+      if (writeChar == null) throw Exception('No writable characteristic found on device');
 
       // Build and send provision command
       final packet = _buildImprovProvisionPacket(ssid, password);

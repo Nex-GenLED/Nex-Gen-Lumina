@@ -315,13 +315,12 @@ class _TeamCard extends ConsumerWidget {
 
   void _toggleLiveScoring(
       WidgetRef ref, GameDayAutopilotConfig config, bool value) {
-    final notifier = ref.read(gameDayAutopilotNotifierProvider.notifier);
-    notifier.toggleAutopilot(
+    ref.read(gameDayAutopilotNotifierProvider.notifier).toggleAutopilot(
       teamSlug: config.teamSlug,
       enabled: config.enabled,
     );
     // Update the score celebration field specifically.
-    notifier.saveDesign(
+    ref.read(gameDayAutopilotNotifierProvider.notifier).saveDesign(
       teamSlug: config.teamSlug,
       designName: config.savedDesignName ?? config.designLabel,
       wledPayload: config.savedDesignPayload ?? {},
@@ -1167,8 +1166,7 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
   Future<void> _addTeam(BuildContext context, WidgetRef ref, String slug,
       TeamColors team) async {
     // Create a GameDayAutopilotConfig for this team with defaults.
-    final notifier = ref.read(gameDayAutopilotNotifierProvider.notifier);
-    await notifier.toggleAutopilot(teamSlug: slug, enabled: true);
+    await ref.read(gameDayAutopilotNotifierProvider.notifier).toggleAutopilot(teamSlug: slug, enabled: true);
 
     if (!context.mounted) return;
     Navigator.pop(context);

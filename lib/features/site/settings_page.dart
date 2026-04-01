@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:ui';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -21,9 +23,6 @@ import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
-
-/// Master PIN for Installer Tools access (session-gated).
-const String kInstallerMasterPin = '8817';
 
 /// Session-level flag — resets only on full app restart.
 bool _installerUnlocked = false;
@@ -566,6 +565,17 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                   onTap: () async {
                     await _uploadDiagnostics(context);
                     await _simulateUpload(context);
+                  },
+                ),
+                const Divider(height: 1),
+                // Privacy Policy
+                ListTile(
+                  leading: Icon(Icons.privacy_tip_outlined, color: NexGenPalette.cyan),
+                  title: const Text('Privacy Policy'),
+                  trailing: Icon(Icons.open_in_new, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  onTap: () async {
+                    final uri = Uri.parse('https://nex-genled.com/privacy-policy');
+                    await _safeLaunch(context, uri);
                   },
                 ),
                 const Divider(height: 1),
@@ -1450,27 +1460,59 @@ class _InstallerPinDialog extends StatefulWidget {
 class _InstallerPinDialogState extends State<_InstallerPinDialog> {
   String _pin = '';
   bool _error = false;
+  bool _validating = false;
 
   void _onDigit(String digit) {
+    if (_validating) return;
     if (_pin.length >= 4) return;
     setState(() {
       _error = false;
       _pin += digit;
     });
     if (_pin.length == 4) {
-      if (_pin == kInstallerMasterPin) {
-        Navigator.of(context).pop();
-        widget.onSuccess();
-      } else {
-        setState(() {
-          _error = true;
-          _pin = '';
-        });
+      _validatePin();
+    }
+  }
+
+  Future<void> _validatePin() async {
+    setState(() => _validating = true);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('app_config')
+          .doc('master_installer')
+          .get();
+
+      if (!mounted) return;
+
+      if (doc.exists && doc.data() != null) {
+        final storedHash = doc.data()!['pin_hash'] as String?;
+        if (storedHash != null && storedHash.isNotEmpty) {
+          final enteredHash = sha256.convert(utf8.encode(_pin)).toString();
+          if (enteredHash == storedHash) {
+            Navigator.of(context).pop();
+            widget.onSuccess();
+            return;
+          }
+        }
       }
+
+      setState(() {
+        _error = true;
+        _pin = '';
+        _validating = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = true;
+        _pin = '';
+        _validating = false;
+      });
     }
   }
 
   void _onBackspace() {
+    if (_validating) return;
     if (_pin.isEmpty) return;
     setState(() {
       _error = false;

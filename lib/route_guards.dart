@@ -82,9 +82,6 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
         final data = userDoc.data()!;
         final role = data['installation_role'] as String?;
 
-        // DEV BYPASS: Link-account and installation checks skipped for testing
-        // (remove before production)
-
         // Installers and admins don't need an installation
         if (role == 'installer' || role == 'admin') {
           return AppRoutes.dashboard;
@@ -171,6 +168,42 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   }
 
   // For protected routes (dashboard, settings, etc.), verify installation access
-  // DEV BYPASS: Skip all installation checks for testing
-  return null; // Allow access to all routes
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
+    if (userDoc.exists) {
+      final data = userDoc.data()!;
+      final role = data['installation_role'] as String?;
+
+      // Admin: unrestricted access to all routes
+      if (role == 'admin') {
+        return null;
+      }
+
+      // Installer: allow access to all routes (they need to see/configure
+      // the residential dashboard and system settings)
+      if (role == 'installer') {
+        return null;
+      }
+
+      // Unlinked: redirect to link-account for any protected route
+      if (role == null || role == 'unlinked') {
+        return AppRoutes.linkAccount;
+      }
+
+      // primary / subUser with a valid installation: allow access
+      return null;
+    } else {
+      // User exists in Auth but not Firestore - create unlinked profile
+      await createUnlinkedUserProfile(user);
+      return AppRoutes.linkAccount;
+    }
+  } catch (e) {
+    debugPrint('Redirect: Error verifying installation access: $e');
+    // On error, allow access rather than blocking (network issues, etc.)
+    return null;
+  }
 }

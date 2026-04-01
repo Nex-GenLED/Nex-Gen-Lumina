@@ -83,7 +83,9 @@ class _PreferredWhiteSelectionPageState extends ConsumerState<PreferredWhiteSele
     if (repo == null) return;
     try {
       repo.applyJson(preset.toWledPayload());
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in white preset live preview: $e');
+    }
   }
 
   Future<void> _save() async {
@@ -468,7 +470,9 @@ class _PreferredWhiteSelectionPageState extends ConsumerState<PreferredWhiteSele
         b: _customB,
         w: _customW,
       ).toWledPayload());
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in custom white preview: $e');
+    }
   }
 }
 

@@ -1135,11 +1135,10 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
       excludedGameIds: _isSeasonSchedule ? _excludedGameIds.toList() : [],
     );
 
-    final notifier = ref.read(syncEventNotifierProvider.notifier);
     if (_isEditing) {
-      await notifier.updateSyncEvent(event);
+      await ref.read(syncEventNotifierProvider.notifier).updateSyncEvent(event);
     } else {
-      await notifier.createSyncEvent(event);
+      await ref.read(syncEventNotifierProvider.notifier).createSyncEvent(event);
       // Show battery optimization prompt on first sync event creation (Android)
       if (mounted) {
         await showBatteryOptimizationPrompt(context);

@@ -143,10 +143,9 @@ class BackgroundLearningService {
     if (profile.weeklySchedulePreviewEnabled && newEvents.isNotEmpty) {
       try {
         // AutopilotNotificationService already handles this — pass through.
-        final notifier = ref.read(autopilotSettingsServiceProvider);
         // scheduleWeeklyBrief is on the notification service; trigger via
         // the existing settings service to avoid circular imports.
-        await notifier.scheduleWeeklyBriefForEvents(profile, newEvents);
+        await ref.read(autopilotSettingsServiceProvider).scheduleWeeklyBriefForEvents(profile, newEvents);
       } catch (e) {
         debugPrint('⚠️ Weekly brief notification failed: $e');
       }

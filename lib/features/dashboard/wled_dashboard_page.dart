@@ -75,7 +75,9 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
         }
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    debugPrint('Error in _extractPreviewFromPayload: $e');
+  }
 
   return (
     colors: colors.isNotEmpty ? colors : [Colors.white],
@@ -787,14 +789,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             intensity: preview.intensity,
             effectName: favorite.patternName,
           );
-        } catch (_) {}
-        try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (_) {}
-        try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (_) {}
+        } catch (e) {
+          debugPrint('Error in preset chip applyLocalPreview: $e');
+        }
+        try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (e) {
+          debugPrint('Error in preset chip set active label: $e');
+        }
+        try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {
+          debugPrint('Error in preset chip recordFavoriteUsage: $e');
+        }
         try {
           if (mounted) {
             ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
           }
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('Error in preset chip trackWledPayload: $e');
+        }
       }
     } catch (e) {
       debugPrint('Preset chip apply error: $e');
@@ -1062,7 +1072,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   const SizedBox(height: 6),
                   Consumer(builder: (context, ref, _) {
                     final st = ref.watch(wledStateProvider);
-                    final notifier = ref.read(wledStateProvider.notifier);
                     return Row(
                       children: [
                         Icon(
@@ -1088,7 +1097,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                     }
                                   : null,
                               onChanged: st.connected
-                                  ? (v) => notifier.setBrightness(v.round())
+                                  ? (v) => ref.read(wledStateProvider.notifier).setBrightness(v.round())
                                   : null,
                               activeColor: NexGenPalette.cyan,
                               inactiveColor: Colors.white.withValues(alpha: 0.15),
@@ -1298,6 +1307,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               final patternName = suggestion.actionData['pattern_name'] as String?;
               if (patternName != null) {
                 final library = ref.read(publicPatternLibraryProvider);
+                if (library.all.isEmpty) return;
                 final pattern = library.all.firstWhere(
                   (p) => p.name.toLowerCase() == patternName.toLowerCase(),
                   orElse: () => library.all.first,
@@ -1319,7 +1329,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       effectName: patternName,
                     );
                     ref.read(activePresetLabelProvider.notifier).state = patternName;
-                  } catch (_) {}
+                  } catch (e) {
+                    debugPrint('Error in AI suggestion applyLocalPreview: $e');
+                  }
                 }
                 ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
                 if (mounted) {
@@ -1381,12 +1393,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     intensity: preview.intensity,
                     effectName: favorite.patternName,
                   );
-                } catch (_) {}
-                try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (_) {}
-                try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (_) {}
+                } catch (e) {
+                  debugPrint('Error in favorite grid applyLocalPreview: $e');
+                }
+                try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (e) {
+                  debugPrint('Error in favorite grid set active label: $e');
+                }
+                try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {
+                  debugPrint('Error in favorite grid recordFavoriteUsage: $e');
+                }
                 try {
                   if (mounted) ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
-                } catch (_) {}
+                } catch (e) {
+                  debugPrint('Error in favorite grid trackWledPayload: $e');
+                }
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Applied: ${favorite.patternName}'), backgroundColor: Colors.green.shade700),
@@ -1756,7 +1776,9 @@ class _PresetChip extends StatelessWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in _extractPrimaryColor: $e');
+    }
     return NexGenPalette.cyan;
   }
 }

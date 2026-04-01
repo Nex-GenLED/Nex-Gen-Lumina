@@ -249,7 +249,9 @@ class CloudRelayRepository implements WledRepository {
         final v = leds['rgbw'];
         if (v is bool) return v;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in CloudRelayRepository parsing RGBW support: $e');
+    }
     return false;
   }
 

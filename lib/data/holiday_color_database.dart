@@ -885,7 +885,7 @@ class HolidayColorDatabase {
 
     // Sort by date ascending to get the soonest
     candidates.sort((a, b) => a.value.compareTo(b.value));
-    return candidates.first.key;
+    return candidates.firstOrNull?.key;
   }
 
   // -----------------------------------------------------------------------

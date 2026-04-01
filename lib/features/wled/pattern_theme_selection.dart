@@ -431,7 +431,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
           if (sx is num) return sx.toDouble();
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in ThemePatternCard _speedFromPayload: $e');
+    }
     return 128;
   }
 
@@ -458,7 +460,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in ThemePatternCard _colorsFromPayload: $e');
+    }
     return const [Colors.white];
   }
 
@@ -588,19 +592,18 @@ class _CompactPatternItemCard extends ConsumerWidget {
   }
 
   void _updateLocalState(WidgetRef ref) {
-    final notifier = ref.read(wledStateProvider.notifier);
     final bri = item.wledPayload['bri'];
-    if (bri is int) notifier.setBrightness(bri);
+    if (bri is int) ref.read(wledStateProvider.notifier).setBrightness(bri);
     final seg = item.wledPayload['seg'];
     if (seg is List && seg.isNotEmpty && seg.first is Map) {
       final s0 = seg.first as Map;
       final sx = s0['sx'];
-      if (sx is int) notifier.setSpeed(sx);
+      if (sx is int) ref.read(wledStateProvider.notifier).setSpeed(sx);
       final col = s0['col'];
       if (col is List && col.isNotEmpty && col.first is List) {
         final c = col.first as List;
         if (c.length >= 3) {
-          notifier.setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
+          ref.read(wledStateProvider.notifier).setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
         }
       }
     }

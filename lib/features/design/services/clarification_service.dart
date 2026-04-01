@@ -57,6 +57,7 @@ class ClarificationService {
       if (selectedOption == null) continue;
 
       // Find the original ambiguity
+      if (original.ambiguities.isEmpty) continue;
       final ambiguity = original.ambiguities.firstWhere(
         (a) => a.affectedLayerId == question.affectedLayerId &&
                _ambiguityTypeMatchesClarificationType(a.type, question.type),

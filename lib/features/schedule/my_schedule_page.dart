@@ -420,11 +420,9 @@ class _PendingChangesBanner extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             ),
             onPressed: () async {
-              final notifier = ref.read(calendarScheduleProvider.notifier);
-
               // Check for conflicts with recurring schedules
               final conflicts =
-                  notifier.checkConflictsForEntries(pending.changes);
+                  ref.read(calendarScheduleProvider.notifier).checkConflictsForEntries(pending.changes);
               ConflictResolution? resolution;
               if (conflicts.hasConflicts) {
                 if (!context.mounted) return;
@@ -433,7 +431,7 @@ class _PendingChangesBanner extends ConsumerWidget {
                 if (resolution == ConflictResolution.cancel) return;
               }
 
-              final ok = await notifier.applyEntries(
+              final ok = await ref.read(calendarScheduleProvider.notifier).applyEntries(
                 pending.changes,
                 resolution: resolution,
               );
@@ -1937,7 +1935,6 @@ class _ScheduleCard extends ConsumerWidget {
   const _ScheduleCard({required this.item});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notifier = ref.read(schedulesProvider.notifier);
     // Build time display string
     final timeDisplay = item.hasOffTime
         ? '${item.timeLabel} → ${item.offTimeLabel}'
@@ -2004,7 +2001,7 @@ class _ScheduleCard extends ConsumerWidget {
                 ),
               );
               if (ok == true) {
-                notifier.remove(item.id);
+                ref.read(schedulesProvider.notifier).remove(item.id);
               }
             },
             icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 18),
@@ -2015,7 +2012,7 @@ class _ScheduleCard extends ConsumerWidget {
           CupertinoSwitch(
             value: item.enabled,
             activeColor: NexGenPalette.cyan,
-            onChanged: (v) => notifier.toggle(item.id, v),
+            onChanged: (v) => ref.read(schedulesProvider.notifier).toggle(item.id, v),
           ),
         ],
       ),

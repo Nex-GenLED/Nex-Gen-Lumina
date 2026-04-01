@@ -370,7 +370,9 @@ class LuminaAI {
     try {
       final obj = jsonDecode(content);
       if (obj is Map<String, dynamic>) return obj;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in _tryParseJsonObject (raw decode): $e');
+    }
 
     final stripped = content
         .replaceAll(RegExp(r'```json\s*'), '')
@@ -379,7 +381,9 @@ class LuminaAI {
     try {
       final obj = jsonDecode(stripped);
       if (obj is Map<String, dynamic>) return obj;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in _tryParseJsonObject (stripped decode): $e');
+    }
 
     final start = stripped.indexOf('{');
     if (start < 0) return null;
@@ -393,7 +397,9 @@ class LuminaAI {
             final sub = stripped.substring(start, i + 1);
             final obj = jsonDecode(sub);
             if (obj is Map<String, dynamic>) return obj;
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('Error in _tryParseJsonObject (substring decode): $e');
+          }
           break;
         }
       }

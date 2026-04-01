@@ -27,8 +27,7 @@ class _DemoRooflineScreenState extends ConsumerState<DemoRooflineScreen> {
   }
 
   void _addSegment() {
-    final notifier = ref.read(demoRooflineNotifierProvider.notifier);
-    if (!notifier.canAddMore) {
+    if (!ref.read(demoRooflineNotifierProvider.notifier).canAddMore) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Maximum 5 segments allowed in demo')),
       );

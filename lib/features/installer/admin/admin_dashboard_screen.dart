@@ -18,9 +18,12 @@ class AdminPinScreen extends ConsumerStatefulWidget {
 class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
   String _enteredPin = '';
   bool _showError = false;
+  bool _isValidating = false;
+  String _errorMessage = 'Incorrect PIN';
   static const int _pinLength = 4;
 
   void _onKeyPressed(String key) {
+    if (_isValidating) return;
     if (_enteredPin.length < _pinLength) {
       HapticFeedback.lightImpact();
       setState(() {
@@ -35,6 +38,7 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
   }
 
   void _onBackspace() {
+    if (_isValidating) return;
     if (_enteredPin.isNotEmpty) {
       HapticFeedback.lightImpact();
       setState(() {
@@ -44,16 +48,24 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
     }
   }
 
-  void _submitPin() {
-    if (_enteredPin == kAdminPin) {
+  Future<void> _submitPin() async {
+    setState(() => _isValidating = true);
+
+    final result = await validateAdminPin(_enteredPin);
+
+    if (!mounted) return;
+
+    if (result.isSuccess) {
       HapticFeedback.mediumImpact();
-      ref.read(adminAuthenticatedProvider.notifier).state = true;
+      startAdminSession(ref);
       context.go('/admin/dashboard');
     } else {
       HapticFeedback.heavyImpact();
       setState(() {
         _showError = true;
+        _errorMessage = result.errorMessage ?? 'Incorrect PIN';
         _enteredPin = '';
+        _isValidating = false;
       });
     }
   }
@@ -135,9 +147,10 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
               AnimatedOpacity(
                 opacity: _showError ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
-                child: const Text(
-                  'Incorrect PIN',
-                  style: TextStyle(color: Colors.red, fontSize: 14),
+                child: Text(
+                  _errorMessage,
+                  style: const TextStyle(color: Colors.red, fontSize: 14),
+                  textAlign: TextAlign.center,
                 ),
               ),
               const SizedBox(height: 32),
@@ -218,17 +231,49 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
 }
 
 /// Admin dashboard with access to dealer and installer management
-class AdminDashboardScreen extends ConsumerWidget {
+class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isAuthenticated = ref.watch(adminAuthenticatedProvider);
+  ConsumerState<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
 
-    // Redirect if not authenticated
+class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Check session validity on screen init
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!checkAdminSession(ref)) {
+        _redirectToPin(expired: true);
+      }
+    });
+  }
+
+  void _redirectToPin({bool expired = false}) {
+    endAdminSession(ref);
+    if (!mounted) return;
+    context.go('/admin/pin');
+    if (expired) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Admin session expired. Please re-enter your PIN.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAuthenticated = ref.watch(adminSessionActiveProvider);
+
+    // Redirect if not authenticated or session expired
     if (!isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/admin/pin');
+        if (!mounted) return;
+        _redirectToPin(expired: true);
       });
       return const Scaffold(
         backgroundColor: NexGenPalette.matteBlack,
@@ -246,7 +291,7 @@ class AdminDashboardScreen extends ConsumerWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () {
-            ref.read(adminAuthenticatedProvider.notifier).state = false;
+            endAdminSession(ref);
             context.pop();
           },
         ),

@@ -1,14 +1,199 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 
-/// Admin PIN for accessing dealer/installer management
-/// In production, this should be stored securely or use Firebase Auth roles
-const String kAdminPin = '9999';
+/// Admin session timeout duration (30 minutes)
+const Duration kAdminSessionTimeout = Duration(minutes: 30);
 
-/// Provider for admin authentication state
-final adminAuthenticatedProvider = StateProvider<bool>((ref) => false);
+/// Maximum failed admin PIN attempts before lockout
+const int kMaxAdminPinAttempts = 5;
+
+/// Lockout duration after exceeding max failed attempts
+const Duration kAdminLockoutDuration = Duration(minutes: 15);
+
+/// Tracks failed admin PIN attempts and lockout state
+class _AdminPinRateLimiter {
+  int _failedAttempts = 0;
+  DateTime? _lockoutUntil;
+
+  /// Returns true if the admin PIN entry is currently locked out
+  bool get isLockedOut {
+    if (_lockoutUntil == null) return false;
+    if (DateTime.now().isAfter(_lockoutUntil!)) {
+      // Lockout expired, reset
+      _failedAttempts = 0;
+      _lockoutUntil = null;
+      return false;
+    }
+    return true;
+  }
+
+  /// Returns the remaining lockout duration, or Duration.zero if not locked out
+  Duration get remainingLockout {
+    if (_lockoutUntil == null) return Duration.zero;
+    final remaining = _lockoutUntil!.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  /// Record a failed attempt. Returns true if now locked out.
+  bool recordFailure() {
+    _failedAttempts++;
+    if (_failedAttempts >= kMaxAdminPinAttempts) {
+      _lockoutUntil = DateTime.now().add(kAdminLockoutDuration);
+      debugPrint('AdminPinRateLimiter: Locked out until $_lockoutUntil after $_failedAttempts failed attempts');
+      return true;
+    }
+    return false;
+  }
+
+  /// Reset after successful authentication
+  void reset() {
+    _failedAttempts = 0;
+    _lockoutUntil = null;
+  }
+
+  int get failedAttempts => _failedAttempts;
+}
+
+final _adminPinRateLimiter = _AdminPinRateLimiter();
+
+/// Hash a PIN using SHA-256 for comparison with stored hash
+String hashPin(String pin) => sha256.convert(utf8.encode(pin)).toString();
+
+/// Validate the admin PIN against the hash stored in Firestore.
+///
+/// Returns a [AdminPinResult] indicating success, failure, lockout, or error.
+Future<AdminPinResult> validateAdminPin(String enteredPin) async {
+  // Check rate limit first
+  if (_adminPinRateLimiter.isLockedOut) {
+    final remaining = _adminPinRateLimiter.remainingLockout;
+    debugPrint('AdminPin: Locked out for ${remaining.inMinutes} more minutes');
+    return AdminPinResult.lockedOut(remaining);
+  }
+
+  try {
+    final doc = await FirebaseFirestore.instance
+        .collection('app_config')
+        .doc('admin')
+        .get();
+
+    if (!doc.exists || doc.data() == null) {
+      debugPrint('AdminPin: No admin config found in Firestore');
+      _adminPinRateLimiter.recordFailure();
+      return AdminPinResult.failure('Admin PIN not configured');
+    }
+
+    final storedHash = doc.data()!['pin_hash'] as String?;
+    if (storedHash == null || storedHash.isEmpty) {
+      debugPrint('AdminPin: No pin_hash field in admin config');
+      _adminPinRateLimiter.recordFailure();
+      return AdminPinResult.failure('Admin PIN not configured');
+    }
+
+    final enteredHash = hashPin(enteredPin);
+    if (enteredHash == storedHash) {
+      _adminPinRateLimiter.reset();
+      debugPrint('AdminPin: Authentication successful');
+      return AdminPinResult.success();
+    } else {
+      final nowLocked = _adminPinRateLimiter.recordFailure();
+      debugPrint('AdminPin: Incorrect PIN (attempt ${_adminPinRateLimiter.failedAttempts}/$kMaxAdminPinAttempts)');
+      if (nowLocked) {
+        return AdminPinResult.lockedOut(_adminPinRateLimiter.remainingLockout);
+      }
+      return AdminPinResult.failure('Incorrect PIN');
+    }
+  } catch (e) {
+    debugPrint('AdminPin: Error validating PIN: $e');
+    _adminPinRateLimiter.recordFailure();
+    return AdminPinResult.failure('Unable to validate PIN. Check your connection.');
+  }
+}
+
+/// Result of an admin PIN validation attempt
+class AdminPinResult {
+  final bool isSuccess;
+  final bool isLockedOut;
+  final String? errorMessage;
+  final Duration? lockoutRemaining;
+
+  const AdminPinResult._({
+    required this.isSuccess,
+    this.isLockedOut = false,
+    this.errorMessage,
+    this.lockoutRemaining,
+  });
+
+  factory AdminPinResult.success() => const AdminPinResult._(isSuccess: true);
+
+  factory AdminPinResult.failure(String message) => AdminPinResult._(
+        isSuccess: false,
+        errorMessage: message,
+      );
+
+  factory AdminPinResult.lockedOut(Duration remaining) => AdminPinResult._(
+        isSuccess: false,
+        isLockedOut: true,
+        lockoutRemaining: remaining,
+        errorMessage: 'Too many attempts. Try again in ${remaining.inMinutes + 1} minutes.',
+      );
+}
+
+/// Tracks admin session authentication timestamp
+class AdminSession {
+  final DateTime authenticatedAt;
+
+  const AdminSession({required this.authenticatedAt});
+
+  /// Whether the session is still within the timeout window
+  bool get isValid =>
+      DateTime.now().difference(authenticatedAt) < kAdminSessionTimeout;
+}
+
+/// Provider for the admin session (null if not authenticated)
+final adminSessionProvider = StateProvider<AdminSession?>((ref) => null);
+
+/// Provider that returns true only if admin is authenticated AND session
+/// has not expired. This replaces the old `adminAuthenticatedProvider`.
+final adminSessionActiveProvider = Provider<bool>((ref) {
+  final session = ref.watch(adminSessionProvider);
+  if (session == null) return false;
+  return session.isValid;
+});
+
+/// Legacy provider kept for backward compatibility.
+/// Reads from the session-based provider so existing widgets that watch
+/// `adminAuthenticatedProvider` continue to work.
+final adminAuthenticatedProvider = Provider<bool>((ref) {
+  return ref.watch(adminSessionActiveProvider);
+});
+
+/// Call this to start an admin session (on successful PIN entry).
+void startAdminSession(WidgetRef ref) {
+  ref.read(adminSessionProvider.notifier).state =
+      AdminSession(authenticatedAt: DateTime.now());
+}
+
+/// Call this to end the admin session (logout or expiry).
+void endAdminSession(WidgetRef ref) {
+  ref.read(adminSessionProvider.notifier).state = null;
+}
+
+/// Checks whether the admin session is still valid.
+/// Returns true if active, false if expired or not authenticated.
+/// If expired, automatically clears the session.
+bool checkAdminSession(WidgetRef ref) {
+  final session = ref.read(adminSessionProvider);
+  if (session == null) return false;
+  if (!session.isValid) {
+    endAdminSession(ref);
+    return false;
+  }
+  return true;
+}
 
 /// Provider for managing dealers
 final dealerListProvider = StreamProvider<List<DealerInfo>>((ref) {

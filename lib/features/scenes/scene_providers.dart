@@ -161,8 +161,7 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
             .toList();
 
         // Update the wled state with scene colors immediately
-        final notifier = ref.read(wledStateProvider.notifier);
-        notifier.setLuminaPatternMetadata(
+        ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
           colorSequence: colorSequence,
           colorNames: colorNames,
           effectName: scene.name,
@@ -170,7 +169,7 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
 
         // Also update brightness if specified
         if (scene.brightness > 0) {
-          notifier.setBrightness(scene.brightness);
+          ref.read(wledStateProvider.notifier).setBrightness(scene.brightness);
         }
 
         // Log usage for learning

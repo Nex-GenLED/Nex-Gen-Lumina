@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// Service for communicating with the Lumina backend server.
 /// Handles authentication, device management, and remote command relay.
@@ -13,6 +13,17 @@ class LuminaBackendService {
   // Default to localhost for development, user can configure production URL
   static const String _defaultBaseUrl = 'http://localhost:3000';
 
+  /// Secure storage for auth tokens and sensitive credentials.
+  /// Uses EncryptedSharedPreferences on Android and Keychain on iOS.
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
+
   String _baseUrl = _defaultBaseUrl;
   String? _authToken;
   String? _userId;
@@ -21,12 +32,11 @@ class LuminaBackendService {
 
   LuminaBackendService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Initialize the service by loading saved credentials.
+  /// Initialize the service by loading saved credentials from secure storage.
   Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    _baseUrl = prefs.getString(_baseUrlKey) ?? _defaultBaseUrl;
-    _authToken = prefs.getString(_tokenKey);
-    _userId = prefs.getString(_userIdKey);
+    _baseUrl = await _secureStorage.read(key: _baseUrlKey) ?? _defaultBaseUrl;
+    _authToken = await _secureStorage.read(key: _tokenKey);
+    _userId = await _secureStorage.read(key: _userIdKey);
     debugPrint('LuminaBackendService: Initialized with baseUrl=$_baseUrl, hasToken=${_authToken != null}');
   }
 
@@ -42,8 +52,7 @@ class LuminaBackendService {
   /// Set the backend URL (for configuration).
   Future<void> setBaseUrl(String url) async {
     _baseUrl = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_baseUrlKey, _baseUrl);
+    await _secureStorage.write(key: _baseUrlKey, value: _baseUrl);
   }
 
   /// Common headers for authenticated requests.
@@ -130,21 +139,19 @@ class LuminaBackendService {
     }
   }
 
-  /// Logout and clear saved credentials.
+  /// Logout and clear saved credentials from secure storage.
   Future<void> logout() async {
     _authToken = null;
     _userId = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
-    await prefs.remove(_userIdKey);
+    await _secureStorage.delete(key: _tokenKey);
+    await _secureStorage.delete(key: _userIdKey);
   }
 
   Future<void> _saveAuthData(String token, String userId) async {
     _authToken = token;
     _userId = userId;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
-    await prefs.setString(_userIdKey, userId);
+    await _secureStorage.write(key: _tokenKey, value: token);
+    await _secureStorage.write(key: _userIdKey, value: userId);
   }
 
   /// Provision a new device (get MQTT credentials for the device).

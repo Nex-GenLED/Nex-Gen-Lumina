@@ -201,7 +201,6 @@ class _ColorwayEffectSelectorPageState
       effectName = WledEffectsCatalog.getName(effectId);
     }
 
-    final notifier = ref.read(wledStateProvider.notifier);
     final currentState = ref.read(wledStateProvider);
     bool appliedToDevice = false;
 
@@ -251,7 +250,7 @@ class _ColorwayEffectSelectorPageState
     }
 
     // Always update local preview state so roofline shows on house image
-    notifier.applyLocalPreview(
+    ref.read(wledStateProvider.notifier).applyLocalPreview(
       colors: previewColors,
       effectId: fxId,
       speed: speed,

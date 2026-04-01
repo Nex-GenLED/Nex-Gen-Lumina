@@ -151,7 +151,9 @@ class LuminaBrain {
           userTeams = profile.sportsTeams;
           userLocation = profile.location;
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in LuminaBrain reading user profile for sports: $e');
+      }
 
       final teamResult = TeamColorResolver.resolve(
         userPrompt,
@@ -345,7 +347,9 @@ class LuminaBrain {
           userTeams = profile.sportsTeams;
           userLocation = profile.location;
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in LuminaBrain reading user profile for team resolution: $e');
+      }
 
       final teamResult = TeamColorResolver.resolve(
         lightingPrompt,
@@ -971,7 +975,9 @@ class LuminaBrain {
               if (cap.audioReactiveEffects.contains(state.effectId)) {
                 buffer.writeln('- Currently Active Audio Effect: YES (effect ID ${state.effectId})');
               }
-            } catch (_) {}
+            } catch (e) {
+              debugPrint('Error in LuminaBrain checking audio-reactive state: $e');
+            }
           } else {
             buffer.writeln('\nAUDIO REACTIVITY: Not supported on this controller');
           }

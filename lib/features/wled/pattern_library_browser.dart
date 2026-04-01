@@ -371,10 +371,9 @@ class _DesignLibraryCategoryCard extends ConsumerWidget {
   }
 
   Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
-    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
     final success = isPinned
-        ? await notifier.unpinCategory(category.id)
-        : await notifier.pinCategory(category.id);
+        ? await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(category.id)
+        : await ref.read(pinnedCategoriesNotifierProvider.notifier).pinCategory(category.id);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -988,8 +987,7 @@ class _PinnedCategoryRow extends ConsumerWidget {
     );
 
     if (confirmed == true && context.mounted) {
-      final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
-      final success = await notifier.unpinCategory(pinnedData.category.id);
+      final success = await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(pinnedData.category.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

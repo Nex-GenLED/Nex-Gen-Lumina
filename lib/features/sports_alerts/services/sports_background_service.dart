@@ -105,7 +105,7 @@ void _onStart(ServiceInstance service) async {
   syncWorker.startMonitoring();
 
   // Listen for IP updates from the UI isolate.
-  service.on('updateIps').listen((data) {
+  final updateIpsSub = service.on('updateIps').listen((data) {
     if (data != null && data['ips'] is List) {
       controllerIps = List<String>.from(data['ips'] as List);
       syncWorker.updateControllerIps(controllerIps);
@@ -113,24 +113,28 @@ void _onStart(ServiceInstance service) async {
   });
 
   // Listen for sync events config change signal.
-  service.on('syncEventsChanged').listen((_) {
+  final syncChangedSub = service.on('syncEventsChanged').listen((_) {
     debugPrint('[Background] Sync events changed — worker will reload on next poll');
-  });
-
-  // Listen for stop signal.
-  service.on('stop').listen((_) async {
-    monitor.dispose();
-    espnApi.dispose();
-    scheduleService.dispose();
-    syncWorker.dispose();
-    await service.stopSelf();
   });
 
   // Wire monitor → trigger.
   StreamSubscription<dynamic>? alertSub;
-
-  // ---------- Main polling loop ----------
   Timer? pollTimer;
+
+  // Listen for stop signal.
+  late final StreamSubscription stopSub;
+  stopSub = service.on('stop').listen((_) async {
+    monitor.dispose();
+    espnApi.dispose();
+    scheduleService.dispose();
+    syncWorker.dispose();
+    alertSub?.cancel();
+    pollTimer?.cancel();
+    updateIpsSub.cancel();
+    syncChangedSub.cancel();
+    stopSub.cancel();
+    await service.stopSelf();
+  });
 
   Future<void> poll() async {
     final configs = await _loadConfigs();
@@ -238,7 +242,7 @@ FutureOr<bool> _onIosBackground(ServiceInstance service) async {
 
   if (active.isNotEmpty) {
     final trigger = AlertTriggerService(controllerIps: const []);
-    monitor.alertStream.listen((event) {
+    final alertSub = monitor.alertStream.listen((event) {
       final config = active.firstWhere(
         (c) => c.teamSlug == event.teamSlug,
         orElse: () => active.first,
@@ -247,6 +251,7 @@ FutureOr<bool> _onIosBackground(ServiceInstance service) async {
     });
 
     await monitor.checkScores(active);
+    await alertSub.cancel();
   }
 
   espnApi.dispose();

@@ -283,7 +283,9 @@ class UserVarietyProfileAnalyzer {
         try {
           final id = (fav as dynamic).effectId as int?;
           if (id != null) effectIds.add(id);
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('Error in UserVarietyProfile reading favorite effectId: $e');
+        }
       }
 
       if (effectIds.length >= 4) {

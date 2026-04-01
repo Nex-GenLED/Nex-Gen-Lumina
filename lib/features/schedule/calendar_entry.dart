@@ -63,7 +63,9 @@ class CalendarEntry {
     if (colorStr != null && colorStr.startsWith('#') && colorStr.length == 7) {
       try {
         color = Color(int.parse('FF${colorStr.substring(1)}', radix: 16));
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in CalendarEntry.fromAiJson parsing color: $e');
+      }
     }
 
     final brightness = (json['brightness'] as num?)?.toInt() ?? 85;
@@ -106,7 +108,9 @@ class CalendarEntry {
     if (colorStr != null && colorStr.startsWith('#') && colorStr.length == 7) {
       try {
         color = Color(int.parse('FF${colorStr.substring(1)}', radix: 16));
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in CalendarEntry.fromJson parsing color: $e');
+      }
     }
 
     return CalendarEntry(

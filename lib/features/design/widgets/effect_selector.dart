@@ -32,6 +32,10 @@ class EffectSelector extends ConsumerWidget {
       );
     }
 
+    if (design.channels.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     final channel = design.channels.firstWhere(
       (ch) => ch.channelId == selectedChannelId,
       orElse: () => design.channels.first,

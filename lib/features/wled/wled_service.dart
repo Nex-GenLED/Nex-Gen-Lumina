@@ -168,7 +168,9 @@ class WledService implements WledRepository {
             }
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error in WledService applyJson simulation color parse: $e');
+      }
       return true;
     }
 

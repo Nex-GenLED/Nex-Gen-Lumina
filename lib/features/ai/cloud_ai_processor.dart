@@ -243,7 +243,9 @@ class CloudAIProcessor {
         final obj = jsonDecode(jsonStr) as Map<String, dynamic>;
         return _JsonExtraction(object: obj, substring: jsonStr);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in _extractJson: $e');
+    }
     return null;
   }
 
