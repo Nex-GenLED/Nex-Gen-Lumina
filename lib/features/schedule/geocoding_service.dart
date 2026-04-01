@@ -80,12 +80,13 @@ class GeocodingService {
   }
 
   /// Google Places Autocomplete (New) — best coverage for US residential addresses.
+  /// Returns results immediately from autocomplete without fetching details
+  /// (lat/lng are resolved lazily when the user selects an address).
   Future<List<AddressSuggestion>> _searchGooglePlaces(String query, {int limit = 5}) async {
     try {
       final uri = Uri.parse('https://places.googleapis.com/v1/places:autocomplete');
       final requestBody = jsonEncode({
         'input': query,
-        'includedPrimaryTypes': ['street_address', 'subpremise', 'premise'],
         'includedRegionCodes': ['us'],
       });
 
@@ -108,27 +109,12 @@ class GeocodingService {
           final placePrediction = s['placePrediction'] as Map<String, dynamic>?;
           if (placePrediction == null) continue;
 
-          final placeId = placePrediction['placeId'] as String? ?? '';
           final text = placePrediction['text'] as Map<String, dynamic>?;
           final structuredFormat = placePrediction['structuredFormat'] as Map<String, dynamic>?;
 
           final fullText = text?['text'] as String? ?? '';
           final mainText = (structuredFormat?['mainText'] as Map<String, dynamic>?)?['text'] as String? ?? fullText;
           final secondaryText = (structuredFormat?['secondaryText'] as Map<String, dynamic>?)?['text'] as String? ?? '';
-
-          // Fetch details for lat/lng and address components
-          double lat = 0, lon = 0;
-          String? city, state, postcode;
-          if (placeId.isNotEmpty) {
-            final details = await _getPlaceDetails(placeId);
-            if (details != null) {
-              lat = details['lat'] ?? 0;
-              lon = details['lon'] ?? 0;
-              city = details['city'];
-              state = details['state'];
-              postcode = details['postcode'];
-            }
-          }
 
           // Parse house number and street from main text
           String? houseNumber, street;
@@ -140,22 +126,24 @@ class GeocodingService {
             street = mainText;
           }
 
-          // Build short address: "123 Main St, City, ST"
-          final shortParts = <String>[mainText];
-          if (city != null) shortParts.add(city);
-          if (state != null) shortParts.add(state);
+          // Parse city/state from secondary text (e.g. "Kansas City, MO, USA")
+          String? city, state;
+          final secondaryParts = secondaryText.split(', ');
+          if (secondaryParts.length >= 2) {
+            city = secondaryParts[0];
+            state = secondaryParts[1];
+          }
 
           results.add(AddressSuggestion(
             displayName: fullText.isNotEmpty ? fullText : '$mainText, $secondaryText',
-            shortAddress: shortParts.join(', '),
-            lat: lat,
-            lon: lon,
+            shortAddress: mainText,
+            lat: 0,
+            lon: 0,
             type: 'house',
             houseNumber: houseNumber,
             street: street,
             city: city,
             state: state,
-            postcode: postcode,
           ));
         }
         return results;
@@ -169,50 +157,6 @@ class GeocodingService {
       debugPrint('GeocodingService: Google Places error $e');
     }
     return [];
-  }
-
-  /// Fetch lat/lng and address components for a Google place_id.
-  Future<Map<String, dynamic>?> _getPlaceDetails(String placeId) async {
-    try {
-      final uri = Uri.parse(
-        'https://places.googleapis.com/v1/places/$placeId',
-      );
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-      final req = await client.getUrl(uri);
-      req.headers.set('X-Goog-Api-Key', _googleApiKey);
-      req.headers.set('X-Goog-FieldMask', 'location,addressComponents');
-      final res = await req.close().timeout(const Duration(seconds: 5));
-      final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(body) as Map<String, dynamic>;
-        final location = data['location'] as Map<String, dynamic>?;
-        final components = data['addressComponents'] as List? ?? [];
-
-        String? city, state, postcode;
-        for (final c in components) {
-          final comp = c as Map<String, dynamic>;
-          final types = (comp['types'] as List?)?.cast<String>() ?? [];
-          final longName = comp['longText'] as String?;
-          final shortName = comp['shortText'] as String?;
-          if (types.contains('locality')) city = longName;
-          if (types.contains('administrative_area_level_1')) state = shortName ?? longName;
-          if (types.contains('postal_code')) postcode = longName;
-        }
-
-        return {
-          'lat': (location?['latitude'] as num?)?.toDouble(),
-          'lon': (location?['longitude'] as num?)?.toDouble(),
-          'city': city,
-          'state': state,
-          'postcode': postcode,
-        };
-      }
-    } catch (e) {
-      debugPrint('GeocodingService: Place details error $e');
-    }
-    return null;
   }
 
   /// Photon geocoder fallback — free, OSM-based, decent fuzzy matching.
