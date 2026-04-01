@@ -1,6 +1,11 @@
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/services/user_service.dart';
@@ -79,6 +84,62 @@ final hasRooflineConfigProvider = Provider<bool>((ref) {
   );
 });
 
+/// One-shot migration provider: converts a legacy single-path [RooflineMask]
+/// into a [RooflineConfiguration] with a single segment.
+///
+/// Runs silently in the background when user data loads. The condition:
+///   RooflineMask exists with custom points AND RooflineConfiguration either
+///   doesn't exist or has no segments with traced points.
+///
+/// Once a config with valid segment points exists, the check short-circuits
+/// and never re-migrates. Watch this provider from any top-level widget
+/// (e.g. the dashboard) to activate it.
+final rooflineLegacyMigrationProvider = FutureProvider<void>((ref) async {
+  // 1. Need an authenticated user.
+  final authState = ref.watch(authStateProvider);
+  final user = authState.valueOrNull;
+  if (user == null) return;
+
+  // 2. Need a legacy mask with custom points.
+  //    Watching this re-runs when the profile loads.
+  final mask = ref.watch(rooflineMaskProvider);
+  if (mask == null || !mask.hasCustomPoints || mask.points.length < 2) return;
+
+  // 3. One-time fetch of config (not reactive — avoids loop after we write).
+  final service = ref.read(rooflineConfigServiceProvider);
+  final existing = await service.getConfiguration(user.uid);
+
+  // Short-circuit: already have a config with traced segments.
+  if (existing != null &&
+      existing.segments.any((s) => s.points.length >= 2)) {
+    return;
+  }
+
+  // 4. Determine pixel count: try the live device, fall back to 100.
+  int totalPixels = 100;
+  try {
+    final deviceCount = ref.read(deviceTotalLedCountProvider).valueOrNull;
+    if (deviceCount != null && deviceCount > 0) {
+      totalPixels = deviceCount;
+    }
+  } catch (_) {
+    // Device not connected — keep default.
+  }
+
+  // 5. Migrate.
+  final photoPath = ref.read(houseImageUrlProvider);
+  final migrated = migrateFromLegacyMask(
+    maskPoints: mask.points,
+    totalPixelCount: totalPixels,
+    photoPath: photoPath,
+  );
+
+  final configToSave = migrated.copyWith(id: 'config');
+  await service.saveConfiguration(user.uid, configToSave);
+  debugPrint('Roofline migration complete: legacy mask → '
+      'single-segment config (${mask.points.length} points, $totalPixels px)');
+});
+
 /// State notifier for editing a roofline configuration.
 ///
 /// This manages the in-memory editing state before saving to Firestore.
@@ -127,6 +188,10 @@ class RooflineConfigEditorNotifier
     SegmentType type = SegmentType.run,
     List<int>? anchorPixels,
     int anchorLedCount = 2,
+    int channelIndex = 0,
+    int level = 1,
+    List<Offset> points = const [],
+    bool isConnectedToPrevious = false,
   }) {
     if (state == null) return;
 
@@ -138,9 +203,55 @@ class RooflineConfigEditorNotifier
       anchorPixels: anchorPixels ?? [],
       anchorLedCount: anchorLedCount,
       sortOrder: state!.segments.length,
+      channelIndex: channelIndex,
+      level: level,
+      points: points,
+      isConnectedToPrevious: isConnectedToPrevious,
     );
 
     state = state!.addSegment(segment);
+  }
+
+  /// Update the photo path on the configuration.
+  void setPhotoPath(String? path) {
+    if (state == null) return;
+    state = state!.copyWith(
+      photoPath: path,
+      clearPhotoPath: path == null,
+    );
+  }
+
+  /// Update the total channel count.
+  void setTotalChannelCount(int count) {
+    if (state == null) return;
+    state = state!.copyWith(totalChannelCount: count);
+  }
+
+  /// Update the spatial points for a segment (from trace tool).
+  void setSegmentPoints(String segmentId, List<Offset> points) {
+    if (state == null) return;
+    final existing = state!.segmentById(segmentId);
+    if (existing == null) return;
+    final updated = existing.copyWith(points: points);
+    state = state!.updateSegment(segmentId, updated);
+  }
+
+  /// Update the channel assignment for a segment.
+  void setSegmentChannel(String segmentId, int channelIndex) {
+    if (state == null) return;
+    final existing = state!.segmentById(segmentId);
+    if (existing == null) return;
+    final updated = existing.copyWith(channelIndex: channelIndex);
+    state = state!.updateSegment(segmentId, updated);
+  }
+
+  /// Update the story level for a segment.
+  void setSegmentLevel(String segmentId, int level) {
+    if (state == null) return;
+    final existing = state!.segmentById(segmentId);
+    if (existing == null) return;
+    final updated = existing.copyWith(level: level);
+    state = state!.updateSegment(segmentId, updated);
   }
 
   /// Update an existing segment.
@@ -150,6 +261,9 @@ class RooflineConfigEditorNotifier
     SegmentType? type,
     List<int>? anchorPixels,
     int? anchorLedCount,
+    int? channelIndex,
+    int? level,
+    List<Offset>? points,
   }) {
     if (state == null) return;
 
@@ -162,6 +276,9 @@ class RooflineConfigEditorNotifier
       type: type,
       anchorPixels: anchorPixels,
       anchorLedCount: anchorLedCount,
+      channelIndex: channelIndex,
+      level: level,
+      points: points,
     );
 
     state = state!.updateSegment(segmentId, updated);

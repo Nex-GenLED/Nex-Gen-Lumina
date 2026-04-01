@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 
@@ -23,12 +25,23 @@ class RooflineConfiguration {
   /// When this configuration was last updated
   final DateTime updatedAt;
 
+  /// Path to the user's home photo used for tracing.
+  /// May be a URL (Firebase Storage) or local asset path.
+  final String? photoPath;
+
+  /// Total number of independent WLED channels (hardware buses).
+  /// Derived from the max channelIndex across all segments + 1,
+  /// but can be overridden when the user adds channels before tracing.
+  final int totalChannelCount;
+
   const RooflineConfiguration({
     required this.id,
     required this.name,
     required this.segments,
     required this.createdAt,
     required this.updatedAt,
+    this.photoPath,
+    this.totalChannelCount = 1,
   });
 
   /// Total number of pixels across all segments
@@ -85,6 +98,92 @@ class RooflineConfiguration {
     runs.add(currentRun);
 
     return runs;
+  }
+
+  /// Returns all segments assigned to a given channel index, in segment order.
+  List<RooflineSegment> segmentsForChannel(int channelIndex) {
+    return segments.where((s) => s.channelIndex == channelIndex).toList();
+  }
+
+  /// Returns all segments on a given story level.
+  List<RooflineSegment> segmentsForStory(int storyLevel) {
+    return segments.where((s) => s.level == storyLevel).toList();
+  }
+
+  /// Effective channel count: max of the explicit field and the
+  /// highest channelIndex found in segments.
+  int get effectiveTotalChannelCount {
+    if (segments.isEmpty) return totalChannelCount;
+    final maxIndex = segments.map((s) => s.channelIndex).reduce((a, b) => a > b ? a : b);
+    return (maxIndex + 1).clamp(totalChannelCount, maxIndex + 1);
+  }
+
+  /// Returns all unique channel indices present in this configuration, sorted.
+  List<int> get allChannelIndices {
+    final indices = segments.map((s) => s.channelIndex).toSet().toList();
+    indices.sort();
+    return indices;
+  }
+
+  /// Flattened pixel coordinate list in channel order for WLED payload generation.
+  ///
+  /// Iterates channels 0, 1, 2, ... and within each channel iterates segments
+  /// in their order. For each segment, interpolates pixel positions along the
+  /// segment's polyline at even spacing.
+  /// Returns an empty list if no segments have points traced.
+  List<Offset> allPixelsInChannelOrder() {
+    final result = <Offset>[];
+    for (int ch = 0; ch < effectiveTotalChannelCount; ch++) {
+      for (final seg in segmentsForChannel(ch)) {
+        if (seg.points.length >= 2) {
+          // Interpolate pixel positions along the polyline
+          result.addAll(_interpolatePoints(seg.points, seg.pixelCount));
+        }
+      }
+    }
+    return result;
+  }
+
+  /// Interpolates [count] evenly-spaced points along a polyline defined by [points].
+  static List<Offset> _interpolatePoints(List<Offset> points, int count) {
+    if (count <= 0 || points.isEmpty) return [];
+    if (count == 1) return [points.first];
+    if (points.length == 1) return List.filled(count, points.first);
+
+    // Calculate total polyline length
+    double totalLength = 0;
+    for (int i = 1; i < points.length; i++) {
+      totalLength += (points[i] - points[i - 1]).distance;
+    }
+    if (totalLength == 0) return List.filled(count, points.first);
+
+    final result = <Offset>[];
+    final spacing = totalLength / count;
+    double accumulated = 0;
+    int segIdx = 0;
+
+    for (int i = 0; i < count; i++) {
+      final target = i * spacing;
+      while (segIdx < points.length - 1) {
+        final segStart = points[segIdx];
+        final segEnd = points[segIdx + 1];
+        final segLen = (segEnd - segStart).distance;
+        if (accumulated + segLen >= target) {
+          final t = segLen > 0 ? (target - accumulated) / segLen : 0.0;
+          result.add(Offset(
+            segStart.dx + (segEnd.dx - segStart.dx) * t,
+            segStart.dy + (segEnd.dy - segStart.dy) * t,
+          ));
+          break;
+        }
+        accumulated += segLen;
+        segIdx++;
+      }
+      if (result.length <= i) {
+        result.add(points.last);
+      }
+    }
+    return result;
   }
 
   /// Get all segments on a specific level/story.
@@ -198,6 +297,9 @@ class RooflineConfiguration {
     List<RooflineSegment>? segments,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? photoPath,
+    bool clearPhotoPath = false,
+    int? totalChannelCount,
   }) {
     return RooflineConfiguration(
       id: id ?? this.id,
@@ -205,6 +307,8 @@ class RooflineConfiguration {
       segments: segments ?? this.segments,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
+      photoPath: clearPhotoPath ? null : (photoPath ?? this.photoPath),
+      totalChannelCount: totalChannelCount ?? this.totalChannelCount,
     );
   }
 
@@ -217,6 +321,7 @@ class RooflineConfiguration {
       segments: [],
       createdAt: now,
       updatedAt: now,
+      totalChannelCount: 1,
     );
   }
 
@@ -239,6 +344,8 @@ class RooflineConfiguration {
           [],
       createdAt: (json['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (json['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      photoPath: json['photo_path'] as String?,
+      totalChannelCount: json['total_channel_count'] as int? ?? 1,
     );
   }
 
@@ -249,6 +356,8 @@ class RooflineConfiguration {
       'segments': segments.map((s) => s.toJson()).toList(),
       'created_at': Timestamp.fromDate(createdAt),
       'updated_at': Timestamp.fromDate(updatedAt),
+      if (photoPath != null) 'photo_path': photoPath,
+      'total_channel_count': totalChannelCount,
     };
   }
 
@@ -277,6 +386,44 @@ bool _segmentListEquals(List<RooflineSegment> a, List<RooflineSegment> b) {
     if (a[i] != b[i]) return false;
   }
   return true;
+}
+
+/// Migrates a legacy single-path [RooflineMask] into a [RooflineConfiguration]
+/// with a single segment.
+///
+/// Use this when a user has an existing roofline mask (drawn on their photo)
+/// but has not yet created a multi-segment configuration.
+///
+/// The legacy path becomes one [RooflineSegment] with:
+///   channelIndex: 0, storyLevel: 1, label: "Main Roofline"
+RooflineConfiguration migrateFromLegacyMask({
+  required List<Offset> maskPoints,
+  required int totalPixelCount,
+  String? photoPath,
+}) {
+  final now = DateTime.now();
+  return RooflineConfiguration(
+    id: '',
+    name: 'My Roofline',
+    segments: [
+      RooflineSegment(
+        id: 'migrated_main',
+        name: 'Main Roofline',
+        pixelCount: totalPixelCount,
+        startPixel: 0,
+        type: SegmentType.run,
+        direction: SegmentDirection.leftToRight,
+        isConnectedToPrevious: false,
+        level: 1,
+        channelIndex: 0,
+        points: maskPoints,
+      ),
+    ],
+    createdAt: now,
+    updatedAt: now,
+    photoPath: photoPath,
+    totalChannelCount: 1,
+  );
 }
 
 /// Example configuration matching the user's roofline (166 pixels, 9 segments)

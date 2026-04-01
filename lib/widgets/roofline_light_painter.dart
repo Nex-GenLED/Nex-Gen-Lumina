@@ -3,6 +3,30 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
 
+/// Lightweight data carrier for a single roofline segment's spatial path.
+///
+/// Used by [RooflineLightPainter] to render per-segment effects independently.
+class SegmentPathData {
+  /// Normalized 0-1 coordinates of this segment on the photo.
+  final List<Offset> points;
+
+  /// Which channel this segment belongs to (0-based).
+  final int channelIndex;
+
+  /// Whether this segment physically connects to the previous one.
+  final bool isConnectedToPrevious;
+
+  /// Optional per-segment color override (null = use channel color).
+  final Color? overrideColor;
+
+  const SegmentPathData({
+    required this.points,
+    required this.channelIndex,
+    this.isConnectedToPrevious = false,
+    this.overrideColor,
+  });
+}
+
 /// CustomPainter that renders LED light effects along the roofline.
 ///
 /// Supports multiple effect types:
@@ -12,6 +36,10 @@ import 'package:nexgen_command/models/roofline_mask.dart';
 /// - Rainbow: Cycling hue gradient
 /// - Twinkle: Random sparkle points
 /// - Wave: Oscillating color pattern
+///
+/// When [segmentPaths] is provided, renders each segment independently
+/// with per-channel color/effect support. Falls back to the single-path
+/// [mask] rendering when segmentPaths is null.
 class RooflineLightPainter extends CustomPainter {
   final List<Color> colors;
   final double animationPhase; // 0.0 to 1.0
@@ -49,6 +77,12 @@ class RooflineLightPainter extends CustomPainter {
   /// Whether the animation direction is reversed (WLED seg.rev).
   final bool reverse;
 
+  /// Optional multi-segment path data. When non-null and non-empty,
+  /// each segment is rendered independently along its own polyline,
+  /// with per-channel color support. Falls back to single-path [mask]
+  /// rendering when null.
+  final List<SegmentPathData>? segmentPaths;
+
   RooflineLightPainter({
     required this.colors,
     this.animationPhase = 0.0,
@@ -66,6 +100,7 @@ class RooflineLightPainter extends CustomPainter {
     this.colorGroupSize = 1,
     this.spacing = 0,
     this.reverse = false,
+    this.segmentPaths,
   });
 
   @override
@@ -75,6 +110,36 @@ class RooflineLightPainter extends CustomPainter {
     final effectiveColors = colors.isEmpty ? [Colors.white] : colors;
     final category = categorizeEffect(effectId);
     final brightnessFactor = brightness / 255.0;
+
+    // ── Multi-segment rendering ───────────────────────────────────────
+    if (segmentPaths != null && segmentPaths!.isNotEmpty) {
+      for (final seg in segmentPaths!) {
+        if (seg.points.length < 2) continue;
+
+        List<Offset> normalizedPoints = seg.points;
+
+        // Transform points if using BoxFit.cover
+        if (useBoxFitCover && targetAspectRatio != null) {
+          // Apply same cover transformation as RooflineMask.getPointsForCover
+          normalizedPoints = _transformPointsForCover(
+            normalizedPoints, targetAspectRatio!, imageAlignment);
+        }
+
+        final canvasPoints = normalizedPoints
+            .map((p) => Offset(p.dx * size.width, p.dy * size.height))
+            .toList();
+
+        // Use override color if present, otherwise use channel colors
+        final segColors = seg.overrideColor != null
+            ? [seg.overrideColor!]
+            : effectiveColors;
+
+        _paintAlongPath(canvas, size, canvasPoints, segColors, brightnessFactor, category);
+      }
+      return;
+    }
+
+    // ── Legacy single-path rendering ──────────────────────────────────
 
     // Check if we have custom roofline points
     if (mask != null && mask!.hasCustomPoints && mask!.points.length >= 2) {
@@ -310,6 +375,38 @@ class RooflineLightPainter extends CustomPainter {
       ..color = Colors.white.withValues(alpha: luminance * 0.95)
       ..style = PaintingStyle.fill;
     canvas.drawCircle(pos, dotRadius * 0.35, lensPaint);
+  }
+
+  /// Transform normalized points for BoxFit.cover display.
+  /// Mirrors the logic in RooflineMask.getPointsForCover but works without
+  /// requiring a source aspect ratio (uses the target ratio directly).
+  List<Offset> _transformPointsForCover(
+    List<Offset> points,
+    double targetAspectRatio,
+    Offset alignment,
+  ) {
+    // Without source aspect info, we can't transform — return as-is
+    if (mask?.sourceAspectRatio == null) return points;
+
+    final srcAspect = mask!.sourceAspectRatio!;
+    double scaleX = 1.0, scaleY = 1.0;
+    double offsetX = 0.0, offsetY = 0.0;
+
+    if (srcAspect > targetAspectRatio) {
+      final visibleFraction = targetAspectRatio / srcAspect;
+      scaleX = 1.0 / visibleFraction;
+      offsetX = (1.0 - visibleFraction) * (0.5 + alignment.dx * 0.5);
+    } else if (srcAspect < targetAspectRatio) {
+      final visibleFraction = srcAspect / targetAspectRatio;
+      scaleY = 1.0 / visibleFraction;
+      offsetY = (1.0 - visibleFraction) * (0.5 + alignment.dy * 0.5);
+    }
+
+    return points.map((p) {
+      final newX = (p.dx - offsetX) * scaleX;
+      final newY = (p.dy - offsetY) * scaleY;
+      return Offset(newX.clamp(0.0, 1.0), newY.clamp(0.0, 1.0));
+    }).toList();
   }
 
   /// Generate a default gentle-arc roofline path when no custom mask exists.
@@ -648,6 +745,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.backgroundColor != backgroundColor ||
         oldDelegate.colorGroupSize != colorGroupSize ||
         oldDelegate.spacing != spacing ||
-        oldDelegate.reverse != reverse;
+        oldDelegate.reverse != reverse ||
+        oldDelegate.segmentPaths != segmentPaths;
   }
 }

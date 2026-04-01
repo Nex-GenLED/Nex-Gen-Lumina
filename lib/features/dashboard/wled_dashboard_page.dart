@@ -25,6 +25,7 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
@@ -269,6 +270,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Activate one-shot legacy roofline migration (runs silently in background).
+    ref.watch(rooflineLegacyMigrationProvider);
+
     final state = ref.watch(wledStateProvider);
     ref.watch(selectedDeviceIpProvider);
     final profileAsync = ref.watch(activeUserProfileProvider);
