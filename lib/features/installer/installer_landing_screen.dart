@@ -105,7 +105,7 @@ class InstallerLandingScreen extends StatelessWidget {
                       context,
                       icon: Icons.bluetooth,
                       title: 'Controller Setup',
-                      description: 'Pair and configure WLED controllers via Bluetooth. Connect to customer Wi-Fi.',
+                      description: 'Pair and configure Lumina controllers via Bluetooth. Connect to customer Wi-Fi.',
                     ),
 
                     const SizedBox(height: 16),

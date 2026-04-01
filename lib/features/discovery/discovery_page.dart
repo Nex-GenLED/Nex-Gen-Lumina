@@ -61,7 +61,7 @@ class DiscoveryPage extends ConsumerWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  asyncDevices.isLoading ? 'Scanning local network for WLED devices…' : (selectedIp != null ? 'Connected to $selectedIp' : 'Select a device to continue'),
+                  asyncDevices.isLoading ? 'Scanning local network for Lumina controllers…' : (selectedIp != null ? 'Connected to $selectedIp' : 'Select a device to continue'),
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
@@ -133,7 +133,7 @@ class _EmptyState extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.wifi_find, size: 64, color: Theme.of(context).colorScheme.outline),
         const SizedBox(height: 16),
-        Text('No WLED devices found', style: Theme.of(context).textTheme.titleMedium),
+        Text('No controllers found', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Text('Make sure your device is powered on and connected to the same Wi-Fi network', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 16),

@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
@@ -588,17 +589,25 @@ class UserService {
 
   /// Save the bridge IP and mark the bridge as paired.
   /// Also auto-enables remote access.
-  Future<void> saveBridgeConfig(String userId, {required String bridgeIp}) async {
+  /// [bridgeEmail] is the Firebase email the bridge authenticates with —
+  /// stored so Firestore rules can grant the bridge read/write access to
+  /// the user's `commands` and `bridge_status` subcollections.
+  Future<void> saveBridgeConfig(
+    String userId, {
+    required String bridgeIp,
+    String bridgeEmail = 'bridge@lumina.local',
+  }) async {
     try {
       await _firestore.collection('users').doc(userId).update(
         sanitizeForFirestore({
           'bridge_ip': bridgeIp,
+          'bridge_email': bridgeEmail,
           'bridge_paired': true,
           'remote_access_enabled': true,
           'updated_at': FieldValue.serverTimestamp(),
         }),
       );
-      debugPrint('Bridge config saved: ip=$bridgeIp');
+      debugPrint('Bridge config saved: ip=$bridgeIp, email=$bridgeEmail');
     } catch (e) {
       debugPrint('saveBridgeConfig failed: $e');
       rethrow;
@@ -618,6 +627,7 @@ class UserService {
         'home_ssid': FieldValue.delete(),
         // Clear bridge config
         'bridge_ip': FieldValue.delete(),
+        'bridge_email': FieldValue.delete(),
         'bridge_paired': false,
         'remote_access_enabled': false,
         'updated_at': FieldValue.serverTimestamp(),
@@ -811,5 +821,58 @@ class UserService {
               .toList() ??
           [];
     });
+  }
+
+  // ==================== Calendar Entry Management ====================
+
+  /// Save calendar entries for a user.
+  /// Writes to `users/{userId}` field `calendar_entries` (map keyed by date).
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> saveCalendarEntries(
+      String userId, Map<String, CalendarEntry> entries) async {
+    final success = await _writeWithRetry(() async {
+      final map = <String, dynamic>{};
+      for (final e in entries.entries) {
+        map[e.key] = sanitizeForFirestore(e.value.toJson());
+      }
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'calendar_entries': map,
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
+    });
+
+    if (!success) {
+      debugPrint('❌ saveCalendarEntries failed after all retries');
+      return false;
+    }
+    debugPrint('✅ Calendar entries saved: ${entries.length} items');
+    return true;
+  }
+
+  /// Load calendar entries from the Firestore server (bypasses cache).
+  /// Reads from `users/{userId}` field `calendar_entries`.
+  Future<Map<String, CalendarEntry>> loadCalendarEntries(
+      String userId) async {
+    final doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .get(const GetOptions(source: Source.server));
+    if (!doc.exists) return {};
+    final data = doc.data()!;
+    final raw = data['calendar_entries'] as Map<String, dynamic>? ?? {};
+    final result = <String, CalendarEntry>{};
+    for (final entry in raw.entries) {
+      if (entry.value is Map<String, dynamic>) {
+        try {
+          result[entry.key] =
+              CalendarEntry.fromJson(entry.value as Map<String, dynamic>);
+        } catch (e) {
+          debugPrint('⚠️ Skipping corrupt calendar entry ${entry.key}: $e');
+        }
+      }
+    }
+    return result;
   }
 }

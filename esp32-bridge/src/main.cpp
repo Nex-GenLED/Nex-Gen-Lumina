@@ -1,14 +1,16 @@
 /**
- * Lumina ESP32 Bridge
+ * Lumina ESP32 Bridge v1.2
  *
  * This firmware runs on an ESP32 and acts as a bridge between
  * Firebase Firestore and WLED devices on the local network.
  *
  * How it works:
  * 1. Connects to local WiFi network
- * 2. Polls Firestore for pending commands
- * 3. Executes commands by making HTTP requests to WLED devices
- * 4. Updates command status in Firestore
+ * 2. Starts local HTTP API + mDNS so the Lumina app can discover & pair
+ * 3. Signs in to Firebase Auth to get an ID token
+ * 4. Polls Firestore for pending commands (using Bearer token auth)
+ * 5. Executes commands by making HTTP requests to WLED devices
+ * 6. Updates command status in Firestore
  */
 
 #include <Arduino.h>
@@ -17,6 +19,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiManager.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
 #include <time.h>
 
 #include "config.h"
@@ -26,14 +30,33 @@
 // ============================================================================
 
 WiFiClientSecure secureClient;
+WebServer server(80);
 bool firebaseReady = false;
 unsigned long lastPollTime = 0;
 unsigned long lastBlinkTime = 0;
+unsigned long lastHeartbeatTime = 0;
+unsigned long commandsProcessed = 0;
+unsigned long commandErrors = 0;
+unsigned long bootTime = 0;
+
+// Firebase Auth tokens
+String firebaseIdToken = "";
+String firebaseRefreshToken = "";
+unsigned long tokenExpiresAt = 0;  // millis() when token expires
+bool firebaseAuthenticated = false;
+
+// Pairing state (persisted in config, but tracked at runtime too)
+bool isPaired = false;
+String pairedUserId = FIREBASE_USER_UID;
+String pairedWledIp = "192.168.50.91";
+
+// Device identity
+String deviceName = "Lumina-";
 
 // Firestore base URL
 String firestoreBaseUrl() {
   return "https://firestore.googleapis.com/v1/projects/" + String(FIREBASE_PROJECT_ID) +
-         "/databases/(default)/documents/users/" + String(FIREBASE_USER_UID);
+         "/databases/(default)/documents/users/" + pairedUserId;
 }
 
 // ============================================================================
@@ -41,16 +64,31 @@ String firestoreBaseUrl() {
 // ============================================================================
 
 void setupWiFi();
+void setupMDNS();
+void setupWebServer();
 void setupFirebase();
+bool signInFirebase();
+bool refreshFirebaseToken();
+bool ensureValidToken();
 void pollCommands();
 void executeCommand(const String& commandId, JsonObject& fields);
 String makeWledRequest(const String& ip, const String& method,
                        const String& endpoint, const String& body);
 void updateCommandStatus(const String& commandId, const String& status,
                          const String& error = "");
+void writeHeartbeat();
 void blinkLed(int times, int delayMs);
 void statusBlink();
 String convertFirestorePayloadToJson(JsonObject& fields);
+
+// Web server handlers
+void handleApiInfo();
+void handleBridgeStatus();
+void handleBridgePair();
+void handleBridgeAuth();
+void handleReboot();
+void handleReset();
+void handleNotFound();
 
 // ============================================================================
 // Setup
@@ -62,7 +100,7 @@ void setup() {
 
   Serial.println();
   Serial.println("=========================================");
-  Serial.println("   Lumina ESP32 Bridge v1.1");
+  Serial.println("   Lumina ESP32 Bridge v1.2");
   Serial.println("=========================================");
   Serial.println();
 
@@ -71,8 +109,25 @@ void setup() {
 
   blinkLed(5, 100);
 
+  // Build device name from MAC
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char suffix[5];
+  snprintf(suffix, sizeof(suffix), "%02X%02X", mac[4], mac[5]);
+  deviceName += String(suffix);
+
+  Serial.print("Device name: ");
+  Serial.println(deviceName);
+
+  // Mark as paired if a user UID is configured
+  isPaired = (strlen(FIREBASE_USER_UID) > 0);
+
   setupWiFi();
+  setupMDNS();
+  setupWebServer();
   setupFirebase();
+
+  bootTime = millis();
 
   Serial.println();
   Serial.println("Bridge initialized and ready!");
@@ -89,15 +144,26 @@ void setup() {
 // ============================================================================
 
 void loop() {
+  server.handleClient();
   statusBlink();
 
   if (millis() - lastPollTime >= POLL_INTERVAL_MS) {
     lastPollTime = millis();
 
-    if (firebaseReady && WiFi.status() == WL_CONNECTED) {
-      pollCommands();
-    } else {
-      DEBUG_PRINTLN("Not ready, skipping poll");
+    if (firebaseReady && isPaired && WiFi.status() == WL_CONNECTED) {
+      if (ensureValidToken()) {
+        pollCommands();
+      } else {
+        DEBUG_PRINTLN("Token refresh failed, skipping poll");
+      }
+    }
+  }
+
+  // Write heartbeat every 30 seconds
+  if (millis() - lastHeartbeatTime >= 30000) {
+    lastHeartbeatTime = millis();
+    if (firebaseReady && isPaired && WiFi.status() == WL_CONNECTED && !firebaseIdToken.isEmpty()) {
+      writeHeartbeat();
     }
   }
 
@@ -143,7 +209,137 @@ void setupWiFi() {
 }
 
 // ============================================================================
-// Firebase Setup
+// mDNS Setup — advertise _lumina._tcp so the app can discover us
+// ============================================================================
+
+void setupMDNS() {
+  String hostname = deviceName;
+  hostname.toLowerCase();
+
+  if (MDNS.begin(hostname.c_str())) {
+    // Advertise _lumina._tcp for bridge discovery
+    MDNS.addService("lumina", "tcp", 80);
+    // Also advertise _http._tcp as fallback
+    MDNS.addService("http", "tcp", 80);
+    Serial.print("mDNS started: ");
+    Serial.print(hostname);
+    Serial.println(".local");
+  } else {
+    Serial.println("mDNS failed to start");
+  }
+}
+
+// ============================================================================
+// Local Web Server — API endpoints for app pairing/status
+// ============================================================================
+
+void setupWebServer() {
+  server.on("/api/info", HTTP_GET, handleApiInfo);
+  server.on("/api/bridge/status", HTTP_GET, handleBridgeStatus);
+  server.on("/api/bridge/pair", HTTP_POST, handleBridgePair);
+  server.on("/api/bridge/auth", HTTP_POST, handleBridgeAuth);
+  server.on("/api/reboot", HTTP_POST, handleReboot);
+  server.on("/api/reset", HTTP_POST, handleReset);
+  server.onNotFound(handleNotFound);
+
+  server.begin();
+  Serial.println("HTTP server started on port 80");
+}
+
+void handleApiInfo() {
+  JsonDocument doc;
+  doc["name"] = deviceName;
+  doc["version"] = "1.2";
+  doc["type"] = "bridge";
+  doc["ip"] = WiFi.localIP().toString();
+  doc["mdns"] = deviceName + ".local";
+  doc["ap"] = deviceName;
+  doc["savedSSID"] = String(WIFI_SSID);
+
+  String body;
+  serializeJson(doc, body);
+  server.send(200, "application/json", body);
+}
+
+void handleBridgeStatus() {
+  JsonDocument doc;
+  doc["paired"] = isPaired;
+  doc["authenticated"] = firebaseAuthenticated;
+  doc["wifi"] = (WiFi.status() == WL_CONNECTED);
+  doc["userId"] = pairedUserId;
+  doc["wledIp"] = pairedWledIp;
+  doc["commands"] = commandsProcessed;
+  doc["errors"] = commandErrors;
+  doc["uptime"] = (millis() - bootTime) / 1000;
+  doc["version"] = "1.2";
+
+  String body;
+  serializeJson(doc, body);
+  server.send(200, "application/json", body);
+}
+
+void handleBridgePair() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"error\":\"No body\"}");
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  String userId = doc["userId"] | "";
+  String wledIp = doc["wledIp"] | "";
+
+  if (userId.isEmpty()) {
+    server.send(400, "application/json", "{\"error\":\"userId required\"}");
+    return;
+  }
+
+  pairedUserId = userId;
+  if (!wledIp.isEmpty()) {
+    pairedWledIp = wledIp;
+  }
+  isPaired = true;
+
+  Serial.print("Paired with user: ");
+  Serial.println(pairedUserId);
+  Serial.print("WLED target: ");
+  Serial.println(pairedWledIp);
+
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleBridgeAuth() {
+  // Auth is handled internally from config.h credentials.
+  // This endpoint exists so the app's pairing flow can advance.
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleReboot() {
+  server.send(200, "application/json", "{\"ok\":true}");
+  delay(500);
+  ESP.restart();
+}
+
+void handleReset() {
+  isPaired = false;
+  pairedUserId = "";
+  pairedWledIp = "";
+  firebaseReady = false;
+  firebaseIdToken = "";
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleNotFound() {
+  server.send(404, "application/json", "{\"error\":\"Not found\"}");
+}
+
+// ============================================================================
+// Firebase Setup & Auth
 // ============================================================================
 
 void setupFirebase() {
@@ -165,25 +361,140 @@ void setupFirebase() {
   }
   Serial.println(" Done!");
 
-  // Test connection by checking the commands collection
   Serial.print("Free heap: ");
   Serial.println(ESP.getFreeHeap());
-  Serial.print("Testing Firestore connection...");
-  HTTPClient http;
-  String testUrl = firestoreBaseUrl() + "/commands?key=" + String(FIREBASE_API_KEY) + "&pageSize=1";
 
-  http.begin(secureClient, testUrl);
-  int httpCode = http.GET();
-  http.end();
-
-  if (httpCode == 200 || httpCode == 404) {
-    Serial.println(" Connected!");
+  // Sign in to Firebase Auth
+  if (signInFirebase()) {
+    Serial.println("Firebase Auth: signed in successfully");
     firebaseReady = true;
+    firebaseAuthenticated = true;
   } else {
-    Serial.print(" Failed! HTTP ");
-    Serial.println(httpCode);
-    Serial.println("Check your Firebase project ID.");
+    Serial.println("Firebase Auth: FAILED to sign in");
+    Serial.println("Bridge will retry on next poll cycle");
+    firebaseAuthenticated = false;
   }
+}
+
+/**
+ * Sign in to Firebase Auth using email/password.
+ * Returns the ID token needed for authenticated Firestore access.
+ */
+bool signInFirebase() {
+  Serial.println("Signing in to Firebase...");
+
+  HTTPClient http;
+  String url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" +
+               String(FIREBASE_API_KEY);
+
+  JsonDocument doc;
+  doc["email"] = FIREBASE_AUTH_EMAIL;
+  doc["password"] = FIREBASE_AUTH_PASSWORD;
+  doc["returnSecureToken"] = true;
+
+  String body;
+  serializeJson(doc, body);
+
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpCode = http.POST(body);
+
+  if (httpCode == 200) {
+    String response = http.getString();
+    http.end();
+
+    JsonDocument respDoc;
+    DeserializationError error = deserializeJson(respDoc, response);
+    if (error) {
+      Serial.print("Auth JSON parse error: ");
+      Serial.println(error.c_str());
+      return false;
+    }
+
+    firebaseIdToken = respDoc["idToken"].as<String>();
+    firebaseRefreshToken = respDoc["refreshToken"].as<String>();
+    int expiresIn = respDoc["expiresIn"].as<String>().toInt();
+
+    // Set expiry 5 minutes early to avoid edge cases
+    tokenExpiresAt = millis() + ((unsigned long)expiresIn - 300) * 1000UL;
+
+    firebaseAuthenticated = true;
+
+    Serial.print("  Token obtained, expires in ");
+    Serial.print(expiresIn);
+    Serial.println("s");
+    return true;
+  } else {
+    String response = http.getString();
+    http.end();
+    Serial.print("  Auth failed: HTTP ");
+    Serial.print(httpCode);
+    Serial.print(" - ");
+    Serial.println(response.substring(0, 200));
+    firebaseAuthenticated = false;
+    return false;
+  }
+}
+
+/**
+ * Refresh the Firebase ID token using the refresh token.
+ */
+bool refreshFirebaseToken() {
+  DEBUG_PRINTLN("Refreshing Firebase token...");
+
+  HTTPClient http;
+  String url = "https://securetoken.googleapis.com/v1/token?key=" +
+               String(FIREBASE_API_KEY);
+
+  String body = "grant_type=refresh_token&refresh_token=" + firebaseRefreshToken;
+
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  int httpCode = http.POST(body);
+
+  if (httpCode == 200) {
+    String response = http.getString();
+    http.end();
+
+    JsonDocument respDoc;
+    DeserializationError error = deserializeJson(respDoc, response);
+    if (error) {
+      DEBUG_PRINT("Refresh JSON parse error: ");
+      DEBUG_PRINTLN(error.c_str());
+      return false;
+    }
+
+    firebaseIdToken = respDoc["id_token"].as<String>();
+    firebaseRefreshToken = respDoc["refresh_token"].as<String>();
+    int expiresIn = respDoc["expires_in"].as<String>().toInt();
+
+    tokenExpiresAt = millis() + ((unsigned long)expiresIn - 300) * 1000UL;
+    firebaseAuthenticated = true;
+
+    DEBUG_PRINTLN("  Token refreshed");
+    return true;
+  } else {
+    http.end();
+    DEBUG_PRINT("  Token refresh failed: HTTP ");
+    DEBUG_PRINTLN(httpCode);
+    // Fall back to full re-sign-in
+    return signInFirebase();
+  }
+}
+
+/**
+ * Ensure we have a valid (non-expired) Firebase ID token.
+ */
+bool ensureValidToken() {
+  if (firebaseIdToken.isEmpty()) {
+    return signInFirebase();
+  }
+  if (millis() >= tokenExpiresAt) {
+    return refreshFirebaseToken();
+  }
+  return true;
 }
 
 // ============================================================================
@@ -194,8 +505,7 @@ void pollCommands() {
   DEBUG_PRINTLN("Polling for commands...");
 
   HTTPClient http;
-  // Use structured query to only fetch pending commands
-  String url = firestoreBaseUrl() + ":runQuery?key=" + String(FIREBASE_API_KEY);
+  String url = firestoreBaseUrl() + ":runQuery";
 
   // Build query: SELECT * FROM commands WHERE status == "pending" LIMIT 5
   JsonDocument queryDoc;
@@ -210,6 +520,7 @@ void pollCommands() {
 
   http.begin(secureClient, url);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
 
   int httpCode = http.POST(queryBody);
 
@@ -252,10 +563,17 @@ void pollCommands() {
     } else {
       DEBUG_PRINTF("Processed %d command(s)\n", pendingCount);
     }
+  } else if (httpCode == 401 || httpCode == 403) {
+    http.end();
+    Serial.print("Auth error on poll (HTTP ");
+    Serial.print(httpCode);
+    Serial.println("), refreshing token...");
+    refreshFirebaseToken();
   } else {
     DEBUG_PRINT("HTTP error: ");
     DEBUG_PRINTLN(httpCode);
     http.end();
+    commandErrors++;
   }
 }
 
@@ -268,7 +586,6 @@ void executeCommand(const String& commandId, JsonObject& fields) {
   Serial.print("Executing command: ");
   Serial.println(commandId);
 
-  // Extract command fields from Firestore format
   String commandType = "";
   String controllerIp = "";
 
@@ -285,15 +602,29 @@ void executeCommand(const String& commandId, JsonObject& fields) {
   Serial.print("  Controller IP: ");
   Serial.println(controllerIp);
 
+  // Handle ping command — no WLED request needed, just acknowledge
+  if (commandType == "ping") {
+    Serial.println("  PING — acknowledging");
+    updateCommandStatus(commandId, "completed");
+    commandsProcessed++;
+    return;
+  }
+
+  if (controllerIp.isEmpty()) {
+    controllerIp = pairedWledIp;
+    Serial.print("  Using paired WLED IP: ");
+    Serial.println(controllerIp);
+  }
+
   if (controllerIp.isEmpty()) {
     Serial.println("  ERROR: No controller IP specified");
     updateCommandStatus(commandId, "failed", "No controller IP specified");
+    commandErrors++;
     return;
   }
 
   updateCommandStatus(commandId, "executing");
 
-  // Build the WLED endpoint and method
   String endpoint;
   String method;
   String body = "";
@@ -322,9 +653,11 @@ void executeCommand(const String& commandId, JsonObject& fields) {
     Serial.print("  ERROR: ");
     Serial.println(response);
     updateCommandStatus(commandId, "failed", response);
+    commandErrors++;
   } else {
     Serial.println("  SUCCESS!");
     updateCommandStatus(commandId, "completed");
+    commandsProcessed++;
   }
 }
 
@@ -333,8 +666,6 @@ void executeCommand(const String& commandId, JsonObject& fields) {
 // ============================================================================
 
 String convertFirestorePayloadToJson(JsonObject& fields) {
-  // The Dart app stores payload as a JSON string (to avoid nested-array
-  // issues with the iOS Firestore SDK). Check for stringValue first.
   if (fields["payload"]["stringValue"]) {
     String payloadStr = fields["payload"]["stringValue"].as<String>();
     DEBUG_PRINT("  Payload (string): ");
@@ -342,7 +673,6 @@ String convertFirestorePayloadToJson(JsonObject& fields) {
     return payloadStr;
   }
 
-  // Legacy fallback: payload stored as a Firestore mapValue
   JsonObject payload = fields["payload"]["mapValue"]["fields"];
   if (payload.isNull()) {
     return "{}";
@@ -419,7 +749,7 @@ void updateCommandStatus(const String& commandId, const String& status,
                          const String& error) {
   HTTPClient http;
   String url = firestoreBaseUrl() + "/commands/" + commandId +
-               "?key=" + String(FIREBASE_API_KEY) + "&updateMask.fieldPaths=status";
+               "?updateMask.fieldPaths=status";
 
   JsonDocument doc;
   doc["fields"]["status"]["stringValue"] = status;
@@ -442,6 +772,7 @@ void updateCommandStatus(const String& commandId, const String& status,
 
   http.begin(secureClient, url);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
 
   int httpCode = http.PATCH(body);
 
@@ -449,6 +780,54 @@ void updateCommandStatus(const String& commandId, const String& status,
     DEBUG_PRINTLN("Status updated");
   } else {
     DEBUG_PRINT("Status update failed: ");
+    DEBUG_PRINTLN(httpCode);
+    commandErrors++;
+  }
+
+  http.end();
+}
+
+// ============================================================================
+// Heartbeat — writes bridge status to Firestore every 30s
+// ============================================================================
+
+void writeHeartbeat() {
+  DEBUG_PRINTLN("Writing heartbeat...");
+
+  HTTPClient http;
+  String url = firestoreBaseUrl() + "/bridge_status/current"
+               "?updateMask.fieldPaths=uptime"
+               "&updateMask.fieldPaths=ip"
+               "&updateMask.fieldPaths=commands"
+               "&updateMask.fieldPaths=errors"
+               "&updateMask.fieldPaths=version"
+               "&updateMask.fieldPaths=wifi"
+               "&updateMask.fieldPaths=heap";
+
+  unsigned long uptimeSec = (millis() - bootTime) / 1000;
+
+  JsonDocument doc;
+  doc["fields"]["uptime"]["integerValue"] = String(uptimeSec);
+  doc["fields"]["ip"]["stringValue"] = WiFi.localIP().toString();
+  doc["fields"]["commands"]["integerValue"] = String(commandsProcessed);
+  doc["fields"]["errors"]["integerValue"] = String(commandErrors);
+  doc["fields"]["version"]["stringValue"] = "1.2";
+  doc["fields"]["wifi"]["booleanValue"] = (WiFi.status() == WL_CONNECTED);
+  doc["fields"]["heap"]["integerValue"] = String(ESP.getFreeHeap());
+
+  String body;
+  serializeJson(doc, body);
+
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
+
+  int httpCode = http.PATCH(body);
+
+  if (httpCode == 200) {
+    DEBUG_PRINTLN("Heartbeat OK");
+  } else {
+    DEBUG_PRINT("Heartbeat failed: ");
     DEBUG_PRINTLN(httpCode);
   }
 

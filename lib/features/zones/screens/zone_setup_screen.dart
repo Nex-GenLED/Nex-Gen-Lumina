@@ -39,7 +39,7 @@ class ZoneSetupScreen extends ConsumerWidget {
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     Text(
-                      'Connect to a WLED controller to view and assign fixture types to segments.',
+                      'Connect to a controller to view and assign fixture types to segments.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,

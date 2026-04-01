@@ -135,7 +135,7 @@ class ScheduleSyncService {
     if (repo == null) {
       return ScheduleSyncResult(
         success: false,
-        error: 'No WLED device selected',
+        error: 'No controller selected',
       );
     }
 

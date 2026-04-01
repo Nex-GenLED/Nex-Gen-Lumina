@@ -102,6 +102,12 @@ class LuminaAI {
       '- JSON schema: {"patternName":string,"thought":string,"colors":[{"name":string,"rgb":[R,G,B,W]}],'
       '"effect":{"name":string,"id":number,"direction":string,"isStatic":boolean},'
       '"speed":number,"intensity":number,"wled":object}\n'
+      '- patternName: short 2-3 word name in the format "[Short theme] [Effect label]". '
+      'Use the team nickname or short theme name (e.g. "Royals" not "Kansas City Royals"). '
+      'Effect label must describe the actual motion: Solid, Breathe, Chase, Running, Sparkle, '
+      'Fireworks, Candle, Twinkle, Rainbow, Pulse, Fade, Theater, Fairy, Glitter, Meteor, Ripple, Flow. '
+      'Valid: "Royals Chase", "Chiefs Breathe", "Christmas Twinkle". '
+      'NEVER use generic names like "Royals Motion Design 1".\n'
       '- For saturated colors set W=0. Only use W>0 for warm/cool white.\n'
       '- "wled" must be a valid WLED /json state payload.\n'
       '- Verbal confirmation: one factual sentence describing only what is applied. '
@@ -130,6 +136,14 @@ class LuminaAI {
       '- JSON schema: {"patternName":string,"thought":string,"colors":[{"name":string,"rgb":[R,G,B,W]}],'
       '"effect":{"name":string,"id":number,"direction":string,"isStatic":boolean},'
       '"speed":number,"intensity":number,"wled":object}\n'
+      '- patternName: short 2-3 word name in the format "[Short theme] [Effect label]". '
+      'Use the team nickname or short holiday name (e.g. "Royals" not "Kansas City Royals", '
+      '"Christmas" not "Merry Christmas"). Effect label must describe the actual motion: '
+      'Solid, Breathe, Chase, Running, Sparkle, Fireworks, Candle, Twinkle, Rainbow, Pulse, '
+      'Fade, Theater, Fairy, Glitter, Meteor, Ripple, Flow. '
+      'Valid examples: "Royals Chase", "Chiefs Running", "Christmas Candle", "Cardinals Sparkle". '
+      'NEVER use generic numbered names like "Royals Motion Design 1" or "[Team] [Vibe] Design N". '
+      'Each day in a multi-day plan MUST have a different effect label so names are distinct.\n'
       '- For saturated colors set W=0. Only use W>0 for warm/cool white.\n'
       '- Do not explain the JSON. Embed it within the response text.\n\n'
       '═══ COLOR-RESPECTING EFFECTS (SAFE) ═══\n'
@@ -266,7 +280,7 @@ class LuminaAI {
       systemPrompt: systemWithContext,
       userMessage: userPrompt,
       temperature: 0.1,
-      label: '🎨 WLED JSON',
+      label: '🎨 Lighting JSON',
     );
 
     final parsed = _tryParseJsonObject(raw);

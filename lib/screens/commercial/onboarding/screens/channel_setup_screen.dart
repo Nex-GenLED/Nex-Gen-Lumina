@@ -92,7 +92,7 @@ class _ChannelSetupScreenState extends ConsumerState<ChannelSetupScreen> {
             const Icon(Icons.wifi_off, size: 48, color: NexGenPalette.textMedium),
             const SizedBox(height: 12),
             Text(
-              'No channels detected.\nConnect to a WLED controller first.',
+              'No channels detected.\nConnect to a Lumina controller first.',
               textAlign: TextAlign.center,
               style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
             ),

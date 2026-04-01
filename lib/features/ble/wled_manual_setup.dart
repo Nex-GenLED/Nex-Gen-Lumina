@@ -228,7 +228,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           const Icon(Icons.settings_remote, size: 64, color: NexGenPalette.cyan),
           const SizedBox(height: 24),
           Text(
-            'Setup WLED Controller',
+            'Setup Lumina Controller',
             style: Theme.of(context).textTheme.headlineMedium,
             textAlign: TextAlign.center,
           ),
@@ -236,14 +236,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
           _buildInstructionCard(
             '1',
-            'Connect to WLED-AP',
-            'Power on your controller and connect to the "WLED-AP" or "ESP_xxxxxx" WiFi network from your device settings.',
+            'Connect to Controller AP',
+            'Power on your controller and connect to the "Lumina-XXXX" WiFi network from your device settings.',
           ),
           const SizedBox(height: 16),
 
           _buildInstructionCard(
             '2',
-            'Open WLED Web Interface',
+            'Open Controller Web Interface',
             'Open your browser and go to:\nhttp://4.3.2.1',
           ),
           const SizedBox(height: 16),
@@ -251,14 +251,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           _buildInstructionCard(
             '3',
             'Configure WiFi',
-            'In WLED\'s web interface:\n• Tap "Config" → "WiFi Setup"\n• Enter your home WiFi credentials\n• Tap "Save & Connect"',
+            'In the controller\'s web interface:\n• Tap "Config" → "WiFi Setup"\n• Enter your home WiFi credentials\n• Tap "Save & Connect"',
           ),
           const SizedBox(height: 16),
 
           _buildInstructionCard(
             '4',
             'Reconnect to Home WiFi',
-            'After WLED reboots:\n• Disconnect from WLED-AP\n• Reconnect to your home WiFi network\n• Return to this app',
+            'After the controller reboots:\n• Disconnect from the controller AP\n• Reconnect to your home WiFi network\n• Return to this app',
           ),
 
           const SizedBox(height: 32),
@@ -372,7 +372,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Scanning your network for WLED controllers...',
+              'Scanning your network for Lumina controllers...',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70),
             ),
@@ -398,7 +398,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           const SizedBox(height: 16),
           const Text(
             'Controller not found automatically.\n\n'
-            'Check your router\'s connected devices list for your WLED controller and enter its IP address below.',
+            'Check your router\'s connected devices list for your Lumina controller and enter its IP address below.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70),
           ),

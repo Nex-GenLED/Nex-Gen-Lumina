@@ -318,7 +318,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
           _WebhookStatus.disconnected,
           errorMessage: 'Address found but the connection was refused. '
               'Check that port forwarding in your router points to your '
-              'WLED controller.',
+              'Lumina controller.',
         );
       }
       return _WebhookCheckResult(
@@ -734,7 +734,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
                       const SizedBox(height: 8),
                       Text(
                         'Enter your Dynamic DNS URL that points to your home network. '
-                        'This is how the cloud will reach your WLED controller.',
+                        'This is how the cloud will reach your Lumina controller.',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 12),
@@ -1062,7 +1062,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
               2,
               'Commands go through the cloud',
               'When you\'re away, the app writes commands to Firebase. '
-                  'The bridge picks them up and sends them to your WLED controller.',
+                  'The bridge picks them up and sends them to your Lumina controller.',
             ),
             _buildGuideStep(
               context,
@@ -1090,7 +1090,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
         icon = Icons.home;
         color = Colors.green;
         title = 'On Home Network';
-        subtitle = 'Using direct local connection to your WLED devices.';
+        subtitle = 'Using direct local connection to your Lumina controllers.';
         break;
       case ConnectivityStatus.remote:
         if (isEnabled) {
@@ -1210,7 +1210,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
               2,
               'Configure port forwarding',
               'In your router settings, forward an external port (e.g., 8080) '
-                  'to your WLED controller\'s local IP address on port 80.',
+                  'to your Lumina controller\'s local IP address on port 80.',
             ),
             _buildGuideStep(
               context,

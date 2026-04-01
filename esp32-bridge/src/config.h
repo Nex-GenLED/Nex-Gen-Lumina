@@ -24,6 +24,12 @@
 // This is the UID from Firebase Authentication for the home owner
 #define FIREBASE_USER_UID "Empwc9bfLKVBTe3VcaHIE1mZw5y1"
 
+// Firebase Auth credentials for the bridge's own Firebase account.
+// The bridge signs in with these to get an ID token for authenticated
+// Firestore access. Create this account in Firebase Console > Authentication.
+#define FIREBASE_AUTH_EMAIL    "bridge@lumina.local"
+#define FIREBASE_AUTH_PASSWORD "bridge@lumina.local"
+
 // ============================================================================
 // WiFi Configuration (optional - can use WiFiManager instead)
 // ============================================================================

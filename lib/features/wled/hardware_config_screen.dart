@@ -205,7 +205,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     if (repo == null) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No WLED device selected.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller selected.')));
       }
       return;
     }
@@ -285,7 +285,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your WLED device.'),
+        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your controller.'),
       ));
     }
   }
@@ -342,7 +342,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'The WLED device requires manual LED configuration via its web interface.',
+                'This controller requires manual LED configuration via its web interface.',
                 style: TextStyle(fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 16),

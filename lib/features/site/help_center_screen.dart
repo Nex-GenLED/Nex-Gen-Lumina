@@ -14,7 +14,7 @@ class HelpCenterScreen extends StatelessWidget {
       ),
       (
         'How to reset Wi-Fi?',
-        "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to 'WLED-AP' first."
+        "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to the controller's AP (Lumina-XXXX) first."
       ),
       (
         'Can I cut the strips?',

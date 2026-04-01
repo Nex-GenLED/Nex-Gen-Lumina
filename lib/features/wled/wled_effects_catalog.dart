@@ -174,7 +174,7 @@ extension ColorBehaviorDisplay on ColorBehavior {
       case ColorBehavior.generatesOwnColors:
         return 'This effect generates its own colors (your selection is ignored)';
       case ColorBehavior.usesPalette:
-        return 'This effect uses a WLED color palette';
+        return 'This effect uses a built-in color palette';
     }
   }
 }

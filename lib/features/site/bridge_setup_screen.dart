@@ -175,21 +175,46 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
 
   // ── Step 3: Verify ────────────────────────────────────────────────────────
 
+  BridgeStatus? _lastStatus;
+
   Future<void> _doVerify() async {
     setState(() {
       _verifying = true;
       _verifyError = null;
       _verified = false;
+      _lastStatus = null;
     });
 
     // Check bridge status endpoint first
     final status = await _client!.getStatus();
     if (!mounted) return;
 
-    if (status == null || !status.paired) {
+    _lastStatus = status;
+
+    if (status == null) {
       setState(() {
         _verifying = false;
-        _verifyError = 'Bridge reports it is not paired. Try again.';
+        _verifyError = 'Could not reach bridge at $_bridgeIp. Is it powered on?';
+      });
+      return;
+    }
+
+    if (!status.paired) {
+      setState(() {
+        _verifying = false;
+        _verifyError = 'Bridge reports it is not paired. Try going back and re-pairing.';
+      });
+      return;
+    }
+
+    if (!status.authenticated) {
+      setState(() {
+        _verifying = false;
+        _verifyError =
+            'Bridge is paired but NOT authenticated with Firebase.\n\n'
+            'The bridge@lumina.local account may not exist in Firebase Auth. '
+            'Create it in the Firebase Console → Authentication → Add User, '
+            'then re-run the pairing step.';
       });
       return;
     }
@@ -245,11 +270,31 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         }
       }
 
+      // Timed out — re-fetch bridge status for diagnostics
+      final refreshed = await _client!.getStatus();
+      _lastStatus = refreshed;
       await docRef.update({'status': 'timeout'});
+
+      final diag = StringBuffer(
+        'Bridge did not respond within 15 seconds.\n\n',
+      );
+      if (refreshed != null) {
+        diag.writeln('Bridge diagnostics:');
+        diag.writeln('  WiFi: ${refreshed.wifi ? "connected" : "DISCONNECTED"}');
+        diag.writeln('  Firebase Auth: ${refreshed.authenticated ? "OK" : "FAILED"}');
+        diag.writeln('  Paired: ${refreshed.paired}');
+        diag.writeln('  User ID: ${refreshed.userId.isNotEmpty ? refreshed.userId.substring(0, 8) + "..." : "(empty)"}');
+        diag.writeln('  Controller IP: ${refreshed.wledIp}');
+        diag.writeln('  Commands processed: ${refreshed.commands}');
+        diag.writeln('  Errors: ${refreshed.errors}');
+        diag.writeln('  Uptime: ${refreshed.uptime}s');
+      } else {
+        diag.writeln('Could not reach bridge for diagnostics.');
+      }
+
       setState(() {
         _verifying = false;
-        _verifyError =
-            'Bridge did not respond within 15 seconds. It may still be connecting to WiFi.';
+        _verifyError = diag.toString();
       });
     } catch (e) {
       setState(() {
@@ -482,12 +527,12 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'This will register the bridge with your account and point it '
-                  'at your WLED controller.',
+                  'at your Lumina controller.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 _InfoRow(
-                  label: 'WLED Target',
+                  label: 'Controller Target',
                   value: controllerIp,
                 ),
                 const SizedBox(height: 16),

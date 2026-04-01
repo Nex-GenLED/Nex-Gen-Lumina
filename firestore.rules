@@ -20,6 +20,16 @@ service cloud.firestore {
       return isOwner(userId) || hasMediaAccess();
     }
 
+    // Helper function to check if the requester is the paired Lumina Bridge
+    // for a given user. The bridge authenticates with its own Firebase account
+    // (e.g. bridge@lumina.local) whose email is stored in the user doc during
+    // pairing. This grants the bridge read/write on commands and bridge_status.
+    function isBridgeForUser(userId) {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.bridge_email == request.auth.token.email;
+    }
+
     // SECURITY: Prevent tampering with critical fields
     function cannotModifyCriticalFields() {
       return request.resource.data.owner_id == resource.data.owner_id &&
@@ -123,14 +133,14 @@ service cloud.firestore {
 
       // Commands subcollection - Cloud Relay commands for remote WLED control
       match /commands/{commandId} {
-        // Users can read their own commands, media users can view system state
-        allow read: if canReadUserData(userId);
+        // Users can read their own commands; bridge reads to pick up pending commands
+        allow read: if canReadUserData(userId) || isBridgeForUser(userId);
 
         // Users can create commands (sent from app when remote)
         allow create: if isOwner(userId);
 
-        // Users can update commands (status updates from relay/bridge)
-        allow update: if isOwner(userId);
+        // Users or bridge can update commands (bridge sets status to completed/failed)
+        allow update: if isOwner(userId) || isBridgeForUser(userId);
 
         // Users can delete commands (cleanup)
         allow delete: if isOwner(userId);
@@ -138,11 +148,11 @@ service cloud.firestore {
 
       // Bridge status subcollection - heartbeat and status from ESP32 bridge
       match /bridge_status/{docId} {
-        // Users can read their own bridge status, media users can view
-        allow read: if canReadUserData(userId);
+        // Users can read their own bridge status; bridge reads for self-check
+        allow read: if canReadUserData(userId) || isBridgeForUser(userId);
 
-        // Bridge writes heartbeat (authenticated as the owner)
-        allow create, update: if isOwner(userId);
+        // Bridge writes heartbeat (authenticated with its own Firebase account)
+        allow create, update: if isOwner(userId) || isBridgeForUser(userId);
 
         // Allow cleanup
         allow delete: if isOwner(userId);
