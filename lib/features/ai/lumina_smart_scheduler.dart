@@ -360,6 +360,7 @@ class LuminaSmartScheduler {
     for (int i = 0; i < dayCount; i++) {
       final date = today.add(Duration(days: i));
       final dayOfWeek = date.weekday;
+      final dayLabel = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dayOfWeek - 1];
       final energyMultiplier = _dayEnergyMultiplier[dayOfWeek] ?? 0.85;
 
       final effectId = effectRotation[i];
