@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
+import 'package:nexgen_command/features/game_day/live_scoring_prompt.dart';
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
@@ -1385,6 +1386,14 @@ class PatternCard extends ConsumerWidget {
       if (context.mounted) {
         // Show pattern adjustment panel in a bottom sheet
         _showAdjustmentPanel(context, ref);
+
+        // If this is a team-associated pattern, check for a live/upcoming
+        // game and offer to enable live scoring celebrations.
+        maybePromptLiveScoring(
+          context: context,
+          ref: ref,
+          patternId: pattern.id,
+        );
       }
     } catch (e) {
       if (context.mounted) {

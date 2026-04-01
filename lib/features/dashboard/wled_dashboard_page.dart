@@ -317,11 +317,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
+            // Design Studio — full width on its own row
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _FeatureButtonFull(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+            ),
+            const SizedBox(height: 10),
+            // Game Day + Neighborhood Sync — side by side
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+                  _FeatureButton(icon: Icons.stadium_rounded, label: 'Game Day', onTap: () => context.push(AppRoutes.gameDay)),
                   const SizedBox(width: 12),
                   _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
                 ],
@@ -1870,6 +1877,52 @@ class _SkySlot {
   final String label;
 
   const _SkySlot(this.startHour, this.colors, this.opacity, this.label);
+}
+
+/// Full-width feature button (no Expanded wrapper — fills parent).
+class _FeatureButtonFull extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _FeatureButtonFull({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          decoration: BoxDecoration(
+            color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20, color: NexGenPalette.cyan),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: NexGenPalette.textPrimary,
+                  letterSpacing: 0.3,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _FeatureButton extends StatelessWidget {

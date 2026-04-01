@@ -50,6 +50,7 @@ import 'package:nexgen_command/features/installer/media_access_code_screen.dart'
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
@@ -281,6 +282,12 @@ class AppRouter {
         name: 'design-studio',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.gameDay,
+        name: 'game-day',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const NoTransitionPage(child: GameDayScreen()),
       ),
       GoRoute(
         path: AppRoutes.audioReactive,
@@ -689,6 +696,8 @@ class AppRoutes {
   static const String adminDashboard = '/admin/dashboard';
   // Neighborhood sync
   static const String neighborhoodSync = '/settings/neighborhood-sync';
+  // Game Day hub
+  static const String gameDay = '/game-day';
   // Library hierarchy routes (nested under /explore for persistent nav bar)
   static const String libraryNode = '/explore/library/:nodeId';
   // Installation access control routes
