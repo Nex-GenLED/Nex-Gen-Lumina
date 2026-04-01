@@ -626,9 +626,9 @@ class AutopilotScheduler {
       final startTriggerName = entry['startTrigger'] as String? ?? 'sunset';
       final scheduledTime = _resolveScheduledTime(baseDate, startTriggerName);
 
-      final patternName = entry['patternName'] as String? ?? 'Lumina Schedule';
       final wled = entry['wled'] as Map<String, dynamic>? ?? {};
       final effectName = entry['effectName'] as String? ?? 'Effect';
+      final patternName = entry['patternName'] as String? ?? 'Lumina $effectName';
       final dayName = entry['dayName'] as String? ?? 'Night ${i + 1}';
       final endTriggerName = entry['endTrigger'] as String? ?? 'sunrise';
 

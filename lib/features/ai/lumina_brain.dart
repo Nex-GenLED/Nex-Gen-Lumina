@@ -521,30 +521,30 @@ class LuminaBrain {
     }
 
     final ledRgb = team.ledOptimizedRgb;
-    final shortName = team.officialName.split(' ').last;
+    final shortName = _teamShortName(team.officialName);
     String patternName;
     String subtitle;
 
     switch (context) {
       case EventContext.party:
-        patternName = '${team.officialName} Party';
+        patternName = '$shortName $effectName';
         subtitle = 'High-energy $shortName colors chase';
         break;
       case EventContext.celebration:
-        patternName = '${team.officialName} Celebration';
+        patternName = '$shortName $effectName';
         subtitle = 'Festive $shortName sparkle';
         break;
       case EventContext.elegant:
-        patternName = '${team.officialName} Elegance';
+        patternName = '$shortName $effectName';
         subtitle = 'Sophisticated $shortName glow';
         break;
       case EventContext.staticSimple:
-        patternName = '${team.officialName} Colors';
+        patternName = '$shortName $effectName';
         subtitle = 'Pure $shortName team colors';
         break;
       case EventContext.romantic:
       case EventContext.neutral:
-        patternName = '${team.officialName} Spirit';
+        patternName = '$shortName $effectName';
         subtitle = '$shortName team pride';
         break;
     }
@@ -640,7 +640,7 @@ class LuminaBrain {
     };
 
     final jsonObject = {
-      'patternName': '${holiday.name} Theme',
+      'patternName': '${holiday.name} $effectName',
       'thought': 'Beautiful ${holiday.name} colors for your roofline!',
       'colors': colorsArray,
       'effect': {
@@ -657,6 +657,73 @@ class LuminaBrain {
     final verbal =
         'Here are your ${holiday.name} colors! ${jsonObject['thought']}';
     return '$verbal ${jsonEncode(jsonObject)}';
+  }
+
+  /// Returns a short, recognizable team name for pattern naming.
+  /// Handles multi-word nicknames, league suffixes, and ambiguous last-words
+  /// that .split(' ').last would mangle.
+  static String _teamShortName(String officialName) {
+    // Override map for team names where .split(' ').last produces ambiguous,
+    // meaningless, or duplicate results. Update when teams rebrand or new
+    // franchises are added. ~354 standard "City Mascot" names fall through
+    // to the .split().last default and do not need entries here.
+    const overrides = <String, String>{
+      // League suffixes — .last returns meaningless "FC"/"SC"/"CF"/"CP"
+      'Atlanta United FC': 'Atlanta Utd',
+      'Austin FC': 'Austin',
+      'Bay FC': 'Bay',
+      'Charlotte FC': 'Charlotte',
+      'Chicago Fire FC': 'Fire',
+      'Houston Dynamo FC': 'Dynamo',
+      'Inter Miami CF': 'Inter Miami',
+      'Los Angeles FC': 'LAFC',
+      'Nashville SC': 'Nashville',
+      'New York City FC': 'NYCFC',
+      'NJ/NY Gotham FC': 'Gotham',
+      'Orlando City SC': 'Orlando City',
+      'Portland Thorns FC': 'Thorns',
+      'Racing Louisville FC': 'Louisville',
+      'San Diego Wave FC': 'Wave',
+      'Seattle Reign FC': 'Reign',
+      'St. Louis CITY SC': 'St. Louis City',
+      'Angel City FC': 'Angel City',
+      'Utah Royals FC': 'Utah Royals',
+      'Celtic FC': 'Celtic',
+      'Sporting CP': 'Sporting',
+      // .last = "City"/"United"/"Lake"/"Club" — generic or ambiguous
+      'Sporting Kansas City': 'Sporting KC',
+      'Manchester City': 'Man City',
+      'Manchester United': 'Man United',
+      'Newcastle United': 'Newcastle',
+      'Sheffield United': 'Sheffield Utd',
+      'West Ham United': 'West Ham',
+      'D.C. United': 'DC United',
+      'Real Salt Lake': 'RSL',
+      'Utah Hockey Club': 'Utah HC',
+      // .last = "Milan"/"Madrid" — city shared by rival clubs
+      'AC Milan': 'AC Milan',
+      'Inter Milan': 'Inter',
+      'Real Madrid': 'Real Madrid',
+      'Atletico Madrid': 'Atletico',
+      // Multi-word nicknames — .last drops a critical word
+      'Boston Red Sox': 'Red Sox',
+      'Chicago White Sox': 'White Sox',
+      'Toronto Blue Jays': 'Blue Jays',
+      'New York Red Bulls': 'Red Bulls',
+      'Texas Tech Red Raiders': 'Red Raiders',
+      'North Carolina Tar Heels': 'Tar Heels',
+      'TCU Horned Frogs': 'Horned Frogs',
+      'Vegas Golden Knights': 'Golden Knights',
+      'Rutgers Scarlet Knights': 'Scarlet Knights',
+      'Penn State Nittany Lions': 'Nittany Lions',
+      'Arizona State Sun Devils': 'Sun Devils',
+      'Paris Saint-Germain': 'PSG',
+    };
+
+    final override = overrides[officialName];
+    if (override != null) return override;
+
+    return officialName.split(' ').last;
   }
 
   static String _effectIdToName(int id) {

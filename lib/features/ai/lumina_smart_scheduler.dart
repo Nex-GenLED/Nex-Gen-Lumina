@@ -386,8 +386,7 @@ class LuminaSmartScheduler {
         ],
       };
 
-      final dayLabel = _dayName(date);
-      final patternName = '${theme.name} — $dayLabel (${_moodLabel(effectId)})';
+      final patternName = '${_shortThemeName(theme.name)} ${_moodLabel(effectId)}';
 
       occurrences.add(ScheduledOccurrence(
         dayIndex: i,
@@ -545,15 +544,66 @@ class LuminaSmartScheduler {
 
   static String _moodLabel(int effectId) {
     const labels = {
-      0: 'Bold & Solid',
+      0: 'Solid',
       2: 'Breathe',
       12: 'Chase',
       41: 'Running',
       43: 'Sparkle',
       52: 'Fireworks',
-      63: 'Candle Glow',
+      63: 'Candle',
+      65: 'Fire',
     };
     return labels[effectId] ?? 'Dynamic';
+  }
+
+  /// Strips city/state prefixes from full team names for short branded display.
+  /// "Kansas City Royals" → "Royals", "Christmas" → "Christmas"
+  static String _shortThemeName(String fullName) {
+    final trimmed = fullName.trim();
+    if (!trimmed.contains(' ')) return trimmed;
+
+    const cityPrefixes = [
+      'Kansas City',
+      'Los Angeles',
+      'New York',
+      'New Orleans',
+      'New England',
+      'San Francisco',
+      'San Diego',
+      'San Antonio',
+      'San Jose',
+      'St. Louis',
+      'St Louis',
+      'Tampa Bay',
+      'Green Bay',
+      'Oklahoma City',
+      'Salt Lake City',
+      'Las Vegas',
+      'Golden State',
+      'Texas',
+      'Minnesota',
+      'Indiana',
+      'Arizona',
+      'Carolina',
+      'Colorado',
+      'Tennessee',
+      'Kentucky',
+      'Oregon',
+      'Utah',
+      'Florida',
+      'Georgia',
+    ];
+
+    final lower = trimmed.toLowerCase();
+    for (final prefix in cityPrefixes) {
+      if (lower.startsWith(prefix.toLowerCase()) &&
+          trimmed.length > prefix.length + 1) {
+        return trimmed.substring(prefix.length).trim();
+      }
+    }
+
+    // Fallback: return the last word (e.g. "Detroit Lions" → "Lions")
+    return trimmed.split(' ').last;
   }
 
   /// Public color name helper — called externally by [LuminaBrain]
