@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
+import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
@@ -582,6 +583,9 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                 // Hidden Installer Mode entry - revealed by rapid taps
                 const _InstallerModeEntry(),
                 const Divider(height: 1),
+                // Hidden Sales Mode entry - revealed by rapid taps
+                const _SalesModeEntry(),
+                const Divider(height: 1),
                 // Hidden Admin Mode entry - revealed by rapid taps on copyright
                 const _AdminModeEntry(),
               ]),
@@ -689,6 +693,106 @@ class _InstallerModeEntryState extends ConsumerState<_InstallerModeEntry> {
       subtitle: const Text('Access professional setup tools'),
       trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
       onTap: () => context.push('/installer/pin'),
+    );
+  }
+}
+
+/// Hidden sales mode entry - revealed by 6 rapid taps on "Powered by Nex-Gen" text
+class _SalesModeEntry extends ConsumerStatefulWidget {
+  const _SalesModeEntry();
+
+  @override
+  ConsumerState<_SalesModeEntry> createState() => _SalesModeEntryState();
+}
+
+class _SalesModeEntryState extends ConsumerState<_SalesModeEntry> {
+  bool _revealed = false;
+  int _tapCount = 0;
+  DateTime? _lastTap;
+
+  void _onTap() {
+    final now = DateTime.now();
+    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
+      _tapCount = 0;
+    }
+    _lastTap = now;
+    _tapCount++;
+
+    // Reveal after 6 rapid taps (different from installer's 5 and admin's 7)
+    if (_tapCount >= 6) {
+      setState(() => _revealed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSalesMode = ref.watch(salesModeActiveProvider);
+
+    if (isSalesMode) {
+      return ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Icon(Icons.storefront, color: NexGenPalette.cyan, size: 18),
+        ),
+        title: const Text('Sales Mode Active'),
+        subtitle: const Text('Tap to exit sales mode'),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
+          ),
+          child: Text(
+            'Active',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan),
+          ),
+        ),
+        onTap: () {
+          ref.read(salesModeProvider.notifier).exitSalesMode();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sales mode deactivated')),
+          );
+        },
+      );
+    }
+
+    if (!_revealed) {
+      return GestureDetector(
+        onTap: _onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          child: Text(
+            'Powered by Nex-Gen',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+              fontSize: 11,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [NexGenPalette.cyan, NexGenPalette.violet],
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(Icons.storefront, color: Colors.white, size: 18),
+      ),
+      title: const Text('Sales Mode'),
+      subtitle: const Text('Field sales and estimate tools'),
+      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      onTap: () => context.push(AppRoutes.salesPin),
     );
   }
 }

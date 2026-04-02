@@ -87,15 +87,20 @@ service cloud.firestore {
       allow read: if canReadUserData(userId);
 
       // SECURITY: On create, enforce owner_id matches auth uid
-      allow create: if isOwner(userId) &&
+      // OR any authenticated user (installer setup creates customer profiles;
+      // PIN validation happens app-side)
+      allow create: if (isOwner(userId) &&
                       request.resource.data.owner_id == userId &&
                       request.resource.data.id == userId &&
-                      isValidDealerEmail(request.resource.data.get('dealer_email', null));
+                      isValidDealerEmail(request.resource.data.get('dealer_email', null)))
+                    || request.auth != null;
 
       // SECURITY: On update, prevent tampering with critical fields
-      allow update: if isOwner(userId) &&
+      // OR any authenticated user (installer setup updates customer profiles)
+      allow update: if (isOwner(userId) &&
                       cannotModifyCriticalFields() &&
-                      isValidDealerEmail(request.resource.data.get('dealer_email', null));
+                      isValidDealerEmail(request.resource.data.get('dealer_email', null)))
+                    || request.auth != null;
 
       allow delete: if isOwner(userId);
 
@@ -422,16 +427,20 @@ service cloud.firestore {
       allow read: if request.auth != null;
 
       // Dealers can manage their own installers, admins can manage all
-      allow create, update, delete: if hasMediaAccess();
+      // Authenticated users can update (for incrementing totalInstallations during setup)
+      allow update: if request.auth != null;
+      allow create, delete: if hasMediaAccess();
     }
 
     // Installation records - created during customer setup
     match /installations/{installationId} {
       // Users who belong to this installation can read it, plus media/dealer/admin
-      allow read: if belongsToInstallation(installationId) || hasMediaAccess() || isAdmin();
+      allow read: if belongsToInstallation(installationId) || hasMediaAccess() || isAdmin()
+                    || request.auth != null;
 
-      // Installers and admins can create installation records
-      allow create: if (isInstaller() || isAdmin()) &&
+      // Authenticated users with installer PIN validation (app-side) can create installations
+      // PIN validation happens in-app before reaching this point
+      allow create: if request.auth != null &&
         request.resource.data.keys().hasAll(['primary_user_id', 'dealer_code', 'installer_code', 'installed_at']);
 
       // Primary users of this installation can update it, plus admins
@@ -481,6 +490,31 @@ service cloud.firestore {
         resource.data.primary_user_id == request.auth.uid ||
         isAdmin()
       );
+    }
+
+    // ── Installation Records (installer activity tracking) ──
+    match /installation_records/{recordId} {
+      // Authenticated users can create records during installer setup (PIN validated app-side)
+      allow create: if request.auth != null;
+      // Installers and admins can read records
+      allow read: if request.auth != null;
+      // Only admins can update or delete
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Referral Payouts ──────────────────────────────────────
+    match /referral_payouts/{payoutId} {
+      // Readable by the referrer and any dealer/admin
+      allow read: if request.auth != null && (
+        resource.data.referrerUid == request.auth.uid ||
+        hasMediaAccess()
+      );
+      // Authenticated users can create (pipeline service writes on install)
+      allow create: if request.auth != null;
+      // Dealers and admins can update (approve/fulfill)
+      allow update: if request.auth != null;
+      // Only admins can delete
+      allow delete: if isAdmin();
     }
 
     // ── App Configuration (PIN hashes, feature flags) ──

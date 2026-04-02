@@ -56,6 +56,8 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   final isInstallerRoute = state.matchedLocation.startsWith('/installer') ||
       state.matchedLocation.startsWith('/admin');
 
+  final isSalesRoute = state.matchedLocation.startsWith('/sales');
+
   // Check if this is a demo route (allowed without auth)
   final isDemoRoute = state.matchedLocation.startsWith('/demo');
 
@@ -69,6 +71,15 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   }
 
   // User is logged in
+
+  // Anonymous users are only allowed on installer routes.
+  // The installer flow uses anonymous auth to avoid session conflicts
+  // when creating customer accounts during the setup wizard.
+  if (user.isAnonymous) {
+    if (isInstallerRoute || isSalesRoute) return null; // Allow installer & sales routes
+    return AppRoutes.login; // Block everything else for anonymous users
+  }
+
   // If trying to access auth routes, redirect to dashboard (or link-account if unlinked)
   if (isAuthRoute) {
     // Check if user has installation access
@@ -97,9 +108,9 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.dashboard;
   }
 
-  // Allow link routes, installer routes, and first-run without further checks
+  // Allow link routes, installer/sales routes, and first-run without further checks
   final isFirstRunRoute = state.matchedLocation == AppRoutes.firstRun;
-  if (isLinkRoute || isInstallerRoute || isFirstRunRoute ||
+  if (isLinkRoute || isInstallerRoute || isSalesRoute || isFirstRunRoute ||
       state.matchedLocation == AppRoutes.welcome) {
     return null;
   }

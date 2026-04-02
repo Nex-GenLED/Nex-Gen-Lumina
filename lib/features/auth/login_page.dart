@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -391,6 +392,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                             label: Text(
                               'Experience Nex-Gen Demo',
+                              style: GoogleFonts.montserrat(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontWeight: FontWeight.w500,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Installer / Dealer Access (uses anonymous auth to avoid session conflicts)
+                        const SizedBox(height: 16),
+                        Center(
+                          child: TextButton.icon(
+                            onPressed: _loading ? null : () async {
+                              setState(() => _loading = true);
+                              try {
+                                // Anonymous auth gives a valid Firebase token without
+                                // requiring installer personal credentials. This avoids
+                                // the Auth conflict when the wizard creates a customer account.
+                                // NOTE: Anonymous Auth must be enabled in Firebase Console.
+                                await FirebaseAuth.instance.signInAnonymously();
+                                if (context.mounted) context.go('/installer/pin');
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to start installer mode: $e')),
+                                  );
+                                }
+                              } finally {
+                                if (mounted) setState(() => _loading = false);
+                              }
+                            },
+                            icon: Icon(Icons.build_outlined, size: 18, color: Colors.white.withValues(alpha: 0.6)),
+                            label: Text(
+                              'Installer / Dealer Access',
                               style: GoogleFonts.montserrat(
                                 color: Colors.white.withValues(alpha: 0.6),
                                 fontWeight: FontWeight.w500,

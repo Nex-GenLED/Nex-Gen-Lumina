@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -88,58 +87,15 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
       _emailIsUnique = false;
     });
 
-    try {
-      // Try to sign in with the email and a dummy password
-      // If the email exists, we'll get a specific error code
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email.trim().toLowerCase(),
-        password: '_check_email_exists_dummy_password_12345',
-      );
-
-      // If we somehow succeed (shouldn't happen), sign out
-      await FirebaseAuth.instance.signOut();
-
-      // Email exists (though this branch is unlikely)
-      if (mounted) {
-        setState(() {
-          _isCheckingEmail = false;
-          _emailUniquenessError = 'An account with this email already exists';
-          _emailIsUnique = false;
-        });
-      }
-    } on FirebaseAuthException catch (e) {
-      if (mounted) {
-        setState(() {
-          _isCheckingEmail = false;
-
-          if (e.code == 'user-not-found') {
-            // Email doesn't exist - this is what we want
-            _emailUniquenessError = null;
-            _emailIsUnique = true;
-          } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-            // Email exists but password is wrong
-            _emailUniquenessError = 'An account with this email already exists';
-            _emailIsUnique = false;
-          } else if (e.code == 'too-many-requests') {
-            // Too many attempts - can't verify, allow to proceed
-            _emailUniquenessError = null;
-            _emailIsUnique = true;
-          } else {
-            // Other errors - allow to proceed (will catch at account creation)
-            _emailUniquenessError = null;
-            _emailIsUnique = true;
-          }
-        });
-      }
-    } catch (e) {
-      // General error - allow to proceed
-      if (mounted) {
-        setState(() {
-          _isCheckingEmail = false;
-          _emailUniquenessError = null;
-          _emailIsUnique = true;
-        });
-      }
+    // Skip pre-check — the setup wizard handles existing accounts by linking
+    // them to the installation instead of blocking. Any real issues will be
+    // caught at account creation time.
+    if (mounted) {
+      setState(() {
+        _isCheckingEmail = false;
+        _emailUniquenessError = null;
+        _emailIsUnique = true;
+      });
     }
   }
 

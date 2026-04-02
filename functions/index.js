@@ -29,6 +29,26 @@ exports.endSyncSession = endSyncSession;
 const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
 exports.triggerSyncFailover = triggerSyncFailover;
 
+// Import TypeScript-compiled referral code assignment (onCreate /users/{uid})
+const { assignReferralCode } = require("./lib/assignReferralCode");
+exports.assignReferralCode = assignReferralCode;
+
+// Import TypeScript-compiled referral code redemption (callable)
+const { redeemReferralCode } = require("./lib/redeemReferralCode");
+exports.redeemReferralCode = redeemReferralCode;
+
+// Import TypeScript-compiled referral status change notification (onUpdate trigger)
+const { onReferralStatusChanged } = require("./lib/onReferralStatusChanged");
+exports.onReferralStatusChanged = onReferralStatusChanged;
+
+// Import TypeScript-compiled Day 2 install team notification
+const { notifyDay2Team } = require("./lib/notifyDay2Team");
+exports.notifyDay2Team = notifyDay2Team;
+
+// Import TypeScript-compiled referrer reward approval notification
+const { notifyReferrerOfApproval } = require("./lib/notifyReferrerOfApproval");
+exports.notifyReferrerOfApproval = notifyReferrerOfApproval;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

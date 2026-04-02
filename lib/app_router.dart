@@ -48,7 +48,18 @@ import 'package:nexgen_command/features/installer/installer_landing_screen.dart'
 import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
+import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_pin_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_landing_screen.dart';
+import 'package:nexgen_command/features/sales/screens/prospect_info_screen.dart';
+import 'package:nexgen_command/features/sales/screens/zone_builder_screen.dart';
+import 'package:nexgen_command/features/sales/screens/visit_review_screen.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_preview_screen.dart';
+import 'package:nexgen_command/features/sales/screens/customer_signature_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_jobs_screen.dart';
+import 'package:nexgen_command/features/sales/screens/job_detail_screen.dart';
+import 'package:nexgen_command/features/referrals/screens/payout_approval_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
@@ -338,6 +349,67 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
       ),
+
+      // ── Sales Mode ────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.salesPin,
+        name: 'sales-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesPinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesLanding,
+        name: 'sales-landing',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesLandingScreen()),
+      ),
+      // Sales wizard screens
+      GoRoute(
+        path: AppRoutes.salesProspect,
+        name: 'sales-prospect',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: ProspectInfoScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesZones,
+        name: 'sales-zones',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: ZoneBuilderScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesReview,
+        name: 'sales-review',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: VisitReviewScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesEstimate,
+        name: 'sales-estimate',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: EstimatePreviewScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesEstimateSign,
+        name: 'sales-estimate-sign',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: CustomerSignatureScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesJobs,
+        name: 'sales-jobs',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesJobsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesJobDetail,
+        name: 'sales-job-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: JobDetailScreen(jobId: state.pathParameters['jobId'] ?? ''),
+        ),
+      ),
+
       GoRoute(
         path: AppRoutes.mediaLanding,
         name: 'media-landing',
@@ -367,6 +439,24 @@ class AppRouter {
         name: 'admin-dashboard',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.dealerDashboard,
+        name: 'dealer-dashboard',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final dealerCode = state.uri.queryParameters['dealerCode'];
+          return MaterialPage(
+            fullscreenDialog: true,
+            child: DealerDashboardScreen(dealerCodeOverride: dealerCode),
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.dealerPayouts,
+        name: 'dealer-payouts',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: PayoutApprovalScreen()),
       ),
 
       // ===== COMMERCIAL MODE ROUTES (root navigator) =====
@@ -687,6 +777,16 @@ class AppRoutes {
   static const String installerLanding = '/installer';
   static const String installerPin = '/installer/pin';
   static const String installerWizard = '/installer/wizard';
+  // Sales mode routes
+  static const String salesPin = '/sales/pin';
+  static const String salesLanding = '/sales';
+  static const String salesProspect = '/sales/visit/prospect';
+  static const String salesZones = '/sales/visit/zones';
+  static const String salesReview = '/sales/visit/review';
+  static const String salesEstimate = '/sales/estimate';
+  static const String salesEstimateSign = '/sales/estimate/sign';
+  static const String salesJobs = '/sales/jobs';
+  static const String salesJobDetail = '/sales/jobs/:jobId';
   // Media mode routes
   static const String mediaLanding = '/media';
   static const String mediaAccessCode = '/media/code';
@@ -694,6 +794,10 @@ class AppRoutes {
   // Admin management routes
   static const String adminPin = '/admin/pin';
   static const String adminDashboard = '/admin/dashboard';
+  // Dealer dashboard
+  static const String dealerDashboard = '/dealer/dashboard';
+  // Dealer payout approval
+  static const String dealerPayouts = '/dealer/payouts';
   // Neighborhood sync
   static const String neighborhoodSync = '/settings/neighborhood-sync';
   // Game Day hub

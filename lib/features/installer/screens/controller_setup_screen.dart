@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -197,14 +198,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         return;
       }
 
-      // Use a temporary ID for installer uploads
-      final tempId = 'installer_${DateTime.now().millisecondsSinceEpoch}';
+      // Use the current auth user's ID for Storage path (matches security rules)
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final uploadId = currentUser?.uid ?? 'installer_${DateTime.now().millisecondsSinceEpoch}';
       final service = ImageUploadService();
 
-      final url = await service.pickAndUploadHousePhoto(
-        tempId,
-        source: source,
-      );
+      // Upload the already-picked image bytes directly (don't re-pick)
+      final bytes = await image.readAsBytes();
+      final url = await service.uploadImage(uploadId, bytes);
 
       if (url != null && mounted) {
         ref.read(installerPhotoUrlProvider.notifier).state = url;

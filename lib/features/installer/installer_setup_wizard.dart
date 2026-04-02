@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/installer/screens/controller_setup_scree
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/installation_model.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -493,12 +494,46 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       // 1. Generate temporary password
       final tempPassword = _generateTempPassword();
 
-      // 2. Create Firebase Auth account for customer
-      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: customerInfo.email.trim().toLowerCase(),
-        password: tempPassword,
-      );
-      final userId = credential.user!.uid;
+      // 2. Create Firebase Auth account for customer (or link existing account)
+      //
+      // IMPORTANT: createUserWithEmailAndPassword() auto-signs-in as the new
+      // user, which would kill our anonymous installer session. After creating
+      // the account we immediately sign back in anonymously so the remaining
+      // Firestore writes succeed under the anonymous token.
+      String userId;
+      bool isExistingAccount = false;
+      try {
+        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: customerInfo.email.trim().toLowerCase(),
+          password: tempPassword,
+        );
+        userId = credential.user!.uid;
+        // Customer account created — sign back in anonymously for remaining writes
+        await FirebaseAuth.instance.signInAnonymously();
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          // Account already exists — look up the existing user doc
+          final existingQuery = await FirebaseFirestore.instance
+              .collection('users')
+              .where('email', isEqualTo: customerInfo.email.trim().toLowerCase())
+              .limit(1)
+              .get();
+          if (existingQuery.docs.isNotEmpty) {
+            userId = existingQuery.docs.first.id;
+            isExistingAccount = true;
+          } else {
+            // Email exists in Auth but no Firestore doc yet —
+            // Create a placeholder doc keyed by a generated ID. When the customer
+            // signs in, the auth flow will merge this into their real profile.
+            final placeholderRef = FirebaseFirestore.instance.collection('users').doc();
+            userId = placeholderRef.id;
+            isExistingAccount = true;
+            debugPrint('Installer: Auth account exists without Firestore doc, using placeholder $userId');
+          }
+        } else {
+          rethrow;
+        }
+      }
 
       // 3. Get installer-collected configuration
       final siteMode = ref.read(installerSiteModeProvider);
@@ -595,7 +630,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         welcomeCompleted: false,
       );
 
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(UserService.sanitizeForFirestore(userModel.toJson()));
+      await FirebaseFirestore.instance.collection('users').doc(userId).set(
+        UserService.sanitizeForFirestore(userModel.toJson()),
+        SetOptions(merge: true),
+      );
 
       // 6. Create installation record for tracking/analytics
       final installationRecord = InstallationRecord(
@@ -617,7 +655,18 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           .doc(installationRef.id)
           .set(UserService.sanitizeForFirestore(installationRecord.toMap()));
 
-      // 7. Increment installer's installation count
+      // 7. Update referral pipeline status → "installed"
+      try {
+        await ref.read(referralPipelineServiceProvider).updateReferralStatus(
+          prospectUid: userId,
+          newStatus: 'installed',
+          jobId: installationRef.id,
+        );
+      } catch (e) {
+        debugPrint('Referral pipeline update failed (non-blocking): $e');
+      }
+
+      // 8. Increment installer's installation count
       final installerQuery = await FirebaseFirestore.instance
           .collection('installers')
           .where('fullPin', isEqualTo: session.installer.fullPin)
@@ -630,17 +679,20 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         });
       }
 
-      // 8. Sign out installer from customer's account
+      // 9. Sign out anonymous installer session
+      // We always sign out here because the installer entered via anonymous auth.
+      // Whether we created a new customer account or linked an existing one,
+      // the anonymous session should be cleaned up when the wizard completes.
       await FirebaseAuth.instance.signOut();
 
       setState(() => _isProcessing = false);
 
-      // 9. Show handoff credentials screen
+      // 10. Show handoff credentials screen
       if (mounted) {
         _showHandoffCredentials(
           customerName: customerInfo.name,
           email: customerInfo.email,
-          tempPassword: tempPassword,
+          tempPassword: isExistingAccount ? null : tempPassword,
           installationId: installationRef.id,
         );
       }
@@ -687,9 +739,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   void _showHandoffCredentials({
     required String customerName,
     required String email,
-    required String tempPassword,
+    required String? tempPassword,
     required String installationId,
   }) {
+    final isExisting = tempPassword == null;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -709,9 +762,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Customer account has been created successfully.',
-                style: TextStyle(color: NexGenPalette.textMedium),
+              Text(
+                isExisting
+                    ? 'Existing account has been linked to this installation.'
+                    : 'Customer account has been created successfully.',
+                style: const TextStyle(color: NexGenPalette.textMedium),
               ),
               const SizedBox(height: 24),
               const Text(
@@ -727,8 +782,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
               _buildCredentialRow('Name', customerName),
               const SizedBox(height: 8),
               _buildCredentialRow('Email', email, canCopy: true),
-              const SizedBox(height: 8),
-              _buildCredentialRow('Temporary Password', tempPassword, canCopy: true, isPassword: true),
+              if (!isExisting) ...[
+                const SizedBox(height: 8),
+                _buildCredentialRow('Temporary Password', tempPassword, canCopy: true, isPassword: true),
+              ],
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -737,14 +794,16 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.amber, size: 20),
-                    SizedBox(width: 8),
+                    const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Customer should change their password after first login.',
-                        style: TextStyle(color: Colors.amber, fontSize: 12),
+                        isExisting
+                            ? 'Customer can sign in with their existing password.'
+                            : 'Customer should change their password after first login.',
+                        style: const TextStyle(color: Colors.amber, fontSize: 12),
                       ),
                     ),
                   ],
@@ -754,11 +813,12 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () {
-              // Copy all credentials to clipboard
-              final credentials = 'Lumina App Login\n\nEmail: $email\nTemporary Password: $tempPassword\n\nPlease change your password after first login.';
-              Clipboard.setData(ClipboardData(text: credentials));
+          if (!isExisting)
+            TextButton(
+              onPressed: () {
+                // Copy all credentials to clipboard
+                final credentials = 'Lumina App Login\n\nEmail: $email\nTemporary Password: $tempPassword\n\nPlease change your password after first login.';
+                Clipboard.setData(ClipboardData(text: credentials));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Credentials copied to clipboard'),

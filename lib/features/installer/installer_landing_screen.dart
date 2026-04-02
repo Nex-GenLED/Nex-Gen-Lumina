@@ -1,8 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/nav.dart';
 
 /// Landing screen explaining Installer Mode before PIN entry.
 ///
@@ -10,11 +12,12 @@ import 'package:nexgen_command/nav.dart';
 /// - Create new customer accounts with temporary passwords
 /// - Pair and configure WLED controllers
 /// - Complete installation records for warranty tracking
-class InstallerLandingScreen extends StatelessWidget {
+class InstallerLandingScreen extends ConsumerWidget {
   const InstallerLandingScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasSession = ref.watch(installerSessionProvider) != null;
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: SafeArea(
@@ -178,30 +181,59 @@ class InstallerLandingScreen extends StatelessWidget {
               ),
             ),
 
-            // Bottom button
+            // Bottom buttons
             Padding(
               padding: const EdgeInsets.all(24),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => context.push(AppRoutes.installerPin),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => context.push(AppRoutes.installerPin),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: NexGenPalette.cyan,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.lock_outline),
+                      label: const Text(
+                        'Enter Installer PIN',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
-                  icon: const Icon(Icons.lock_outline),
-                  label: const Text(
-                    'Enter Installer PIN',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  if (hasSession) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.push(AppRoutes.dealerDashboard),
+                        icon: const Icon(Icons.dashboard_outlined, color: Colors.amber),
+                        label: const Text(
+                          'Dealer Dashboard',
+                          style: TextStyle(
+                            color: Colors.amber,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.amber.withValues(alpha: 0.4)),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                  ],
+                ],
               ),
             ),
           ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/installer/admin/dealer_management_screen.dart';
 import 'package:nexgen_command/features/installer/admin/installer_management_screen.dart';
@@ -265,6 +266,79 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     }
   }
 
+  void _showDealerPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => Consumer(
+        builder: (ctx, sheetRef, _) {
+          final dealersAsync = sheetRef.watch(dealerListProvider);
+          return dealersAsync.when(
+            loading: () => const SizedBox(
+              height: 120,
+              child: Center(child: CircularProgressIndicator(color: NexGenPalette.cyan)),
+            ),
+            error: (_, __) => const SizedBox(
+              height: 120,
+              child: Center(child: Text('Error loading dealers', style: TextStyle(color: Colors.red))),
+            ),
+            data: (dealers) {
+              final active = dealers.where((d) => d.isActive).toList();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Select Dealer',
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+                  ),
+                  const Divider(color: NexGenPalette.line, height: 1),
+                  if (active.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('No active dealers', style: TextStyle(color: NexGenPalette.textMedium)),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.45),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: active.length,
+                        itemBuilder: (_, i) {
+                          final dealer = active[i];
+                          return ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: NexGenPalette.violet.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(dealer.dealerCode,
+                                  style: const TextStyle(
+                                      color: NexGenPalette.violet, fontWeight: FontWeight.bold)),
+                            ),
+                            title: Text(dealer.companyName, style: const TextStyle(color: Colors.white)),
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              context.push('${AppRoutes.dealerDashboard}?dealerCode=${dealer.dealerCode}');
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAuthenticated = ref.watch(adminSessionActiveProvider);
@@ -381,6 +455,14 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (context) => const InstallerManagementScreen()),
               ),
+            ),
+            const SizedBox(height: 12),
+            _ManagementTile(
+              title: 'Dealer Operations',
+              subtitle: 'View pipeline and payouts for a dealer',
+              icon: Icons.dashboard_outlined,
+              color: Colors.amber,
+              onTap: () => _showDealerPicker(),
             ),
             const SizedBox(height: 32),
             // Quick actions
