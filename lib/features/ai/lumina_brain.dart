@@ -91,6 +91,77 @@ class LuminaBrain {
     return result;
   }
 
+  // -------------------------------------------------------------------------
+  // Contextual placeholder — holiday / season / sport awareness (zero AI cost)
+  // -------------------------------------------------------------------------
+
+  /// Returns a contextual hint string for the Lumina chat input based on
+  /// the current date. Checks upcoming holidays first, then in-season
+  /// sports, then falls back to a seasonal suggestion.
+  static String contextualPlaceholder() {
+    // 1. Upcoming holiday within 14 days
+    final holiday = HolidayColorDatabase.getUpcomingHoliday(withinDays: 14);
+    if (holiday != null) {
+      return _holidayPlaceholder(holiday.name);
+    }
+
+    // 2. In-season sport suggestion (generic — no user data needed)
+    final month = DateTime.now().month;
+    final weekday = DateTime.now().weekday; // 1=Mon … 7=Sun
+    final sportHint = _sportHint(month, weekday);
+    if (sportHint != null) return sportHint;
+
+    // 3. Seasonal fallback
+    final season = HolidayColorDatabase.getCurrentSeason();
+    return _seasonPlaceholder(season.id);
+  }
+
+  static String _holidayPlaceholder(String name) {
+    const map = {
+      'Christmas': 'Try "Christmas lights"',
+      'Halloween': 'Try "spooky Halloween"',
+      'Independence Day': 'Try "4th of July fireworks"',
+      '4th of July': 'Try "4th of July fireworks"',
+      "Valentine's Day": 'Try "romantic Valentine\'s glow"',
+      "St. Patrick's Day": 'Try "St. Patrick\'s green"',
+      'Thanksgiving': 'Try "warm Thanksgiving"',
+      'Easter': 'Try "pastel Easter lights"',
+      "New Year's Day": 'Try "New Year\'s celebration"',
+      "New Year's Eve": 'Try "midnight countdown glow"',
+      'Juneteenth': 'Try "Juneteenth celebration"',
+      'Cinco de Mayo': 'Try "Cinco de Mayo fiesta"',
+      'Mardi Gras': 'Try "Mardi Gras party"',
+    };
+    return map[name] ?? 'Try "$name lights"';
+  }
+
+  static String? _sportHint(int month, int weekday) {
+    // NFL: Sep–Feb, games Sun/Mon/Thu
+    if ((month >= 9 || month <= 2) && (weekday == 7 || weekday == 1 || weekday == 4)) {
+      return 'Try "game day lights" 🏈';
+    }
+    // NBA/NHL: Oct–Jun, most games Tue–Sun
+    if ((month >= 10 || month <= 6) && weekday >= 2) {
+      // Only suggest on ~40% of eligible days to avoid being repetitive
+      if (DateTime.now().day % 5 < 2) {
+        return 'Try "game night lights" 🏀';
+      }
+    }
+    // MLB: Apr–Oct, games nearly every day
+    if (month >= 4 && month <= 10 && DateTime.now().day % 4 == 0) {
+      return 'Try "ballpark lights" ⚾';
+    }
+    return null;
+  }
+
+  static String _seasonPlaceholder(String seasonId) => switch (seasonId) {
+        'spring' => 'Try "fresh spring glow"',
+        'summer' => 'Try "warm summer night"',
+        'autumn' => 'Try "cozy autumn glow"',
+        'winter' => 'Try "cool winter sparkle"',
+        _ => 'Ask Lumina anything…',
+      };
+
   /// Sends a conversational request enriched with context.
   /// Three-tier matching system for maximum consistency and scalability:
   /// 1. Check pre-defined theme library (fastest, for common themes)
@@ -201,6 +272,11 @@ class LuminaBrain {
         final tw = compound.temporal!.timeWindowLabel;
         contextBlock = '$contextBlock\n\nTIME CONSTRAINT: Apply this design $tw only. '
             'Do not say "all day" or any other time — echo "$tw" in your confirmation.';
+      }
+      if (compound.temporal != null && compound.temporal!.hasDateRange) {
+        final dr = compound.temporal!.dateRangeLabel;
+        contextBlock = '$contextBlock\n\nDATE RANGE: Schedule this design $dr. '
+            'Echo "$dr" in your confirmation.';
       }
     }
 
@@ -764,15 +840,17 @@ class LuminaBrain {
   }
 
   static Future<Map<String, dynamic>> generateWledJson(
-      WidgetRef ref, String userPrompt) async {
+      WidgetRef ref, String userPrompt, {double temperature = 0.1}) async {
     final contextBlock = _buildContextBlock(ref);
-    return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
+    return LuminaAI.generateWledJson(userPrompt,
+        contextBlock: contextBlock, temperature: temperature);
   }
 
   static Future<Map<String, dynamic>> generateWledJsonFromRef(
-      Ref ref, String userPrompt) async {
+      Ref ref, String userPrompt, {double temperature = 0.1}) async {
     final contextBlock = _buildContextBlockFromRef(ref);
-    return LuminaAI.generateWledJson(userPrompt, contextBlock: contextBlock);
+    return LuminaAI.generateWledJson(userPrompt,
+        contextBlock: contextBlock, temperature: temperature);
   }
 
   static Future<String> chatRefinement(

@@ -13,6 +13,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "autopilot_enabled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "weekly_schedule_preview_enabled",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ]
 }

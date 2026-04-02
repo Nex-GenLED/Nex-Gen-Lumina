@@ -10,6 +10,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart' show activePresetLabelProvider;
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
+import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
@@ -1235,7 +1236,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                       color: _kFrost,
                     ),
                 decoration: InputDecoration(
-                  hintText: 'Ask Lumina anything...',
+                  hintText: LuminaBrain.contextualPlaceholder(),
                   hintStyle: TextStyle(
                     color: _kFrost.withValues(alpha: 0.3),
                   ),

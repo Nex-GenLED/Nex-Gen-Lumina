@@ -296,6 +296,7 @@ class AutopilotScheduler {
             wledPayload: item.wledPayload,
             confidenceScore: item.confidenceScore,
             createdAt: item.createdAt,
+            message: item.message,
           ),
         );
       }
@@ -696,6 +697,7 @@ class AutopilotScheduler {
             wledPayload: item.wledPayload,
             confidenceScore: item.confidenceScore,
             createdAt: item.createdAt,
+            message: item.message,
           ),
         );
       }

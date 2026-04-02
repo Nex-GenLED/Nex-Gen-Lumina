@@ -99,6 +99,48 @@ final autonomyLevelProvider = Provider<int>((ref) {
   );
 });
 
+/// How autopilot handles conflicts with user-set calendar entries.
+enum AutopilotConflictPolicy {
+  /// Always keep the user's manual entry — skip the autopilot event.
+  keepMine,
+  /// Always trust autopilot — overwrite the user's entry.
+  trustAutopilot,
+  /// Ask the user every time a conflict is detected.
+  ask;
+
+  static AutopilotConflictPolicy fromString(String? value) {
+    switch (value) {
+      case 'keep_mine':
+        return AutopilotConflictPolicy.keepMine;
+      case 'trust_autopilot':
+        return AutopilotConflictPolicy.trustAutopilot;
+      default:
+        return AutopilotConflictPolicy.ask;
+    }
+  }
+
+  String toJson() {
+    switch (this) {
+      case AutopilotConflictPolicy.keepMine:
+        return 'keep_mine';
+      case AutopilotConflictPolicy.trustAutopilot:
+        return 'trust_autopilot';
+      case AutopilotConflictPolicy.ask:
+        return 'ask';
+    }
+  }
+}
+
+/// Provider for the user's autopilot conflict resolution policy.
+final autopilotConflictPolicyProvider = Provider<AutopilotConflictPolicy>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) =>
+        AutopilotConflictPolicy.fromString(profile?.autopilotConflictPolicy),
+    orElse: () => AutopilotConflictPolicy.ask,
+  );
+});
+
 /// Provider for when the autopilot schedule was last generated.
 final autopilotLastGeneratedProvider = Provider<DateTime?>((ref) {
   final profileAsync = ref.watch(currentUserProfileProvider);
@@ -174,6 +216,10 @@ class AutopilotSuggestion {
   final SuggestionStatus status;
   final DateTime createdAt;
 
+  /// Lumina's narrative voice for this suggestion.
+  /// e.g., "Thursday: Chiefs vs. Raiders kickoff — red and gold pulse at game time."
+  final String? message;
+
   const AutopilotSuggestion({
     required this.id,
     required this.patternName,
@@ -184,6 +230,7 @@ class AutopilotSuggestion {
     required this.confidenceScore,
     this.status = SuggestionStatus.pending,
     required this.createdAt,
+    this.message,
   });
 
   AutopilotSuggestion copyWith({
@@ -196,6 +243,7 @@ class AutopilotSuggestion {
     double? confidenceScore,
     SuggestionStatus? status,
     DateTime? createdAt,
+    String? message,
   }) {
     return AutopilotSuggestion(
       id: id ?? this.id,
@@ -207,6 +255,7 @@ class AutopilotSuggestion {
       confidenceScore: confidenceScore ?? this.confidenceScore,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      message: message ?? this.message,
     );
   }
 }

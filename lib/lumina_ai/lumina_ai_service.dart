@@ -306,6 +306,9 @@ class LuminaAI {
   /// Direct call — bypasses tier routing and uses [systemPrompt] as the SOLE
   /// system instruction. No Lumina lighting prompts are injected.
   /// Use this for calendar, schedule, and any non-lighting AI features.
+  ///
+  /// Defaults to temperature 0.1 (deterministic). Calendar-mode callers
+  /// should keep this default. Only raise it for creative/variety use cases.
   static Future<String> chatDirect(
     String userMessage, {
     required String systemPrompt,
@@ -342,9 +345,19 @@ class LuminaAI {
   }
 
   /// Raw WLED JSON generation always uses Haiku — structured output only.
+  ///
+  /// Temperature policy:
+  ///   • 0.1 (default) — calendar mode, direct commands, refinements.
+  ///     Deterministic: same input → same output.
+  ///   • 0.7 — Autopilot variety generation. Creative diversity across
+  ///     multiple days so the schedule doesn't feel repetitive.
+  ///
+  /// Do not override these values without clear intent; they are tuned to
+  /// balance reliability (calendar) vs. freshness (autopilot).
   static Future<Map<String, dynamic>> generateWledJson(
     String userPrompt, {
     String? contextBlock,
+    double temperature = 0.1,
   }) async {
     const system =
         _kSecurityPreamble + '\n\n'
@@ -359,7 +372,7 @@ class LuminaAI {
       model: _kHaiku,
       systemPrompt: systemWithContext,
       userMessage: userPrompt,
-      temperature: 0.1,
+      temperature: temperature,
       label: '🎨 Lighting JSON',
     );
 

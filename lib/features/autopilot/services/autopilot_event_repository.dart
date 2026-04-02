@@ -13,7 +13,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_conflict_dialog.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -337,18 +340,27 @@ class AutopilotEventRepository {
   /// Run the full weekly regeneration pipeline:
   ///   1. Fetch protected user events for the target week.
   ///   2. Generate new autopilot events (via [AutopilotScheduleGenerator]).
-  ///   3. Compute diff vs existing autopilot events.
-  ///   4. Apply the diff.
+  ///   3. Filter out events that conflict with user calendar entries
+  ///      (based on [autopilotConflictPolicy]).
+  ///   4. Compute diff vs existing autopilot events.
+  ///   5. Apply the diff.
   ///
   /// Pass [sportingEvents], [holidays], and [weather] pre-fetched by the
   /// calling service so this method stays pure (testable).
-  Future<List<AutopilotEvent>> runWeeklyRegeneration({
+  ///
+  /// If [calendarEntries] is provided, events that conflict with
+  /// [CalendarEntryType.user] entries will be filtered according to the
+  /// user's [autopilotConflictPolicy].  When the policy is `ask`, the
+  /// conflicting events are returned in [conflicts] for the UI to handle
+  /// — the diff is still applied for non-conflicting events.
+  Future<AutopilotRegenResult> runWeeklyRegeneration({
     required String uid,
     required UserModel profile,
     required List<GameEvent> sportingEvents,
     required List<HolidayEvent> holidays,
     WeatherForecast? weather,
     int weekGeneration = 0,
+    Map<String, CalendarEntry>? calendarEntries,
   }) async {
     final weekStart = upcomingWeekStart(DateTime.now());
     final weekEnd = weekEndFor(weekStart);
@@ -374,15 +386,74 @@ class AutopilotEventRepository {
       weekGeneration: weekGeneration,
     );
 
-    // 3. Diff.
-    final diff = await computeDiff(uid, weekStart, newEvents);
+    // 3. Detect conflicts with user-set calendar entries.
+    var eventsToApply = newEvents;
+    var conflicts = <AutopilotConflict>[];
+    if (calendarEntries != null && calendarEntries.isNotEmpty) {
+      conflicts = detectAutopilotConflicts(newEvents, calendarEntries);
+      if (conflicts.isNotEmpty) {
+        final policy = AutopilotConflictPolicy.fromString(
+            profile.autopilotConflictPolicy);
+        if (policy == AutopilotConflictPolicy.keepMine) {
+          // Silently skip dates where the user has a manual entry
+          final conflictDateKeys =
+              conflicts.map((c) => c.dateKey).toSet();
+          eventsToApply = newEvents
+              .where((e) {
+                final dk =
+                    '${e.startTime.year}-${e.startTime.month.toString().padLeft(2, '0')}-${e.startTime.day.toString().padLeft(2, '0')}';
+                return !conflictDateKeys.contains(dk);
+              })
+              .toList();
+          debugPrint(
+              '🛡️ AutopilotEventRepository: skipped ${conflicts.length} '
+              'events due to keepMine policy');
+          conflicts = []; // Resolved — no UI needed
+        } else if (policy == AutopilotConflictPolicy.trustAutopilot) {
+          // Proceed as-is — autopilot overwrites user entries
+          debugPrint(
+              '⚡ AutopilotEventRepository: overwriting ${conflicts.length} '
+              'user entries (trustAutopilot policy)');
+          conflicts = []; // Resolved — no UI needed
+        }
+        // policy == ask → conflicts list remains populated for UI handling
+      }
+    }
 
-    // 4. Apply.
+    // 4. Diff.
+    final diff = await computeDiff(uid, weekStart, eventsToApply);
+
+    // 5. Apply.
     await applyDiff(uid, diff);
 
     // Return the full new event list for notifications / UI.
-    return newEvents;
+    return AutopilotRegenResult(
+      events: newEvents,
+      conflicts: conflicts,
+    );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Result type
+// ---------------------------------------------------------------------------
+
+/// Result from [AutopilotEventRepository.runWeeklyRegeneration].
+class AutopilotRegenResult {
+  /// All generated autopilot events (including those filtered by policy).
+  final List<AutopilotEvent> events;
+
+  /// Conflicts that require UI resolution (only populated when the user's
+  /// conflict policy is [AutopilotConflictPolicy.ask]).  Empty if no
+  /// conflicts exist or if the policy auto-resolves them.
+  final List<AutopilotConflict> conflicts;
+
+  bool get hasConflicts => conflicts.isNotEmpty;
+
+  const AutopilotRegenResult({
+    required this.events,
+    this.conflicts = const [],
+  });
 }
 
 // ---------------------------------------------------------------------------

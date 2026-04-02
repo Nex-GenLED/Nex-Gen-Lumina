@@ -187,6 +187,10 @@ class UserModel {
   /// Whether score celebrations (LED animations) are enabled via autopilot
   final bool scoreCelebrations;
 
+  /// How autopilot resolves conflicts with user-set calendar entries.
+  /// 'ask' = prompt every time, 'keep_mine' = always keep manual, 'trust_autopilot' = always overwrite.
+  final String autopilotConflictPolicy;
+
   /// Patterns the user has rejected via autopilot suggestions.
   /// Each entry: { 'pattern_name': String, 'count': int, 'last_rejected_at': Timestamp }
   final List<Map<String, dynamic>> rejectedPatterns;
@@ -313,6 +317,7 @@ class UserModel {
     this.autoDetectGameDays = true,
     this.preGameLighting = true,
     this.scoreCelebrations = true,
+    this.autopilotConflictPolicy = 'ask',
     this.rejectedPatterns = const [],
     this.deprioritizedPatterns = const [],
     this.profileType = 'residential',
@@ -440,6 +445,7 @@ class UserModel {
       autoDetectGameDays: (json['auto_detect_game_days'] as bool?) ?? true,
       preGameLighting: (json['pre_game_lighting'] as bool?) ?? true,
       scoreCelebrations: (json['score_celebrations'] as bool?) ?? true,
+      autopilotConflictPolicy: (json['autopilot_conflict_policy'] as String?) ?? 'ask',
       rejectedPatterns: (json['rejected_patterns'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .toList() ??
@@ -572,6 +578,7 @@ class UserModel {
       'auto_detect_game_days': autoDetectGameDays,
       'pre_game_lighting': preGameLighting,
       'score_celebrations': scoreCelebrations,
+      'autopilot_conflict_policy': autopilotConflictPolicy,
       'rejected_patterns': rejectedPatterns,
       'deprioritized_patterns': deprioritizedPatterns,
       'profile_type': profileType,
@@ -654,6 +661,7 @@ class UserModel {
     bool? autoDetectGameDays,
     bool? preGameLighting,
     bool? scoreCelebrations,
+    String? autopilotConflictPolicy,
     List<Map<String, dynamic>>? rejectedPatterns,
     List<String>? deprioritizedPatterns,
     String? profileType,
@@ -734,6 +742,7 @@ class UserModel {
       autoDetectGameDays: autoDetectGameDays ?? this.autoDetectGameDays,
       preGameLighting: preGameLighting ?? this.preGameLighting,
       scoreCelebrations: scoreCelebrations ?? this.scoreCelebrations,
+      autopilotConflictPolicy: autopilotConflictPolicy ?? this.autopilotConflictPolicy,
       rejectedPatterns: rejectedPatterns ?? this.rejectedPatterns,
       deprioritizedPatterns: deprioritizedPatterns ?? this.deprioritizedPatterns,
       profileType: profileType ?? this.profileType,

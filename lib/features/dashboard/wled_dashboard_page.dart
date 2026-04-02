@@ -574,12 +574,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               minLines: 1,
               maxLines: 2,
               style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
-              decoration: const InputDecoration(
-                hintText: 'Tell Lumina what to do\u2026',
-                hintStyle: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: LuminaBrain.contextualPlaceholder(),
+                hintStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 4),
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
               ),
               onSubmitted: (_) => _submitLuminaCommand(),
             ),

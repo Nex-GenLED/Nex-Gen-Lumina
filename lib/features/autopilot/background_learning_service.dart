@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/services/sports_alert_service.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/autopilot_sync_trigger.dart';
@@ -128,24 +129,30 @@ class BackgroundLearningService {
     // The repository's runWeeklyRegeneration accepts empty lists and falls
     // back to seasonal/preferred-white defaults — safe for the first release.
     final repo = ref.read(autopilotEventRepositoryProvider);
-    final newEvents = await repo.runWeeklyRegeneration(
+    final calEntries = ref.read(calendarScheduleProvider);
+    final result = await repo.runWeeklyRegeneration(
       uid: uid,
       profile: profile,
       sportingEvents: const [],
       holidays: const [],
       weekGeneration: DateTime.now().millisecondsSinceEpoch ~/ (7 * 86400000),
+      calendarEntries: calEntries,
     );
 
     debugPrint(
-        '✅ WeeklyRegen: generated ${newEvents.length} events for upcoming week');
+        '✅ WeeklyRegen: generated ${result.events.length} events for upcoming week');
+    if (result.hasConflicts) {
+      debugPrint(
+          '⚠️ WeeklyRegen: ${result.conflicts.length} conflicts need UI resolution');
+    }
 
     // Dispatch push notification if user has opted in.
-    if (profile.weeklySchedulePreviewEnabled && newEvents.isNotEmpty) {
+    if (profile.weeklySchedulePreviewEnabled && result.events.isNotEmpty) {
       try {
         // AutopilotNotificationService already handles this — pass through.
         // scheduleWeeklyBrief is on the notification service; trigger via
         // the existing settings service to avoid circular imports.
-        await ref.read(autopilotSettingsServiceProvider).scheduleWeeklyBriefForEvents(profile, newEvents);
+        await ref.read(autopilotSettingsServiceProvider).scheduleWeeklyBriefForEvents(profile, result.events);
       } catch (e) {
         debugPrint('⚠️ Weekly brief notification failed: $e');
       }

@@ -15,9 +15,13 @@ import 'dart:ui';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_conflict_dialog.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/theme.dart';
@@ -232,14 +236,49 @@ class _AutopilotCalendarScreenState
     setState(() => _regenerating = true);
     try {
       final repo = ref.read(autopilotEventRepositoryProvider);
-      await repo.runWeeklyRegeneration(
+      final calEntries = ref.read(calendarScheduleProvider);
+      final result = await repo.runWeeklyRegeneration(
         uid: uid,
         profile: profile,
         sportingEvents: const [],
         holidays: const [],
         weekGeneration:
             DateTime.now().millisecondsSinceEpoch ~/ (7 * 86400000),
+        calendarEntries: calEntries,
       );
+
+      // Show conflict dialog if policy is 'ask' and conflicts were found
+      if (result.hasConflicts && mounted) {
+        final resolution =
+            await showAutopilotConflictDialog(context, result.conflicts);
+
+        if (resolution.choice != AutopilotConflictChoice.cancel) {
+          final conflictDateKeys =
+              result.conflicts.map((c) => c.dateKey).toSet();
+
+          if (resolution.choice == AutopilotConflictChoice.keepMine) {
+            // Remove autopilot events that conflict
+            for (final dk in conflictDateKeys) {
+              for (final event in result.events) {
+                final eDk =
+                    '${event.startTime.year}-${event.startTime.month.toString().padLeft(2, '0')}-${event.startTime.day.toString().padLeft(2, '0')}';
+                if (eDk == dk) {
+                  await repo.deleteEvent(uid, event.id);
+                }
+              }
+            }
+          }
+          // useAutopilot and merge are already handled by the diff
+
+          // Persist the policy if user checked "Remember"
+          if (resolution.remember) {
+            final policy = resolution.choice == AutopilotConflictChoice.keepMine
+                ? AutopilotConflictPolicy.keepMine
+                : AutopilotConflictPolicy.trustAutopilot;
+            await saveConflictPolicy(ref, policy);
+          }
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -408,6 +447,32 @@ class _CalendarDayCard extends StatelessWidget {
 // Event tiles
 // ---------------------------------------------------------------------------
 
+/// Extract [Color]s from a WLED payload's seg→col arrays.
+/// Falls back to [fallback] wrapped in a single-element list.
+List<Color> _colorsFromPayload(Map<String, dynamic>? payload, Color fallback) {
+  if (payload != null) {
+    final seg = payload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final col = (seg[0] as Map<String, dynamic>?)?['col'];
+      if (col is List && col.isNotEmpty) {
+        final parsed = col
+            .whereType<List>()
+            .where((c) => c.length >= 3)
+            .map<Color>((c) => Color.fromARGB(
+                  255,
+                  (c[0] as num).toInt().clamp(0, 255),
+                  (c[1] as num).toInt().clamp(0, 255),
+                  (c[2] as num).toInt().clamp(0, 255),
+                ))
+            .where((c) => c != const Color(0xFF000000)) // skip black/off
+            .toList();
+        if (parsed.isNotEmpty) return parsed;
+      }
+    }
+  }
+  return [fallback];
+}
+
 class _AutopilotEventTile extends StatelessWidget {
   final AutopilotEvent event;
   final VoidCallback onTap;
@@ -432,7 +497,16 @@ class _AutopilotEventTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(event.eventType.icon, size: 15, color: color),
+            SizedBox(
+              width: 32,
+              child: PixelStripPreview(
+                colors: _colorsFromPayload(event.wledPayload, color),
+                pixelCount: 8,
+                height: 24,
+                borderRadius: 6,
+                animate: false,
+              ),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -488,7 +562,16 @@ class _UserEventTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.push_pin_rounded, size: 15, color: color),
+            SizedBox(
+              width: 32,
+              child: PixelStripPreview(
+                colors: _colorsFromPayload(event.patternData, color),
+                pixelCount: 8,
+                height: 24,
+                borderRadius: 6,
+                animate: false,
+              ),
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(

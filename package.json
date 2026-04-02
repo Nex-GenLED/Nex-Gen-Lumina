@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "firebase-admin": "^13.7.0"
+  },
+  "dependencies": {
+    "firebase-functions": "^7.2.2"
   }
 }

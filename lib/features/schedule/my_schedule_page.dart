@@ -26,6 +26,8 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
+import 'package:nexgen_command/features/ai/light_effect_animator.dart';
+import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/schedule_type_badge.dart';
@@ -233,7 +235,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   selectedKey: selectedKey,
                   calEntries: calEntries,
                   scheduleItems: schedules,
-                  pendingKeys: pending?.changes.map((c) => c.dateKey).toSet() ?? {},
+                  pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
                   onDayTap: (k) =>
                       ref.read(selectedCalendarDateProvider.notifier).state = k,
                   onPrevWeek: () => _shiftWeek(-1),
@@ -250,7 +252,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                     calStart: _calStart,
                     selectedKey: selectedKey,
                     calEntries: calEntries,
-                    pendingKeys: pending?.changes.map((c) => c.dateKey).toSet() ?? {},
+                    pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
                     onDayTap: (k) =>
                         ref.read(selectedCalendarDateProvider.notifier).state = k,
                     onPrev: () => _shiftCal(-1),
@@ -259,7 +261,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   ),
                 ],
 
-                // ── All recurring schedules list ──
+                // ── All recurring schedules list (or empty state) ──
                 if (schedules.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   Row(children: [
@@ -310,6 +312,12 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: _ScheduleCard(item: s),
                       )),
+                ] else ...[
+                  const SizedBox(height: 24),
+                  if (ref.watch(autopilotEnabledProvider))
+                    const _AutopilotGeneratingState()
+                  else
+                    const _AutopilotOffInvitation(),
                 ],
               ],
             ),
@@ -393,75 +401,376 @@ class _PendingChangesBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      color: NexGenPalette.amber.withValues(alpha: 0.12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        children: [
-          Icon(Icons.pending_actions_rounded,
-              color: NexGenPalette.amber, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${pending.changes.length} pending change${pending.changes.length == 1 ? '' : 's'} — ${pending.message}',
-              style: TextStyle(
+    final count = pending.changes.length;
+    final firstNames = pending.changes
+        .take(2)
+        .map((e) => e.patternName)
+        .join(', ');
+    final summary = count <= 2
+        ? firstNames
+        : '$firstNames +${count - 2} more';
+
+    return GestureDetector(
+      onTap: () => _showPendingPreviewSheet(context, ref, pending),
+      child: Container(
+        decoration: BoxDecoration(
+          color: NexGenPalette.amber.withValues(alpha: 0.10),
+          border: Border(
+            bottom: BorderSide(
+                color: NexGenPalette.amber.withValues(alpha: 0.3)),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome,
+                color: NexGenPalette.amber, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$count design${count == 1 ? '' : 's'} across $count night${count == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      color: NexGenPalette.amber,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    summary,
+                    style: TextStyle(
+                      color: NexGenPalette.textMedium,
+                      fontSize: 11,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: NexGenPalette.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: NexGenPalette.amber.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                'Review',
+                style: TextStyle(
                   color: NexGenPalette.amber,
                   fontSize: 12,
-                  fontWeight: FontWeight.w500),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.green,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            ),
-            onPressed: () async {
-              // Check for conflicts with recurring schedules
-              final conflicts =
-                  ref.read(calendarScheduleProvider.notifier).checkConflictsForEntries(pending.changes);
-              ConflictResolution? resolution;
-              if (conflicts.hasConflicts) {
-                if (!context.mounted) return;
-                resolution =
-                    await showScheduleConflictDialog(context, conflicts);
-                if (resolution == ConflictResolution.cancel) return;
-              }
-
-              final ok = await ref.read(calendarScheduleProvider.notifier).applyEntries(
-                pending.changes,
-                resolution: resolution,
-              );
-              // Jump to first changed date so user sees it immediately
-              if (pending.changes.isNotEmpty) {
-                ref.read(selectedCalendarDateProvider.notifier).state =
-                    pending.changes.first.dateKey;
-              }
-              ref.read(pendingCalendarProvider.notifier).state = null;
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(ok
-                      ? 'Schedule saved'
-                      : 'Schedule could not be saved. Please try again.'),
-                  duration: const Duration(seconds: 2),
+                  fontWeight: FontWeight.w700,
                 ),
-              );
-            },
-            child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red.shade400,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              ),
             ),
-            onPressed: () =>
-                ref.read(pendingCalendarProvider.notifier).state = null,
-            child: const Text('Discard'),
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () =>
+                  ref.read(pendingCalendarProvider.notifier).state = null,
+              child: Icon(Icons.close,
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.6),
+                  size: 18),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Pending Preview Bottom Sheet ─────────────────────────────────────────────
+
+/// Shows a preview bottom sheet summarizing Lumina's proposed changes.
+/// "Lumina wants to schedule X designs across Y nights."
+/// Previews the first 3 entries, then Confirm or Cancel.
+Future<void> _showPendingPreviewSheet(
+  BuildContext context,
+  WidgetRef ref,
+  PendingCalendarChanges pending,
+) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _PendingPreviewSheet(pending: pending),
+  );
+
+  if (result == true) {
+    // Confirm — check for recurring schedule conflicts, then apply
+    final conflicts = ref
+        .read(calendarScheduleProvider.notifier)
+        .checkConflictsForEntries(pending.changes);
+    ConflictResolution? resolution;
+    if (conflicts.hasConflicts && context.mounted) {
+      resolution =
+          await showScheduleConflictDialog(context, conflicts);
+      if (resolution == ConflictResolution.cancel) return;
+    }
+
+    final ok = await ref
+        .read(calendarScheduleProvider.notifier)
+        .applyEntries(pending.changes, resolution: resolution);
+    if (pending.changes.isNotEmpty) {
+      ref.read(selectedCalendarDateProvider.notifier).state =
+          pending.changes.first.dateKey;
+    }
+    ref.read(pendingCalendarProvider.notifier).state = null;
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Schedule saved'
+            : 'Schedule could not be saved. Please try again.'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+  // null or false → user cancelled, keep pending state for banner
+}
+
+class _PendingPreviewSheet extends StatelessWidget {
+  final PendingCalendarChanges pending;
+  const _PendingPreviewSheet({required this.pending});
+
+  @override
+  Widget build(BuildContext context) {
+    final count = pending.changes.length;
+    final preview = pending.changes.take(3).toList();
+    final remaining = count - preview.length;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: NexGenPalette.gunmetal,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 14),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.textMedium.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome,
+                      color: NexGenPalette.cyan, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Lumina wants to schedule $count design${count == 1 ? '' : 's'} '
+                      'across $count night${count == 1 ? '' : 's'}',
+                      style:
+                          Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: NexGenPalette.textHigh,
+                                fontWeight: FontWeight.w700,
+                              ),
+                    ),
+                  ),
+                ],
+              ),
+
+              if (pending.message.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  pending.message,
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 13,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+
+              const SizedBox(height: 14),
+
+              // Preview tiles (first 3)
+              ...preview.map((entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _PendingEntryTile(entry: entry),
+                  )),
+
+              // "and N more" indicator
+              if (remaining > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Center(
+                    child: Text(
+                      '+ $remaining more night${remaining == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        color: NexGenPalette.textMedium,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 8),
+
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: TextButton.styleFrom(
+                        foregroundColor: NexGenPalette.textMedium,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      icon:
+                          const Icon(Icons.check_rounded, size: 18),
+                      label: Text(
+                          'Confirm ${count == 1 ? '' : 'All '}$count'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: NexGenPalette.cyan,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single preview tile for a pending calendar entry.
+class _PendingEntryTile extends StatelessWidget {
+  final CalendarEntry entry;
+  const _PendingEntryTile({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final date = DateTime.tryParse(entry.dateKey);
+    final dayLabel = date != null
+        ? '${_kDayFull[date.weekday % 7]}, ${_kMonthShort[date.month]} ${date.day}'
+        : entry.dateKey;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: entry.color?.withValues(alpha: 0.35) ??
+              NexGenPalette.line,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Color swatch
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: entry.color ?? NexGenPalette.gunmetal90,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: entry.color != null
+                  ? [
+                      BoxShadow(
+                        color: entry.color!.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                      )
+                    ]
+                  : null,
+            ),
+            child: entry.color == null
+                ? Icon(Icons.power_off_outlined,
+                    color: NexGenPalette.textMedium, size: 16)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          // Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.patternName,
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dayLabel,
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Time + brightness
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (entry.onTime != null)
+                Text(
+                  entry.offTime != null
+                      ? '${entry.onTime} → ${entry.offTime}'
+                      : entry.onTime!,
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              if (entry.brightness > 0)
+                Text(
+                  '${entry.brightness}%',
+                  style: TextStyle(
+                    color: NexGenPalette.amber,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -522,7 +831,44 @@ class _DayHeroCard extends StatelessWidget {
                 ? NexGenPalette.violet
                 : NexGenPalette.textMedium;
 
-    return ClipRRect(
+    // Extract WLED effect info for the pixel strip
+    final wledPayload = calEntry != null ? null : recurringFirst?.wledPayload;
+    final stripColors = _extractStripColors(color, wledPayload);
+    final effectId = _extractEffectId(wledPayload);
+    final effectType = effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid;
+    final speed = _extractNormalized(wledPayload, 'sx');
+    final bri = brightness != null ? brightness / 100.0 : 1.0;
+
+    // Source label for detail sheet
+    final sourceLabel = calEntry?.type == CalendarEntryType.holiday
+        ? 'Holiday'
+        : calEntry?.type == CalendarEntryType.user
+            ? calEntry!.autopilot ? 'AI-Generated' : 'Manual'
+            : recurringFirst != null
+                ? 'Recurring Schedule'
+                : 'Autopilot';
+
+    final effectLabel = effectId != null
+        ? _wledEffectName(effectId)
+        : patternName ?? 'Solid';
+
+    return GestureDetector(
+      onTap: (patternName != null || color != null)
+          ? () => _showScheduleDetailSheet(
+                context,
+                colors: stripColors,
+                effectType: effectType,
+                speed: speed,
+                brightness: bri,
+                patternName: patternName ?? 'No Schedule',
+                effectName: effectLabel,
+                onTime: onTime,
+                offTime: offTime,
+                brightnessPercent: brightness,
+                source: sourceLabel,
+              )
+          : null,
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -548,15 +894,20 @@ class _DayHeroCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Color strip at top
-              if (color != null)
-                Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: color,
-                    boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 8)],
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(14)),
+              // Animated pixel strip at top
+              if (stripColors.isNotEmpty)
+                ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(14)),
+                  child: PixelStripPreview(
+                    colors: stripColors,
+                    effectType: effectType,
+                    speed: speed,
+                    brightness: bri,
+                    pixelCount: 24,
+                    height: 28,
+                    borderRadius: 0,
+                    backgroundColor: const Color(0xFF0A0E14),
                   ),
                 ),
 
@@ -755,6 +1106,7 @@ class _DayHeroCard extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -828,6 +1180,221 @@ class _StatChip extends StatelessWidget {
   }
 }
 
+// ─── Shared helpers for PixelStripPreview in schedule cards ──────────────────
+
+/// Extract preview colors from a CalendarEntry color and/or WLED payload.
+List<Color> _extractStripColors(Color? entryColor, Map<String, dynamic>? wledPayload) {
+  // Try extracting from WLED payload first (multi-color)
+  if (wledPayload != null) {
+    final seg = wledPayload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final col = seg[0] is Map ? (seg[0] as Map)['col'] : null;
+      if (col is List) {
+        final colors = col
+            .whereType<List>()
+            .where((c) => c.length >= 3)
+            .map((c) => Color.fromARGB(
+                  255,
+                  (c[0] as num).toInt().clamp(0, 255),
+                  (c[1] as num).toInt().clamp(0, 255),
+                  (c[2] as num).toInt().clamp(0, 255),
+                ))
+            .toList();
+        if (colors.isNotEmpty) return colors;
+      }
+    }
+  }
+  // Fall back to single entry color
+  if (entryColor != null) return [entryColor];
+  return const [];
+}
+
+/// Extract effect ID from WLED payload.
+int? _extractEffectId(Map<String, dynamic>? payload) {
+  if (payload == null) return null;
+  final seg = payload['seg'];
+  if (seg is List && seg.isNotEmpty && seg[0] is Map) {
+    final fx = (seg[0] as Map)['fx'];
+    if (fx is num) return fx.toInt();
+  }
+  return null;
+}
+
+/// Extract and normalize a 0-255 WLED field to 0.0-1.0.
+double _extractNormalized(Map<String, dynamic>? payload, String key) {
+  if (payload == null) return 0.5;
+  final seg = payload['seg'];
+  if (seg is List && seg.isNotEmpty && seg[0] is Map) {
+    final val = (seg[0] as Map)[key];
+    if (val is num) return (val / 255.0).clamp(0.0, 1.0);
+  }
+  return 0.5;
+}
+
+/// Map a WLED effect ID to its human-readable name.
+String _wledEffectName(int id) {
+  const names = {
+    0: 'Solid', 2: 'Breathe', 12: 'Fade', 13: 'Theater Chase',
+    15: 'Running', 17: 'Twinkle', 20: 'Sparkle', 28: 'Chase',
+    37: 'Candle', 38: 'Fire', 39: 'Fireworks', 41: 'Running Dual',
+    43: 'Tricolor Chase', 46: 'Lightning', 49: 'Fairy',
+    52: 'Fireworks Starburst', 76: 'Meteor', 79: 'Ripple',
+    80: 'Twinklefox', 87: 'Glitter', 95: 'Flow',
+    9: 'Rainbow', 10: 'Rainbow Cycle',
+  };
+  return names[id] ?? 'Effect $id';
+}
+
+/// Bottom sheet showing full schedule detail for a card.
+void _showScheduleDetailSheet(
+  BuildContext context, {
+  required List<Color> colors,
+  required EffectType effectType,
+  required double speed,
+  required double brightness,
+  required String patternName,
+  required String effectName,
+  required String? onTime,
+  required String? offTime,
+  required int? brightnessPercent,
+  required String source,
+}) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: NexGenPalette.textMedium.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // Full-width pixel strip
+          if (colors.isNotEmpty)
+            PixelStripPreview(
+              colors: colors,
+              effectType: effectType,
+              speed: speed,
+              brightness: brightness,
+              pixelCount: 32,
+              height: 48,
+              borderRadius: 10,
+            ),
+
+          const SizedBox(height: 16),
+
+          // Pattern name
+          Text(
+            patternName,
+            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                  color: NexGenPalette.textHigh,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+
+          // Effect name
+          Text(
+            effectName,
+            style: TextStyle(
+              color: NexGenPalette.cyan,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Detail rows
+          _DetailRow(
+            icon: Icons.wb_sunny_rounded,
+            label: 'On',
+            value: onTime ?? '—',
+            color: NexGenPalette.cyan,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.nightlight_round,
+            label: 'Off',
+            value: offTime ?? '—',
+            color: NexGenPalette.violet,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.brightness_6_rounded,
+            label: 'Brightness',
+            value: brightnessPercent != null ? '$brightnessPercent%' : '—',
+            color: NexGenPalette.amber,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.source_rounded,
+            label: 'Source',
+            value: source,
+            color: NexGenPalette.textMedium,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            color: NexGenPalette.textMedium,
+            fontSize: 12,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(
+            color: NexGenPalette.textHigh,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ─── Week Strip ───────────────────────────────────────────────────────────────
 
 class _WeekStripSection extends StatelessWidget {
@@ -835,7 +1402,7 @@ class _WeekStripSection extends StatelessWidget {
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
   final List<ScheduleItem> scheduleItems;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
   final VoidCallback onPrevWeek;
   final VoidCallback onNextWeek;
@@ -847,7 +1414,7 @@ class _WeekStripSection extends StatelessWidget {
     required this.selectedKey,
     required this.calEntries,
     required this.scheduleItems,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.onDayTap,
     required this.onPrevWeek,
     required this.onNextWeek,
@@ -945,7 +1512,7 @@ class _WeekStripSection extends StatelessWidget {
                   children: List.generate(7, (i) {
                     final key = days[i];
                     final d = DateTime.parse(key);
-                    final calEntry = calEntries[key];
+                    final calEntry = pendingEntries[key] ?? calEntries[key];
                     final wd = d.weekday % 7;
                     final recurringItems = _itemsForWeekday(scheduleItems, wd);
                     return Expanded(
@@ -956,7 +1523,7 @@ class _WeekStripSection extends StatelessWidget {
                           calEntry: calEntry,
                           recurringItems: recurringItems,
                           isSelected: key == selectedKey,
-                          isPending: pendingKeys.contains(key),
+                          isPending: pendingEntries.containsKey(key),
                           onTap: () => onDayTap(key),
                         ),
                       ),
@@ -1058,21 +1625,38 @@ class _WeekDayCell extends StatelessWidget {
                   ),
                   const SizedBox(height: 5),
 
-                  // Color bar
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(2),
-                      color: color ?? NexGenPalette.line,
-                      boxShadow: color != null
-                          ? [
-                              BoxShadow(
-                                  color: color.withValues(alpha: 0.6),
-                                  blurRadius: 4)
-                            ]
-                          : null,
+                  // Color bar or Off pill
+                  if (calEntry?.brightness == 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.textMedium.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.nightlight_round, size: 9, color: NexGenPalette.textMedium),
+                          const SizedBox(width: 2),
+                          Text('Off', style: TextStyle(fontSize: 8, color: NexGenPalette.textMedium, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        color: color ?? NexGenPalette.line,
+                        boxShadow: color != null
+                            ? [
+                                BoxShadow(
+                                    color: color.withValues(alpha: 0.6),
+                                    blurRadius: 4)
+                              ]
+                            : null,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 5),
 
                   // Pattern name
@@ -1160,7 +1744,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
   final DateTime calStart;
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
   final VoidCallback onPrev;
   final VoidCallback onNext;
@@ -1171,7 +1755,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
     required this.calStart,
     required this.selectedKey,
     required this.calEntries,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.onDayTap,
     required this.onPrev,
     required this.onNext,
@@ -1230,7 +1814,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
                   firstDay: monthList[i],
                   selectedKey: selectedKey,
                   calEntries: calEntries,
-                  pendingKeys: pendingKeys,
+                  pendingEntries: pendingEntries,
                   size: size,
                   onDayTap: onDayTap,
                 ),
@@ -1249,7 +1833,7 @@ class _CalendarMonthBlock extends StatelessWidget {
   final DateTime firstDay;
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final _CalDaySize size;
   final ValueChanged<String> onDayTap;
 
@@ -1257,7 +1841,7 @@ class _CalendarMonthBlock extends StatelessWidget {
     required this.firstDay,
     required this.selectedKey,
     required this.calEntries,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.size,
     required this.onDayTap,
   });
@@ -1317,8 +1901,8 @@ class _CalendarMonthBlock extends StatelessWidget {
             if (key == null) return const SizedBox.shrink();
             return _CalDayCell(
               dateKey: key,
-              calEntry: calEntries[key],
-              isPending: pendingKeys.contains(key),
+              calEntry: pendingEntries[key] ?? calEntries[key],
+              isPending: pendingEntries.containsKey(key),
               isSelected: key == selectedKey,
               size: cellSize,
               fontSize: fontSize,
@@ -1393,7 +1977,12 @@ class _CalDayCell extends StatelessWidget {
                         : NexGenPalette.textHigh,
               ),
             ),
-            if (color != null && size >= 24)
+            if (calEntry?.brightness == 0 && size >= 24)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(Icons.nightlight_round, size: 8, color: NexGenPalette.textMedium),
+              )
+            else if (color != null && size >= 24)
               Container(
                 width: 4,
                 height: 4,
@@ -1420,13 +2009,17 @@ class _LuminaAICard extends ConsumerStatefulWidget {
   ConsumerState<_LuminaAICard> createState() => _LuminaAICardState();
 }
 
-class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
+class _LuminaAICardState extends ConsumerState<_LuminaAICard>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _ctrl = TextEditingController();
   bool _loading = false;
   String? _lastResponse;
 
   late final stt.SpeechToText _speech;
   bool _listening = false;
+
+  late final AnimationController _glowController;
+  late final Animation<double> _glowAnim;
 
   static const _quickActions = [
     'July 4th → Independence Blue 100%',
@@ -1437,10 +2030,18 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _glowAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
+    _glowController.dispose();
     _speech.stop();
     _ctrl.dispose();
     super.dispose();
@@ -1496,17 +2097,19 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
       if (result == null || result.changes.isEmpty) {
         setState(() {
-          _lastResponse =
+          _lastResponse = result?.message ??
               "Lumina couldn't find specific dates to update. Try something like "
               '"every Friday in April" or "turn off December 1st".';
         });
         return;
       }
 
-      // Store pending changes — user must tap Apply to commit them
+      // Show preview sheet — user confirms before committing
       ref.read(pendingCalendarProvider.notifier).state = result;
-      setState(() => _lastResponse = result.message);
       _ctrl.clear();
+      if (!context.mounted) return;
+      await _showPendingPreviewSheet(context, ref, result);
+      if (mounted) setState(() => _lastResponse = result.message);
     } catch (e) {
       debugPrint('LuminaCalendarService error: $e');
       if (mounted) setState(() => _lastResponse = 'Error: $e');
@@ -1517,10 +2120,34 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(autopilotEnabledProvider);
+    final autopilotOn = ref.watch(autopilotEnabledProvider);
+    final schedules = ref.watch(schedulesProvider);
     final pending = ref.watch(pendingCalendarProvider);
 
-    return ClipRRect(
+    // Highlight the AI bar when schedule is empty and autopilot is off
+    final bool showHighlight = schedules.isEmpty && !autopilotOn;
+
+    return AnimatedBuilder(
+      animation: _glowAnim,
+      builder: (context, child) {
+        final glowAlpha = showHighlight ? 0.25 + (_glowAnim.value * 0.35) : 0.0;
+        return Container(
+          decoration: showHighlight
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: NexGenPalette.cyan.withValues(alpha: glowAlpha),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                )
+              : null,
+          child: child!,
+        );
+      },
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -1530,13 +2157,13 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                NexGenPalette.cyan.withValues(alpha: 0.12),
-                NexGenPalette.violet.withValues(alpha: 0.08),
+                NexGenPalette.cyan.withValues(alpha: showHighlight ? 0.18 : 0.12),
+                NexGenPalette.violet.withValues(alpha: showHighlight ? 0.12 : 0.08),
               ],
             ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-                color: NexGenPalette.cyan.withValues(alpha: 0.35)),
+                color: NexGenPalette.cyan.withValues(alpha: showHighlight ? 0.55 : 0.35)),
           ),
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -1741,7 +2368,8 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
           ),
         ),
       ),
-    );
+    ), // end AnimatedBuilder child (ClipRRect)
+    ); // end AnimatedBuilder
   }
 }
 
@@ -1810,6 +2438,294 @@ class _AutopilotRow extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Empty States ─────────────────────────────────────────────────────────────
+
+/// State 1: Autopilot OFF, no schedules — invite user to use Lumina AI.
+class _AutopilotOffInvitation extends StatelessWidget {
+  const _AutopilotOffInvitation();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                NexGenPalette.cyan.withValues(alpha: 0.06),
+                NexGenPalette.violet.withValues(alpha: 0.04),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: NexGenPalette.cyan.withValues(alpha: 0.2),
+              width: 1,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            children: [
+              // Icon with gradient background
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      NexGenPalette.violet.withValues(alpha: 0.25),
+                      NexGenPalette.cyan.withValues(alpha: 0.25),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.auto_awesome_rounded,
+                    color: NexGenPalette.cyan, size: 24),
+              ),
+              const SizedBox(height: 16),
+
+              // Headline
+              Text(
+                'Your week is wide open',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 6),
+
+              // CTA pointing to Lumina AI bar
+              ShaderMask(
+                shaderCallback: (bounds) => LinearGradient(
+                  colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                ).createShader(bounds),
+                child: Text(
+                  'Ask Lumina to fill your week',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.arrow_upward_rounded,
+                      size: 14, color: NexGenPalette.cyan.withValues(alpha: 0.6)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Use the Lumina AI bar above',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Example prompts
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: const [
+                  _ExampleChip('"Warm white every night at sunset"'),
+                  _ExampleChip('"Christmas week — red & green chase"'),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Divider with "or"
+              Row(
+                children: [
+                  Expanded(child: Divider(color: NexGenPalette.line, height: 1)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('or',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: NexGenPalette.textMedium)),
+                  ),
+                  Expanded(child: Divider(color: NexGenPalette.line, height: 1)),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              // Autopilot nudge
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.smart_toy_rounded,
+                      size: 16, color: NexGenPalette.textMedium),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Turn on Autopilot and let Lumina handle it',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// State 2: Autopilot ON, schedule generation pending or in progress.
+class _AutopilotGeneratingState extends ConsumerWidget {
+  const _AutopilotGeneratingState();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lastGenerated = ref.watch(autopilotLastGeneratedProvider);
+    final needsRegen = ref.watch(needsScheduleRegenerationProvider);
+
+    // Compute next expected generation time
+    final DateTime? nextFire = lastGenerated?.add(const Duration(days: 7));
+    final bool isFirstRun = lastGenerated == null;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                NexGenPalette.cyan.withValues(alpha: 0.10),
+                NexGenPalette.violet.withValues(alpha: 0.06),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: NexGenPalette.cyan.withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            children: [
+              // Animated progress ring
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation(
+                          NexGenPalette.cyan.withValues(alpha: 0.7),
+                        ),
+                        backgroundColor: NexGenPalette.line,
+                      ),
+                    ),
+                    Icon(Icons.smart_toy_rounded,
+                        color: NexGenPalette.cyan, size: 20),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Headline
+              Text(
+                'Generating your schedule\u2026',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 8),
+
+              // Subtext
+              Text(
+                isFirstRun
+                    ? 'Lumina is crafting your first lighting plan based on '
+                      'your holidays, teams, and preferences.'
+                    : 'Lumina is refreshing your weekly lighting plan.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: NexGenPalette.textMedium,
+                      height: 1.5,
+                    ),
+              ),
+              const SizedBox(height: 16),
+
+              // Next fire time chip
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.update_rounded,
+                        size: 14, color: NexGenPalette.cyan),
+                    const SizedBox(width: 6),
+                    Text(
+                      nextFire != null && !needsRegen
+                          ? 'Next refresh: ${_kMonthShort[nextFire.month]} ${nextFire.day}, ${nextFire.year}'
+                          : 'Building your first week\u2026',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: NexGenPalette.cyan,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExampleChip extends StatelessWidget {
+  final String text;
+  const _ExampleChip(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: NexGenPalette.textMedium,
+              fontStyle: FontStyle.italic,
+              fontSize: 11,
+            ),
       ),
     );
   }
@@ -1940,26 +2856,25 @@ class _ScheduleCard extends ConsumerWidget {
         ? '${item.timeLabel} → ${item.offTimeLabel}'
         : item.timeLabel;
 
-    // Extract preview colors from WLED payload if available
-    final previewColors = <Color>[];
-    if (item.wledPayload != null) {
-      final seg = item.wledPayload!['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final col = seg[0] is Map ? seg[0]['col'] : null;
-        if (col is List) {
-          for (final c in col.take(3)) {
-            if (c is List && c.length >= 3) {
-              previewColors.add(Color.fromRGBO(c[0] as int, c[1] as int, c[2] as int, 1.0));
-            }
-          }
-        }
-      }
-    }
+    // Extract preview colors from WLED payload
+    final previewColors = _extractStripColors(null, item.wledPayload);
+    final effectId = _extractEffectId(item.wledPayload);
+    final effectType = effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid;
+    final speed = _extractNormalized(item.wledPayload, 'sx');
+
+    // Extract brightness from payload (top-level bri, 0-255)
+    final payloadBri = item.wledPayload?['bri'];
+    final briFraction = payloadBri is num ? (payloadBri / 255.0).clamp(0.0, 1.0) : 1.0;
+    final briPercent = payloadBri is num ? (payloadBri / 255.0 * 100).round() : null;
 
     // Extract effect name from action label
     final effectName = item.actionLabel.startsWith('Pattern: ')
         ? item.actionLabel.substring(9)
         : null;
+
+    final effectLabel = effectId != null
+        ? _wledEffectName(effectId)
+        : effectName ?? item.actionLabel;
 
     // Build recurrence label
     final recurrence = item.repeatDays.length == 7
@@ -1969,50 +2884,87 @@ class _ScheduleCard extends ConsumerWidget {
             ? 'Weekdays'
             : item.repeatDays.join(', ');
 
-    return ScheduleIdentityCard(
-      type: ScheduleEntryType.personalAutopilot,
-      patternName: effectName ?? item.actionLabel,
-      previewColors: previewColors,
-      effectName: effectName != null ? item.actionLabel : null,
-      timeLabel: timeDisplay,
-      recurrenceLabel: recurrence,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+    return GestureDetector(
+      onTap: () => _showScheduleDetailSheet(
+        context,
+        colors: previewColors.isNotEmpty ? previewColors : const [NexGenPalette.cyan],
+        effectType: effectType,
+        speed: speed,
+        brightness: briFraction,
+        patternName: effectName ?? item.actionLabel,
+        effectName: effectLabel,
+        onTime: item.timeLabel,
+        offTime: item.offTimeLabel,
+        brightnessPercent: briPercent,
+        source: 'Recurring Schedule',
+      ),
+      child: Column(
         children: [
-          IconButton(
-            tooltip: 'Edit',
-            onPressed: () => showScheduleEditor(context, ref, editing: item),
-            icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 18),
-            constraints: const BoxConstraints(minWidth: 32),
-            padding: EdgeInsets.zero,
-          ),
-          IconButton(
-            tooltip: 'Delete',
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Delete schedule?'),
-                  content: const Text('This action cannot be undone.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                    FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
-                  ],
+          // Pixel strip above the identity card
+          if (previewColors.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 0),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                child: PixelStripPreview(
+                  colors: previewColors,
+                  effectType: effectType,
+                  speed: speed,
+                  brightness: briFraction,
+                  pixelCount: 20,
+                  height: 24,
+                  borderRadius: 0,
+                  backgroundColor: const Color(0xFF0A0E14),
                 ),
-              );
-              if (ok == true) {
-                ref.read(schedulesProvider.notifier).remove(item.id);
-              }
-            },
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 18),
-            constraints: const BoxConstraints(minWidth: 32),
-            padding: EdgeInsets.zero,
-          ),
-          const SizedBox(width: 4),
-          CupertinoSwitch(
-            value: item.enabled,
-            activeColor: NexGenPalette.cyan,
-            onChanged: (v) => ref.read(schedulesProvider.notifier).toggle(item.id, v),
+              ),
+            ),
+          ScheduleIdentityCard(
+            type: ScheduleEntryType.personalAutopilot,
+            patternName: effectName ?? item.actionLabel,
+            previewColors: previewColors,
+            effectName: effectName != null ? item.actionLabel : null,
+            timeLabel: timeDisplay,
+            recurrenceLabel: recurrence,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Edit',
+                  onPressed: () => showScheduleEditor(context, ref, editing: item),
+                  icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 18),
+                  constraints: const BoxConstraints(minWidth: 32),
+                  padding: EdgeInsets.zero,
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Delete schedule?'),
+                        content: const Text('This action cannot be undone.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                          FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                        ],
+                      ),
+                    );
+                    if (ok == true) {
+                      ref.read(schedulesProvider.notifier).remove(item.id);
+                    }
+                  },
+                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 18),
+                  constraints: const BoxConstraints(minWidth: 32),
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(width: 4),
+                CupertinoSwitch(
+                  value: item.enabled,
+                  activeColor: NexGenPalette.cyan,
+                  onChanged: (v) => ref.read(schedulesProvider.notifier).toggle(item.id, v),
+                ),
+              ],
+            ),
           ),
         ],
       ),

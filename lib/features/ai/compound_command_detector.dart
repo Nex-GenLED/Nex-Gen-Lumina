@@ -43,6 +43,14 @@ class TemporalIntent {
   /// e.g., "to 10pm" → 22, "until midnight" → 0
   final int? endHour;
 
+  /// Resolved start date for a date-range command, or null if not specified.
+  /// e.g., "starting Monday" → next Monday, "starting April 5th" → April 5.
+  final DateTime? startDate;
+
+  /// Resolved end date for a date-range command, or null if not specified.
+  /// e.g., "through Friday" → next Friday, "through April 12th" → April 12.
+  final DateTime? endDate;
+
   const TemporalIntent({
     required this.recurrence,
     required this.startTrigger,
@@ -51,6 +59,8 @@ class TemporalIntent {
     this.weekdays = const [],
     this.startHour,
     this.endHour,
+    this.startDate,
+    this.endDate,
   });
 
   bool get usesSunsetSunrise =>
@@ -61,6 +71,20 @@ class TemporalIntent {
 
   /// Whether specific clock hours were parsed from the user's request.
   bool get hasClockTime => startHour != null || endHour != null;
+
+  /// Whether a specific date range was parsed from the user's request.
+  bool get hasDateRange => startDate != null && endDate != null;
+
+  /// Human-readable date range string for prompt injection.
+  String get dateRangeLabel {
+    if (startDate == null || endDate == null) return '';
+    const months = [
+      '', 'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    String fmt(DateTime d) => '${months[d.month]} ${d.day}';
+    return 'from ${fmt(startDate!)} through ${fmt(endDate!)}';
+  }
 
   /// Human-readable time window string for prompt injection.
   String get timeWindowLabel {
@@ -85,7 +109,9 @@ class TemporalIntent {
       'TemporalIntent(recurrence=${recurrence.name}, days=$dayCount, '
       'start=${startTrigger.name}, end=${endTrigger.name}'
       '${startHour != null ? ", startHour=$startHour" : ""}'
-      '${endHour != null ? ", endHour=$endHour" : ""})';
+      '${endHour != null ? ", endHour=$endHour" : ""}'
+      '${startDate != null ? ", startDate=$startDate" : ""}'
+      '${endDate != null ? ", endDate=$endDate" : ""})';
 }
 
 /// The result of detecting a compound (lighting + scheduling) command.
@@ -202,6 +228,17 @@ class CompoundCommandDetector {
   );
 
   // -----------------------------------------------------------------------
+  // Date range patterns
+  // -----------------------------------------------------------------------
+
+  /// Captures "starting X through Y" date range expressions.
+  /// X and Y can be day names, "today"/"tomorrow", or "Month Day" forms.
+  static final _dateRangePattern = RegExp(
+    r'\bstarting\s+(\w+(?:\s+\d{1,2}(?:st|nd|rd|th)?)?)\s+through\s+(\w+(?:\s+\d{1,2}(?:st|nd|rd|th)?)?)\b',
+    caseSensitive: false,
+  );
+
+  // -----------------------------------------------------------------------
   // Strip patterns — temporal language removed to isolate lighting intent
   // -----------------------------------------------------------------------
 
@@ -221,7 +258,8 @@ class CompoundCommandDetector {
     r'from\s+\d{1,2}(?::\d{2})?\s*[ap]m?\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*[ap]m|'
     r'at\s+\d{1,2}(?::\d{2})?\s*[ap]m|'
     r'(?:until|till|til)\s+\d{1,2}(?::\d{2})?\s*[ap]m|'
-    r'(?:until|till|til)\s+midnight'
+    r'(?:until|till|til)\s+midnight|'
+    r'starting\s+\w+(?:\s+\d{1,2}(?:st|nd|rd|th)?)?\s+through\s+\w+(?:\s+\d{1,2}(?:st|nd|rd|th)?)?'
     r')\b',
     caseSensitive: false,
   );
@@ -244,7 +282,8 @@ class CompoundCommandDetector {
   static CompoundCommandResult detect(String input) {
     final lower = input.toLowerCase();
 
-    final hasTemporalSignal = _thisWeekPattern.hasMatch(lower) ||
+    final hasTemporalSignal = _dateRangePattern.hasMatch(lower) ||
+        _thisWeekPattern.hasMatch(lower) ||
         _nextNDaysPattern.hasMatch(lower) ||
         _weekendsPattern.hasMatch(lower) ||
         _weekdaysPattern.hasMatch(lower) ||
@@ -288,8 +327,28 @@ class CompoundCommandDetector {
     RecurrenceType recurrence;
     int dayCount;
     List<int> weekdays = [];
+    DateTime? startDate;
+    DateTime? endDate;
 
-    if (_weekendsPattern.hasMatch(lower)) {
+    // Check "starting X through Y" date range first — it takes priority
+    // over general recurrence patterns since it carries explicit bounds.
+    final dateRangeMatch = _dateRangePattern.firstMatch(lower);
+    if (dateRangeMatch != null) {
+      final rawStart = dateRangeMatch.group(1) ?? '';
+      final rawEnd = dateRangeMatch.group(2) ?? '';
+      startDate = resolveDate(rawStart);
+      endDate = (startDate != null)
+          ? resolveDate(rawEnd, onOrAfter: startDate)
+          : resolveDate(rawEnd);
+      if (startDate != null && endDate != null) {
+        dayCount = endDate.difference(startDate).inDays + 1;
+        recurrence = dayCount == 1 ? RecurrenceType.once : RecurrenceType.daily;
+      } else {
+        // Fallback if date resolution fails
+        recurrence = RecurrenceType.once;
+        dayCount = 1;
+      }
+    } else if (_weekendsPattern.hasMatch(lower)) {
       recurrence = RecurrenceType.weekends;
       dayCount = 2;
       weekdays = [6, 7];
@@ -378,6 +437,8 @@ class CompoundCommandDetector {
       weekdays: weekdays,
       startHour: startHour,
       endHour: endHour,
+      startDate: startDate,
+      endDate: endDate,
     );
   }
 
@@ -420,5 +481,85 @@ class CompoundCommandDetector {
       'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
     };
     return map[word.toLowerCase()] ?? int.tryParse(word) ?? 7;
+  }
+
+  // -----------------------------------------------------------------------
+  // Date resolution helpers
+  // -----------------------------------------------------------------------
+
+  /// Resolve a human date expression to a [DateTime] on or after [onOrAfter].
+  ///
+  /// Supports day names ("monday"), relative words ("today", "tomorrow"),
+  /// and month+day forms ("April 5th", "Dec 25").
+  /// Exposed as `@visibleForTesting` so unit tests can inject [now].
+  @visibleForTesting
+  static DateTime? resolveDate(
+    String text, {
+    DateTime? onOrAfter,
+    DateTime? now,
+  }) {
+    final t = text.trim().toLowerCase();
+    final clock = now ?? DateTime.now();
+    final today = DateTime(clock.year, clock.month, clock.day);
+    final earliest = onOrAfter ?? today;
+
+    if (t == 'today') return today.isBefore(earliest) ? earliest : today;
+    if (t == 'tomorrow') {
+      final tom = today.add(const Duration(days: 1));
+      return tom.isBefore(earliest) ? earliest : tom;
+    }
+
+    // Day of week
+    const dayNames = {
+      'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4,
+      'friday': 5, 'saturday': 6, 'sunday': 7,
+    };
+    if (dayNames.containsKey(t)) {
+      final target = dayNames[t]!;
+      var candidate = earliest;
+      // Walk forward until we land on the target day of week
+      for (int i = 0; i < 7; i++) {
+        if (candidate.weekday == target) return candidate;
+        candidate = candidate.add(const Duration(days: 1));
+      }
+      return candidate; // unreachable, but safe
+    }
+
+    // Month + optional day: "april 5th", "december 25", "jan", "july 4"
+    final monthDayRe = RegExp(
+      r'^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|'
+      r'july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+      r'(?:\s+(\d{1,2})(?:st|nd|rd|th)?)?$',
+    );
+    final mMatch = monthDayRe.firstMatch(t);
+    if (mMatch != null) {
+      final month = _parseMonth(mMatch.group(1)!);
+      final day = int.tryParse(mMatch.group(2) ?? '') ?? 1;
+      var candidate = DateTime(clock.year, month, day);
+      if (candidate.isBefore(earliest)) {
+        candidate = DateTime(clock.year + 1, month, day);
+      }
+      return candidate;
+    }
+
+    return null;
+  }
+
+  static int _parseMonth(String m) {
+    const months = {
+      'jan': 1, 'january': 1,
+      'feb': 2, 'february': 2,
+      'mar': 3, 'march': 3,
+      'apr': 4, 'april': 4,
+      'may': 5,
+      'jun': 6, 'june': 6,
+      'jul': 7, 'july': 7,
+      'aug': 8, 'august': 8,
+      'sep': 9, 'sept': 9, 'september': 9,
+      'oct': 10, 'october': 10,
+      'nov': 11, 'november': 11,
+      'dec': 12, 'december': 12,
+    };
+    return months[m.toLowerCase()] ?? 1;
   }
 }

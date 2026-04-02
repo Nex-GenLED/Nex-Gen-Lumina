@@ -49,6 +49,10 @@ exports.notifyDay2Team = notifyDay2Team;
 const { notifyReferrerOfApproval } = require("./lib/notifyReferrerOfApproval");
 exports.notifyReferrerOfApproval = notifyReferrerOfApproval;
 
+// Import TypeScript-compiled weekly brief scheduled function (Sunday 18:30 UTC)
+const { sendWeeklyBrief } = require("./lib/sendWeeklyBrief");
+exports.sendWeeklyBrief = sendWeeklyBrief;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

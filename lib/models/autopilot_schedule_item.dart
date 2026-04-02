@@ -79,6 +79,10 @@ class AutopilotScheduleItem {
   /// Duration in minutes before auto-off (null = no auto-off).
   final int? durationMinutes;
 
+  /// Lumina's narrative voice for this event.
+  /// e.g., "Thursday: Chiefs vs. Raiders kickoff — red and gold pulse at game time."
+  final String? message;
+
   const AutopilotScheduleItem({
     required this.id,
     required this.scheduledTime,
@@ -98,6 +102,7 @@ class AutopilotScheduleItem {
     this.wasAutoApplied = false,
     this.eventName,
     this.durationMinutes,
+    this.message,
   });
 
   /// Create from Firestore document.
@@ -134,6 +139,7 @@ class AutopilotScheduleItem {
       wasAutoApplied: json['was_auto_applied'] as bool? ?? false,
       eventName: json['event_name'] as String?,
       durationMinutes: json['duration_minutes'] as int?,
+      message: json['message'] as String?,
     );
   }
 
@@ -158,6 +164,7 @@ class AutopilotScheduleItem {
       'was_auto_applied': wasAutoApplied,
       if (eventName != null) 'event_name': eventName,
       if (durationMinutes != null) 'duration_minutes': durationMinutes,
+      if (message != null) 'message': message,
     };
   }
 
@@ -181,6 +188,7 @@ class AutopilotScheduleItem {
     bool? wasAutoApplied,
     String? eventName,
     int? durationMinutes,
+    String? message,
   }) {
     return AutopilotScheduleItem(
       id: id ?? this.id,
@@ -201,6 +209,7 @@ class AutopilotScheduleItem {
       wasAutoApplied: wasAutoApplied ?? this.wasAutoApplied,
       eventName: eventName ?? this.eventName,
       durationMinutes: durationMinutes ?? this.durationMinutes,
+      message: message ?? this.message,
     );
   }
 

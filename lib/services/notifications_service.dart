@@ -1,3 +1,5 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
@@ -21,9 +23,62 @@ class NotificationsService {
         initSettings,
         onDidReceiveNotificationResponse: _onNotificationResponse,
       );
+
+      // Handle FCM data messages (server-sent push notifications like weekly brief).
+      // onMessageOpenedApp: user tapped the notification while app was in background.
+      // getInitialMessage: app was terminated and opened via the notification.
+      if (!kIsWeb) {
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleFcmTap);
+        final initial = await FirebaseMessaging.instance.getInitialMessage();
+        if (initial != null) {
+          // Delay slightly so the navigator is mounted before pushing.
+          Future.delayed(const Duration(milliseconds: 500), () {
+            _handleFcmTap(initial);
+          });
+        }
+      }
+
       _initialized = true;
     } catch (e) {
       debugPrint('Notifications init failed: $e');
+    }
+  }
+
+  /// Handle taps on server-sent FCM push notifications.
+  ///
+  /// The weekly brief Cloud Function sends data: { type: "weeklyBrief",
+  /// route: "/autopilot-schedule", date: "2026-04-06" }.
+  static void _handleFcmTap(RemoteMessage message) {
+    try {
+      final data = message.data;
+      final type = data['type'] as String?;
+
+      debugPrint('FCM notification tapped: type=$type data=$data');
+
+      if (type == 'weekly_brief' || type == 'weeklyBrief') {
+        final dateStr = data['date'] as String?;
+        final route = data['route'] as String?;
+        final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
+        final context = navigatorKey?.currentContext;
+        if (context != null) {
+          context.push(
+            route ?? AppRoutes.autopilotSchedule,
+            extra: date,
+          );
+        }
+        return;
+      }
+
+      // Fallback: if a route is provided, navigate to it directly.
+      final route = data['route'] as String?;
+      if (route != null) {
+        final context = navigatorKey?.currentContext;
+        if (context != null) {
+          context.push(route);
+        }
+      }
+    } catch (e) {
+      debugPrint('FCM tap handler failed: $e');
     }
   }
 
@@ -233,6 +288,33 @@ class NotificationsService {
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
+    }
+  }
+
+  /// Show an autopilot weekly schedule preview notification.
+  static Future<void> showWeeklyBrief(String title, String body, {String? weekDate}) async {
+    try {
+      const android = AndroidNotificationDetails(
+        'autopilot_weekly',
+        'Weekly Schedule Preview',
+        channelDescription: 'Sunday evening summary of your upcoming lighting schedule',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+        styleInformation: BigTextStyleInformation(''),
+        sound: RawResourceAndroidNotificationSound('default'),
+        playSound: true,
+      );
+      const iOS = DarwinNotificationDetails();
+      const details = NotificationDetails(android: android, iOS: iOS);
+      await _plugin.show(
+        8001,
+        title,
+        body,
+        details,
+        payload: weekDate,
+      );
+    } catch (e) {
+      debugPrint('Show weekly brief notification failed: $e');
     }
   }
 

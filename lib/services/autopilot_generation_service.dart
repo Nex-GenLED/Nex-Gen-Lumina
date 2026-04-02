@@ -167,10 +167,12 @@ class AutopilotGenerationService {
       double confidence;
 
       try {
-        // Use LuminaBrain to generate WLED JSON (using Ref-compatible variant)
+        // Autopilot uses temperature 0.7 for creative variety across days.
+        // See LuminaAI.generateWledJson() for the full temperature policy.
         wledPayload = await LuminaBrain.generateWledJsonFromRef(
           _ref,
           prompt,
+          temperature: 0.7,
         );
         patternName = event.name;
         confidence = _calculateConfidence(event, profile);
@@ -199,6 +201,12 @@ class AutopilotGenerationService {
         effectId: event.suggestedEffectId,
         createdAt: DateTime.now(),
         eventName: event.name,
+        message: _buildNarrative(
+          event: event,
+          patternName: patternName,
+          scheduledTime: scheduledTime,
+          wledPayload: wledPayload,
+        ),
       );
     } catch (e) {
       debugPrint('AutopilotGeneration: Failed to generate suggestion: $e');
@@ -251,6 +259,7 @@ class AutopilotGenerationService {
         confidenceScore: 1.0,
         wledPayload: wledPayload,
         createdAt: DateTime.now(),
+        message: 'Warm white comes on at sunset — a soft glow to welcome you home.',
       );
     } catch (e) {
       debugPrint('AutopilotGeneration: Failed to generate daily warm white: $e');
@@ -324,16 +333,23 @@ class AutopilotGenerationService {
         vibeLevel: profile.vibeLevel ?? 0.5,
       );
 
+      final pName = pattern['name'] as String;
+      final dayName = _dayOfWeekName(day.weekday);
+      final narrativeMsg = isWeekend
+          ? '$dayName evening — $pName sets the weekend mood.'
+          : '$dayName night — $pName keeps things easy.';
+
       defaults.add(AutopilotScheduleItem(
         id: _uuid.v4(),
         scheduledTime: scheduledTime,
         repeatDays: const [],
-        patternName: pattern['name'] as String,
+        patternName: pName,
         reason: isWeekend ? 'Weekend ambiance' : 'Weeknight lighting',
         trigger: trigger,
         confidenceScore: 0.6,
         wledPayload: pattern['payload'] as Map<String, dynamic>,
         createdAt: DateTime.now(),
+        message: narrativeMsg,
       ));
     }
 
@@ -596,6 +612,88 @@ class AutopilotGenerationService {
   /// Get day of year for grouping.
   int _dayOfYear(DateTime date) {
     return date.difference(DateTime(date.year, 1, 1)).inDays;
+  }
+
+  /// Build a narrative message — Lumina's voice describing what's happening.
+  String _buildNarrative({
+    required CalendarEvent event,
+    required String patternName,
+    required DateTime scheduledTime,
+    required Map<String, dynamic> wledPayload,
+  }) {
+    final dayName = _dayOfWeekName(scheduledTime.weekday);
+    final colorHint = _narrativeColorHint(wledPayload);
+
+    switch (event.type) {
+      case CalendarEventType.sportGame:
+        final matchup = event.name;
+        if (colorHint.isNotEmpty) {
+          return '$dayName: $matchup kickoff — $colorHint at game time.';
+        }
+        return '$dayName: $matchup — team colors light up the house.';
+
+      case CalendarEventType.holiday:
+        if (colorHint.isNotEmpty) {
+          return '$dayName: ${event.name} — $colorHint to set the spirit.';
+        }
+        return '$dayName: ${event.name} — the house gets dressed up.';
+
+      case CalendarEventType.seasonal:
+        return '$dayName: $patternName marks the turn of the season.';
+
+      case CalendarEventType.custom:
+        return '$dayName: $patternName for ${event.name}.';
+    }
+  }
+
+  /// Extract a human-readable color description from WLED payload colors.
+  String _narrativeColorHint(Map<String, dynamic> wledPayload) {
+    final seg = wledPayload['seg'];
+    if (seg is! List || seg.isEmpty) return '';
+    final col = seg[0]['col'];
+    if (col is! List || col.isEmpty) return '';
+
+    final names = <String>[];
+    for (final c in col.take(2)) {
+      if (c is List && c.length >= 3) {
+        names.add(_colorName(c[0] as int, c[1] as int, c[2] as int));
+      }
+    }
+    if (names.isEmpty) return '';
+    if (names.length == 1) return '${names[0]} pulse';
+    return '${names[0]} and ${names[1]} pulse';
+  }
+
+  /// Approximate a human-readable color name from RGB.
+  String _colorName(int r, int g, int b) {
+    // Warm white detection
+    if (r > 200 && g > 140 && g < 200 && b < 120) return 'warm gold';
+    if (r > 200 && g > 200 && b > 200) return 'white';
+
+    // Dominant channel detection
+    final max = [r, g, b].reduce((a, b2) => a > b2 ? a : b2);
+    if (max < 30) return 'deep black';
+
+    if (r == max && g < 80 && b < 80) return 'red';
+    if (r == max && g > 80 && g < 180 && b < 80) return 'orange';
+    if (r == max && g >= 180 && b < 80) return 'gold';
+    if (g == max && r < 80 && b < 80) return 'green';
+    if (g == max && r < 80 && b > 80) return 'teal';
+    if (b == max && r < 80 && g < 80) return 'blue';
+    if (b == max && r > 80) return 'purple';
+    if (r > 200 && b > 200 && g < 80) return 'magenta';
+    if (r > 200 && g > 200 && b < 80) return 'yellow';
+
+    return 'vivid';
+  }
+
+  /// Day-of-week name from weekday number.
+  String _dayOfWeekName(int weekday) {
+    const names = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+      'Friday', 'Saturday', 'Sunday',
+    ];
+    return names[weekday - 1];
   }
 
   /// Get vibe description for prompts.

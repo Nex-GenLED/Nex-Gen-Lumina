@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
@@ -32,6 +34,12 @@ class _AutopilotSuggestionsCardState
 
     final displayCount =
         _showAll ? pendingSuggestions.length : pendingSuggestions.length.clamp(0, 3);
+
+    // Collect narrative messages for the voice card
+    final narratives = pendingSuggestions
+        .where((s) => s.message != null && s.message!.isNotEmpty)
+        .map((s) => s.message!)
+        .toList();
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -71,6 +79,9 @@ class _AutopilotSuggestionsCardState
               ],
             ),
           ),
+          // Lumina AI narrative card — above the suggestions list
+          if (narratives.isNotEmpty)
+            _LuminaVoiceCard(narratives: narratives),
           const Divider(),
           // Suggestions list
           ListView.separated(
@@ -418,6 +429,114 @@ class _SuggestionTileState extends State<_SuggestionTile> {
     final period = time.hour >= 12 ? 'PM' : 'AM';
     final monthDay = '${time.month}/${time.day}';
     return '$monthDay at $hour:$minute $period';
+  }
+}
+
+/// Lumina AI response card — gradient border, glassmorphic, narrative voice.
+///
+/// Displays above the pending changes list to give Lumina a visible
+/// personality. Each narrative is a one-liner generated per event:
+/// "Thursday: Chiefs vs. Raiders kickoff — red and gold pulse at game time."
+class _LuminaVoiceCard extends StatelessWidget {
+  final List<String> narratives;
+
+  const _LuminaVoiceCard({required this.narratives});
+
+  static const _gradientColors = [
+    NexGenPalette.cyan,
+    NexGenPalette.violet,
+    NexGenPalette.cyan,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: const LinearGradient(
+            colors: _gradientColors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        padding: const EdgeInsets.all(1.5), // gradient border thickness
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12.5),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: NexGenPalette.gunmetal.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(12.5),
+              ),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Lumina header row
+                  Row(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [
+                              NexGenPalette.cyan,
+                              NexGenPalette.violet.withValues(alpha: 0.8),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                        ).createShader(bounds),
+                        child: const Text(
+                          'Lumina',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // Narrative lines
+                  ...narratives.map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        line,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.white.withValues(alpha: 0.88),
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

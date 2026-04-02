@@ -4,7 +4,9 @@
 // Provides the CalendarScheduleNotifier, pending-changes state,
 // and the LuminaCalendarService that calls the Anthropic API.
 
+import 'dart:async';
 import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -15,6 +17,8 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/autopilot/autopilot_conflict_dialog.dart';
+import 'package:nexgen_command/utils/sun_utils.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +123,63 @@ class CalendarScheduleNotifier
       }
     }
     return ScheduleConflictInfo(conflictingItems: seen.values.toList());
+  }
+
+  // ─── Autopilot conflict detection ───────────────────────────────
+
+  /// Returns date keys from [entries] that would overwrite an existing
+  /// [CalendarEntryType.user] record.  Used by autopilot to decide
+  /// whether to show a conflict card.
+  List<String> findUserConflictKeys(List<CalendarEntry> entries) {
+    final conflicting = <String>[];
+    for (final entry in entries) {
+      final existing = state[entry.dateKey];
+      if (existing != null && existing.type == CalendarEntryType.user) {
+        conflicting.add(entry.dateKey);
+      }
+    }
+    return conflicting;
+  }
+
+  /// Filter [entries] according to [choice], returning only the entries
+  /// that should actually be written.
+  ///
+  /// - [keepMine]: drop any entry whose date has an existing user record.
+  /// - [useAutopilot]: keep all entries (overwrites user records).
+  /// - [merge]: keep autopilot's pattern/color but preserve user's times
+  ///   and brightness where set.
+  List<CalendarEntry> resolveAutopilotConflicts(
+    List<CalendarEntry> entries,
+    AutopilotConflictChoice choice,
+  ) {
+    if (choice == AutopilotConflictChoice.cancel ||
+        choice == AutopilotConflictChoice.keepMine) {
+      // Drop entries that conflict with user records
+      return entries
+          .where((e) {
+            final existing = state[e.dateKey];
+            return existing == null || existing.type != CalendarEntryType.user;
+          })
+          .toList();
+    }
+
+    if (choice == AutopilotConflictChoice.merge) {
+      return entries.map((e) {
+        final existing = state[e.dateKey];
+        if (existing != null && existing.type == CalendarEntryType.user) {
+          // Keep user's times and brightness; take autopilot's pattern/color
+          return e.copyWith(
+            onTime: existing.onTime ?? e.onTime,
+            offTime: existing.offTime ?? e.offTime,
+            brightness: existing.brightness > 0 ? existing.brightness : e.brightness,
+          );
+        }
+        return e;
+      }).toList();
+    }
+
+    // useAutopilot — pass through as-is
+    return entries;
   }
 
   // ─── Mutations ─────────────────────────────────────────────────
@@ -229,10 +290,19 @@ final pendingCalendarProvider =
 class LuminaCalendarService {
   LuminaCalendarService._();
 
-  // Inline system instructions sent as part of the user message so that
-  // LuminaBrain's own system prompt doesn't conflict.
-  static const _prefix = '''
+  /// Format a 24-hour time string from a DateTime (e.g. "18:30").
+  static String _hhmm(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  /// Build the system instructions with dynamic sun times and timezone.
+  static String _buildPrefix({
+    required String sunsetTime,
+    required String sunriseTime,
+    required String timezone,
+  }) => '''
 SCHEDULE_CALENDAR_MODE — You MUST respond with ONLY a raw JSON object. No markdown fences, no explanation, no text before or after the JSON.
+
+USER_TIMEZONE: $timezone
 
 Required JSON format:
 {
@@ -253,9 +323,10 @@ Rules:
 • YOU MUST ALWAYS include at least one entry in "changes" with a valid "date" in YYYY-MM-DD format.
 • For relative dates like "next week", "this weekend", "tomorrow", etc., calculate the actual calendar dates from today's date (provided below) and list EACH date explicitly.
 • "next week" means the 7 days of the following Monday–Sunday week. "nightly" or "every night" means every day in the range.
-• For ranges (e.g. "every Friday in April", "nightly next week"), include one entry PER matching day.
+• For ranges (e.g. "every Friday in April 2026", "nightly next week"), include one entry PER matching day.
 • For "off" / "turn off": set color to null and brightness to 0.
-• onTime / offTime use 24-hour format ("18:00", "23:30"). Use "sunset" or "17:30" for sunset, "sunrise" or "06:30" for sunrise. null is also valid.
+• onTime / offTime use 24-hour format ("18:00", "23:30"). Use "sunset" or "$sunsetTime" for sunset, "sunrise" or "$sunriseTime" for sunrise. null is also valid.
+• Today's sunset is $sunsetTime and sunrise is $sunriseTime in the user's timezone ($timezone). Use these exact times when the user says "sunset" or "sunrise".
 • "brightness" is 0–100.
 • Common patterns and their hex colors:
     Warm White #FFE8C0 | Ocean Pulse #00C2FF | Ember Glow #FF6B35
@@ -267,7 +338,8 @@ Rules:
 ''';
 
   /// Calls Lumina AI and returns structured pending calendar changes.
-  /// Returns null if the response cannot be parsed into valid date entries.
+  /// Returns a [PendingCalendarChanges] with a user-facing error message
+  /// if the request fails, or valid changes on success.
   static Future<PendingCalendarChanges?> parseRequest(
     WidgetRef ref,
     String userRequest,
@@ -277,15 +349,69 @@ Rules:
     final dayStr = _dayName(today.weekday);
     final monthStr = _monthName(today.month);
 
-    final systemContext =
-        '${_prefix}Today is $todayStr ($dayStr, $monthStr ${today.day}, ${today.year}).';
+    // Resolve user coordinates for sun time calculation
+    final user = ref.read(currentUserProfileProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    final lat = user?.latitude;
+    final lon = user?.longitude;
 
-    final raw = await LuminaBrain.chatCalendar(
-      ref,
-      systemContext,
-      'User schedule request: $userRequest',
+    // Compute today's actual sunset/sunrise from device lat/lng
+    String sunsetTime = '18:00';
+    String sunriseTime = '06:30';
+    if (lat != null && lon != null) {
+      final sunset = SunUtils.sunsetLocal(lat, lon, today);
+      final sunrise = SunUtils.sunriseLocal(lat, lon, today);
+      if (sunset != null) sunsetTime = _hhmm(sunset);
+      if (sunrise != null) sunriseTime = _hhmm(sunrise);
+    }
+
+    // Resolve device timezone name
+    final tzOffset = today.timeZoneOffset;
+    final tzName = today.timeZoneName;
+    final sign = tzOffset.isNegative ? '-' : '+';
+    final absHours = tzOffset.inHours.abs().toString().padLeft(2, '0');
+    final absMinutes = (tzOffset.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    final timezone = '$tzName (UTC$sign$absHours:$absMinutes)';
+
+    final prefix = _buildPrefix(
+      sunsetTime: sunsetTime,
+      sunriseTime: sunriseTime,
+      timezone: timezone,
     );
 
+    final systemContext =
+        '${prefix}Today is $todayStr ($dayStr, $monthStr ${today.day}, ${today.year}).';
+
+    String raw;
+    try {
+      raw = await LuminaBrain.chatCalendar(
+        ref,
+        systemContext,
+        'User schedule request: $userRequest',
+      );
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('📅 Calendar AI: Firebase error ${e.code} — ${e.message}');
+      return PendingCalendarChanges(
+        message: "Couldn't reach Lumina right now. Check your connection and try again.",
+        changes: const [],
+      );
+    } on TimeoutException catch (e) {
+      debugPrint('📅 Calendar AI: Timeout — $e');
+      return PendingCalendarChanges(
+        message: "Couldn't reach Lumina right now. Check your connection and try again.",
+        changes: const [],
+      );
+    } catch (e) {
+      debugPrint('📅 Calendar AI: Unexpected error — $e');
+      return PendingCalendarChanges(
+        message: "Couldn't reach Lumina right now. Check your connection and try again.",
+        changes: const [],
+      );
+    }
+
+    debugPrint('📅 Calendar AI raw response: $raw');
     return _parseAiResponse(raw);
   }
 
@@ -306,8 +432,12 @@ Rules:
     Map<String, dynamic> parsed;
     try {
       parsed = jsonDecode(cleaned) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
+    } catch (e) {
+      debugPrint('📅 Calendar AI: JSON decode failed — $e\nRaw: $raw');
+      return PendingCalendarChanges(
+        message: 'Lumina had trouble reading that. Try rephrasing your request.',
+        changes: const [],
+      );
     }
 
     final message =
@@ -320,7 +450,12 @@ Rules:
         .whereType<CalendarEntry>()
         .toList();
 
-    if (changes.isEmpty) return null;
+    if (changes.isEmpty) {
+      return PendingCalendarChanges(
+        message: 'No dates matched — did you mean this week or a specific date?',
+        changes: const [],
+      );
+    }
     return PendingCalendarChanges(message: message, changes: changes);
   }
 }
