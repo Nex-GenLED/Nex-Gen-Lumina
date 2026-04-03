@@ -38,6 +38,7 @@ unsigned long lastHeartbeatTime = 0;
 unsigned long commandsProcessed = 0;
 unsigned long commandErrors = 0;
 unsigned long bootTime = 0;
+unsigned long lastSuccessfulPoll = 0; // millis() of last successful command or heartbeat
 
 // Firebase Auth tokens
 String firebaseIdToken = "";
@@ -165,7 +166,17 @@ void loop() {
     lastHeartbeatTime = millis();
     if (firebaseReady && isPaired && WiFi.status() == WL_CONNECTED && !firebaseIdToken.isEmpty()) {
       writeHeartbeat();
+      lastSuccessfulPoll = millis();
     }
+  }
+
+  // Watchdog: reboot if no successful Firestore activity for 5 minutes.
+  // Catches silent failures like auth token corruption, memory leaks,
+  // or WiFi connected but no internet.
+  if (lastSuccessfulPoll > 0 && millis() - lastSuccessfulPoll > 300000UL) {
+    Serial.println("WATCHDOG: No successful activity for 5 minutes — rebooting");
+    delay(1000);
+    ESP.restart();
   }
 
   delay(10);
@@ -370,6 +381,7 @@ void setupFirebase() {
     Serial.println("Firebase Auth: signed in successfully");
     firebaseReady = true;
     firebaseAuthenticated = true;
+    lastSuccessfulPoll = millis();
   } else {
     Serial.println("Firebase Auth: FAILED to sign in");
     Serial.println("Bridge will retry on next poll cycle");
@@ -608,6 +620,7 @@ void executeCommand(const String& commandId, JsonObject& fields) {
     Serial.println("  PING — acknowledging");
     updateCommandStatus(commandId, "completed");
     commandsProcessed++;
+    lastSuccessfulPoll = millis();
     return;
   }
 
@@ -659,6 +672,7 @@ void executeCommand(const String& commandId, JsonObject& fields) {
     Serial.println("  SUCCESS!");
     updateCommandStatus(commandId, "completed", "", response);
     commandsProcessed++;
+    lastSuccessfulPoll = millis();
   }
 }
 

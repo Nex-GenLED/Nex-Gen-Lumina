@@ -718,38 +718,40 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Replace Photo',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Replace Photo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
-              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
-              title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.gallery);
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
+                title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
+                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.gallery);
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );

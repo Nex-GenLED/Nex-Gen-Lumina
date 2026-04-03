@@ -69,11 +69,12 @@ class ConnectivityService {
     final currentSsid = await getCurrentSsid();
 
     // If we can't determine current SSID (e.g. Android location permission
-    // not granted), assume REMOTE. Direct HTTP only works on the home LAN,
-    // but the cloud relay works everywhere — so remote is the safe default.
+    // not granted), assume LOCAL. Direct HTTP to the controller is the
+    // primary control path — defaulting to remote when SSID is unavailable
+    // breaks local control for users without location permission.
     if (currentSsid == null || currentSsid.isEmpty) {
-      debugPrint('ConnectivityService: Cannot determine current SSID, assuming remote');
-      return false;
+      debugPrint('ConnectivityService: Cannot determine current SSID, assuming local');
+      return true;
     }
 
     // SECURITY: Compare using hashed SSID
@@ -82,8 +83,8 @@ class ConnectivityService {
       debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
       return isHome;
     } catch (e) {
-      debugPrint('ConnectivityService: SSID comparison failed ($e), assuming remote');
-      return false;
+      debugPrint('ConnectivityService: SSID comparison failed ($e), assuming local');
+      return true;
     }
   }
 

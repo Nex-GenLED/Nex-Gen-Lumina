@@ -280,45 +280,47 @@ class _AssignmentSheetState extends ConsumerState<_AssignmentSheet> {
                       isSelected: _selectedType == type,
                       onTap: () => setState(() => _selectedType = type),
                     ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Location label — pinned below the scrollable fixture list
-            Text('Location Label',
-                style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _labelCtrl,
-              decoration: const InputDecoration(
-                hintText: 'e.g. Front Roofline, Patio Edge',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Action buttons — always visible at bottom
-            Row(
-              children: [
-                if (widget.existing != null)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _removeAssignment,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Remove'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error,
-                      ),
+                  const SizedBox(height: 12),
+                  // Location label
+                  Text('Location Label',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _labelCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. Front Roofline, Patio Edge',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                if (widget.existing != null) const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _selectedType != null ? _saveAssignment : null,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Save'),
+                  const SizedBox(height: 12),
+                  // Action buttons
+                  Row(
+                    children: [
+                      if (widget.existing != null)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _removeAssignment,
+                            icon: const Icon(Icons.delete_outline),
+                            label: const Text('Remove'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                      if (widget.existing != null) const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _selectedType != null ? _saveAssignment : null,
+                          icon: const Icon(Icons.check),
+                          label: const Text('Save'),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  // Extra space so content clears the glass dock nav bar
+                  const SizedBox(height: 32),
+                ],
+              ),
             ),
           ],
         ),

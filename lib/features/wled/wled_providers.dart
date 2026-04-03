@@ -243,26 +243,15 @@ final selectedControllerIdProvider = Provider<String?>((ref) {
   );
   final selectedIp = ref.watch(selectedDeviceIpProvider);
 
-  if (selectedIp == null || controllers.isEmpty) {
-    debugPrint('🔍 ControllerIdMatch: BAIL — selectedIp=$selectedIp, '
-        'controllers.length=${controllers.length}');
-    return null;
-  }
+  if (selectedIp == null || controllers.isEmpty) return null;
 
   // Find the controller with matching IP
-  debugPrint('🔍 ControllerIdMatch: looking for selectedIp="$selectedIp" '
-      '(len=${selectedIp.length}) among ${controllers.length} controller(s)');
   for (final controller in controllers) {
-    final match = controller.ip == selectedIp;
-    debugPrint('🔍 ControllerIdMatch:   controller.id="${controller.id}" '
-        'controller.ip="${controller.ip}" (len=${controller.ip.length}) → match=$match');
-    if (match) {
-      debugPrint('🔍 ControllerIdMatch: ✅ FOUND controllerId="${controller.id}"');
+    if (controller.ip == selectedIp) {
       return controller.id;
     }
   }
 
-  debugPrint('🔍 ControllerIdMatch: ❌ NO MATCH — controllerId=null');
   return null;
 });
 
@@ -353,10 +342,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       if (_polling) return;
       _polling = true;
       try {
-        final isRemote = ref.read(isRemoteModeProvider);
-        if (isRemote) debugPrint('🔬 REMOTE POLL: firing getState (repo=${service.runtimeType})');
         final data = await service.getState();
-        if (isRemote) debugPrint('🔬 REMOTE POLL: result = ${data == null ? "null" : "{${data.keys.take(5).join(", ")}...}"}');
+        final isRemote = ref.read(isRemoteModeProvider);
         if (data == null) {
           if (state.connected) {
             state = state.copyWith(connected: false);
@@ -365,9 +352,7 @@ class WledNotifier extends Notifier<WledStateModel> {
           // after repeated failures to prevent stale "Connected" indicator.
           if (isRemote) {
             _consecutiveRemoteFailures++;
-            debugPrint('🔬 REMOTE POLL: failure count = $_consecutiveRemoteFailures');
             if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
-              debugPrint('🔬 REMOTE POLL: bridge marked unreachable');
               ref.read(bridgeReachableProvider.notifier).state = false;
             }
           }
@@ -379,7 +364,6 @@ class WledNotifier extends Notifier<WledStateModel> {
         if (isRemote) {
           _consecutiveRemoteFailures = 0;
           ref.read(bridgeReachableProvider.notifier).state = true;
-          debugPrint('🔬 REMOTE POLL: connected = true');
         }
         try {
           _applyStateData(data);

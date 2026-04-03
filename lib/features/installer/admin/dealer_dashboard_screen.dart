@@ -1284,7 +1284,8 @@ class _PendingPayoutCard extends ConsumerWidget {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => Padding(
+      builder: (ctx) => SafeArea(
+        child: Padding(
         padding: EdgeInsets.fromLTRB(
             24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
         child: Column(
@@ -1393,6 +1394,7 @@ class _PendingPayoutCard extends ConsumerWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

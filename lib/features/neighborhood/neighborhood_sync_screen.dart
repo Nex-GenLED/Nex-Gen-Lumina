@@ -2419,7 +2419,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
 
     return ListView.builder(
       controller: scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       itemCount: _nearbyGroups!.length,
       itemBuilder: (context, index) {
         final group = _nearbyGroups![index];

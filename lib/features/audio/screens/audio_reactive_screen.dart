@@ -141,7 +141,7 @@ class _AudioReactiveScreenState extends ConsumerState<AudioReactiveScreen> {
     final effectNames = ref.watch(wledEffectNamesProvider(ip)).valueOrNull ?? [];
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
       children: [
         // Status header
         _buildStatusCard(context, isAudioEffectActive),
