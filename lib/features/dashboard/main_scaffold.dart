@@ -1,7 +1,12 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
+import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/demo/demo_lead_service.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/geofence/geofence_monitor.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
@@ -10,6 +15,7 @@ import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
+import 'package:nexgen_command/theme.dart';
 
 /// Root shell with persistent Bottom Navigation (Glass Dock).
 /// Receives a [StatefulNavigationShell] from GoRouter's StatefulShellRoute
@@ -109,6 +115,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       }
     });
 
+    final isBrowsing = ref.watch(demoBrowsingProvider);
+
     return FeatureTourOverlay(
       child: PopScope(
         canPop: false,
@@ -119,35 +127,213 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
             _onTap(0);
           }
         },
-        child: Scaffold(
-          extendBody: true,
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          body: Stack(
-            children: [
-              Positioned.fill(child: widget.navigationShell),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: isSimpleMode
-                    ? SimpleNavBar(
-                        index: shellIndex == 3 ? 1 : 0,
-                        onTap: (i) => _onTap(i == 0 ? 0 : 3),
-                      )
-                    : GlassDockNavBar(
-                        index: shellIndex,
-                        onTap: _onTap,
-                        onLuminaTap: _handleLuminaTap,
-                        onLuminaLongPress: _handleLuminaLongPress,
-                        isVoiceListening: luminaState.isOpen &&
-                            luminaState.mode == LuminaSheetMode.listening,
-                        hasActiveSession: luminaState.hasActiveSession,
-                      ),
+        child: Column(
+          children: [
+            if (isBrowsing) _DemoBanner(onExit: () => _showExitDemoSheet(context)),
+            Expanded(
+              child: Scaffold(
+                extendBody: true,
+                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                body: Stack(
+                  children: [
+                    Positioned.fill(child: widget.navigationShell),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: isSimpleMode
+                          ? SimpleNavBar(
+                              index: shellIndex == 3 ? 1 : 0,
+                              onTap: (i) => _onTap(i == 0 ? 0 : 3),
+                            )
+                          : GlassDockNavBar(
+                              index: shellIndex,
+                              onTap: _onTap,
+                              onLuminaTap: _handleLuminaTap,
+                              onLuminaLongPress: _handleLuminaLongPress,
+                              isVoiceListening: luminaState.isOpen &&
+                                  luminaState.mode == LuminaSheetMode.listening,
+                              hasActiveSession: luminaState.hasActiveSession,
+                            ),
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
+
+  void _showExitDemoSheet(BuildContext context) {
+    showDemoExitSheet(context, ref);
+  }
+}
+
+/// Persistent gradient banner shown at the top of the scaffold during demo browsing.
+class _DemoBanner extends StatelessWidget {
+  final VoidCallback onExit;
+  const _DemoBanner({required this.onExit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF6E2FFF), Color(0xFF00D4FF)],
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Demo mode \u2014 simulated lighting',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            GestureDetector(
+              onTap: onExit,
+              child: Text(
+                'Exit demo',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white.withValues(alpha: 0.85),
+                  decoration: TextDecoration.underline,
+                  decorationColor: Colors.white.withValues(alpha: 0.85),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows the demo exit bottom sheet with conversion options.
+/// Reusable from any screen during demo browsing.
+void showDemoExitSheet(BuildContext context, WidgetRef ref) {
+  void logExit(String path) {
+    try {
+      final leadId = ref.read(demoLeadProvider)?.id;
+      if (leadId != null) {
+        final svc = ref.read(demoLeadServiceProvider);
+        unawaited(svc.logExitDemoTapped(leadId, path)
+            .catchError((e) => debugPrint('Demo analytics: $e')));
+      }
+    } catch (_) {}
+  }
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: NexGenPalette.gunmetal,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (sheetCtx) => Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle bar
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Ready for your own lights?',
+            style: Theme.of(sheetCtx).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Talk to a Nex-Gen dealer about your home',
+            style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
+                  color: NexGenPalette.textMedium,
+                ),
+          ),
+          const SizedBox(height: 20),
+          // Request consultation
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              onPressed: () {
+                logExit('consultation');
+                Navigator.pop(sheetCtx);
+                exitDemoMode(ref);
+                context.go(AppRoutes.demoComplete);
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF00D4FF),
+                foregroundColor: const Color(0xFF07091A),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Request a free consultation'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Create account
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton(
+              onPressed: () {
+                logExit('signup');
+                Navigator.pop(sheetCtx);
+                exitDemoMode(ref);
+                context.go(AppRoutes.signUp);
+              },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: NexGenPalette.line),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Create an account'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Keep exploring
+          TextButton(
+            onPressed: () {
+              logExit('keep_exploring');
+              Navigator.pop(sheetCtx);
+            },
+            child: Text(
+              'Keep exploring',
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -30,6 +30,12 @@ import 'package:nexgen_command/services/reviewer_seed_service.dart';
 /// Also invalidated on app resume via [_connectivityRefreshProvider] so a
 /// fresh SSID check runs immediately when the user opens the app.
 final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) {
+  // Prevent the stream from being disposed when temporarily unwatched
+  // (e.g. during screen transitions). Without this, navigating away from
+  // every screen that watches this provider would destroy & recreate the
+  // stream, causing a brief "loading" gap → null repository → false offline.
+  ref.keepAlive();
+
   // Watch the refresh counter — incrementing it restarts this stream,
   // which clears the SSID cache and forces a fresh network check.
   ref.watch(_connectivityRefreshProvider);
@@ -48,6 +54,11 @@ final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) 
   return connectivityService.watchConnectivity(homeSsidHash);
 });
 
+/// Last-known connectivity status. Updated whenever the stream emits.
+/// Used as fallback during stream rebuilds so the repository provider
+/// never sees null during the async loading gap.
+final _lastConnectivityStatusProvider = StateProvider<ConnectivityStatus?>((ref) => null);
+
 /// Counter that, when incremented, forces [wledConnectivityStatusProvider]
 /// to restart its stream and re-check the network.
 final _connectivityRefreshProvider = StateProvider<int>((ref) => 0);
@@ -65,11 +76,11 @@ void refreshConnectivityStatusFromRef(Ref ref) {
 }
 
 /// Whether the app is currently in remote mode (cloud relay).
-/// Returns false while the connectivity check is still loading.
+/// Falls back to last-known status during stream loading gaps.
 final isRemoteModeProvider = Provider<bool>((ref) {
   final status = ref.watch(wledConnectivityStatusProvider).maybeWhen(
     data: (s) => s,
-    orElse: () => null,
+    orElse: () => ref.read(_lastConnectivityStatusProvider),
   );
   return status == ConnectivityStatus.remote;
 });
@@ -143,9 +154,17 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   }
 
   // ── 3. Network location ──────────────────────────────────────────────────
+  //
+  // When the connectivity stream rebuilds (profile change, app resume) there
+  // is a brief async gap where the StreamProvider is in "loading" state.
+  // Fall back to the last-known status so we don't flash null → offline.
   final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
-    data: (status) => status,
-    orElse: () => null,
+    data: (status) {
+      // Cache every successful emission for use during future loading gaps.
+      ref.read(_lastConnectivityStatusProvider.notifier).state = status;
+      return status;
+    },
+    orElse: () => ref.read(_lastConnectivityStatusProvider),
   );
 
   if (connectivityStatus == null) {
@@ -224,15 +243,26 @@ final selectedControllerIdProvider = Provider<String?>((ref) {
   );
   final selectedIp = ref.watch(selectedDeviceIpProvider);
 
-  if (selectedIp == null || controllers.isEmpty) return null;
+  if (selectedIp == null || controllers.isEmpty) {
+    debugPrint('🔍 ControllerIdMatch: BAIL — selectedIp=$selectedIp, '
+        'controllers.length=${controllers.length}');
+    return null;
+  }
 
   // Find the controller with matching IP
+  debugPrint('🔍 ControllerIdMatch: looking for selectedIp="$selectedIp" '
+      '(len=${selectedIp.length}) among ${controllers.length} controller(s)');
   for (final controller in controllers) {
-    if (controller.ip == selectedIp) {
+    final match = controller.ip == selectedIp;
+    debugPrint('🔍 ControllerIdMatch:   controller.id="${controller.id}" '
+        'controller.ip="${controller.ip}" (len=${controller.ip.length}) → match=$match');
+    if (match) {
+      debugPrint('🔍 ControllerIdMatch: ✅ FOUND controllerId="${controller.id}"');
       return controller.id;
     }
   }
 
+  debugPrint('🔍 ControllerIdMatch: ❌ NO MATCH — controllerId=null');
   return null;
 });
 
@@ -292,6 +322,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
   Timer? _reconnectTimer;
   bool _posting = false;
+  bool _polling = false;
   bool _infoQueried = false;
 
   /// Consecutive remote poll failures. After 3, bridge is marked unreachable
@@ -315,33 +346,48 @@ class WledNotifier extends Notifier<WledStateModel> {
       final service = ref.read(wledRepositoryProvider);
       if (service == null) return;
       if (_posting) return; // avoid fighting with user updates
-      final data = await service.getState();
-      final isRemote = ref.read(isRemoteModeProvider);
-      if (data == null) {
-        if (state.connected) {
-          state = state.copyWith(connected: false);
-        }
-        // Track consecutive failures in remote mode. Downgrade bridge status
-        // after repeated failures to prevent stale "Connected" indicator.
-        if (isRemote) {
-          _consecutiveRemoteFailures++;
-          if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
-            ref.read(bridgeReachableProvider.notifier).state = false;
-          }
-        }
-        _ensureReconnectTimer();
-        return;
-      }
-      _cancelReconnectTimer();
-      // Successful poll in remote mode confirms bridge is working.
-      if (isRemote) {
-        _consecutiveRemoteFailures = 0;
-        ref.read(bridgeReachableProvider.notifier).state = true;
-      }
+      // In remote mode, CloudRelayRepository.getState() can take up to 30s
+      // waiting for the bridge to respond. Without this guard, the 1.5s poll
+      // timer fires ~20 concurrent getState() calls that all time out together,
+      // instantly hitting the 3-failure threshold and marking the bridge dead.
+      if (_polling) return;
+      _polling = true;
       try {
-        _applyStateData(data);
-      } catch (e) {
-        debugPrint('WLED parse state error: $e');
+        final isRemote = ref.read(isRemoteModeProvider);
+        if (isRemote) debugPrint('🔬 REMOTE POLL: firing getState (repo=${service.runtimeType})');
+        final data = await service.getState();
+        if (isRemote) debugPrint('🔬 REMOTE POLL: result = ${data == null ? "null" : "{${data.keys.take(5).join(", ")}...}"}');
+        if (data == null) {
+          if (state.connected) {
+            state = state.copyWith(connected: false);
+          }
+          // Track consecutive failures in remote mode. Downgrade bridge status
+          // after repeated failures to prevent stale "Connected" indicator.
+          if (isRemote) {
+            _consecutiveRemoteFailures++;
+            debugPrint('🔬 REMOTE POLL: failure count = $_consecutiveRemoteFailures');
+            if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
+              debugPrint('🔬 REMOTE POLL: bridge marked unreachable');
+              ref.read(bridgeReachableProvider.notifier).state = false;
+            }
+          }
+          _ensureReconnectTimer();
+          return;
+        }
+        _cancelReconnectTimer();
+        // Successful poll in remote mode confirms bridge is working.
+        if (isRemote) {
+          _consecutiveRemoteFailures = 0;
+          ref.read(bridgeReachableProvider.notifier).state = true;
+          debugPrint('🔬 REMOTE POLL: connected = true');
+        }
+        try {
+          _applyStateData(data);
+        } catch (e) {
+          debugPrint('WLED parse state error: $e');
+        }
+      } finally {
+        _polling = false;
       }
 
       // Query RGBW support once after connection
@@ -457,14 +503,20 @@ class WledNotifier extends Notifier<WledStateModel> {
       _resolvePresetName(ps);
     }
 
-    // Clear stale preset label when the live effect diverges from what was
-    // cached in SharedPreferences AND no WLED preset is active.
-    // When ps > 0, the preset lookup above will set the correct label.
+    // When the live effect diverges from what was cached AND no WLED preset
+    // is active: if the user applied a custom pattern (e.g. "Kansas City
+    // Royals Twinkle") keep that label; only clear a stale generic label.
     if (effectId != prevEffectId && ps <= 0) {
       try {
-        ref.read(activePresetLabelProvider.notifier).clear();
+        final customName = state.customEffectName;
+        if (customName != null && customName.isNotEmpty) {
+          // Preserve user-set custom name as the active label
+          ref.read(activePresetLabelProvider.notifier).state = customName;
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
       } catch (e) {
-        debugPrint('Error in WledNotifier clearing preset label: $e');
+        debugPrint('Error in WledNotifier updating preset label: $e');
       }
     }
   }
@@ -747,9 +799,11 @@ class WledNotifier extends Notifier<WledStateModel> {
         state = state.copyWith(connected: false);
         _ensureReconnectTimer();
       }
-      // Wait a bit before allowing poller to read back state
-      // This prevents the poller from reading stale data before WLED updates
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Wait before allowing poller to read back state.
+      // In remote mode the bridge processes commands sequentially, so give it
+      // extra time to finish before we queue another getState poll.
+      final isRemote = ref.read(isRemoteModeProvider);
+      await Future.delayed(Duration(milliseconds: isRemote ? 5000 : 500));
     } finally {
       _posting = false;
     }

@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/dashboard/main_scaffold.dart' show showDemoExitSheet;
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -1402,6 +1403,45 @@ class PatternCard extends ConsumerWidget {
           ref: ref,
           patternId: pattern.id,
         );
+
+        // Demo conversion nudge — once per session
+        if (ref.read(demoBrowsingProvider) &&
+            !ref.read(hasShownDemoNudgeProvider)) {
+          ref.read(hasShownDemoNudgeProvider.notifier).state = true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Love this look? Get it on your home.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      showDemoExitSheet(context, ref);
+                    },
+                    child: const Text(
+                      'Talk to us',
+                      style: TextStyle(
+                        color: Color(0xFF00D4FF),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFF111527),
+              duration: const Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (context.mounted) {

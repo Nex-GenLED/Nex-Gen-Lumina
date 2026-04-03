@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Dealer & Installer Setup Guide"
 subtitle: "How to set up your dealer account and complete customer installations"
 author: "Nex-Gen LED"
-date: "March 2026"
+date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -45,7 +45,49 @@ Every installer receives a **4-digit PIN** combining both codes. For example, if
 
 ---
 
-## 2. Getting Your Dealer Account
+## 2. Sales Mode for Field Reps
+
+In addition to Installer Mode, the Lumina app includes a **Sales Mode** for your field sales representatives. Sales Mode is a separate workflow designed for site surveys and estimate generation --- it does not install or configure systems.
+
+### Entering Sales Mode
+
+1. Open the Lumina app
+2. Tap **Sales Mode** on the main screen
+3. Enter the **Sales PIN** (provided by your Nex-Gen admin)
+4. Sessions last 30 minutes with auto-save on timeout
+
+### Sales Mode Workflow
+
+1. **Prospect Info** --- collect customer contact details and address
+2. **Zone Builder** --- map LED zones, record run lengths, mark injection points and power mount locations
+3. **Visit Review** --- verify all survey data before generating an estimate
+4. **Estimate Preview** --- review the generated estimate with pricing
+5. **Customer Signature** --- present the estimate and collect a digital signature
+
+### Viewing Sales Jobs
+
+- From the Sales landing screen, tap **My Estimates** to view all your jobs
+- Jobs show status, customer name, and date
+- Status progression: Draft → Estimate Sent → Estimate Signed → Prewire Scheduled → Prewire Complete → Install Complete
+
+Sales data feeds into the Dealer Dashboard for pipeline tracking (see section 5 for details).
+
+For the full Sales Mode guide, see the separate **Sales Mode Guide**.
+
+### Demo Mode for Sales Visits
+
+When visiting a prospect who doesn't yet have a Lumina system, you can use **Demo Mode** to showcase the app experience:
+
+1. On the login screen, use a demo access code (provided by Nex-Gen)
+2. The prospect sees a simulated Lumina experience on their phone or yours
+3. They can browse patterns, try the AI assistant, and see the dashboard
+4. The app captures their contact info as a lead for follow-up
+
+Demo Mode uses simulated lighting (no real hardware needed) and is a powerful sales tool during site visits.
+
+---
+
+## 3. Getting Your Dealer Account
 
 Dealer accounts are created by the Nex-Gen administrative team.
 
@@ -63,7 +105,7 @@ Once created, you will receive:
 
 ---
 
-## 3. Registering Installers
+## 4. Registering Installers
 
 As a dealer, you can add installers through the Admin Portal in the Lumina app.
 
@@ -105,7 +147,76 @@ From the Admin Portal you can:
 
 ---
 
-## 4. Installer Mode --- Step by Step
+## 5. Your Dealer Dashboard
+
+As a dealer, you have access to a dashboard for tracking your business.
+
+### Accessing the Dealer Dashboard
+
+- From the Lumina app, navigate to the Dealer Dashboard
+- Your dashboard shows real-time data about your team and pipeline
+
+### What You Can See
+
+| Tab | What It Shows |
+|-----|--------------|
+| **Overview** | Total jobs, active installs, team size, pipeline summary |
+| **Pipeline** | All sales jobs across your team with status filters |
+| **Team** | Your installers --- active/inactive status, installation counts |
+| **Payouts** | Referral rewards, payout status, ambassador tier progress |
+
+### Pipeline Management
+
+- View every job your team has in progress
+- Filter by status to focus on what needs attention
+- Tap any job to see full details
+
+For the full dashboard guide, see the separate **Dealer Dashboard Guide**.
+
+---
+
+## 6. Referral Rewards Program
+
+Earn rewards for every referral that converts to a completed installation.
+
+### How It Works
+
+1. Share your unique referral code with prospects and customers
+2. When a referral leads to a completed Lumina installation, you earn a reward
+3. Rewards are tracked automatically through the Lumina system
+4. Nex-Gen admin reviews and approves payouts
+
+### Your Referral Code
+
+- Found on the Dealer Dashboard under the Referrals/Payouts tab
+- Also available in the Referral Program screen
+
+### Ambassador Tiers
+
+| Tier | Installs Required | Reward Level |
+|------|------------------|-------------|
+| Bronze | 0+ | Base reward |
+| Silver | 3+ | Increased reward |
+| Gold | 8+ | Higher reward |
+| Platinum | 15+ | Maximum reward |
+
+### Reward Types
+
+- Visa Gift Card (capped at $599/year)
+- Nex-Gen Credit (no cap)
+
+### Payout Process
+
+1. Installation completes --- reward is calculated
+2. Reward enters pending status
+3. Nex-Gen admin reviews and approves
+4. Payout is processed
+
+Track your rewards, tier progress, and payout history from the Dealer Dashboard.
+
+---
+
+## 7. Installer Mode --- Step by Step
 
 Installer Mode is a guided 6-step wizard that sets up a customer's Lumina system and creates their user account.
 
@@ -439,7 +550,7 @@ Customer should change their password after first login.
 
 ---
 
-## 5. Handing Off to the Customer
+## 8. Handing Off to the Customer
 
 Give the customer their credentials and walk them through:
 
@@ -460,7 +571,7 @@ Give the customer their credentials and walk them through:
 
 ---
 
-## 6. Configuring Remote Access
+## 9. Configuring Remote Access
 
 For customers who want to control their lights away from home, Remote Access must be configured before you leave the job site. This requires a **Lumina Bridge** --- a small ESP32 device that stays plugged in at the customer's home and relays commands from the cloud to the WLED controller.
 
@@ -498,7 +609,7 @@ On the Remote Access settings screen:
 
 ---
 
-## 7. Resuming an Incomplete Setup
+## 10. Resuming an Incomplete Setup
 
 If you exit the wizard before completing, your progress is saved automatically.
 
@@ -512,7 +623,7 @@ Next time you enter Installer Mode:
 
 ---
 
-## 8. Warranty & Installation Records
+## 11. Warranty & Installation Records
 
 Each completed installation automatically creates a warranty record:
 
@@ -529,7 +640,7 @@ These records are accessible to the Nex-Gen support team for warranty claims.
 
 ---
 
-## 9. Quick Reference
+## 12. Quick Reference
 
 ### PIN Format
 `[Dealer Code (2 digits)][Installer Code (2 digits)]`
@@ -543,6 +654,16 @@ Example: Dealer 03 + Installer 12 = **0312**
 5. Customer Preferences (teams, holidays, vibe, autonomy)
 6. Complete & Hand Off (credentials screen)
 
+### Quick Actions
+
+| Action | Where |
+|--------|-------|
+| Enter Sales Mode | Main screen → Sales Mode → enter Sales PIN |
+| View sales jobs | Sales Mode → My Estimates |
+| Access Dealer Dashboard | Main screen → Dealer Dashboard |
+| View referral rewards | Dealer Dashboard → Payouts tab |
+| Use Demo Mode | Login screen → enter demo access code |
+
 ### Support
 Email: support@nexgenled.com
 
@@ -550,6 +671,11 @@ Email: support@nexgenled.com
 
 For troubleshooting, see the separate **Lumina Troubleshooting Guide**.
 
+**Related Guides:**
+- **Sales Mode Guide** --- detailed walkthrough for sales field visits
+- **Dealer Dashboard Guide** --- complete guide to the dealer dashboard
+- **Admin Operations Guide** --- how the admin system works (for Nex-Gen staff)
+
 ---
 
-*Nex-Gen Lumina v2.1 --- Dealer & Installer Guide --- March 2026*
+*Nex-Gen Lumina v2.1 --- Dealer & Installer Guide --- April 2026*

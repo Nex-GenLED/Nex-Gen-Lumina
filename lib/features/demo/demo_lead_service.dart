@@ -259,6 +259,24 @@ class DemoLeadService {
       data: {'userId': userId},
     );
   }
+
+  /// Log when prospect starts browsing the full app in demo mode.
+  Future<void> logAppExploreStarted(String leadId) async {
+    await logAnalyticsEvent(
+      event: 'app_explore_started',
+      leadId: leadId,
+    );
+  }
+
+  /// Log when prospect taps an exit option from the demo banner.
+  /// [exitPath] is one of 'consultation', 'signup', or 'keep_exploring'.
+  Future<void> logExitDemoTapped(String leadId, String exitPath) async {
+    await logAnalyticsEvent(
+      event: 'exit_demo_tapped',
+      leadId: leadId,
+      data: {'exitPath': exitPath},
+    );
+  }
 }
 
 /// Provider for the demo lead service.

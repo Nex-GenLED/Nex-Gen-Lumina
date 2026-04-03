@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Commercial User Guide"
 subtitle: "Multi-zone lighting control for business owners and property managers"
 author: "Nex-Gen LED"
-date: "March 2026"
+date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -47,7 +47,70 @@ Your installer provided you with a Lumina account during system handoff.
 
 ---
 
-## 2. Dashboard Overview
+## 2. Commercial Onboarding Wizard
+
+When your account is first set up (or when adding a new location), you go through an 8-step commercial onboarding wizard that tailors the app to your business.
+
+### Step 1: Business Type
+
+Select your business type (retail, restaurant, bar, office, hotel, mixed-use, etc.). This tailors the default settings and day part suggestions to match your industry.
+
+### Step 2: Brand Identity
+
+Set up your brand colors and visual identity. These colors are available as quick presets throughout the app and can be pushed to all locations.
+
+### Step 3: Hours of Operation
+
+Define your business hours for each day of the week. These are used to automatically create default schedules and determine when lights should be active.
+
+### Step 4: Channel Setup
+
+Configure your lighting channels. Commercial properties typically have multiple channels:
+
+| Channel Role | Example Use |
+|-------------|-------------|
+| Interior | Indoor ambient lighting |
+| Outdoor Facade | Building exterior |
+| Window Display | Storefront windows |
+| Patio | Outdoor dining/seating area |
+| Canopy | Covered outdoor structures |
+| Signage/Accent | Signs and architectural accents |
+
+Each channel has a **Coverage Policy** (Always On, Smart Fill, Scheduled Only) and a **Daylight Mode** (Soft Dim, Hard Off, Disabled).
+
+### Step 5: Your Teams
+
+Set up team members and assign roles. See **Roles and Permissions** (Section 12) for details on the four-tier role system.
+
+### Step 6: Day Part Configuration
+
+Configure day parts to automate lighting transitions throughout the day:
+
+| Day Part | Typical Hours | Example Use |
+|----------|--------------|-------------|
+| Morning/Open | 6 AM -- 11 AM | Bright, welcoming lighting |
+| Midday | 11 AM -- 2 PM | Full brightness, natural feel |
+| Afternoon | 2 PM -- 5 PM | Maintain visibility |
+| Evening/Dinner | 5 PM -- 9 PM | Warm, ambient mood |
+| Late Night/Close | 9 PM -- Close | Dimmed, wind-down |
+
+Day parts automatically transition lighting without manual intervention. You can adjust these at any time after setup.
+
+### Step 7: Multi-Location Setup
+
+If you manage multiple locations, add them here. Each location gets its own schedule, controllers, and team assignments. Single-location businesses can skip this step.
+
+### Step 8: Review and Go Live
+
+Final review of all settings. Tap **Go Live** to activate your commercial lighting system. Everything can be adjusted later from the System tab.
+
+<div class="tip">
+<strong>Tip:</strong> You can re-run parts of the onboarding wizard at any time from System -- Settings if you need to reconfigure your business type, channels, or day parts.
+</div>
+
+---
+
+## 3. Dashboard Overview
 
 The Home Dashboard is your central command for all lighting zones. It provides an at-a-glance view of your entire property.
 
@@ -84,7 +147,7 @@ Shows what is scheduled for tonight across your zones, with a color preview of t
 
 ---
 
-## 3. Navigation
+## 4. Navigation
 
 The app has 5 tabs along the bottom:
 
@@ -98,7 +161,7 @@ The app has 5 tabs along the bottom:
 
 ---
 
-## 4. Zone Control
+## 5. Zone Control
 
 Commercial systems divide your property into independent **zones** -- for example, "Storefront", "Patio", "Parking Lot", or "Building Perimeter". Each zone can be controlled separately or together.
 
@@ -136,7 +199,7 @@ If a zone spans multiple physical controllers (common for large buildings), thos
 
 ---
 
-## 5. Lumina AI Assistant
+## 6. Lumina AI Assistant
 
 Lumina is your AI lighting assistant. It understands natural language and is fully zone-aware for commercial properties.
 
@@ -171,7 +234,7 @@ Lumina understands zone references. You can be specific or general:
 
 ---
 
-## 6. Scheduling
+## 7. Scheduling
 
 The Schedule tab lets you automate your lighting on a weekly basis. Commercial schedules are typically built around business hours and can be set independently per zone.
 
@@ -223,9 +286,37 @@ Lumina's Auto-Pilot can generate weekly schedule suggestions based on upcoming h
 
 You can always override Auto-Pilot by editing any scheduled item manually.
 
+### Day Part Automation
+
+Day parts automate lighting transitions throughout the business day without manual intervention. Unlike individual schedules, day parts define a continuous program that covers the entire day.
+
+**How to configure:**
+
+1. Go to **System** tab, then **Settings** -- **Day Parts** (or configure during onboarding Step 6)
+2. Define time ranges for each day part
+3. Assign a lighting preset to each day part
+4. Day parts apply automatically every day
+
+**Example restaurant setup:**
+
+| Day Part | Time | Lighting |
+|----------|------|----------|
+| Breakfast | 6:00 AM -- 11:00 AM | Bright white, full brightness |
+| Lunch | 11:00 AM -- 2:00 PM | Warm white, 80% brightness |
+| Afternoon | 2:00 PM -- 5:00 PM | Warm white, 70% brightness |
+| Dinner | 5:00 PM -- 9:00 PM | Amber accent, 60% brightness |
+| Close | 9:00 PM -- 10:00 PM | Dim warm, 30% brightness |
+| Overnight | 10:00 PM -- 6:00 AM | Security lights only |
+
+Day parts coexist with manual schedules. Manual overrides take priority, and the next day part resumes the automatic program.
+
+<div class="tip">
+<strong>Tip:</strong> Day parts are ideal for businesses with consistent daily routines. Combine them with seasonal schedules for holidays and special events -- the manual schedule takes precedence during the event, and day parts resume afterward.
+</div>
+
 ---
 
-## 7. Explore -- The Pattern Library
+## 8. Explore -- The Pattern Library
 
 ### Browsing Patterns
 
@@ -260,7 +351,7 @@ You can always override Auto-Pilot by editing any scheduled item manually.
 
 ---
 
-## 8. White Presets
+## 9. White Presets
 
 Your system uses **RGBW LEDs** with a dedicated white channel, producing clean, true whites that standard RGB LEDs cannot match.
 
@@ -287,7 +378,7 @@ Use the R, G, B, and W sliders to create a custom white tone for your property. 
 
 ---
 
-## 9. My Properties
+## 10. My Properties
 
 Commercial accounts can manage multiple properties (e.g., multiple storefronts, office buildings, or mixed-use sites) from a single Lumina account.
 
@@ -322,7 +413,7 @@ Set your most-used property as the primary (default) location:
 
 ---
 
-## 10. Remote Access
+## 11. Remote Access
 
 Lumina supports controlling your lights from anywhere -- not just when you are on-site connected to the property WiFi.
 
@@ -345,24 +436,54 @@ You do not need to configure anything. The app detects your network and switches
 
 ---
 
-## 11. Managing Users
+## 12. Roles and Permissions
 
-Commercial accounts support up to **20 users**. As the property manager, you control who has access to the lighting system.
+Commercial accounts use a 4-tier role system to control access across your organization.
+
+### Role Overview
+
+| Role | Description |
+|------|------------|
+| **Store Staff** | View-only access to their assigned location |
+| **Store Manager** | Full control of their location -- schedules, overrides, and patterns |
+| **Regional Manager** | Manage multiple locations, push settings to a region, manage users |
+| **Corporate Admin** | Full access to everything -- brand colors, corporate lock, push to all locations |
+
+### Permission Matrix
+
+| Permission | Store Staff | Store Manager | Regional Manager | Corporate Admin |
+|-----------|:-----------:|:-------------:|:-----------------:|:---------------:|
+| View own location | Yes | Yes | Yes | Yes |
+| Edit schedules | -- | Yes | Yes | Yes |
+| Override now (manual control) | -- | Yes | Yes | Yes |
+| View all locations | -- | -- | Yes | Yes |
+| Push to region | -- | -- | Yes | Yes |
+| Push to all locations | -- | -- | -- | Yes |
+| Apply corporate lock | -- | -- | -- | Yes |
+| Manage users | -- | -- | Yes | Yes |
+| Edit brand colors | -- | -- | -- | Yes |
+
+### Corporate Lock
+
+When a Corporate Admin applies a lock, local managers cannot override the schedule during the locked period. This is commonly used for brand-wide promotions, holidays, or corporate events.
+
+To apply a corporate lock:
+
+1. Go to **System** tab, then **Corporate Lock**
+2. Select the schedule or pattern to lock
+3. Set the lock period (start and end date/time)
+4. Tap **Apply Lock**
+5. All affected locations receive a notification
 
 ### Inviting a User
 
 1. Go to **System** tab, then **Manage Users**
 2. Tap **Invite User**
 3. Enter the person's email address
-4. They receive an invitation to download the Lumina app and create their account
-5. Once they accept, they appear in your user list
-
-### User Roles
-
-| Role | Capabilities |
-|------|-------------|
-| **Property Manager** | Full control -- all zones, scheduling, user management, system settings |
-| **Standard User** | Control lights, apply patterns, adjust brightness. Cannot manage other users or modify system settings |
+4. Select their **role** (Store Staff, Store Manager, Regional Manager, or Corporate Admin)
+5. If applicable, assign them to specific **locations** or **regions**
+6. They receive an invitation to download the Lumina app and create their account
+7. Once they accept, they appear in your user list with their assigned role
 
 ### Removing a User
 
@@ -372,12 +493,94 @@ Commercial accounts support up to **20 users**. As the property manager, you con
 4. Their access is revoked immediately
 
 <div class="tip">
-<strong>Tip:</strong> Invite shift managers or trusted staff so they can adjust lighting as needed without requiring your direct involvement.
+<strong>Tip:</strong> Assign the Store Manager role to shift managers or trusted staff so they can adjust lighting as needed without requiring your direct involvement. Use Store Staff for employees who only need to view the system status.
 </div>
 
 ---
 
-## 12. Connection Status
+## 13. Fleet Dashboard -- Multi-Location Management
+
+If you manage multiple locations, the Fleet Dashboard gives you a bird's-eye view of your entire operation.
+
+### Accessing the Fleet Dashboard
+
+- If your account has multiple locations, the app automatically loads the Fleet Dashboard
+- For single-location accounts, you see the standard dashboard
+- You can switch between the Fleet Dashboard and an individual location dashboard at any time
+
+### Fleet Dashboard Features
+
+- **Map View:** See all locations on a map with status indicators (green = online, red = offline)
+- **List View:** Scrollable list of all locations with current status, pattern, and brightness
+- **Filtering:** Filter locations by region, status, or custom tags
+- **Bulk Actions:** Push a pattern, schedule, or setting to multiple locations at once
+- **Quick Status:** See at a glance which locations need attention
+
+Tap any location to drill into its individual dashboard for detailed control.
+
+<div class="tip">
+<strong>Tip:</strong> Use the Fleet Dashboard's filtering to quickly identify locations that are offline or running unexpected patterns. This is especially useful for Regional Managers overseeing many sites.
+</div>
+
+---
+
+## 14. Brand Identity and Corporate Push
+
+Corporate Admins can enforce brand consistency across all locations.
+
+### Setting Brand Colors
+
+1. Go to **System** tab, then **Settings** -- **Brand Identity** (or configure during onboarding Step 2)
+2. Define your primary and secondary brand colors
+3. These appear as quick presets on every location's dashboard
+4. Tap **Save** to apply
+
+### Pushing to Locations
+
+- **Push to Region:** Regional Managers can push a schedule or pattern to all locations in their region
+- **Push to All:** Corporate Admins can push to every location company-wide
+- Pushed settings override local schedules until the push expires or is removed
+
+To push a setting:
+
+1. Select the pattern, schedule, or setting you want to push
+2. Tap **Push to...** and choose **Region** or **All Locations**
+3. Optionally set an **expiration date** for the push
+4. Confirm the push -- all affected locations receive a notification
+
+### Business Profile
+
+1. Go to **System** tab, then **Settings** -- **Business Profile**
+2. Edit your business name, logo, and contact information
+3. These details appear on reports and notifications
+
+<div class="warning">
+<strong>Note:</strong> Pushing to all locations overrides any local schedule changes. Communicate with your location managers before applying a company-wide push.
+</div>
+
+---
+
+## 15. Commercial Notifications
+
+The app sends relevant notifications for commercial operations:
+
+| Notification | When |
+|-------------|------|
+| **Controller Offline** | A controller at one of your locations stops responding |
+| **Holiday Schedule Conflict** | An upcoming holiday may affect your lighting schedule |
+| **Game Day Alert** | A followed team is playing -- Game Day mode is available |
+| **Corporate Push Received** | Your organization has updated your schedule |
+| **Lock Expiring** | A corporate schedule lock expires within 24 hours |
+
+Notifications can be configured in **System** -- **Settings**. You can enable or disable individual notification types and choose whether to receive them as push notifications, in-app alerts, or both.
+
+<div class="tip">
+<strong>Tip:</strong> Enable Controller Offline notifications so you are alerted immediately if a location loses connectivity. This helps you address issues before they impact your business.
+</div>
+
+---
+
+## 16. Connection Status
 
 The app displays your connection status so you always know the state of your system.
 
@@ -402,7 +605,7 @@ The app displays your connection status so you always know the state of your sys
 
 ---
 
-## 13. Quick Reference Card
+## 17. Quick Reference Card
 
 | Action | How |
 |--------|-----|
@@ -420,6 +623,12 @@ The app displays your connection status so you always know the state of your sys
 | Check remote access | System -- Remote Access |
 | Invite a user | System -- Manage Users -- Invite User |
 | Remove a user | System -- Manage Users -- tap user -- Remove |
+| Access Fleet Dashboard | Automatic for multi-location accounts, or tap **Fleet** on the dashboard |
+| Configure day parts | System -- Settings -- Day Parts |
+| Set brand colors | System -- Settings -- Brand Identity |
+| Apply corporate lock | System -- Corporate Lock -- select schedule -- Apply Lock |
+| Push to all locations | Select pattern or schedule -- Push to... -- All Locations |
+| View role permissions | System -- Manage Users -- tap a user to see their role |
 
 ---
 
@@ -433,4 +642,4 @@ For troubleshooting, see the separate Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina v2.1 -- Commercial User Guide -- March 2026*
+*Nex-Gen Lumina v2.1 -- Commercial User Guide -- April 2026*

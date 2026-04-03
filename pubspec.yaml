@@ -9,6 +9,7 @@ environment:
 dependencies:
   geolocator: 13.0.4
   network_info_plus: ^7.0.0
+  connectivity_plus: ^6.1.4
   image_picker: '>=1.1.2'
   url_launcher: ^6.0.0
   flutter_local_notifications: ^17.2.2

@@ -75,7 +75,8 @@ void executeCommand(const String& commandId, JsonObject& fields);
 String makeWledRequest(const String& ip, const String& method,
                        const String& endpoint, const String& body);
 void updateCommandStatus(const String& commandId, const String& status,
-                         const String& error = "");
+                         const String& error = "",
+                         const String& result = "");
 void writeHeartbeat();
 void blinkLed(int times, int delayMs);
 void statusBlink();
@@ -656,7 +657,7 @@ void executeCommand(const String& commandId, JsonObject& fields) {
     commandErrors++;
   } else {
     Serial.println("  SUCCESS!");
-    updateCommandStatus(commandId, "completed");
+    updateCommandStatus(commandId, "completed", "", response);
     commandsProcessed++;
   }
 }
@@ -746,7 +747,7 @@ String makeWledRequest(const String& ip, const String& method,
 // ============================================================================
 
 void updateCommandStatus(const String& commandId, const String& status,
-                         const String& error) {
+                         const String& error, const String& result) {
   HTTPClient http;
   String url = firestoreBaseUrl() + "/commands/" + commandId +
                "?updateMask.fieldPaths=status";
@@ -765,6 +766,11 @@ void updateCommandStatus(const String& commandId, const String& status,
   if (!error.isEmpty()) {
     doc["fields"]["error"]["stringValue"] = error;
     url += "&updateMask.fieldPaths=error";
+  }
+
+  if (!result.isEmpty()) {
+    doc["fields"]["result"]["stringValue"] = result;
+    url += "&updateMask.fieldPaths=result";
   }
 
   String body;

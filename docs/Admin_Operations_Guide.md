@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Admin Operations Guide"
 subtitle: "How to manage dealers, installers, and installations as the system owner"
 author: "Nex-Gen LED"
-date: "March 2026"
+date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -185,7 +185,81 @@ Tap any dealer or installer in the list to edit their contact details (name, ema
 
 ---
 
-## 7. Deactivating & Reactivating
+## 7. Sales Mode Management
+
+The Lumina app includes a Sales Mode for field representatives to conduct site surveys and generate estimates.
+
+### How Sales Mode Works
+
+- Sales reps access Sales Mode from the login screen
+- They enter a 4-digit Sales PIN (validated against `master_sales_pin` in Firestore `app_config` collection)
+- Sessions last 30 minutes with a 5-minute warning before timeout
+- Progress auto-saves on session timeout
+
+### What You Manage
+
+- The master sales PIN is stored in Firestore at `app_config/master_sales_pin`
+- Currently a single shared PIN — all sales reps use the same PIN
+- To change the PIN: update the value in Firebase Console → Firestore → `app_config` collection
+
+### Sales Job Data
+
+Sales jobs are stored in Firestore (created by the sales reps). Jobs track: prospect info, zone measurements, estimates, and signatures.
+
+**Job status flow:**
+
+`Draft` → `EstimateSent` → `EstimateSigned` → `PrewireScheduled` → `PrewireComplete` → `InstallComplete`
+
+### Viewing Sales Data
+
+- Sales job data is visible in the Admin Dashboard under sales tracking
+- Each job shows: customer name, address, status, assigned sales rep, dealer code, date
+- The Dealer Dashboard also shows jobs filtered by that dealer's team
+
+---
+
+## 8. Referral Reward Approval and Payout Management
+
+The Lumina app includes a referral program where dealers and customers earn rewards for referrals.
+
+### How the Referral Pipeline Works
+
+1. A dealer or customer shares their referral code
+2. The referred prospect goes through Sales Mode → Installation
+3. Upon installation completion, the referral attribution service tracks the source
+4. A reward is calculated based on the installation value and the referrer's ambassador tier
+5. The reward enters "pending" status awaiting admin approval
+
+### Ambassador Tiers
+
+| Tier | Installs Required | Benefits |
+|------|------------------|----------|
+| Bronze | 0+ | Base referral reward |
+| Silver | 3+ | Increased reward |
+| Gold | 8+ | Higher reward + perks |
+| Platinum | 15+ | Maximum reward + premium perks |
+
+### Approving Payouts
+
+1. From the Admin Dashboard, go to the **Payout Approval** screen
+2. Review pending payouts — each shows: dealer name, referral details, reward amount, reward type
+3. Reward types: **Visa Gift Card** or **Nex-Gen Credit**
+4. Annual gift card cap: **$599 per dealer** (IRS reporting threshold)
+5. Approve or reject each payout
+6. Approved payouts move to "fulfilled" status
+
+### Firestore Collections for Referrals
+
+- Referral tracking data lives under dealer/user documents
+- Payout records are tracked with status (`pending`, `approved`, `fulfilled`, `gcCapReached`)
+
+<div class="tip">
+<strong>Tip:</strong> Keep an eye on dealers approaching the $599 annual gift card cap. When they hit the cap, future rewards automatically default to Nex-Gen Credit until the next calendar year.
+</div>
+
+---
+
+## 9. Deactivating & Reactivating
 
 ### Deactivating an Installer
 
@@ -209,7 +283,7 @@ Toggle **Active** back to on. For dealers, you must **manually reactivate each i
 
 ---
 
-## 8. What Happens During an Installation
+## 10. What Happens During an Installation
 
 When an installer uses their PIN and completes a setup, the system:
 
@@ -231,7 +305,7 @@ You can view all installation records from the Firebase Console under the `insta
 
 ---
 
-## 9. Firebase Collections You Own
+## 11. Firebase Collections You Own
 
 | Collection | What's In It | Who Writes |
 |------------|-------------|------------|
@@ -240,11 +314,12 @@ You can view all installation records from the Firebase Console under the `insta
 | `/installations/{id}` | Completed installation records (customer, warranty, controllers) | Installers (during setup) |
 | `/users/{uid}` | Customer accounts (profile, preferences, linked controllers) | Installer creates; customer owns |
 | `/users/{uid}/properties` | Customer properties (homes, locations) with linked controller IDs | Customer creates/manages |
-| `/dealerDemoCodes/{id}` | Demo/trial access codes for media team | You (admin, via Firebase Console) |
+| `/dealerDemoCodes/{id}` | Demo/trial access codes for media and demo mode | You (admin, via Firebase Console) |
+| `app_config` | App-wide config (master sales PIN, etc.) | You (admin, via Firebase Console) |
 
 ---
 
-## 10. Media Mode (Content Team Access)
+## 12. Media Mode (Content Team Access)
 
 Media Mode is separate from Installer Mode. It lets your content/marketing team access any customer's system for video shoots without giving them installer privileges.
 
@@ -276,7 +351,106 @@ Currently done directly in Firebase Console:
 
 ---
 
-## 11. Firestore Security Rules Summary
+## 13. Demo Mode Management
+
+Demo Mode allows prospects to experience the Lumina app without a real account or hardware.
+
+### How It Works
+
+- Prospects enter a demo code on the Demo Welcome Screen
+- They go through: welcome → consent → profile collection → photo capture → roofline demo → completion
+- The demo uses `MockWledRepository` to simulate lighting without real hardware
+- Lead information is captured via the demo lead service
+
+### Managing Demo Codes
+
+Demo codes are stored in the `dealerDemoCodes` Firestore collection (same collection as Media Mode codes). Each code document has the same fields described in Section 12 above.
+
+- Codes can have expiration dates (`expiresAt`) and usage limits (`maxUses`)
+- Track `usageCount` to measure marketing effectiveness
+- Set `isActive` to `false` to revoke a code without deleting it
+
+### Lead Capture
+
+- Demo sessions capture prospect contact info (name, email, phone)
+- This data can be used for follow-up by the sales team
+- Review leads in Firebase Console or through the Admin Dashboard
+
+<div class="tip">
+<strong>Tip:</strong> Create dedicated demo codes per marketing campaign or event so you can track which channels are generating the most interest.
+</div>
+
+---
+
+## 14. Dealer Dashboard Overview
+
+When dealers log in to their dashboard, they see a 4-tab interface. Understanding what your dealers see helps you support them and answer their questions.
+
+### Overview Tab
+
+- Stat cards showing total jobs, active installs, team size
+- Pipeline status bar (visual breakdown of job statuses)
+- Recent activity feed
+
+### Pipeline Tab
+
+- All sales jobs for their team
+- Filterable by status
+- Tap to view full job details
+
+### Team Tab
+
+- List of their installers
+- Active/inactive status for each
+- Installation counts per installer
+
+### Payouts Tab
+
+- Pending rewards awaiting your (admin) approval
+- Approved/fulfilled payout history
+- Ambassador tier progress indicator
+
+---
+
+## 15. Weekly Brief Notifications
+
+The system sends automated weekly push notifications to users with Autopilot enabled.
+
+### How It Works
+
+- A Firebase Cloud Function (`sendWeeklyBrief`) fires every Sunday at 18:30 UTC
+- For each user with `autopilot_enabled` and `weekly_schedule_preview_enabled` set to `true`:
+  1. Queries their upcoming `autopilot_events` for the next week
+  2. Calls Claude Haiku to generate a personalized 1-2 sentence notification body
+  3. Sends an FCM push with title **"Your Week in Lights"** and a deep-link to the autopilot schedule
+
+### Requirements
+
+- `ANTHROPIC_API_KEY` must be set as an environment variable in the Cloud Functions runtime
+- Users must have a valid `fcmToken` in their Firestore user document
+- The function automatically cleans up stale FCM tokens
+
+### Deployment
+
+```bash
+cd functions
+npm run build
+firebase deploy --only functions:sendWeeklyBrief
+```
+
+### Android Notification Channel
+
+The notification channel ID is `autopilot_weekly`, registered in the app as **"Weekly Schedule Preview"**. Users can disable this channel in their Android notification settings without affecting other Lumina notifications.
+
+### Monitoring
+
+- Function logs show: eligible user count, sent/skipped/error counts
+- Check Firebase Console → Functions → `sendWeeklyBrief` for execution logs
+- If no notifications are being sent, verify the `ANTHROPIC_API_KEY` is set and that users have valid FCM tokens
+
+---
+
+## 16. Firestore Security Rules Summary
 
 Your security rules enforce this access model:
 
@@ -298,7 +472,7 @@ The `user_role` field on each user's profile (`residential`, `media`, `dealer`, 
 
 ---
 
-## 12. Onboarding a New Dealer — Complete Checklist
+## 17. Onboarding a New Dealer — Complete Checklist
 
 Here's the full process when you sign up a new dealer:
 
@@ -316,7 +490,7 @@ Here's the full process when you sign up a new dealer:
 
 ---
 
-## 13. Troubleshooting
+## 18. Troubleshooting
 
 ### "Maximum dealer limit (99) reached"
 
@@ -345,7 +519,7 @@ You can't move an installer between dealers — the dealer code is baked into th
 
 ---
 
-## 14. Security Notes
+## 19. Security Notes
 
 <div class="warning">
 <strong>Current limitations to address before scaling:</strong>
@@ -359,7 +533,7 @@ You can't move an installer between dealers — the dealer code is baked into th
 
 ---
 
-## 15. Quick Reference
+## 20. Quick Reference
 
 | Action | Where |
 |--------|-------|
@@ -371,7 +545,12 @@ You can't move an installer between dealers — the dealer code is baked into th
 | View installation stats | Admin Dashboard (top cards) |
 | Create media access code | Firebase Console → `dealerDemoCodes` collection |
 | View all installations | Firebase Console → `installations` collection |
+| Change sales PIN | Firebase Console → Firestore → `app_config` |
+| Approve payouts | Admin Dashboard → Payout Approval |
+| View sales pipeline | Admin Dashboard → Sales Jobs |
+| Deploy weekly brief | `firebase deploy --only functions:sendWeeklyBrief` |
+| Manage demo codes | Firebase Console → `dealerDemoCodes` |
 
 ---
 
-*Nex-Gen Lumina v2.1 — Admin Operations Guide — March 2026 — INTERNAL USE ONLY*
+*Nex-Gen Lumina v2.1 — Admin Operations Guide — April 2026 — INTERNAL USE ONLY*

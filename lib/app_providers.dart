@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
+import 'package:nexgen_command/features/demo/demo_code_screen.dart' show validatedDemoCodeProvider;
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,9 +13,37 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// if you want build-time control. Set to false for real device provisioning.
 const bool kSimulationMode = false;
 
+// Demo state is intentionally in-memory only.
+// Resets on app restart — no persistence needed.
+
+/// Static flag mirroring [demoBrowsingProvider] for use in route guards
+/// where a Riverpod ref is not available.
+bool isDemoBrowsingFlag = false;
+
 /// Global toggle for Demo Mode. When true, the app uses mock repositories
 /// and bypasses network requirements to let users try the UI instantly.
 final demoModeProvider = StateProvider<bool>((ref) => false);
+
+/// True when a prospect is actively browsing the app in demo mode.
+/// Used to show the demo banner and gate certain features.
+final demoBrowsingProvider = StateProvider<bool>((ref) => false);
+
+/// Stores the dealer code context for the current demo session.
+/// Used to attribute the demo lead to the correct dealer.
+final demoDealerCodeProvider = StateProvider<String?>((ref) => null);
+
+/// Whether the demo conversion nudge snackbar has been shown this session.
+final hasShownDemoNudgeProvider = StateProvider<bool>((ref) => false);
+
+/// Atomically resets all demo-browsing state.
+void exitDemoMode(WidgetRef ref) {
+  ref.read(demoModeProvider.notifier).state = false;
+  ref.read(demoBrowsingProvider.notifier).state = false;
+  ref.read(demoDealerCodeProvider.notifier).state = null;
+  ref.read(hasShownDemoNudgeProvider.notifier).state = false;
+  ref.read(validatedDemoCodeProvider.notifier).state = null;
+  isDemoBrowsingFlag = false;
+}
 
 /// Guided Mode toggle. When enabled (default), the app provides:
 /// - Improved visual hierarchy with larger controls

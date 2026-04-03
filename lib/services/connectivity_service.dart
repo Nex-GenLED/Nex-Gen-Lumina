@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
@@ -67,41 +68,35 @@ class ConnectivityService {
 
     final currentSsid = await getCurrentSsid();
 
-    // If we can't determine current SSID, assume local to avoid breaking
-    // existing functionality
+    // If we can't determine current SSID (e.g. Android location permission
+    // not granted), assume REMOTE. Direct HTTP only works on the home LAN,
+    // but the cloud relay works everywhere — so remote is the safe default.
     if (currentSsid == null || currentSsid.isEmpty) {
-      debugPrint('ConnectivityService: Cannot determine current SSID, assuming local');
-      return true;
+      debugPrint('ConnectivityService: Cannot determine current SSID, assuming remote');
+      return false;
     }
 
     // SECURITY: Compare using hashed SSID
-    final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
-    debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
-    return isHome;
+    try {
+      final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
+      debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
+      return isHome;
+    } catch (e) {
+      debugPrint('ConnectivityService: SSID comparison failed ($e), assuming remote');
+      return false;
+    }
   }
 
-  /// Check if device appears to have any network connectivity.
-  /// Note: This checks WiFi specifically, not cellular.
+  /// Check the device's active connection type using connectivity_plus.
   ///
-  /// Returns true if a WiFi IP is found. Also returns true when the IP
-  /// cannot be determined (permission denied, API quirk, Ethernet-only
-  /// phone) — in that case we assume local rather than blocking all
-  /// commands with a false "offline" status.
-  Future<bool> hasWifiConnection() async {
+  /// Returns the set of active connectivity results (wifi, mobile, etc.)
+  /// so callers can distinguish WiFi from cellular.
+  Future<List<ConnectivityResult>> getConnectivityTypes() async {
     try {
-      final ip = await _networkInfo.getWifiIP();
-      // If API returns null/empty we cannot confirm connectivity but we
-      // also cannot confirm absence — default to true (assume connected)
-      // so commands are not silently blocked.
-      if (ip == null || ip.isEmpty || ip == '0.0.0.0') {
-        debugPrint('ConnectivityService: WiFi IP unavailable — assuming connected');
-        return true;
-      }
-      return true;
+      return await Connectivity().checkConnectivity();
     } catch (e) {
-      // Cannot determine connectivity; assume connected to avoid false offline.
-      debugPrint('ConnectivityService: getWifiIP failed ($e) — assuming connected');
-      return true;
+      debugPrint('ConnectivityService: checkConnectivity failed ($e)');
+      return [];
     }
   }
 
@@ -127,15 +122,34 @@ class ConnectivityService {
   }
 
   /// Single connectivity check (shared by initial + periodic emissions).
+  ///
+  /// Uses connectivity_plus to distinguish WiFi from cellular:
+  /// - No connection → offline
+  /// - Cellular (no WiFi) → remote (cellular is never the home LAN)
+  /// - WiFi → check home SSID hash to decide local vs remote
   Future<ConnectivityStatus> _checkConnectivity(String? homeSsid) async {
     final sw = Stopwatch()..start();
-    final hasWifi = await hasWifiConnection();
-    if (!hasWifi) {
+    final types = await getConnectivityTypes();
+
+    // No active connection at all
+    if (types.isEmpty || types.every((t) => t == ConnectivityResult.none)) {
       sw.stop();
-      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=N/A (no wifi), '
-          'source=hasWifiConnection, age=${sw.elapsedMilliseconds}ms');
+      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=N/A (no connection), '
+          'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
       return ConnectivityStatus.offline;
     }
+
+    final hasWifi = types.contains(ConnectivityResult.wifi);
+
+    // Cellular / mobile data only (no WiFi) → always remote
+    if (!hasWifi) {
+      sw.stop();
+      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=false (cellular only), '
+          'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+      return ConnectivityStatus.remote;
+    }
+
+    // WiFi is active → check if it's the home network
     final isHome = await isOnHomeNetwork(homeSsid);
     sw.stop();
     final checkMethod = (homeSsid == null || homeSsid.isEmpty)

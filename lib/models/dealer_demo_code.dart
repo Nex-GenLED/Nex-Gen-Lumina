@@ -29,7 +29,7 @@ class DealerDemoCode {
       code: json['code'] as String,
       dealerCode: json['dealerCode'] as String,
       dealerName: json['dealerName'] as String,
-      market: json['market'] as String,
+      market: (json['market'] ?? json['Market'] ?? '') as String,
       isActive: json['isActive'] as bool? ?? true,
       usageCount: json['usageCount'] as int? ?? 0,
       maxUses: json['maxUses'] as int?,

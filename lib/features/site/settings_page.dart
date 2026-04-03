@@ -581,13 +581,28 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                 ),
                 const Divider(height: 1),
                 // Hidden Installer Mode entry - revealed by rapid taps
-                const _InstallerModeEntry(),
-                const Divider(height: 1),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _InstallerModeEntry();
+                }),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const Divider(height: 1);
+                }),
                 // Hidden Sales Mode entry - revealed by rapid taps
-                const _SalesModeEntry(),
-                const Divider(height: 1),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _SalesModeEntry();
+                }),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const Divider(height: 1);
+                }),
                 // Hidden Admin Mode entry - revealed by rapid taps on copyright
-                const _AdminModeEntry(),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _AdminModeEntry();
+                }),
               ]),
             ),
             crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -42,6 +43,15 @@ Future<void> createUnlinkedUserProfile(User user) async {
 /// Global redirect function for GoRouter.
 /// Handles auth checks, role-based access, and installation validation.
 Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
+  // Gate restricted routes during demo browsing
+  if (isDemoBrowsingFlag) {
+    final location = state.matchedLocation;
+    const restricted = ['/installer', '/sales', '/admin', '/dealer'];
+    if (restricted.any((r) => location.startsWith(r))) {
+      return AppRoutes.dashboard;
+    }
+  }
+
   final user = FirebaseAuth.instance.currentUser;
   final isLoggedIn = user != null;
 
@@ -63,8 +73,8 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // If user is not logged in
   if (!isLoggedIn) {
-    // Allow auth routes, welcome wizard, and demo routes
-    if (isAuthRoute || state.matchedLocation == AppRoutes.welcome || isDemoRoute) {
+    // Allow auth routes, welcome wizard, demo routes, and demo browsing
+    if (isAuthRoute || state.matchedLocation == AppRoutes.welcome || isDemoRoute || isDemoBrowsingFlag) {
       return null;
     }
     return AppRoutes.login;

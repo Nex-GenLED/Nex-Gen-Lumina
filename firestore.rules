@@ -517,6 +517,32 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Dealer Demo Codes (public read for pre-auth validation) ──
+    match /dealer_demo_codes/{codeId} {
+      allow read: if true;
+      allow write: if false; // Only admins via Firebase console
+    }
+
+    // ── Demo Leads (pre-auth lead capture) ──
+    match /demo_leads/{leadId} {
+      allow create: if true;
+      allow read, update: if request.auth != null || true; // Leads may be read/updated during demo flow before auth
+      allow delete: if false; // Only admins via Firebase console
+    }
+
+    // ── Demo Analytics (pre-auth event logging) ──
+    match /demo_analytics/{eventId} {
+      allow create: if true;
+      allow read: if false; // Only Cloud Functions / console
+      allow update, delete: if false;
+    }
+
+    // ── Email Notifications (triggered by demo lead submission) ──
+    match /email_notifications/{notifId} {
+      allow create: if true;
+      allow read, update, delete: if false; // Only Cloud Functions
+    }
+
     // ── App Configuration (PIN hashes, feature flags) ──
     match /app_config/{docId} {
       // Any authenticated user can read (needed for PIN validation)

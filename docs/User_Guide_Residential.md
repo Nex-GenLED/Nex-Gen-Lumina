@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Residential User Guide"
 subtitle: "A homeowner's guide to enjoying your permanent LED lighting system"
 author: "Nex-Gen LED"
-date: "March 2026"
+date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -189,6 +189,19 @@ You can save your current lighting setup so you can recall it anytime:
 3. Give your scene a name
 4. It appears in your Favorites for one-tap access going forward
 
+### Audio Reactive Mode
+
+If your WLED controller supports audio input, you can make your lights respond to music or ambient sound in real time.
+
+1. From the dashboard or **System** → **Settings**, look for **Audio Reactive**
+2. Adjust the **sensitivity slider** — higher values make the lights more responsive to sound
+3. Choose an **effect** for audio mode (e.g., color pulse, frequency bars)
+4. Your lights will react to music or ambient sound in real time
+
+<div class="warning">
+<strong>Note:</strong> Audio Reactive requires compatible hardware. Not all installations include an audio input module — check with your installer if you are unsure.
+</div>
+
 ---
 
 ## 5. Lumina AI — Talk to Your Lights
@@ -263,6 +276,36 @@ Lumina's Auto-Pilot creates a weekly lighting plan for you based on:
 
 You can always make changes to the Auto-Pilot schedule by editing it manually.
 
+### Autopilot Calendar
+
+The Autopilot Calendar gives you a visual overview of your entire week of lighting. Access it from the **Schedule** tab.
+
+**What you will see:**
+
+| Icon | Meaning |
+|------|---------|
+| **Lightning bolt** | Autopilot-generated event — created automatically by Lumina |
+| **Pin** | Protected event — one you created manually (Autopilot will never overwrite these) |
+
+**How to use the Autopilot Calendar:**
+
+1. Open the **Schedule** tab and tap **Autopilot Calendar**
+2. A 7-day grid displays all upcoming lighting events with color-coded pattern previews
+3. Use the **week navigator** arrows to move between previous, current, and next weeks
+4. Tap any event to view its details or make edits
+5. Pull down to **refresh** and regenerate the weekly schedule
+
+**How it works behind the scenes:**
+
+- Each **Sunday evening**, Lumina generates a fresh weekly lighting plan tailored to you
+- The plan considers your sports teams, holidays, preferences, and local sunset times
+- You receive a push notification previewing the upcoming week ("Your Week in Lights")
+- Any events you created manually (marked with a pin) are **protected** — Autopilot will never change or overwrite them
+
+<div class="tip">
+<strong>Tip:</strong> If you want full control over a specific night, just create a manual event for that day. Autopilot will work around it.
+</div>
+
 ---
 
 ## 7. Explore — The Pattern Library
@@ -294,7 +337,30 @@ You can always make changes to the Auto-Pilot schedule by editing it manually.
 
 ---
 
-## 8. White Presets — My Whites
+## 8. AI Design Studio
+
+The AI Design Studio lets you create entirely custom lighting designs using natural language — no technical knowledge required.
+
+### How to Use AI Design Studio
+
+1. Open **AI Design Studio** from the **Explore** tab or the **System** tab
+2. Describe what you want in plain English — for example:
+   - "Red and gold chase from left to right"
+   - "Gentle ocean waves"
+   - "Alternating green and white for St. Patrick's Day"
+3. Lumina interprets your description and generates a live preview
+4. Watch the preview on a **canvas** with your roofline overlay so you can see exactly how it will look on your home
+5. If Lumina needs more information, a dialog will ask follow-up questions (e.g., "How fast should the chase move?")
+6. Fine-tune the result manually using the control panel if needed
+7. Tap **Save** to add the design to **My Designs** for quick access anytime
+
+<div class="tip">
+<strong>Tip:</strong> Your saved designs appear in My Designs on the Explore tab. You can apply them anytime with a single tap — just like any other pattern.
+</div>
+
+---
+
+## 9. White Presets — My Whites
 
 Your lighting system uses **RGBW LEDs**, which means each LED has Red, Green, Blue, and a dedicated White channel. This produces beautiful, true whites that regular color-only LEDs simply cannot match.
 
@@ -312,7 +378,7 @@ Use the R, G, B, and W sliders to blend your perfect white tone. The W slider co
 
 ---
 
-## 9. Remote Access — Control from Anywhere
+## 10. Remote Access — Control from Anywhere
 
 By default, Lumina controls your lights when you are connected to your home WiFi network. If your installer set up remote access, you can also control your lights when you are away from home — at work, on vacation, or anywhere with an internet connection.
 
@@ -333,7 +399,36 @@ Your installer configured a small bridge device that stays connected to your hom
 
 ---
 
-## 10. My Properties
+## 11. Geofence — Welcome Home
+
+Set up your lights to turn on automatically when you arrive home — no tapping required.
+
+### Setting Up Your Geofence
+
+1. Go to **System** → **Geofence Setup**
+2. A map shows your home location
+3. Adjust the **radius slider** (100 m to 1,000 m) to set your trigger zone
+4. Choose what happens when you arrive:
+   - Apply a **favorite pattern**
+   - Apply a **specific scene**
+5. Toggle **"Only at Night"** to avoid triggering during daytime hours
+6. Tap **Save**
+
+### How It Works
+
+When you drive into your geofence zone, Lumina detects your arrival and automatically turns on your lights with your chosen pattern. When you leave the zone, the lights can return to their regular schedule or turn off — depending on your settings.
+
+<div class="warning">
+<strong>Note:</strong> Geofence requires location permissions to be enabled on your phone. The app will prompt you to grant this permission the first time you set up a geofence.
+</div>
+
+<div class="tip">
+<strong>Tip:</strong> A radius of 200–300 m works well for most homes. Too small and the lights may not trigger in time; too large and they may turn on before you are close.
+</div>
+
+---
+
+## 12. My Properties
 
 If you have Lumina systems at multiple locations (main home, vacation house, lake house, etc.), the **My Properties** screen lets you organize them.
 
@@ -375,7 +470,7 @@ If you have multiple properties, set one as your primary (default) property:
 
 ---
 
-## 11. Simple Mode
+## 13. Simple Mode
 
 If you prefer a streamlined, no-frills experience, Simple Mode is for you.
 
@@ -393,7 +488,7 @@ This is great for family members who just want to turn the lights on and off wit
 
 ---
 
-## 12. Adding Family Members
+## 14. Adding Family Members
 
 You can invite up to 5 family members to control your lights from their own phones.
 
@@ -410,9 +505,225 @@ Each family member gets their own login and can control the lights, set favorite
 <strong>Tip:</strong> Family members who prefer a simpler experience can turn on Simple Mode on their own device without affecting anyone else.
 </div>
 
+### Sub-User Permissions
+
+When inviting family members, you can set granular permissions to control what each person can do:
+
+| Permission | What It Controls |
+|-----------|-----------------|
+| **Can Control** | Turn lights on and off |
+| **Can Change Patterns** | Browse and apply effects and colors |
+| **Can Edit Schedules** | Create and modify automations |
+| **Can Invite** | Add other family members |
+| **Can Access Settings** | View system settings |
+
+For convenience, there are three **Permission Presets** you can assign with a single tap:
+
+| Preset | Includes | Good For |
+|--------|----------|----------|
+| **Basic** | Control + Change Patterns | Kids or occasional users |
+| **Full** | Everything except owner-only actions | Spouse or partner |
+| **View Only** | Can see but not change anything | Guests or house-sitters |
+
+You can adjust individual permissions at any time from **Manage Users** in the System tab.
+
 ---
 
-## 13. Connection Status
+## 15. Neighborhood Sync
+
+Neighborhood Sync lets you and your neighbors coordinate lighting for events like game days, holidays, or celebrations. Everyone's lights sync together in real time.
+
+### Getting Started
+
+1. Go to the **Neighborhood Sync** screen (accessible from the **System** tab or the dashboard)
+2. Create a **new group** or **join an existing group** with a shared code
+3. Complete the short 4-page onboarding that explains how Sync works
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Create or Join a Group** | Start a "crew" with neighbors who also have Lumina systems |
+| **Sync Control Panel** | Start, pause, or stop a sync session at any time |
+| **Game Day Sync** | When your team plays, everyone's lights flash the team colors together |
+| **Score Celebrations** | Lights react in real time when your team scores |
+| **Handoff System** | If a game starts during a holiday theme, the game takes priority and the holiday resumes after |
+| **Group Autopilot** | The host can set Game Day Autopilot for the entire group |
+
+### Notifications
+
+You can receive push notifications for Neighborhood Sync events:
+- When a sync session starts
+- When scores happen during a game
+- When a session ends
+
+Configure these in your notification preferences under **System** → **Settings**.
+
+<div class="tip">
+<strong>Tip:</strong> Share your group code at the next block party — the more neighbors who join, the more impressive the display.
+</div>
+
+---
+
+## 16. Sports Alerts
+
+Sports Alerts automatically trigger lighting effects when your favorite teams play — no manual intervention needed.
+
+### Setting Up Sports Alerts
+
+1. Go to **Sports Alerts** (from the **System** tab or **Settings**)
+2. Tap **Add Team** to browse available teams
+3. Select your teams from the supported leagues:
+
+| League | Examples |
+|--------|----------|
+| **NFL** | Chiefs, Cowboys, Eagles, etc. |
+| **NBA** | Lakers, Celtics, Warriors, etc. |
+| **MLB** | Yankees, Dodgers, Cardinals, etc. |
+| **NHL** | Bruins, Penguins, Lightning, etc. |
+| **MLS** | Sporting KC, LAFC, Atlanta United, etc. |
+| **NCAA** | College football and basketball teams |
+| **FIFA** | International teams and tournaments |
+
+4. For each team, choose the **alert types** you want (score, touchdown, basket, goal, etc.)
+5. Assign which **lighting zones** should respond to alerts
+6. Use **Test Alert** to preview how the effect will look on your lights
+
+### How It Works
+
+When a game is live, Lumina monitors scores in real time. When your team scores, your lights flash in your team's colors. After the game ends, your lights automatically return to their regular schedule.
+
+---
+
+## 17. Game Day
+
+Game Day mode transforms your entire lighting system for the big game.
+
+### How to Use Game Day
+
+1. Go to the **Game Day** screen
+2. Select which team's game you want to activate
+3. Your lights switch to **team colors** immediately
+4. Live scoring prompts keep you updated throughout the game
+5. Lights **automatically return** to your regular schedule when the game ends
+
+Game Day works with **Neighborhood Sync** for group experiences — when the host starts a Game Day session, everyone in the group lights up together.
+
+<div class="tip">
+<strong>Tip:</strong> If you set up Sports Alerts for a team, Game Day mode can activate automatically when that team plays. Check your team's settings to enable this.
+</div>
+
+---
+
+## 18. Voice Assistant Integration
+
+Control your Lumina lights hands-free using your favorite voice assistant.
+
+### Apple Siri (iPhone)
+
+1. Open **Voice Assistant Guide** from **System** → **Settings**
+2. Follow the **Siri Shortcuts** setup instructions
+3. Example commands:
+   - "Hey Siri, turn on my lights"
+   - "Hey Siri, set my lights to warm white"
+   - "Hey Siri, dim the lights to 50 percent"
+
+### Google Assistant (Android)
+
+1. Open **Voice Assistant Guide** from **System** → **Settings**
+2. Follow the **Google Assistant App Actions** setup
+3. Example commands:
+   - "Hey Google, set my lights to warm white"
+   - "Hey Google, turn off the patio lights"
+   - "Hey Google, brighten my lights"
+
+### Amazon Alexa
+
+1. Enable the **Lumina Smart Home Skill** in the Alexa app
+2. Link your Lumina account when prompted
+3. Example commands:
+   - "Alexa, turn on the patio lights"
+   - "Alexa, set the front lights to blue"
+   - "Alexa, dim the lights to 30 percent"
+
+### Home Assistant
+
+Integration is available for advanced users who run a Home Assistant setup. See the **Voice Assistant Guide** in **System** → **Settings** for detailed setup instructions.
+
+---
+
+## 19. Roofline Editor
+
+Your installer configured your roofline mapping during the initial setup, but you can view the configuration and make adjustments.
+
+### Viewing Your Roofline
+
+1. Go to **System** → **Roofline Editor**
+2. Your house image is displayed with roofline segments traced on top
+3. Each segment shows its **channel assignment** and **LED count**
+4. Segments are **color-coded by channel** so you can see which lights belong to which zone
+
+### Auto-Detection
+
+If you upload a new photo of your home, Lumina can use **ML-based auto-detection** to trace the roofline automatically. You can then fine-tune the result manually.
+
+<div class="warning">
+<strong>Note:</strong> Major changes to roofline configuration (adding segments, changing LED counts) should be coordinated with your installer to ensure the hardware mapping stays accurate.
+</div>
+
+---
+
+## 20. Lumina Studio — Request Professional Designs
+
+Want a custom lighting design for your landscape, patio, deck, or pool? Lumina Studio connects you with a design specialist.
+
+### How to Submit a Request
+
+1. Go to **System** → **Lumina Studio**
+2. Select the **area** you want designed:
+   - Landscape
+   - Patio
+   - Deck
+   - Pool
+3. **Upload a photo** — take one with your camera or choose from your gallery
+4. **Mark fixture locations** on the image by tapping where you want lights
+5. Add **fixture types and quantities**
+6. Tap **Submit**
+
+A design specialist will review your request and contact you with a custom lighting plan tailored to your space.
+
+---
+
+## 21. Referral Program — Refer and Earn
+
+Earn rewards by referring friends and neighbors to Lumina.
+
+### How It Works
+
+1. Go to **System** → **Referral Program**
+2. View your unique **referral code**
+3. Share it via **SMS** or copy the code to send however you like
+4. When your referral completes a Lumina installation, you earn a reward
+
+### Ambassador Tiers
+
+As you refer more people, you climb through reward tiers with increasing benefits:
+
+| Tier | Benefits |
+|------|----------|
+| **Bronze** | Starting tier — base reward per referral |
+| **Gold** | Increased reward amount |
+| **Platinum** | Maximum reward + bonus perks |
+
+Track your referral count, total rewards earned, and progress toward the next tier — all from the Referral Program screen.
+
+<div class="tip">
+<strong>Tip:</strong> Your neighbors are your best referrals. When they see your lights, they will want their own — share your code and you both benefit.
+</div>
+
+---
+
+## 22. Connection Status
 
 The app keeps you informed about the connection to your lighting system:
 
@@ -428,7 +739,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 14. Daily Use Scenarios
+## 23. Daily Use Scenarios
 
 ### Evening Routine
 
@@ -459,7 +770,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 15. Troubleshooting
+## 24. Troubleshooting
 
 ### Lights not responding
 
@@ -496,7 +807,7 @@ If your lights are not responding, the most common fix is simply making sure you
 
 ---
 
-## 16. Quick Reference Card
+## 25. Quick Reference Card
 
 | Action | How |
 |--------|-----|
@@ -507,10 +818,22 @@ If your lights are not responding, the most common fix is simply making sure you
 | Ask Lumina | Chat bar on the dashboard — type or speak |
 | View your schedule | Schedule tab |
 | Add a new schedule | Schedule tab, then tap the + button |
+| View Autopilot Calendar | Schedule tab, then Autopilot Calendar |
 | Save a scene | Dashboard, then tap "Save Current Design" |
+| Create an AI design | Explore tab or System tab, then AI Design Studio |
 | Change white presets | System tab, then My Whites |
+| Enable Audio Reactive | System tab, then Settings, then Audio Reactive |
+| Set up geofence | System tab, then Geofence Setup |
 | Enable Simple Mode | System tab, then Settings, then Simple Mode toggle |
 | Add a family member | System tab, then Manage Users, then Invite User |
+| Set user permissions | System tab, then Manage Users, then tap a member |
+| Join Neighborhood Sync | System tab, then Neighborhood Sync |
+| Set up Sports Alerts | System tab, then Sports Alerts, then Add Team |
+| Activate Game Day | Game Day screen, then select a team |
+| Use voice assistant | System tab, then Settings, then Voice Assistant Guide |
+| View roofline config | System tab, then Roofline Editor |
+| Request a pro design | System tab, then Lumina Studio |
+| Share referral code | System tab, then Referral Program |
 | Check connection status | Look at the status indicator on the dashboard |
 
 ---
@@ -525,4 +848,4 @@ For troubleshooting, see the separate Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina v2.1 — Residential User Guide — March 2026*
+*Nex-Gen Lumina v2.1 — Residential User Guide — April 2026*

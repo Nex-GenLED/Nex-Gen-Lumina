@@ -144,11 +144,21 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
     );
   }
 
-  void _showCreateGroupDialog() {
-    showDialog(
+  Future<void> _showCreateGroupDialog() async {
+    final group = await showDialog<NeighborhoodGroup>(
       context: context,
       builder: (context) => const _CreateGroupDialog(),
     );
+
+    if (group != null && mounted) {
+      ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+      // Refresh the groups list then show controls
+      ref.invalidate(userNeighborhoodsProvider);
+      await ref.read(userNeighborhoodsProvider.future);
+      if (!mounted) return;
+      final groups = ref.read(userNeighborhoodsProvider).valueOrNull ?? [];
+      _showGroupControlsSheet(groups);
+    }
   }
 
   void _showJoinGroupDialog() {

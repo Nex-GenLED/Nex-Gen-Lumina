@@ -2414,7 +2414,7 @@ class _AutopilotRow extends ConsumerWidget {
             _AutopilotModeChip(
               label: 'Suggest',
               selected: autonomyLevel == 1,
-              onTap: () => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1),
+              onTap: () async => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1),
             ),
             const SizedBox(width: 6),
             _AutopilotModeChip(
@@ -2433,8 +2433,9 @@ class _AutopilotRow extends ConsumerWidget {
             child: CupertinoSwitch(
               value: autopilotEnabled,
               activeColor: NexGenPalette.cyan,
-              onChanged: (v) =>
-                  ref.read(autopilotSettingsServiceProvider).setEnabled(v),
+              onChanged: (v) async {
+                await ref.read(autopilotSettingsServiceProvider).setEnabled(v);
+              },
             ),
           ),
         ],

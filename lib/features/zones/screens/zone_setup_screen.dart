@@ -280,23 +280,23 @@ class _AssignmentSheetState extends ConsumerState<_AssignmentSheet> {
                       isSelected: _selectedType == type,
                       onTap: () => setState(() => _selectedType = type),
                     ),
-                  const SizedBox(height: 16),
-                  // Location label
-                  Text('Location Label',
-                      style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _labelCtrl,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. Front Roofline, Patio Edge',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            // Action buttons
+            // Location label — pinned below the scrollable fixture list
+            Text('Location Label',
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _labelCtrl,
+              decoration: const InputDecoration(
+                hintText: 'e.g. Front Roofline, Patio Edge',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Action buttons — always visible at bottom
             Row(
               children: [
                 if (widget.existing != null)

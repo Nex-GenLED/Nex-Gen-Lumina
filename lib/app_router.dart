@@ -203,6 +203,23 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoCompletionScreen()),
       ),
+      // ===== DEMO REDIRECTS (placeholder routes → main app sections) =====
+      GoRoute(
+        path: AppRoutes.demoPatterns,
+        redirect: (context, state) => AppRoutes.explore,
+      ),
+      GoRoute(
+        path: AppRoutes.demoSchedule,
+        redirect: (context, state) => AppRoutes.schedule,
+      ),
+      GoRoute(
+        path: AppRoutes.demoExplore,
+        redirect: (context, state) => AppRoutes.explore,
+      ),
+      GoRoute(
+        path: AppRoutes.demoLumina,
+        redirect: (context, state) => AppRoutes.dashboard,
+      ),
       // ===== ONBOARDING (root navigator) =====
       GoRoute(
         path: AppRoutes.discovery,
@@ -298,7 +315,10 @@ class AppRouter {
         path: AppRoutes.gameDay,
         name: 'game-day',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: GameDayScreen()),
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: GameDayScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.audioReactive,

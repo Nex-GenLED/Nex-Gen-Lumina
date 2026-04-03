@@ -1,13 +1,15 @@
+import 'dart:async' show unawaited;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/demo/demo_lead_service.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_scaffold.dart';
-import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Demo completion screen - the conversion point.
@@ -272,6 +274,56 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
           ),
 
           const SizedBox(height: 40),
+
+          // Explore the app CTA
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton(
+              onPressed: () {
+                // Activate demo mode so the main app uses DemoWledRepository
+                ref.read(demoModeProvider.notifier).state = true;
+                ref.read(demoBrowsingProvider.notifier).state = true;
+                isDemoBrowsingFlag = true;
+
+                // Log analytics (fire and forget)
+                final leadService = ref.read(demoLeadServiceProvider);
+                final leadId = ref.read(demoLeadProvider)?.id;
+                if (leadId != null) {
+                  unawaited(leadService.logDemoCompleted(leadId)
+                      .catchError((e) => debugPrint('Demo analytics: $e')));
+                  unawaited(leadService.logAppExploreStarted(leadId)
+                      .catchError((e) => debugPrint('Demo analytics: $e')));
+                }
+
+                // Navigate to main app shell
+                context.go(AppRoutes.dashboard);
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF00D4FF),
+                foregroundColor: const Color(0xFF07091A),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              child: const Text('Explore the app \u2192'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'See exactly what your home could look like',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 11,
+                  color: NexGenPalette.textMedium,
+                ),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 24),
 
           // CTA Card
           DemoGlassCard(

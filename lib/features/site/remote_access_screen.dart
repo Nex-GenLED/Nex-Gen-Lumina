@@ -373,7 +373,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       final docRef = await commandsRef.add({
         'type': 'getInfo',
         'payload': '{}',
-        'controllerId': '',
+        'controllerId': ref.read(selectedControllerIdProvider) ?? '',
         'controllerIp': ref.read(selectedDeviceIpProvider) ?? '',
         'webhookUrl': '',
         'createdAt': FieldValue.serverTimestamp(),

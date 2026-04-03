@@ -288,11 +288,23 @@ class AutopilotSettingsService {
 
   /// Generate autopilot schedules and add them to the user's schedule list.
   Future<void> generateAndPopulateSchedules() async {
-    final profileAsync = _ref.read(currentUserProfileProvider);
-    final profile = profileAsync.maybeWhen(
+    // Try to get the profile, waiting for it if it's still loading
+    var profileAsync = _ref.read(currentUserProfileProvider);
+    var profile = profileAsync.maybeWhen(
       data: (p) => p,
       orElse: () => null,
     );
+    if (profile == null) {
+      // Profile not yet loaded — wait for it with a timeout
+      debugPrint('AutopilotSettingsService: Waiting for profile to load...');
+      try {
+        profile = await _ref.read(currentUserProfileProvider.future)
+            .timeout(const Duration(seconds: 10));
+      } catch (e) {
+        debugPrint('AutopilotSettingsService: No profile found after waiting, cannot generate schedules: $e');
+        return;
+      }
+    }
     if (profile == null) {
       debugPrint('AutopilotSettingsService: No profile found, cannot generate schedules');
       return;
@@ -311,7 +323,7 @@ class AutopilotSettingsService {
 
       // Convert to regular ScheduleItem format (using user's IANA timezone for display)
       final scheduleItems = autopilotItems
-          .map((item) => _convertToScheduleItem(item, ianaTimezone: profile.timeZone))
+          .map((item) => _convertToScheduleItem(item, ianaTimezone: profile?.timeZone))
           .toList();
 
       // Add to user's schedules (merge with existing)

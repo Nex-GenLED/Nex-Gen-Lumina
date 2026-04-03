@@ -315,11 +315,11 @@ class _DayDetailSheet extends ConsumerWidget {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () {
+              onPressed: () async {
                 final settingsService = ref.read(autopilotSettingsServiceProvider);
-                // Save override by generating a new schedule item
-                settingsService.generateAndPopulateSchedules();
                 Navigator.of(dialogContext).pop();
+                // Generate after closing so the user isn't stuck on a dialog
+                await settingsService.generateAndPopulateSchedules();
               },
               child: const Text('Save'),
             ),
