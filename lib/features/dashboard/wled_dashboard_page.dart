@@ -32,7 +32,6 @@ import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
-import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
@@ -323,24 +322,29 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
-            // Design Studio — full width on its own row
+            // Design Studio + Neighborhood Sync — side by side
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _FeatureButtonFull(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+              child: Row(
+                children: [
+                  _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+                  const SizedBox(width: 12),
+                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
-            // Game Day + Neighborhood Sync — side by side
+            // Game Day + Audio Mode — side by side
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   _FeatureButton(icon: Icons.stadium_rounded, label: 'Game Day', onTap: () => context.push(AppRoutes.gameDay)),
                   const SizedBox(width: 12),
-                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
+                  _FeatureButton(icon: Icons.graphic_eq_rounded, label: 'Audio Mode', onTap: () => context.push(AppRoutes.audioReactive)),
                 ],
               ),
             ),
-            _buildAudioReactiveChip(context, ref),
             const SizedBox(height: 16),
             _buildSmartSuggestions(context, ref),
             const SizedBox(height: 16),
@@ -1271,29 +1275,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
-  Widget _buildAudioReactiveChip(BuildContext context, WidgetRef ref) {
-    final ip = ref.watch(selectedDeviceIpProvider);
-    if (ip == null) return const SizedBox.shrink();
-
-    final capAsync = ref.watch(audioCapabilityProvider(ip));
-    final hasSupport = capAsync.valueOrNull?.hasAudioReactiveUsermod ?? false;
-    if (!hasSupport) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 16, top: 10),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: ActionChip(
-          avatar: Icon(Icons.mic, size: 16, color: NexGenPalette.cyan),
-          label: const Text('Audio Reactive'),
-          labelStyle: TextStyle(color: NexGenPalette.textHigh, fontSize: 12, fontWeight: FontWeight.w500),
-          side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.4)),
-          backgroundColor: NexGenPalette.gunmetal90,
-          onPressed: () => context.push(AppRoutes.audioReactive),
-        ),
-      ),
-    );
-  }
 
   Widget _buildSmartSuggestions(BuildContext context, WidgetRef ref) {
     return SmartSuggestionsList(
@@ -1903,52 +1884,6 @@ class _SkySlot {
   final String label;
 
   const _SkySlot(this.startHour, this.colors, this.opacity, this.label);
-}
-
-/// Full-width feature button (no Expanded wrapper — fills parent).
-class _FeatureButtonFull extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _FeatureButtonFull({required this.icon, required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 20, color: NexGenPalette.cyan),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: NexGenPalette.textPrimary,
-                  letterSpacing: 0.3,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _FeatureButton extends StatelessWidget {

@@ -20,7 +20,7 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/features/wled/current_colors_editor_screen.dart';
-import 'package:nexgen_command/features/audio/screens/audio_reactive_screen.dart';
+import 'package:nexgen_command/features/audio/audio_mode_page.dart';
 import 'package:nexgen_command/features/site/settings_page.dart';
 import 'package:nexgen_command/features/site/user_profile_screen.dart';
 import 'package:nexgen_command/features/site/edit_profile_screen.dart';
@@ -324,7 +324,7 @@ class AppRouter {
         path: AppRoutes.audioReactive,
         name: 'audio-reactive',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: AudioReactiveScreen()),
+        pageBuilder: (context, state) => const NoTransitionPage(child: AudioModePage()),
       ),
       GoRoute(
         path: AppRoutes.myDesigns,

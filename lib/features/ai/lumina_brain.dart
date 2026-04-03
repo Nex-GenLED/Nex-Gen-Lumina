@@ -179,6 +179,14 @@ class LuminaBrain {
     final historyService = SuggestionHistoryService.instance;
     final isOpenEnded = SuggestionHistoryService.isOpenEndedQuery(userPrompt);
 
+    // ── PRE-TIER: Audio Intent Detection ──────────────────────────────────
+    // Runs before all other tiers so "pulse to music", "audio mode", etc.
+    // always activate Audio Mode directly.
+    {
+      final audioResponse = await _handleAudioIntent(ref, userPrompt);
+      if (audioResponse != null) return audioResponse;
+    }
+
     // ── PRE-TIER: Compound Command Detection ──────────────────────────────
     // Detect and handle commands that combine lighting + scheduling intent
     // BEFORE tier resolution so temporal language doesn't corrupt team/holiday
@@ -359,6 +367,114 @@ class LuminaBrain {
     }
 
     return _sanitizeResponse(aiResponse);
+  }
+
+  // -------------------------------------------------------------------------
+  // Compound command handler
+  // -------------------------------------------------------------------------
+
+  /// Handles a confirmed compound lighting+scheduling command.
+  ///
+  // -------------------------------------------------------------------------
+  // Audio intent detection & handler
+  // -------------------------------------------------------------------------
+
+  /// Returns true when the prompt explicitly requests audio/music reactivity.
+  static bool _isAudioIntent(String query) {
+    final lower = query.toLowerCase();
+    const patterns = [
+      'pulse to', 'react to', 'audio', 'music', 'beat', 'bass',
+      'sound reactive', 'audio mode', 'audio reactive', 'mic',
+      'listen to', 'dance to', 'sync to music',
+    ];
+    return patterns.any((p) => lower.contains(p));
+  }
+
+  /// Handles audio-reactive intent by activating an audio effect on the
+  /// connected controller. Returns null if the prompt isn't audio-related
+  /// so the caller can fall through to normal tiers.
+  static Future<String?> _handleAudioIntent(WidgetRef ref, String userPrompt) async {
+    if (!_isAudioIntent(userPrompt)) return null;
+
+    final ip = ref.read(selectedDeviceIpProvider);
+    if (ip == null) {
+      return 'Audio Mode needs a connected controller. '
+          'Make sure your system is online first.';
+    }
+
+    // Read capability — the provider may already be cached
+    final capAsync = ref.read(audioCapabilityProvider(ip));
+    final cap = capAsync.valueOrNull;
+    if (cap == null || !cap.hasAudioReactiveUsermod) {
+      return 'Audio Mode needs AudioReactive firmware on your controller. '
+          'Check your controller settings.';
+    }
+
+    if (cap.audioReactiveEffects.isEmpty) {
+      return 'Your controller has AudioReactive firmware but no audio '
+          'effects were detected. Try updating your firmware.';
+    }
+
+    // Pick the best default effect: prefer GEQ or Gravimeter
+    final effectNames = ref.read(wledEffectNamesProvider(ip)).valueOrNull ?? [];
+    int chosenId = cap.audioReactiveEffects.first;
+    String chosenName = 'Audio Effect';
+
+    for (final fxId in cap.audioReactiveEffects) {
+      if (fxId < effectNames.length) {
+        final raw = effectNames[fxId];
+        final name = raw.startsWith('* ') ? raw.substring(2) : raw;
+        final lower = name.toLowerCase();
+        if (lower.contains('geq') || lower.contains('gravimeter')) {
+          chosenId = fxId;
+          chosenName = name;
+          break;
+        }
+      }
+    }
+
+    // Resolve display name if we fell through without matching
+    if (chosenName == 'Audio Effect' && chosenId < effectNames.length) {
+      final raw = effectNames[chosenId];
+      chosenName = raw.startsWith('* ') ? raw.substring(2) : raw;
+    }
+
+    // Apply via the repository
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo != null) {
+      await repo.applyJson({
+        'on': true,
+        'bri': 220,
+        'seg': [
+          {
+            'id': 0,
+            'fx': chosenId,
+            'sx': 128,
+            'ix': 180,
+            'col': [
+              [255, 255, 255, 180]
+            ],
+          }
+        ]
+      });
+
+      // Update local preview so the dashboard reflects the change immediately
+      try {
+        ref.read(wledStateProvider.notifier).applyLocalPreview(
+          colors: [const Color(0xFF00D4FF)],
+          effectId: chosenId,
+          effectName: chosenName,
+          brightness: 220,
+          speed: 128,
+          intensity: 180,
+        );
+      } catch (e) {
+        debugPrint('Audio intent applyLocalPreview error: $e');
+      }
+    }
+
+    return "Audio Mode is on — your lights will now pulse to whatever's "
+        "playing in the room. $chosenName is active.";
   }
 
   // -------------------------------------------------------------------------

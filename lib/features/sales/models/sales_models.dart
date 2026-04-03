@@ -60,7 +60,53 @@ extension WireGaugeX on WireGauge {
 }
 
 // ─────────────────────────────────────────
-// 4. OutletType enum
+// 4. RailType enum
+// ─────────────────────────────────────────
+
+enum RailType {
+  onePiece,   // Aluminum 1-piece rail, 1m per piece
+  twoPiece,   // Aluminum 2-piece rail, 1m per piece
+  none,       // No rail — used for rope light zones
+}
+
+extension RailTypeX on RailType {
+  String get label => const {
+    RailType.onePiece: '1-Piece Rail',
+    RailType.twoPiece: '2-Piece Rail',
+    RailType.none: 'None',
+  }[this]!;
+}
+
+// ─────────────────────────────────────────
+// 5. RailColor enum
+// ─────────────────────────────────────────
+
+enum RailColor {
+  black,
+  brown,
+  beige,
+  white,
+  navy,
+  silver,
+  grey,
+  none,       // No color — used when railType == none
+}
+
+extension RailColorX on RailColor {
+  String get label => const {
+    RailColor.black: 'Black',
+    RailColor.brown: 'Brown',
+    RailColor.beige: 'Beige',
+    RailColor.white: 'White',
+    RailColor.navy: 'Navy',
+    RailColor.silver: 'Silver',
+    RailColor.grey: 'Grey',
+    RailColor.none: 'None',
+  }[this]!;
+}
+
+// ─────────────────────────────────────────
+// 6. OutletType enum
 // ─────────────────────────────────────────
 
 enum OutletType { existing, newRequired }
@@ -176,6 +222,9 @@ class InstallZone {
   final List<String> photoUrls;
   final String notes;
   final double priceUsd;
+  final RailType railType;
+  final RailColor railColor;
+  final double connectorRunFt;   // distance from controller/previous zone to start of this zone (ft)
 
   const InstallZone({
     required this.id,
@@ -189,6 +238,9 @@ class InstallZone {
     required this.photoUrls,
     this.notes = '',
     this.priceUsd = 0.0,
+    this.railType = RailType.none,
+    this.railColor = RailColor.none,
+    this.connectorRunFt = 0.0,
   });
 
   int get totalPixels => (runLengthFt * pixelsPerFoot).round();
@@ -208,6 +260,9 @@ class InstallZone {
     'photoUrls': photoUrls,
     'notes': notes,
     'priceUsd': priceUsd,
+    'railType': railType.name,
+    'railColor': railColor.name,
+    'connectorRunFt': connectorRunFt,
   };
 
   factory InstallZone.fromJson(Map<String, dynamic> j) => InstallZone(
@@ -224,6 +279,9 @@ class InstallZone {
     photoUrls: List<String>.from(j['photoUrls'] ?? []),
     notes: j['notes'] ?? '',
     priceUsd: (j['priceUsd'] as num?)?.toDouble() ?? 0.0,
+    railType: RailType.values.byName(j['railType'] ?? 'none'),
+    railColor: RailColor.values.byName(j['railColor'] ?? 'none'),
+    connectorRunFt: (j['connectorRunFt'] as num?)?.toDouble() ?? 0.0,
   );
 }
 

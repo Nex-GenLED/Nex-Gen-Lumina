@@ -28,12 +28,19 @@ class AudioCapabilityDetector {
       bool hasUsermod = false;
       String? usermodeVersion;
 
-      // Check info.u (usermods object) for audioreactive key
+      // Check info.u (usermods object) for audioreactive key.
+      // Case-insensitive: firmware may report "audioreactive",
+      // "AudioReactive", "Audioreactive", etc.
       final usermods = info['u'];
+      String arKey = '';
       if (usermods is Map<String, dynamic>) {
-        if (usermods.containsKey('audioreactive')) {
+        arKey = usermods.keys.firstWhere(
+          (k) => k.toLowerCase() == 'audioreactive',
+          orElse: () => '',
+        );
+        if (arKey.isNotEmpty) {
           hasUsermod = true;
-          final arMod = usermods['audioreactive'];
+          final arMod = usermods[arKey];
           if (arMod is Map<String, dynamic> && arMod.containsKey('ver')) {
             usermodeVersion = arMod['ver']?.toString();
           }
@@ -50,8 +57,8 @@ class AudioCapabilityDetector {
       bool hasMic = false;
       if (hasUsermod) {
         // If the usermod is present, check for mic type/pin config
-        if (usermods is Map<String, dynamic>) {
-          final arMod = usermods['audioreactive'];
+        if (usermods is Map<String, dynamic> && arKey.isNotEmpty) {
+          final arMod = usermods[arKey];
           if (arMod is Map<String, dynamic>) {
             // mic type: 0 = none, 1 = analog, 2 = I2S digital (INMP441/SPH0645 etc.)
             final micType = arMod['micType'] ?? arMod['type'];
@@ -92,10 +99,35 @@ class AudioCapabilityDetector {
       // /json/effects returns a JSON array of effect name strings
       // Index in the array = effect ID
       if (effects is List) {
+        // Primary: SR WLED marks audio-reactive effects with "* " prefix
         for (int i = 0; i < effects.length; i++) {
           final name = effects[i];
           if (name is String && name.startsWith('* ')) {
             arEffectIds.add(i);
+          }
+        }
+
+        // Fallback: some builds (e.g. v0.15.x Dig-Octa Audioreactive)
+        // list audio effects by plain name without the asterisk prefix.
+        if (arEffectIds.isEmpty && hasUsermod) {
+          const arPatterns = [
+            'gravimeter', 'geq', 'freqwave', 'dj light', 'waverly',
+            'rocktaves', 'audioreactive', 'ripple peak',
+            'puddles', 'puddlepeak', 'juggles', 'matripix', 'akemi',
+            'blurz', 'funky plank', 'fizzybubbles', 'noisemove',
+            'freqmap', 'freqmatrix', 'freqpixels', 'binmap',
+            'noisepal', 'plasmoid', 'pixels', 'pixelwave',
+            'midnoise', 'noisemeter', 'gravcent', 'gravfreq',
+            'waterfall', 'noisefire',
+          ];
+          for (int i = 0; i < effects.length; i++) {
+            final name = effects[i];
+            if (name is String) {
+              final lower = name.toLowerCase();
+              if (arPatterns.any((p) => lower.contains(p))) {
+                arEffectIds.add(i);
+              }
+            }
           }
         }
       }

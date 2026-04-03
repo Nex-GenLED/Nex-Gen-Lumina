@@ -387,9 +387,12 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
   final _pxPerFtCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
+  final _connectorRunCtrl = TextEditingController();
 
   ProductType _productType = ProductType.roofline;
   ColorPreset _colorPreset = ColorPreset.rgbw;
+  RailType _railType = RailType.none;
+  RailColor _railColor = RailColor.none;
   List<InjectionPoint> _injections = [];
   List<PowerMount> _mounts = [];
   List<String> _photoUrls = [];
@@ -407,6 +410,9 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
       _pxPerFtCtrl.text = z.pixelsPerFoot.toStringAsFixed(3);
       _notesCtrl.text = z.notes;
       _priceCtrl.text = z.priceUsd > 0 ? z.priceUsd.toStringAsFixed(2) : '';
+      _railType = z.railType;
+      _railColor = z.railColor;
+      _connectorRunCtrl.text = z.connectorRunFt > 0 ? z.connectorRunFt.toStringAsFixed(1) : '';
       _injections = List.from(z.injections);
       _mounts = List.from(z.mounts);
       _photoUrls = List.from(z.photoUrls);
@@ -422,6 +428,7 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
     _pxPerFtCtrl.dispose();
     _notesCtrl.dispose();
     _priceCtrl.dispose();
+    _connectorRunCtrl.dispose();
     super.dispose();
   }
 
@@ -439,6 +446,10 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
       _productType = type;
       if (type != ProductType.custom) {
         _pxPerFtCtrl.text = type.pixelsPerFoot.toStringAsFixed(3);
+      }
+      if (type != ProductType.roofline) {
+        _railType = RailType.none;
+        _railColor = RailColor.none;
       }
     });
     _recalculate();
@@ -616,6 +627,9 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
       photoUrls: _photoUrls,
       notes: _notesCtrl.text.trim(),
       priceUsd: double.tryParse(_priceCtrl.text) ?? 0,
+      railType: _railType,
+      railColor: _railColor,
+      connectorRunFt: double.tryParse(_connectorRunCtrl.text) ?? 0,
     );
 
     Navigator.of(context).pop(zone);
@@ -705,6 +719,38 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
                     icon: Icons.straighten,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (_) => _recalculate(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Rail type (roofline only)
+                  if (_productType == ProductType.roofline) ...[
+                    const Text('Rail type', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    _buildRailTypeSelector(),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Rail color (when rail is selected)
+                  if (_railType != RailType.none) ...[
+                    const Text('Rail color', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    _buildRailColorGrid(),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Connector run distance
+                  _buildField(
+                    controller: _connectorRunCtrl,
+                    label: 'Connector run to this zone (ft)',
+                    icon: Icons.cable,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 4),
+                    child: Text(
+                      'Estimated distance from controller or previous zone',
+                      style: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.6), fontSize: 11),
+                    ),
                   ),
                   const SizedBox(height: 12),
 
@@ -899,6 +945,97 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
                 ),
               ],
             ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRailTypeSelector() {
+    final options = [RailType.onePiece, RailType.twoPiece];
+    return Row(
+      children: options.map((type) {
+        final selected = _railType == type;
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: type != options.last ? 8 : 0),
+            child: GestureDetector(
+              onTap: () => setState(() {
+                _railType = type;
+                if (_railColor == RailColor.none) {
+                  _railColor = RailColor.black;
+                }
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected ? NexGenPalette.cyan.withValues(alpha: 0.15) : NexGenPalette.gunmetal90,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: selected ? NexGenPalette.cyan : NexGenPalette.line,
+                  ),
+                ),
+                child: Text(
+                  type.label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: selected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRailColorGrid() {
+    const colorOptions = <RailColor, Color>{
+      RailColor.black:  Color(0xFF1C1C1C),
+      RailColor.brown:  Color(0xFF5C3D1E),
+      RailColor.beige:  Color(0xFFD4B896),
+      RailColor.white:  Color(0xFFF5F5F5),
+      RailColor.navy:   Color(0xFF1B2A4A),
+      RailColor.silver: Color(0xFFA8A8A8),
+      RailColor.grey:   Color(0xFF6B6B6B),
+    };
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: colorOptions.entries.map((entry) {
+        final railColor = entry.key;
+        final displayColor = entry.value;
+        final selected = _railColor == railColor;
+
+        return GestureDetector(
+          onTap: () => setState(() => _railColor = railColor),
+          child: Column(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: displayColor,
+                  border: Border.all(
+                    color: selected ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.2),
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                railColor.label,
+                style: TextStyle(
+                  color: selected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                  fontSize: 10,
+                ),
+              ),
+            ],
           ),
         );
       }).toList(),
