@@ -388,6 +388,7 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
   final _notesCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _connectorRunCtrl = TextEditingController();
+  final _cornerCountCtrl = TextEditingController();
 
   ProductType _productType = ProductType.roofline;
   ColorPreset _colorPreset = ColorPreset.rgbw;
@@ -413,6 +414,7 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
       _railType = z.railType;
       _railColor = z.railColor;
       _connectorRunCtrl.text = z.connectorRunFt > 0 ? z.connectorRunFt.toStringAsFixed(1) : '';
+      _cornerCountCtrl.text = z.cornerCount > 0 ? z.cornerCount.toString() : '';
       _injections = List.from(z.injections);
       _mounts = List.from(z.mounts);
       _photoUrls = List.from(z.photoUrls);
@@ -429,6 +431,7 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
     _notesCtrl.dispose();
     _priceCtrl.dispose();
     _connectorRunCtrl.dispose();
+    _cornerCountCtrl.dispose();
     super.dispose();
   }
 
@@ -630,6 +633,7 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
       railType: _railType,
       railColor: _railColor,
       connectorRunFt: double.tryParse(_connectorRunCtrl.text) ?? 0,
+      cornerCount: int.tryParse(_cornerCountCtrl.text) ?? 0,
     );
 
     Navigator.of(context).pop(zone);
@@ -719,6 +723,22 @@ class _ZoneEditorSheetState extends State<ZoneEditorSheet> {
                     icon: Icons.straighten,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (_) => _recalculate(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Corner count
+                  _buildField(
+                    controller: _cornerCountCtrl,
+                    label: 'Corners in this zone',
+                    icon: Icons.turn_right,
+                    keyboardType: TextInputType.number,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 4),
+                    child: Text(
+                      'Count every direction change along this zone\'s run',
+                      style: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.6), fontSize: 11),
+                    ),
                   ),
                   const SizedBox(height: 12),
 

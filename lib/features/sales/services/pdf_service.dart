@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'package:nexgen_command/features/sales/models/material_models.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/services/install_plan_service.dart';
 
@@ -413,6 +414,89 @@ class PdfService {
     final wd = _days[date.weekday];
     final mo = _months[date.month];
     return '$wd, $mo ${date.day}, ${date.year}';
+  }
+
+  // ── Packing list PDF ────────────────────────────────────────────────────
+
+  /// Generate a single-page packing list from a job material list.
+  Future<Uint8List> generatePackingList(JobMaterialList matList) async {
+    final doc = pw.Document();
+    final headerBg = PdfColor.fromHex('#07091A');
+    final accentCyan = PdfColor.fromHex('#00D4FF');
+    const white = PdfColors.white;
+    final darkText = PdfColor.fromHex('#111527');
+    final altRow = PdfColor.fromHex('#F1EFE8');
+
+    doc.addPage(pw.Page(
+      pageFormat: PdfPageFormat.letter,
+      margin: const pw.EdgeInsets.all(32),
+      build: (context) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Container(
+            color: headerBg,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Packing List',
+                    style: pw.TextStyle(color: white, fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                pw.Text('Job #${matList.jobNumber}',
+                    style: pw.TextStyle(color: accentCyan, fontSize: 11)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Table(
+            columnWidths: {
+              0: const pw.FlexColumnWidth(5),
+              1: const pw.FlexColumnWidth(1.5),
+              2: const pw.FlexColumnWidth(1),
+              3: const pw.FlexColumnWidth(1),
+            },
+            border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+            children: [
+              pw.TableRow(
+                decoration: pw.BoxDecoration(color: PdfColor.fromHex('#E0DED6')),
+                children: [
+                  _cell('Material', bold: true, color: darkText),
+                  _cell('Qty', bold: true, color: darkText),
+                  _cell('Unit', bold: true, color: darkText),
+                  _cell('✓', bold: true, color: darkText),
+                ],
+              ),
+              ...matList.lines.where((l) => l.checkedOutQty > 0).toList().asMap().entries.map((entry) {
+                final i = entry.key;
+                final line = entry.value;
+                final rowColor = i.isOdd ? altRow : PdfColors.white;
+                return pw.TableRow(
+                  decoration: pw.BoxDecoration(color: rowColor),
+                  children: [
+                    _cell(line.materialName, color: darkText),
+                    _cell(line.checkedOutQty.toStringAsFixed(0), color: darkText),
+                    _cell(line.unit == MaterialUnit.piece ? 'pcs' : 'ea', color: darkText),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(4),
+                      child: pw.Container(
+                        width: 12, height: 12,
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border.all(color: PdfColors.grey600, width: 0.5),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ],
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text('${matList.lines.where((l) => l.checkedOutQty > 0).length} items · ${_formatDate(DateTime.now())}',
+              style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+        ],
+      ),
+    ));
+
+    return doc.save();
   }
 }
 

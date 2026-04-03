@@ -60,7 +60,13 @@ extension WireGaugeX on WireGauge {
 }
 
 // ─────────────────────────────────────────
-// 4. RailType enum
+// 4. SystemVoltage enum
+// ─────────────────────────────────────────
+
+enum SystemVoltage { v24, v36 }
+
+// ─────────────────────────────────────────
+// 5. RailType enum
 // ─────────────────────────────────────────
 
 enum RailType {
@@ -225,6 +231,7 @@ class InstallZone {
   final RailType railType;
   final RailColor railColor;
   final double connectorRunFt;   // distance from controller/previous zone to start of this zone (ft)
+  final int cornerCount;         // number of corners in this zone's run
 
   const InstallZone({
     required this.id,
@@ -241,6 +248,7 @@ class InstallZone {
     this.railType = RailType.none,
     this.railColor = RailColor.none,
     this.connectorRunFt = 0.0,
+    this.cornerCount = 0,
   });
 
   int get totalPixels => (runLengthFt * pixelsPerFoot).round();
@@ -263,6 +271,7 @@ class InstallZone {
     'railType': railType.name,
     'railColor': railColor.name,
     'connectorRunFt': connectorRunFt,
+    'cornerCount': cornerCount,
   };
 
   factory InstallZone.fromJson(Map<String, dynamic> j) => InstallZone(
@@ -282,6 +291,7 @@ class InstallZone {
     railType: RailType.values.byName(j['railType'] ?? 'none'),
     railColor: RailColor.values.byName(j['railColor'] ?? 'none'),
     connectorRunFt: (j['connectorRunFt'] as num?)?.toDouble() ?? 0.0,
+    cornerCount: (j['cornerCount'] as int?) ?? 0,
   );
 }
 
@@ -409,6 +419,7 @@ class SalesJob {
   final DateTime? day2Date;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final SystemVoltage systemVoltage;
 
   double get calculatedTotal =>
       zones.fold(0.0, (acc, z) => acc + z.priceUsd);
@@ -432,6 +443,7 @@ class SalesJob {
     this.day2Date,
     required this.createdAt,
     required this.updatedAt,
+    this.systemVoltage = SystemVoltage.v24,
   });
 
   Map<String, dynamic> toJson() => {
@@ -452,6 +464,7 @@ class SalesJob {
     'day2Date': day2Date != null ? Timestamp.fromDate(day2Date!) : null,
     'createdAt': Timestamp.fromDate(createdAt),
     'updatedAt': Timestamp.fromDate(updatedAt),
+    'systemVoltage': systemVoltage.name,
   };
 
   factory SalesJob.fromJson(Map<String, dynamic> j) => SalesJob(
@@ -471,6 +484,10 @@ class SalesJob {
     day2Date: (j['day2Date'] as Timestamp?)?.toDate(),
     createdAt: (j['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     updatedAt: (j['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    systemVoltage: SystemVoltage.values.firstWhere(
+      (v) => v.name == (j['systemVoltage'] ?? ''),
+      orElse: () => SystemVoltage.v24,
+    ),
   );
 
   SalesJob copyWith({
@@ -489,6 +506,7 @@ class SalesJob {
     DateTime? day2Date,
     DateTime? createdAt,
     DateTime? updatedAt,
+    SystemVoltage? systemVoltage,
   }) => SalesJob(
     id: id ?? this.id,
     jobNumber: jobNumber ?? this.jobNumber,
@@ -505,5 +523,6 @@ class SalesJob {
     day2Date: day2Date ?? this.day2Date,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    systemVoltage: systemVoltage ?? this.systemVoltage,
   );
 }

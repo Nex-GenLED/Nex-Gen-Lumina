@@ -21,6 +21,7 @@ class VisitReviewScreen extends ConsumerStatefulWidget {
 class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
   DateTime? _day1;
   DateTime? _day2;
+  SystemVoltage _systemVoltage = SystemVoltage.v24;
   bool _isSending = false;
 
   @override
@@ -30,6 +31,7 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
     if (job != null) {
       _day1 = job.day1Date;
       _day2 = job.day2Date;
+      _systemVoltage = job.systemVoltage;
     }
   }
 
@@ -77,6 +79,7 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
         estimateSentAt: DateTime.now(),
         day1Date: _day1,
         day2Date: _day2,
+        systemVoltage: _systemVoltage,
         updatedAt: DateTime.now(),
       );
 
@@ -117,6 +120,7 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
     final updated = job.copyWith(
       day1Date: _day1,
       day2Date: _day2,
+      systemVoltage: _systemVoltage,
       updatedAt: DateTime.now(),
     );
 
@@ -193,6 +197,8 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
                     ),
                   ),
                   _buildTotalsCard(zones),
+                  const SizedBox(height: 12),
+                  _buildVoltageCard(),
                   const SizedBox(height: 12),
                   _buildDatesCard(),
                   const SizedBox(height: 24),
@@ -423,6 +429,54 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
             Text('Total price', style: GoogleFonts.montserrat(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
             Text('\$${totalPrice.toStringAsFixed(0)}', style: GoogleFonts.montserrat(color: NexGenPalette.green, fontSize: 22, fontWeight: FontWeight.w700)),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVoltageCard() {
+    return _ReviewCard(
+      title: 'System configuration',
+      children: [
+        const Text('System Voltage', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
+        const SizedBox(height: 8),
+        Row(
+          children: SystemVoltage.values.map((v) {
+            final selected = _systemVoltage == v;
+            final label = v == SystemVoltage.v24 ? '24V' : '36V';
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: v != SystemVoltage.values.last ? 8 : 0),
+                child: GestureDetector(
+                  onTap: () => setState(() => _systemVoltage = v),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: selected ? NexGenPalette.cyan.withValues(alpha: 0.15) : NexGenPalette.gunmetal90,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selected ? NexGenPalette.cyan : NexGenPalette.line,
+                      ),
+                    ),
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: selected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                        fontSize: 13,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'All lights and power supplies must match. Cannot be mixed.',
+          style: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.6), fontSize: 11),
         ),
       ],
     );

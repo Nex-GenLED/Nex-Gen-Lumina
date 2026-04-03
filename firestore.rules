@@ -550,5 +550,43 @@ service cloud.firestore {
       // Only admins can write
       allow write: if request.auth != null && isAdmin();
     }
+
+    // ── Sales Jobs ───────────────────────────────────────────────
+    match /sales_jobs/{jobId} {
+      // Any authenticated user can read/write (PIN validation is app-side)
+      allow read, write: if request.auth != null;
+
+      // Material list — single document per job
+      match /materialList/{docId} {
+        allow read, write: if request.auth != null;
+      }
+
+      // Material ledger — append-only audit trail
+      match /materialLedger/{entryId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if false;
+      }
+    }
+
+    // ── Dealer Material Catalog ──────────────────────────────────
+    match /dealers/{dealerCode}/materialCatalog/{itemId} {
+      allow read: if request.auth != null;
+      allow write: if hasMediaAccess() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
+    }
+
+    // ── Dealer Inventory ─────────────────────────────────────────
+    match /dealers/{dealerCode}/inventory/{itemId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // ── Dealer Inventory Ledger (append-only) ────────────────────
+    match /dealers/{dealerCode}/inventoryLedger/{entryId} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
   }
 }

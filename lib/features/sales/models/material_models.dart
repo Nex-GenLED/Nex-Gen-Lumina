@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/sales/models/sales_models.dart';
 
 // ─────────────────────────────────────────
 // 1. MaterialCategory enum
@@ -45,6 +46,7 @@ class MaterialItem {
   final String? colorVariant;   // 'black'|'brown'|'beige'|'white'|'navy'|'silver'|'grey' — null if not a rail
   final String? lengthVariant;  // '1ft'|'2ft'|'5ft'|'10ft'|'20ft' — null if not a connector wire
   final bool isActive;
+  final SystemVoltage? voltage; // non-null only for light PCS items and power supply items
 
   const MaterialItem({
     required this.id,
@@ -57,6 +59,7 @@ class MaterialItem {
     this.colorVariant,
     this.lengthVariant,
     this.isActive = true,
+    this.voltage,
   });
 
   factory MaterialItem.fromFirestore(DocumentSnapshot doc) {
@@ -72,6 +75,9 @@ class MaterialItem {
       colorVariant: d['colorVariant'],
       lengthVariant: d['lengthVariant'],
       isActive: d['isActive'] ?? true,
+      voltage: d['voltage'] != null
+          ? SystemVoltage.values.firstWhere((v) => v.name == d['voltage'])
+          : null,
     );
   }
 
@@ -85,6 +91,7 @@ class MaterialItem {
     'colorVariant': colorVariant,
     'lengthVariant': lengthVariant,
     'isActive': isActive,
+    if (voltage != null) 'voltage': voltage!.name,
   };
 
   MaterialItem copyWith({
@@ -98,6 +105,7 @@ class MaterialItem {
     String? colorVariant,
     String? lengthVariant,
     bool? isActive,
+    SystemVoltage? voltage,
   }) => MaterialItem(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -109,6 +117,7 @@ class MaterialItem {
     colorVariant: colorVariant ?? this.colorVariant,
     lengthVariant: lengthVariant ?? this.lengthVariant,
     isActive: isActive ?? this.isActive,
+    voltage: voltage ?? this.voltage,
   );
 }
 
