@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -20,7 +21,7 @@ class MyDesignsScreen extends ConsumerWidget {
         title: const Text('My Designs'),
         actions: [
           IconButton(
-            onPressed: () => context.push('/design-studio'),
+            onPressed: () => context.push(AppRoutes.designStudio),
             icon: const Icon(Icons.add),
             tooltip: 'New Design',
           ),
@@ -30,7 +31,7 @@ class MyDesignsScreen extends ConsumerWidget {
         data: (designs) {
           if (designs.isEmpty) {
             return _EmptyState(
-              onCreateNew: () => context.push('/design-studio'),
+              onCreateNew: () => context.push(AppRoutes.designStudio),
             );
           }
           return _DesignsList(designs: designs);
@@ -53,7 +54,7 @@ class MyDesignsScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/design-studio'),
+        onPressed: () => context.push(AppRoutes.designStudio),
         icon: const Icon(Icons.add),
         label: const Text('New Design'),
         backgroundColor: NexGenPalette.cyan,
@@ -140,8 +141,11 @@ class _DesignsList extends ConsumerWidget {
 
   void _editDesign(BuildContext context, WidgetRef ref, CustomDesign design) {
     ref.read(currentDesignProvider.notifier).loadDesign(design);
-    context.push('/design-studio');
+    context.push(AppRoutes.designStudio);
   }
+  // Note: AppRoutes.designStudio resolves to the home-branch nested path,
+  // and MyDesignsScreen is itself nested under /dashboard, so the push
+  // stays inside the home navigator and the nav bar remains visible.
 
   Future<void> _applyDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
     final repo = ref.read(wledRepositoryProvider);

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
@@ -659,7 +660,7 @@ class _NoMatchRedirectWidget extends StatelessWidget {
             title: 'Build it in Design Studio',
             description: "Pick your colors, choose your effects, and create exactly what you're thinking.",
             buttonText: 'Open Design Studio',
-            onTap: () => context.push('/design-studio'),
+            onTap: () => context.push(AppRoutes.exploreDesignStudio),
           ),
           const SizedBox(height: 24),
 

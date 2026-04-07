@@ -613,11 +613,15 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     } else if (route != null && mounted) {
       // Use go() for within-shell routes so nav bar stays visible;
       // use push() for fullscreen/modal routes (outside shell).
+      // Note: '/dashboard/...' (nested home-branch routes like
+      // /dashboard/design-studio, /dashboard/my-designs, /dashboard/game-day)
+      // must also use go() so the home branch navigates to the nested path
+      // instead of pushing on the root navigator.
       final isShellRoute = route.startsWith('/explore') ||
           route.startsWith('/settings') ||
           route.startsWith('/schedule') ||
           route.startsWith('/wled/') ||
-          route == '/dashboard';
+          route.startsWith('/dashboard');
       if (isShellRoute) {
         context.go(route);
       } else {

@@ -306,33 +306,6 @@ class AppRouter {
         },
       ),
       GoRoute(
-        path: AppRoutes.designStudio,
-        name: 'design-studio',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.gameDay,
-        name: 'game-day',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const MaterialPage(
-          fullscreenDialog: true,
-          child: GameDayScreen(),
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.audioReactive,
-        name: 'audio-reactive',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: AudioModePage()),
-      ),
-      GoRoute(
-        path: AppRoutes.myDesigns,
-        name: 'my-designs',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyDesignsScreen()),
-      ),
-      GoRoute(
         path: AppRoutes.rooflineEditor,
         name: 'roofline-editor',
         parentNavigatorKey: _rootNavigatorKey,
@@ -510,6 +483,60 @@ class AppRouter {
                 path: AppRoutes.dashboard,
                 name: 'dashboard',
                 pageBuilder: (context, state) => const NoTransitionPage(child: WledDashboardPage()),
+                routes: [
+                  // /dashboard/game-day — Game Day hub. Nested here so the
+                  // bottom nav bar stays visible and back navigation pops
+                  // to the dashboard via the home branch navigator.
+                  GoRoute(
+                    path: 'game-day',
+                    name: 'game-day',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: GameDayScreen()),
+                  ),
+                  // /dashboard/audio-reactive — Audio Mode. Nested here for
+                  // the same reason as Game Day: keep the nav bar visible
+                  // and provide normal back navigation in the home branch.
+                  GoRoute(
+                    path: 'audio-reactive',
+                    name: 'audio-reactive',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: AudioModePage()),
+                  ),
+                  // /dashboard/design-studio — AI Design Studio (home variant).
+                  // Design Studio is registered under each branch so the
+                  // bottom nav bar persists no matter which tab the user
+                  // launched it from. Use designStudioPathFor(context) to
+                  // resolve the right branch path.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'home-design-studio',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
+                  ),
+                  // /dashboard/my-designs — saved designs library. Nested
+                  // here so its "create new design" push lands inside the
+                  // home branch and the nav bar stays visible.
+                  GoRoute(
+                    path: 'my-designs',
+                    name: 'my-designs',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: MyDesignsScreen()),
+                  ),
+                  // /dashboard/neighborhood-sync — Neighborhood Sync hub.
+                  // Pushed from the home dashboard with the nav bar visible
+                  // and a back button (added in the screen).
+                  GoRoute(
+                    path: 'neighborhood-sync',
+                    name: 'home-neighborhood-sync',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: NeighborhoodSyncScreen()),
+                  ),
+                ],
               ),
             ],
           ),
@@ -537,6 +564,15 @@ class AppRouter {
                 name: 'explore',
                 pageBuilder: (context, state) => const NoTransitionPage(child: ExplorePatternsScreen()),
                 routes: [
+                  // /explore/design-studio — Design Studio (explore variant).
+                  // Literal path; must come before the :categoryId wildcard.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'explore-design-studio',
+                    parentNavigatorKey: _exploreNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
+                  ),
                   // /explore/library/:nodeId — library node browser
                   GoRoute(
                     path: 'library/:nodeId',
@@ -706,12 +742,6 @@ class AppRouter {
                     pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
                   ),
                   GoRoute(
-                    path: 'neighborhood-sync',
-                    name: 'neighborhood-sync',
-                    parentNavigatorKey: _systemNavigatorKey,
-                    pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
-                  ),
-                  GoRoute(
                     path: 'current-colors',
                     name: 'current-colors',
                     parentNavigatorKey: _systemNavigatorKey,
@@ -734,6 +764,16 @@ class AppRouter {
                     name: 'zone-setup',
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: ZoneSetupScreen()),
+                  ),
+                  // /settings/design-studio — Design Studio (system variant).
+                  // Registered here so callers from the System branch (e.g.
+                  // zone configuration) keep the bottom nav bar visible.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'system-design-studio',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
                   ),
                   // Note: roofline-editor is intentionally a root-level fullscreen route,
                   // not nested here. See the root GoRoute for /settings/roofline-editor.
@@ -784,9 +824,18 @@ class AppRoutes {
   static const String remoteAccess = '/settings/remote-access';
   static const String bridgeSetup = '/settings/bridge-setup';
   static const String luminaAI = '/lumina-ai';
-  static const String designStudio = '/design-studio';
+  // Design Studio is registered as a nested route under each shell branch
+  // so the bottom nav bar persists no matter which tab launched it.
+  // Use [designStudioPathFor] to pick the right one based on current location.
+  static const String homeDesignStudio = '/dashboard/design-studio';
+  static const String exploreDesignStudio = '/explore/design-studio';
+  static const String systemDesignStudio = '/settings/design-studio';
+  // Default = home variant. Branch-aware callers should use the helper.
+  static const String designStudio = homeDesignStudio;
   static const String editPattern = '/edit-pattern';
-  static const String myDesigns = '/my-designs';
+  // My Designs nested under home branch so its "create new" push lands
+  // inside the same branch with the bottom nav bar still visible.
+  static const String myDesigns = '/dashboard/my-designs';
   static const String voiceAssistants = '/settings/voice-assistants';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
@@ -818,10 +867,13 @@ class AppRoutes {
   static const String dealerDashboard = '/dealer/dashboard';
   // Dealer payout approval
   static const String dealerPayouts = '/dealer/payouts';
-  // Neighborhood sync
-  static const String neighborhoodSync = '/settings/neighborhood-sync';
-  // Game Day hub
-  static const String gameDay = '/game-day';
+  // Neighborhood sync — nested under /dashboard so the dashboard button
+  // can context.push() it without switching tabs and the bottom nav bar
+  // stays visible.
+  static const String neighborhoodSync = '/dashboard/neighborhood-sync';
+  // Game Day hub — nested under /dashboard so the bottom nav bar persists
+  // and back navigation pops within the home branch.
+  static const String gameDay = '/dashboard/game-day';
   // Library hierarchy routes (nested under /explore for persistent nav bar)
   static const String libraryNode = '/explore/library/:nodeId';
   // Installation access control routes
@@ -831,7 +883,8 @@ class AppRoutes {
   static const String subUsers = '/settings/users';
   static const String myWhites = '/settings/my-whites';
   static const String autopilotSchedule = '/autopilot-schedule';
-  static const String audioReactive = '/audio-reactive';
+  // Audio Mode — nested under /dashboard so the bottom nav bar persists.
+  static const String audioReactive = '/dashboard/audio-reactive';
   // Demo experience routes
   static const String demoCode = '/demo-code';
   static const String demoWelcome = '/demo';
@@ -853,4 +906,16 @@ class AppRoutes {
   // Commercial mode routes
   static const String commercialHome = '/commercial';
   static const String commercialOnboarding = '/commercial/onboarding';
+}
+
+/// Returns the Design Studio path nested under the current shell branch so
+/// `context.push(designStudioPathFor(context))` keeps the bottom nav bar
+/// visible no matter which tab the caller lives in. Falls back to the home
+/// branch path for callers outside any known branch (e.g. root-level routes
+/// or AI commands without a branch context).
+String designStudioPathFor(BuildContext context) {
+  final loc = GoRouterState.of(context).matchedLocation;
+  if (loc.startsWith('/explore')) return AppRoutes.exploreDesignStudio;
+  if (loc.startsWith('/settings')) return AppRoutes.systemDesignStudio;
+  return AppRoutes.homeDesignStudio;
 }

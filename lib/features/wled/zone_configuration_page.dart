@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -159,7 +160,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
-                  onPressed: () => context.push('/design-studio'),
+                  onPressed: () => context.push(AppRoutes.systemDesignStudio),
                   icon: const Icon(Icons.arrow_forward),
                   label: const Text('Open Design Studio'),
                   style: FilledButton.styleFrom(

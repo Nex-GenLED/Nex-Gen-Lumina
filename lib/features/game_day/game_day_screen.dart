@@ -44,10 +44,12 @@ class GameDayScreen extends ConsumerWidget {
           SliverPersistentHeader(
             pinned: true,
             delegate: _GlassAppBarDelegate(
+              topPadding: MediaQuery.of(context).padding.top,
               child: GlassAppBar(
                 title: const Text('Game Day'),
                 leading: IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.arrow_back),
+                  tooltip: 'Back',
                   onPressed: () => context.pop(),
                 ),
               ),
@@ -1165,17 +1167,34 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
 
   Future<void> _addTeam(BuildContext context, WidgetRef ref, String slug,
       TeamColors team) async {
-    // Create a GameDayAutopilotConfig for this team with defaults.
-    await ref.read(gameDayAutopilotNotifierProvider.notifier).toggleAutopilot(teamSlug: slug, enabled: true);
+    // Capture messenger before any awaits — context may be unmounted by the
+    // time the future resolves if the bottom sheet is dismissed mid-flight.
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      debugPrint('[GameDay] Adding team: $slug (${team.teamName})');
+      await ref
+          .read(gameDayAutopilotNotifierProvider.notifier)
+          .toggleAutopilot(teamSlug: slug, enabled: true);
 
-    if (!context.mounted) return;
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${team.teamName} added to Game Day!'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('${team.teamName} added to Game Day!'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[GameDay] Failed to add team $slug: $e\n$st');
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not add ${team.teamName}: $e'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 }
 
@@ -1396,21 +1415,28 @@ class _SmallActionButton extends StatelessWidget {
 
 class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
   final GlassAppBar child;
+  final double topPadding;
 
-  _GlassAppBarDelegate({required this.child});
-
-  @override
-  double get minExtent => child.preferredSize.height;
+  _GlassAppBarDelegate({required this.child, required this.topPadding});
 
   @override
-  double get maxExtent => child.preferredSize.height;
+  double get minExtent => child.preferredSize.height + topPadding;
+
+  @override
+  double get maxExtent => child.preferredSize.height + topPadding;
 
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
+    // Pad the AppBar down by the system status bar height so the leading
+    // back button isn't hidden under the notch / status bar.
+    return Padding(
+      padding: EdgeInsets.only(top: topPadding),
+      child: child,
+    );
   }
 
   @override
-  bool shouldRebuild(covariant _GlassAppBarDelegate oldDelegate) => false;
+  bool shouldRebuild(covariant _GlassAppBarDelegate oldDelegate) =>
+      child != oldDelegate.child || topPadding != oldDelegate.topPadding;
 }

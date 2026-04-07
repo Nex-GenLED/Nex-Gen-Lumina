@@ -174,6 +174,9 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   }
 
   /// Toggle autopilot for a team. Creates or updates the Firestore document.
+  ///
+  /// Throws [StateError] if the user is not authenticated, or [ArgumentError]
+  /// if the team slug is unknown. Firestore errors propagate to the caller.
   Future<void> toggleAutopilot({
     required String teamSlug,
     required bool enabled,
@@ -182,7 +185,10 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
           data: (u) => u,
           orElse: () => null,
         );
-    if (user == null) return;
+    if (user == null) {
+      debugPrint('[GameDayAutopilot] toggleAutopilot: no authenticated user');
+      throw StateError('You must be signed in to add a Game Day team.');
+    }
 
     final docRef = FirebaseFirestore.instance
         .collection('users')
@@ -201,7 +207,12 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     } else {
       // Create a new config from kTeamColors.
       final team = kTeamColors[teamSlug];
-      if (team == null) return;
+      if (team == null) {
+        debugPrint(
+            '[GameDayAutopilot] toggleAutopilot: unknown team slug "$teamSlug"');
+        throw ArgumentError.value(
+            teamSlug, 'teamSlug', 'Unknown team — not in kTeamColors');
+      }
 
       final config = GameDayAutopilotConfig(
         teamSlug: teamSlug,

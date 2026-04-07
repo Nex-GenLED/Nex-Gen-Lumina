@@ -2,8 +2,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
+import '../../widgets/glass_app_bar.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
 import 'neighborhood_sync_engine.dart';
@@ -38,9 +40,10 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
 
     // Show loading shimmer while either check is in progress.
     if (groupsAsync.isLoading || onboardingAsync.isLoading) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
-        body: _NeighborhoodLoadingShimmer(),
+        appBar: _buildAppBar(context),
+        body: const _NeighborhoodLoadingShimmer(),
       );
     }
 
@@ -61,6 +64,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
       // Returning user — show group list view directly, no onboarding.
       return Scaffold(
         backgroundColor: Colors.black,
+        appBar: _buildAppBar(context),
         body: _NeighborhoodGroupListView(
           groups: groups,
           onGroupTap: (group) {
@@ -76,6 +80,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
     // New user — show 4-page onboarding. Mark complete when they tap any CTA.
     return Scaffold(
       backgroundColor: Colors.black,
+      appBar: _buildAppBar(context),
       body: Stack(
         children: [
           NeighborhoodOnboarding(
@@ -92,6 +97,28 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
           if (groupsAsync.hasError)
             SafeArea(child: _buildErrorBanner()),
         ],
+      ),
+    );
+  }
+
+  /// Shared GlassAppBar with a visible back button. The screen is now pushed
+  /// from the home dashboard inside the home shell branch, so context.pop()
+  /// returns to the dashboard with the bottom nav bar still visible.
+  PreferredSizeWidget _buildAppBar(BuildContext context) {
+    return GlassAppBar(
+      title: const Text('Neighborhood Sync'),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        tooltip: 'Back',
+        onPressed: () {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            // Fallback for deep-links / edge cases where there's nothing to
+            // pop within the home branch — return to the dashboard root.
+            context.go('/dashboard');
+          }
+        },
       ),
     );
   }

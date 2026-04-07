@@ -76,10 +76,14 @@ class LocalCommandParser {
     'zones': {'route': '/wled/zones'},
     'scenes': {'route': '/my-scenes'},
     'my scenes': {'route': '/my-scenes'},
-    'designs': {'route': '/my-designs'},
-    'my designs': {'route': '/my-designs'},
-    'design studio': {'route': '/design-studio'},
-    'studio': {'route': '/design-studio'},
+    // Design Studio + My Designs are nested under /dashboard so the
+    // bottom nav bar persists. The Lumina sheet handler routes /dashboard/*
+    // through context.go() so the home tab activates and the nested route
+    // resolves correctly.
+    'designs': {'route': '/dashboard/my-designs'},
+    'my designs': {'route': '/dashboard/my-designs'},
+    'design studio': {'route': '/dashboard/design-studio'},
+    'studio': {'route': '/dashboard/design-studio'},
     'roofline': {'route': '/settings/roofline-editor'},
     'profile': {'route': '/settings/profile'},
   };

@@ -335,7 +335,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 children: [
                   _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
                   const SizedBox(width: 12),
-                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
+                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.push(AppRoutes.neighborhoodSync)),
                 ],
               ),
             ),

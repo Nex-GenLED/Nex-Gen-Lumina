@@ -119,7 +119,7 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/my-designs');
+          context.push(AppRoutes.myDesigns);
         },
         splashColor: _accentColor.withValues(alpha: 0.10),
         highlightColor: _accentColor.withValues(alpha: 0.05),
@@ -424,7 +424,7 @@ class MySavedDesignsSection extends ConsumerWidget {
                 TextButton.icon(
                   onPressed: () {
                     // Navigate to My Designs screen for full management
-                    context.push('/my-designs');
+                    context.push(AppRoutes.myDesigns);
                   },
                   icon: const Icon(Icons.edit_outlined, size: 16),
                   label: const Text('Manage'),
