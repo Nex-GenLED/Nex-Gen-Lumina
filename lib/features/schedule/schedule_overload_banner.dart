@@ -61,10 +61,24 @@ class _ScheduleOverloadBannerState
     final schedules = ref.watch(schedulesProvider);
     final calEntries = ref.watch(calendarScheduleProvider);
 
+    // Rule 3: only count recurring (enabled) ScheduleItems toward the
+    // overload threshold. CalendarEntry holiday records are excluded
+    // entirely, regardless of how many exist — a user with 50 holiday
+    // CalendarEntries across the year should never trigger this banner.
     final activeCount = schedules.where((s) => s.enabled).length;
-    final totalActive = activeCount + calEntries.length;
 
-    if (totalActive <= 8 || totalActive <= _dismissedAt) {
+    if (activeCount <= 8 || activeCount <= _dismissedAt) {
+      return const SizedBox.shrink();
+    }
+
+    // Rule 4: even when the count is high, only show the banner if there
+    // is at least one genuine conflict the cleanup sheet can surface. An
+    // empty cleanup sheet is a silent failure state — never reach it.
+    final conflicts = ScheduleConflictDetector.computeAllConflicts(
+      schedules: schedules,
+      calendarEntries: calEntries,
+    );
+    if (conflicts.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -78,7 +92,8 @@ class _ScheduleOverloadBannerState
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'You have $totalActive active schedules. '
+              'You have $activeCount active schedules with '
+              '${conflicts.totalCount} overlap${conflicts.totalCount == 1 ? '' : 's'}. '
               'Overlapping schedules can cause unpredictable lighting.',
               style: const TextStyle(
                 color: NexGenPalette.amber,
@@ -96,12 +111,12 @@ class _ScheduleOverloadBannerState
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             ),
             onPressed: () => _showCleanupSheet(
-                context, ref, schedules, calEntries),
+                context, ref, schedules, calEntries, conflicts),
             child: const Text('Clean Up',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
           ),
           GestureDetector(
-            onTap: () => _dismiss(totalActive),
+            onTap: () => _dismiss(activeCount),
             child: Padding(
               padding: const EdgeInsets.all(4),
               child: Icon(Icons.close, size: 16, color: NexGenPalette.amber),
@@ -120,6 +135,7 @@ void _showCleanupSheet(
   WidgetRef ref,
   List<ScheduleItem> schedules,
   Map<String, CalendarEntry> calEntries,
+  ScheduleConflicts conflicts,
 ) {
   showModalBottomSheet(
     context: context,
@@ -128,6 +144,7 @@ void _showCleanupSheet(
     builder: (_) => _CleanupSheet(
       schedules: schedules,
       calEntries: calEntries,
+      conflicts: conflicts,
       ref: ref,
     ),
   );
@@ -138,11 +155,13 @@ void _showCleanupSheet(
 class _CleanupSheet extends StatefulWidget {
   final List<ScheduleItem> schedules;
   final Map<String, CalendarEntry> calEntries;
+  final ScheduleConflicts conflicts;
   final WidgetRef ref;
 
   const _CleanupSheet({
     required this.schedules,
     required this.calEntries,
+    required this.conflicts,
     required this.ref,
   });
 
@@ -154,62 +173,34 @@ class _CleanupSheetState extends State<_CleanupSheet> {
   final _selectedItemIds = <String>{};
   final _selectedEntryKeys = <String>{};
 
-  late final Set<String> _conflictingItemIds;
-  late final Set<String> _conflictingEntryKeys;
-  late final List<ScheduleItem> _enabledItems;
-  late final List<MapEntry<String, CalendarEntry>> _entries;
+  // Only conflicting rows are shown in the sheet — non-conflicting
+  // recurring schedules and holiday CalendarEntries that don't overlap
+  // anything are intentionally excluded (Rule 4). Conflict sets are
+  // precomputed by the banner via [ScheduleConflictDetector.computeAllConflicts]
+  // and passed in here so both views always agree.
+  late final List<ScheduleItem> _conflictingItems;
+  late final List<MapEntry<String, CalendarEntry>> _conflictingEntries;
 
   @override
   void initState() {
     super.initState();
-    _enabledItems =
-        widget.schedules.where((s) => s.enabled).toList();
-    _entries = widget.calEntries.entries.toList();
+    _conflictingItems = widget.schedules
+        .where((s) => s.enabled && widget.conflicts.itemIds.contains(s.id))
+        .toList();
 
-    // Detect which rows have overlapping conflicts
-    _conflictingItemIds = {};
-    _conflictingEntryKeys = {};
-
-    // Item vs item
-    for (final item in _enabledItems) {
-      final conflicts = ScheduleConflictDetector.findItemConflicts(
-        incoming: item,
-        existing: _enabledItems,
-        excludeId: item.id,
-      );
-      if (conflicts.isNotEmpty) {
-        _conflictingItemIds.add(item.id);
-        for (final c in conflicts) {
-          _conflictingItemIds.add(c.id);
-        }
-      }
-    }
-
-    // Entry vs item
-    for (final e in _entries) {
-      final date = DateTime.tryParse(e.key);
-      if (date == null) continue;
-      final conflicts = ScheduleConflictDetector.findItemConflictsForEntry(
-        entry: e.value,
-        entryDate: date,
-        recurringItems: _enabledItems,
-      );
-      if (conflicts.isNotEmpty) {
-        _conflictingEntryKeys.add(e.key);
-        for (final c in conflicts) {
-          _conflictingItemIds.add(c.id);
-        }
-      }
-    }
+    _conflictingEntries = widget.calEntries.entries
+        .where((e) => widget.conflicts.entryKeys.contains(e.key))
+        .toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
   }
 
   int get _selectedCount =>
       _selectedItemIds.length + _selectedEntryKeys.length;
 
-  void _selectAllHighlighted() {
+  void _selectAllConflicts() {
     setState(() {
-      _selectedItemIds.addAll(_conflictingItemIds);
-      _selectedEntryKeys.addAll(_conflictingEntryKeys);
+      _selectedItemIds.addAll(_conflictingItems.map((e) => e.id));
+      _selectedEntryKeys.addAll(_conflictingEntries.map((e) => e.key));
     });
   }
 
@@ -289,7 +280,7 @@ class _CleanupSheetState extends State<_CleanupSheet> {
               child: Row(
                 children: [
                   const Text(
-                    'Review Active Schedules',
+                    'Resolve Schedule Conflicts',
                     style: TextStyle(
                       color: NexGenPalette.textHigh,
                       fontSize: 18,
@@ -298,7 +289,8 @@ class _CleanupSheetState extends State<_CleanupSheet> {
                   ),
                   const Spacer(),
                   Text(
-                    '${_enabledItems.length + _entries.length} total',
+                    '${_conflictingItems.length + _conflictingEntries.length} '
+                    'conflict${_conflictingItems.length + _conflictingEntries.length == 1 ? '' : 's'}',
                     style: const TextStyle(
                       color: NexGenPalette.textMedium,
                       fontSize: 13,
@@ -309,73 +301,75 @@ class _CleanupSheetState extends State<_CleanupSheet> {
             ),
             const SizedBox(height: 12),
 
-            // Scrollable list
+            // Scrollable list — only conflicting rows, grouped by type.
             Flexible(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shrinkWrap: true,
                 children: [
-                  for (final item in _enabledItems)
-                    _ItemRow(
-                      item: item,
-                      isConflicting:
-                          _conflictingItemIds.contains(item.id),
-                      isSelected:
-                          _selectedItemIds.contains(item.id),
-                      onChanged: (v) => setState(() {
-                        v == true
-                            ? _selectedItemIds.add(item.id)
-                            : _selectedItemIds.remove(item.id);
-                      }),
+                  if (_conflictingItems.isNotEmpty) ...[
+                    const _SectionHeader(
+                      label: 'Recurring Schedule Conflicts',
                     ),
-                  for (final e in _entries)
-                    _EntryRow(
-                      dateKey: e.key,
-                      entry: e.value,
-                      isConflicting:
-                          _conflictingEntryKeys.contains(e.key),
-                      isSelected:
-                          _selectedEntryKeys.contains(e.key),
-                      onChanged: (v) => setState(() {
-                        v == true
-                            ? _selectedEntryKeys.add(e.key)
-                            : _selectedEntryKeys.remove(e.key);
-                      }),
-                    ),
+                    for (final item in _conflictingItems)
+                      _ItemRow(
+                        item: item,
+                        isConflicting: true,
+                        isSelected: _selectedItemIds.contains(item.id),
+                        onChanged: (v) => setState(() {
+                          v == true
+                              ? _selectedItemIds.add(item.id)
+                              : _selectedItemIds.remove(item.id);
+                        }),
+                      ),
+                  ],
+                  if (_conflictingEntries.isNotEmpty) ...[
+                    const _SectionHeader(label: 'Holiday Conflicts'),
+                    for (final e in _conflictingEntries)
+                      _EntryRow(
+                        dateKey: e.key,
+                        entry: e.value,
+                        isConflicting: true,
+                        isSelected: _selectedEntryKeys.contains(e.key),
+                        onChanged: (v) => setState(() {
+                          v == true
+                              ? _selectedEntryKeys.add(e.key)
+                              : _selectedEntryKeys.remove(e.key);
+                        }),
+                      ),
+                  ],
                 ],
               ),
             ),
 
             // Buttons
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              // Bottom padding includes kBottomNavBarPadding so the action
+              // buttons sit above the glass dock nav bar overlay (which
+              // remains visible on top of modal sheets opened from the
+              // inner navigator).
+              padding: const EdgeInsets.fromLTRB(
+                  20, 12, 20, 8 + kBottomNavBarPadding),
               child: Column(
                 children: [
-                  if (_conflictingItemIds.isNotEmpty ||
-                      _conflictingEntryKeys.isNotEmpty)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: NexGenPalette.amber,
-                          side: BorderSide(
-                              color: NexGenPalette.amber
-                                  .withValues(alpha: 0.5)),
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(12)),
-                        ),
-                        onPressed: _selectAllHighlighted,
-                        child: const Text('Select All Highlighted',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w600)),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: NexGenPalette.amber,
+                        side: BorderSide(
+                            color:
+                                NexGenPalette.amber.withValues(alpha: 0.5)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
+                      onPressed: _selectAllConflicts,
+                      child: const Text('Select All',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
                     ),
-                  if (_conflictingItemIds.isNotEmpty ||
-                      _conflictingEntryKeys.isNotEmpty)
-                    const SizedBox(height: 10),
+                  ),
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -426,6 +420,27 @@ class _CleanupSheetState extends State<_CleanupSheet> {
 }
 
 // ─── Row widgets ─────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  const _SectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 10, 6, 6),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: NexGenPalette.textMedium,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
 
 class _ItemRow extends StatelessWidget {
   final ScheduleItem item;

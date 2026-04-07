@@ -2,9 +2,33 @@
 //
 // Detects time-range overlaps between ScheduleItem (recurring) entries
 // and CalendarEntry (date-specific) entries.
+//
+// Conflict rules:
+//   1. Two ScheduleItems conflict iff their time windows overlap on a
+//      shared day-of-week.
+//   2. A CalendarEntry conflicts with a ScheduleItem iff the entry's
+//      specific date falls on a day-of-week the ScheduleItem runs AND
+//      their time windows overlap on that date.
+//   3. Two CalendarEntries on different dates NEVER conflict — different
+//      days, by definition no overlap.
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+
+/// Result of a full-system conflict scan: which ScheduleItems and
+/// CalendarEntries are participants in at least one genuine conflict.
+class ScheduleConflicts {
+  final Set<String> itemIds;
+  final Set<String> entryKeys;
+  const ScheduleConflicts({
+    required this.itemIds,
+    required this.entryKeys,
+  });
+
+  bool get isEmpty => itemIds.isEmpty && entryKeys.isEmpty;
+  bool get isNotEmpty => !isEmpty;
+  int get totalCount => itemIds.length + entryKeys.length;
+}
 
 class ScheduleConflictDetector {
   ScheduleConflictDetector._();
@@ -148,6 +172,65 @@ class ScheduleConflictDetector {
       }
     }
     return conflicting;
+  }
+
+  // ── Full-system scan ────────────────────────────────────────────────────────
+
+  /// Compute the full set of conflicting [ScheduleItem] IDs and
+  /// [CalendarEntry] dateKeys across the entire schedule system.
+  ///
+  /// Used by the overload banner and cleanup sheet to decide what (if
+  /// anything) actually needs the user's attention.
+  ///
+  /// Honors the three rules at the top of this file: CalendarEntries are
+  /// only flagged when they overlap a recurring ScheduleItem on their
+  /// specific date.  CalendarEntries on different dates never conflict
+  /// with each other regardless of how many exist.
+  static ScheduleConflicts computeAllConflicts({
+    required List<ScheduleItem> schedules,
+    required Map<String, CalendarEntry> calendarEntries,
+  }) {
+    final enabled = schedules.where((s) => s.enabled).toList();
+    final conflictingItemIds = <String>{};
+    final conflictingEntryKeys = <String>{};
+
+    // Recurring vs recurring
+    for (final item in enabled) {
+      final conflicts = findItemConflicts(
+        incoming: item,
+        existing: enabled,
+        excludeId: item.id,
+      );
+      if (conflicts.isNotEmpty) {
+        conflictingItemIds.add(item.id);
+        for (final c in conflicts) {
+          conflictingItemIds.add(c.id);
+        }
+      }
+    }
+
+    // Date-specific vs recurring (date-by-date — entries on different
+    // dates can never conflict with each other)
+    for (final entry in calendarEntries.entries) {
+      final date = DateTime.tryParse(entry.key);
+      if (date == null) continue;
+      final conflicts = findItemConflictsForEntry(
+        entry: entry.value,
+        entryDate: date,
+        recurringItems: enabled,
+      );
+      if (conflicts.isNotEmpty) {
+        conflictingEntryKeys.add(entry.key);
+        for (final c in conflicts) {
+          conflictingItemIds.add(c.id);
+        }
+      }
+    }
+
+    return ScheduleConflicts(
+      itemIds: conflictingItemIds,
+      entryKeys: conflictingEntryKeys,
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

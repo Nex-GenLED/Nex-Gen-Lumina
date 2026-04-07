@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/data/us_federal_holidays.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -72,7 +73,7 @@ class CalendarEventService {
   ) async {
     final events = <CalendarEvent>[];
 
-    // Get federal and popular holidays
+    // Get federal and popular holidays (single-day matches)
     final holidays = USFederalHolidays.getHolidaysInRange(start, end);
     for (final holiday in holidays) {
       // Only include if user has this holiday in favorites OR it's a major holiday
@@ -92,6 +93,39 @@ class CalendarEventService {
           priority: isFavorite ? 10 : 20,
         ));
       }
+    }
+
+    // Holiday SEASONS — for every day in the range that falls inside a
+    // named [HolidaySeason] (e.g. all of December → Christmas Season),
+    // emit a season-themed event so the autopilot fills the entire
+    // stretch with holiday-appropriate designs instead of just the single
+    // holiday date itself.
+    //
+    // Single-day holiday matches above take priority over season events
+    // on the same day (lower priority number wins in _resolveConflicts).
+    final totalDays = end.difference(start).inDays;
+    for (int dayOffset = 0; dayOffset <= totalDays; dayOffset++) {
+      final day = start.add(Duration(days: dayOffset));
+      final season = HolidaySeasons.activeSeasonForDate(day);
+      if (season == null) continue;
+
+      // Borrow colors/effect from the closest exact-date holiday in the
+      // season range, falling back to neutral defaults if none exists.
+      final anchorHoliday =
+          USFederalHolidays.getHolidayForDate(season.start) ??
+              USFederalHolidays.getHolidayForDate(season.end) ??
+              _findHolidayInRange(season.start, season.end);
+
+      events.add(CalendarEvent(
+        name: season.name,
+        date: day,
+        type: CalendarEventType.holiday,
+        suggestedColors: anchorHoliday?.suggestedColors,
+        suggestedEffectId: anchorHoliday?.suggestedEffectId,
+        // Lower than exact-date holidays (10/20) but still above generic
+        // seasonal events (80) — season fill should beat solstices.
+        priority: 35,
+      ));
     }
 
     // Add custom holidays from user profile
@@ -288,6 +322,15 @@ class CalendarEventService {
 
     final lowerName = name.toLowerCase();
     return majorHolidays.any((h) => lowerName.contains(h));
+  }
+
+  /// Find any [Holiday] with an exact date inside [start]–[end] (inclusive).
+  /// Used to borrow colors/effects when emitting [HolidaySeason] events
+  /// — e.g. a `holiday_stretch` event uses Thanksgiving's colors as the
+  /// season's anchor palette.
+  Holiday? _findHolidayInRange(DateTime start, DateTime end) {
+    final candidates = USFederalHolidays.getHolidaysInRange(start, end);
+    return candidates.isEmpty ? null : candidates.first;
   }
 
   /// Get team colors from the sports teams data.

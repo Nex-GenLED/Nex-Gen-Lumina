@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
@@ -210,11 +211,34 @@ class AutopilotScheduler {
       return;
     }
 
+    // Holiday-season awareness: log when today falls inside a recognized
+    // [HolidaySeason] so scheduling decisions for the next 7 days can fan
+    // out across the entire season range instead of only firing on the
+    // single holiday date itself.  CalendarEventService.getEventsForDateRange
+    // emits per-day season events that the generation service consumes.
+    final activeSeason = HolidaySeasons.activeSeasonForDate(DateTime.now());
+    if (activeSeason != null) {
+      debugPrint(
+        'AutopilotScheduler: Today is inside ${activeSeason.name} '
+        '(${activeSeason.start.toIso8601String().substring(0, 10)} → '
+        '${activeSeason.end.toIso8601String().substring(0, 10)})',
+      );
+    }
+
     // Check if we need to regenerate the schedule
     if (_needsRegeneration(profile)) {
       await _regenerateSchedule(profile);
     }
   }
+
+  /// Public accessor: returns the highest-priority [HolidaySeason] active
+  /// today, or null when today is not inside any named season.
+  ///
+  /// Used by the Lumina AI screen and the calendar UI to answer "are we
+  /// currently in a holiday stretch?" without re-implementing the date
+  /// math.
+  HolidaySeason? get currentHolidaySeason =>
+      HolidaySeasons.activeSeasonForDate(DateTime.now());
 
   /// Check if schedule regeneration is needed.
   bool _needsRegeneration(UserModel profile) {

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/features/ai/compound_command_detector.dart';
 import 'package:nexgen_command/features/ai/user_variety_profile.dart';
 
@@ -300,14 +301,45 @@ class LuminaSmartScheduler {
   }
 
   // -----------------------------------------------------------------------
+  // Holiday season detection
+  // -----------------------------------------------------------------------
+
+  /// Resolve the highest-priority [HolidaySeason] active on [date], or null
+  /// if [date] is not inside any named season.
+  ///
+  /// Used by [generatePlan] (when [fillActiveSeason] is true) and by the
+  /// autopilot scheduler to drive whole-season scheduling instead of
+  /// single-day holiday detection.
+  static HolidaySeason? activeSeasonForDate(DateTime date) =>
+      HolidaySeasons.activeSeasonForDate(date);
+
+  /// Returns the number of days from [date] (inclusive) through the end
+  /// of [season], clamped to at least 1. Used to compute how many nights
+  /// remain in a holiday season when the user requests a season-fill.
+  static int remainingDaysInSeason(HolidaySeason season, DateTime date) {
+    final today = DateTime(date.year, date.month, date.day);
+    final end = DateTime(season.end.year, season.end.month, season.end.day);
+    if (today.isAfter(end)) return 1;
+    return end.difference(today).inDays + 1;
+  }
+
+  // -----------------------------------------------------------------------
   // Main entry point
   // -----------------------------------------------------------------------
 
+  /// Generate a multi-day [SmartSchedulePlan].
+  ///
+  /// When [fillActiveSeason] is true and today falls inside a recognized
+  /// [HolidaySeason], the scheduler will extend the plan to cover every
+  /// remaining night in the season instead of using `temporal.dayCount`.
+  /// This is how "set up Christmas lights for the month" requests fan
+  /// out into a full-season schedule.
   static SmartSchedulePlan generatePlan({
     required ResolvedTheme theme,
     required CompoundCommandResult command,
     required UserVarietyProfile userProfile,
     bool isHolidayTheme = false,
+    bool fillActiveSeason = false,
   }) {
     final temporal = command.temporal;
     if (temporal == null) {
@@ -315,8 +347,25 @@ class LuminaSmartScheduler {
           'LuminaSmartScheduler.generatePlan requires temporal intent');
     }
 
-    final dayCount = temporal.dayCount;
     final today = DateTime.now();
+
+    // If the caller asked us to fill the active holiday season AND today
+    // sits inside one, override the requested dayCount with the number of
+    // days remaining in the season.  Otherwise honor temporal.dayCount.
+    int dayCount = temporal.dayCount;
+    HolidaySeason? activeSeason;
+    if (fillActiveSeason) {
+      activeSeason = activeSeasonForDate(today);
+      if (activeSeason != null) {
+        final seasonDays = remainingDaysInSeason(activeSeason, today);
+        if (seasonDays > dayCount) {
+          debugPrint(
+              '🎄 SmartScheduler: extending plan to fill ${activeSeason.name} '
+              '($dayCount → $seasonDays days)');
+          dayCount = seasonDays;
+        }
+      }
+    }
 
     final basePool = isHolidayTheme ? _holidayEffectPool : _teamEffectPool;
     var effectPool = [
@@ -415,6 +464,7 @@ class LuminaSmartScheduler {
       userProfile: userProfile,
       temporal: temporal,
       hasVariety: hasVariety,
+      activeSeason: activeSeason,
     );
 
     debugPrint('🗓️ SmartSchedulePlan: ${theme.name}, $dayCount days, '
@@ -499,6 +549,7 @@ class LuminaSmartScheduler {
     required UserVarietyProfile userProfile,
     required TemporalIntent temporal,
     required bool hasVariety,
+    HolidaySeason? activeSeason,
   }) {
     final days = occurrences.length;
     final timeDesc = temporal.startTrigger == TimeTrigger.sunset
@@ -511,8 +562,13 @@ class LuminaSmartScheduler {
 
     if (days == 1) {
       return "I've set up a ${occurrences.first.effectName} design "
-          "in ${theme.name} colors running $timeDesc. Looking good! ✨";
+          "in ${theme.name} colors running $timeDesc.";
     }
+
+    // Season-fill plans get a season-aware lead-in.
+    final seasonPrefix = activeSeason != null
+        ? "${activeSeason.name} — $days nights of ${theme.name} colors"
+        : "I've scheduled $days nights of ${theme.name} colors";
 
     if (hasVariety) {
       final uniqueEffects = occurrences
@@ -521,13 +577,11 @@ class LuminaSmartScheduler {
           .take(4)
           .join(', ');
 
-      return "I've scheduled $days nights of ${theme.name} colors running "
-          "$timeDesc — rotating through $uniqueEffects and more. "
-          "Every night brings something fresh to your roofline! 🎨";
+      return "$seasonPrefix running $timeDesc — "
+          "rotating through $uniqueEffects and more.";
     } else {
-      return "I've scheduled $days nights of ${theme.name} colors with a "
-          "consistent ${occurrences.first.effectName} effect running "
-          "$timeDesc. Reliable and beautiful every night. ✨";
+      return "$seasonPrefix with a consistent "
+          "${occurrences.first.effectName} effect running $timeDesc.";
     }
   }
 
