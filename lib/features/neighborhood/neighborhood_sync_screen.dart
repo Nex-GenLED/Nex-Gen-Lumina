@@ -2150,42 +2150,82 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
   }
 
   Future<void> _createGroup() async {
-    if (_groupNameController.text.trim().isEmpty) return;
+    final name = _groupNameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a name for your crew.'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 
     double? latitude;
     double? longitude;
 
-    final group = await ref.read(neighborhoodNotifierProvider.notifier).createGroup(
-      _groupNameController.text.trim(),
-      displayName: _homeNameController.text.trim().isNotEmpty
-          ? _homeNameController.text.trim()
-          : null,
-      description: _descriptionController.text.trim().isNotEmpty
-          ? _descriptionController.text.trim()
-          : null,
-      streetName: _streetController.text.trim().isNotEmpty
-          ? _streetController.text.trim()
-          : null,
-      city: _cityController.text.trim().isNotEmpty
-          ? _cityController.text.trim()
-          : null,
-      isPublic: _isPublic,
-      latitude: latitude,
-      longitude: longitude,
-    );
+    try {
+      final group = await ref.read(neighborhoodNotifierProvider.notifier).createGroup(
+        name,
+        displayName: _homeNameController.text.trim().isNotEmpty
+            ? _homeNameController.text.trim()
+            : null,
+        description: _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
+            : null,
+        streetName: _streetController.text.trim().isNotEmpty
+            ? _streetController.text.trim()
+            : null,
+        city: _cityController.text.trim().isNotEmpty
+            ? _cityController.text.trim()
+            : null,
+        isPublic: _isPublic,
+        latitude: latitude,
+        longitude: longitude,
+      );
 
-    if (mounted) {
-      Navigator.pop(context, group);
-      if (group != null) {
+      if (!mounted) return;
+
+      if (group == null) {
+        // Notifier swallows exceptions and returns null on failure.
+        // Surface the underlying error so the user knows what happened.
+        final notifierState = ref.read(neighborhoodNotifierProvider);
+        final errorMsg = notifierState.hasError
+            ? 'Could not create your crew: ${notifierState.error}'
+            : 'Could not create your crew. Please try again.';
+        debugPrint('Block party creation failed: $errorMsg');
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${group.name} is ready! Invite your neighbors!'),
-            backgroundColor: Colors.green,
+            content: Text(errorMsg),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
+        return;
       }
+
+      Navigator.pop(context, group);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${group.name} is ready! Invite your neighbors!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint('Block party creation failed: $e\n$stack');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not create your crew: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 }
