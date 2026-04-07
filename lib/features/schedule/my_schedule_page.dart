@@ -208,9 +208,12 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           const ScheduleOverloadBanner(),
 
           // ── Main scroll area ────────────────────────────────────────────
+          // Bottom padding is intentionally small here — the manual
+          // _GenerateThisWeekButton sits below this Expanded and provides its
+          // own SafeArea + nav-bar offset.
           Expanded(
             child: ListView(
-              padding: EdgeInsets.fromLTRB(14, 16, 14, navBarTotalHeight(context)),
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
               children: [
                 // ── Lumina AI card (with fixed schedule creation) ──
                 const _LuminaAICard(),
@@ -322,14 +325,29 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
               ],
             ),
           ),
+
+          // ── Manual generate button ──────────────────────────────────────
+          // Sits above the bottom nav so it's always reachable. Tapping it
+          // forces a fresh schedule generation regardless of the weekly
+          // refresh gate.
+          const _GenerateThisWeekButton(),
         ],
       ),
 
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: NexGenPalette.cyan,
-        foregroundColor: Colors.black,
-        onPressed: () => showScheduleEditor(context, ref),
-        child: const Icon(CupertinoIcons.add),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. The parent shell's Scaffold uses extendBody:true
+        // and overlays the dock via a Stack (it's not a bottomNavigationBar),
+        // so default FAB positioning would otherwise sit underneath the dock.
+        // Use navBarTotalHeight() so the offset also includes the device
+        // bottom safe-area inset (e.g. iPhone home indicator).
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton(
+          backgroundColor: NexGenPalette.cyan,
+          foregroundColor: Colors.black,
+          onPressed: () => showScheduleEditor(context, ref),
+          child: const Icon(CupertinoIcons.add),
+        ),
       ),
     );
   }
@@ -665,7 +683,9 @@ class _PendingPreviewSheet extends StatelessWidget {
                 ],
               ),
 
-              const SizedBox(height: 16),
+              // Trailing space clears the glass dock nav bar overlay so
+              // the Confirm/Cancel buttons aren't hidden behind the dock.
+              const SizedBox(height: 16 + kBottomNavBarPadding),
             ],
           ),
         ),
@@ -1263,7 +1283,9 @@ void _showScheduleDetailSheet(
     context: context,
     backgroundColor: Colors.transparent,
     builder: (ctx) => Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      // Bottom padding clears the glass dock nav bar overlay so the
+      // last detail row isn't hidden behind the dock.
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32 + kBottomNavBarPadding),
       decoration: BoxDecoration(
         color: NexGenPalette.matteBlack,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -2586,18 +2608,56 @@ class _AutopilotOffInvitation extends StatelessWidget {
   }
 }
 
-/// State 2: Autopilot ON, schedule generation pending or in progress.
-class _AutopilotGeneratingState extends ConsumerWidget {
+/// State 2: Autopilot ON, schedule generation pending, in progress, or failed.
+///
+/// Drives off [autopilotGenerationStateProvider] for the *real* loading state
+/// (loading / error / idle) and falls back to a "ready to generate" prompt
+/// when idle. Auto-triggers a generation on first build if autopilot is on,
+/// no schedules exist, no generation is in flight, and no error is set.
+class _AutopilotGeneratingState extends ConsumerStatefulWidget {
   const _AutopilotGeneratingState();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final lastGenerated = ref.watch(autopilotLastGeneratedProvider);
-    final needsRegen = ref.watch(needsScheduleRegenerationProvider);
+  ConsumerState<_AutopilotGeneratingState> createState() =>
+      _AutopilotGeneratingStateState();
+}
 
-    // Compute next expected generation time
-    final DateTime? nextFire = lastGenerated?.add(const Duration(days: 7));
+class _AutopilotGeneratingStateState
+    extends ConsumerState<_AutopilotGeneratingState> {
+  bool _autoTriggered = false;
+
+  void _maybeAutoTrigger() {
+    if (_autoTriggered) return;
+    final genState = ref.read(autopilotGenerationStateProvider);
+    if (genState.status != AutopilotGenerationStatus.idle) return;
+    _autoTriggered = true;
+    // Defer past the current build frame so we don't mutate provider state
+    // while widgets are still building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref
+          .read(autopilotSettingsServiceProvider)
+          .generateAndPopulateSchedules(force: true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final genState = ref.watch(autopilotGenerationStateProvider);
+    final lastGenerated = ref.watch(autopilotLastGeneratedProvider);
     final bool isFirstRun = lastGenerated == null;
+
+    // Compute next expected generation time (7 days after last successful run)
+    final DateTime? nextFire = lastGenerated?.add(const Duration(days: 7));
+
+    // Auto-kick a generation if we're idle and there are still no schedules.
+    // Skip if there's an active error so the user has a chance to read it.
+    if (genState.status == AutopilotGenerationStatus.idle) {
+      _maybeAutoTrigger();
+    }
+
+    final isError = genState.hasError;
+    final isLoading = genState.isLoading;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
@@ -2608,48 +2668,66 @@ class _AutopilotGeneratingState extends ConsumerWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                NexGenPalette.cyan.withValues(alpha: 0.10),
-                NexGenPalette.violet.withValues(alpha: 0.06),
-              ],
+              colors: isError
+                  ? [
+                      Colors.red.withValues(alpha: 0.10),
+                      Colors.orange.withValues(alpha: 0.06),
+                    ]
+                  : [
+                      NexGenPalette.cyan.withValues(alpha: 0.10),
+                      NexGenPalette.violet.withValues(alpha: 0.06),
+                    ],
             ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: NexGenPalette.cyan.withValues(alpha: 0.3),
+              color: isError
+                  ? Colors.red.withValues(alpha: 0.4)
+                  : NexGenPalette.cyan.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Column(
             children: [
-              // Animated progress ring
+              // ── Status icon / progress ring ──
               SizedBox(
                 width: 48,
                 height: 48,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        valueColor: AlwaysStoppedAnimation(
-                          NexGenPalette.cyan.withValues(alpha: 0.7),
+                    if (isLoading)
+                      SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          valueColor: AlwaysStoppedAnimation(
+                            NexGenPalette.cyan.withValues(alpha: 0.7),
+                          ),
+                          backgroundColor: NexGenPalette.line,
                         ),
-                        backgroundColor: NexGenPalette.line,
                       ),
+                    Icon(
+                      isError
+                          ? Icons.error_outline_rounded
+                          : Icons.smart_toy_rounded,
+                      color:
+                          isError ? Colors.red.shade300 : NexGenPalette.cyan,
+                      size: 20,
                     ),
-                    Icon(Icons.smart_toy_rounded,
-                        color: NexGenPalette.cyan, size: 20),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
 
-              // Headline
+              // ── Headline ──
               Text(
-                'Generating your schedule\u2026',
+                isError
+                    ? 'Couldn\u2019t generate schedule'
+                    : (isLoading
+                        ? 'Generating your schedule\u2026'
+                        : 'Ready to generate your schedule'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: NexGenPalette.textHigh,
                       fontWeight: FontWeight.w700,
@@ -2657,12 +2735,15 @@ class _AutopilotGeneratingState extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
 
-              // Subtext
+              // ── Subtext ──
               Text(
-                isFirstRun
-                    ? 'Lumina is crafting your first lighting plan based on '
-                      'your holidays, teams, and preferences.'
-                    : 'Lumina is refreshing your weekly lighting plan.',
+                isError
+                    ? (genState.errorMessage ??
+                        'Schedule generation failed. Please try again.')
+                    : isFirstRun
+                        ? 'Lumina is crafting your first lighting plan based on '
+                            'your holidays, teams, and preferences.'
+                        : 'Lumina is refreshing your weekly lighting plan.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: NexGenPalette.textMedium,
@@ -2671,7 +2752,25 @@ class _AutopilotGeneratingState extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
 
-              // Next fire time chip
+              // ── Retry button (error state only) ──
+              if (isError) ...[
+                FilledButton.icon(
+                  onPressed: () {
+                    ref
+                        .read(autopilotSettingsServiceProvider)
+                        .generateAndPopulateSchedules(force: true);
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Try Again'),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // ── Last generated / next refresh chip ──
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2681,25 +2780,153 @@ class _AutopilotGeneratingState extends ConsumerWidget {
                   border: Border.all(
                       color: NexGenPalette.cyan.withValues(alpha: 0.2)),
                 ),
-                child: Row(
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.update_rounded,
-                        size: 14, color: NexGenPalette.cyan),
-                    const SizedBox(width: 6),
-                    Text(
-                      nextFire != null && !needsRegen
-                          ? 'Next refresh: ${_kMonthShort[nextFire.month]} ${nextFire.day}, ${nextFire.year}'
-                          : 'Building your first week\u2026',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: NexGenPalette.cyan,
-                            fontWeight: FontWeight.w600,
+                    if (lastGenerated != null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.history_rounded,
+                              size: 14, color: NexGenPalette.cyan),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Last generated: ${_formatLastGenerated(lastGenerated)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: NexGenPalette.cyan,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
+                        ],
+                      ),
+                    if (lastGenerated != null) const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.update_rounded,
+                            size: 14, color: NexGenPalette.cyan),
+                        const SizedBox(width: 6),
+                        Text(
+                          nextFire != null
+                              ? 'Next refresh: ${_kMonthShort[nextFire.month]} ${nextFire.day}, ${nextFire.year}'
+                              : 'Building your first week\u2026',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                color: NexGenPalette.cyan,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Format a last-generated timestamp as "Today" / "Yesterday" / "Apr 7, 2026".
+String _formatLastGenerated(DateTime when) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final whenDay = DateTime(when.year, when.month, when.day);
+  final diff = today.difference(whenDay).inDays;
+  if (diff == 0) return 'Today';
+  if (diff == 1) return 'Yesterday';
+  return '${_kMonthShort[when.month]} ${when.day}, ${when.year}';
+}
+
+// ─── Manual Generate Button ──────────────────────────────────────────────────
+
+/// Full-width primary CTA at the bottom of My Schedule. Forces a fresh
+/// autopilot schedule generation, bypassing the weekly refresh gate. Reflects
+/// the live state of [autopilotGenerationStateProvider] (idle / loading /
+/// error) and surfaces success or failure via SnackBar.
+class _GenerateThisWeekButton extends ConsumerWidget {
+  const _GenerateThisWeekButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genState = ref.watch(autopilotGenerationStateProvider);
+    final isLoading = genState.isLoading;
+
+    Future<void> handleTap() async {
+      if (isLoading) return;
+      final messenger = ScaffoldMessenger.of(context);
+      final beforeStatus =
+          ref.read(autopilotGenerationStateProvider).status;
+      await ref
+          .read(autopilotSettingsServiceProvider)
+          .generateAndPopulateSchedules(force: true);
+      if (!context.mounted) return;
+      final afterState = ref.read(autopilotGenerationStateProvider);
+      // Skipped because already in progress — no toast needed.
+      if (beforeStatus == AutopilotGenerationStatus.loading) return;
+      if (afterState.hasError) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(
+            afterState.errorMessage ??
+                'Couldn\u2019t generate schedule. Try again.',
+          ),
+          backgroundColor: Colors.red.shade700,
+        ));
+      } else {
+        messenger.showSnackBar(SnackBar(
+          content: const Text('Schedule generated for this week.'),
+          backgroundColor: Colors.green.shade700,
+        ));
+      }
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding:
+            EdgeInsets.fromLTRB(16, 8, 16, navBarTotalHeight(context) + 8),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: FilledButton.icon(
+            onPressed: isLoading ? null : handleTap,
+            style: FilledButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+              foregroundColor: Colors.black,
+              disabledBackgroundColor:
+                  NexGenPalette.cyan.withValues(alpha: 0.4),
+              disabledForegroundColor: Colors.black54,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
+            ),
+            icon: isLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(Colors.black),
+                    ),
+                  )
+                : const Icon(Icons.auto_awesome_rounded, size: 20),
+            label: Text(
+              isLoading
+                  ? 'Generating\u2026'
+                  : 'Generate This Week\u2019s Schedule',
+            ),
           ),
         ),
       ),
@@ -3117,7 +3344,12 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
             top: false,
             child: ListView(
               controller: widget.scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
+              // Bottom padding clears the glass dock nav bar overlay.
+              // The dock sits in the parent Stack and is NOT pushed aside
+              // by modal sheets opened from the inner navigator, so the
+              // last action button (Save/Delete) would otherwise sit
+              // behind the dock when the sheet is fully expanded.
+              padding: EdgeInsets.fromLTRB(16, 16, 16, kBottomNavBarPadding + 16),
               children: [
                 Row(children: [
                   Text(widget.editing == null ? 'New Schedule' : 'Edit Schedule', style: Theme.of(context).textTheme.titleLarge),
@@ -3655,7 +3887,10 @@ class _AggregatedPatternGrid extends ConsumerWidget {
     final all = lib.all;
     if (all.isEmpty) return const Center(child: Text('No patterns'));
     return GridView.builder(
-      padding: const EdgeInsets.all(16),
+      // Bottom padding clears the glass dock nav bar overlay so the
+      // last row of pattern tiles is reachable when this picker sheet
+      // is opened from the schedule editor.
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, kBottomNavBarPadding + 16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.9),
       itemCount: all.length,
       itemBuilder: (_, i) {

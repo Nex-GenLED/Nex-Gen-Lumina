@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -162,6 +164,51 @@ final needsScheduleRegenerationProvider = Provider<bool>((ref) {
   return daysSince >= 7; // Regenerate weekly
 });
 
+// ─── Generation lifecycle state ─────────────────────────────────────────────
+
+/// Lifecycle status of the autopilot schedule generation pipeline.
+enum AutopilotGenerationStatus { idle, loading, error }
+
+/// State for [autopilotGenerationStateProvider]. Tracks whether a schedule
+/// generation is currently running, and surfaces any error message that the
+/// UI should display alongside a retry affordance.
+class AutopilotGenerationState {
+  final AutopilotGenerationStatus status;
+  final String? errorMessage;
+
+  const AutopilotGenerationState({
+    this.status = AutopilotGenerationStatus.idle,
+    this.errorMessage,
+  });
+
+  bool get isLoading => status == AutopilotGenerationStatus.loading;
+  bool get hasError => status == AutopilotGenerationStatus.error;
+}
+
+/// Notifier driving the schedule-generation lifecycle. Owned by
+/// [AutopilotSettingsService.generateAndPopulateSchedules]; widgets read it
+/// to drive spinners, error UI, and retry buttons.
+class AutopilotGenerationStateNotifier
+    extends StateNotifier<AutopilotGenerationState> {
+  AutopilotGenerationStateNotifier() : super(const AutopilotGenerationState());
+
+  void setLoading() => state = const AutopilotGenerationState(
+        status: AutopilotGenerationStatus.loading,
+      );
+
+  void setError(String message) => state = AutopilotGenerationState(
+        status: AutopilotGenerationStatus.error,
+        errorMessage: message,
+      );
+
+  void setIdle() => state = const AutopilotGenerationState();
+}
+
+final autopilotGenerationStateProvider = StateNotifierProvider<
+    AutopilotGenerationStateNotifier, AutopilotGenerationState>(
+  (ref) => AutopilotGenerationStateNotifier(),
+);
+
 /// State notifier for managing autopilot suggestions.
 class AutopilotSuggestionsNotifier extends StateNotifier<List<AutopilotSuggestion>> {
   AutopilotSuggestionsNotifier() : super([]);
@@ -287,62 +334,118 @@ class AutopilotSettingsService {
   }
 
   /// Generate autopilot schedules and add them to the user's schedule list.
-  Future<void> generateAndPopulateSchedules() async {
-    // Try to get the profile, waiting for it if it's still loading
-    var profileAsync = _ref.read(currentUserProfileProvider);
-    var profile = profileAsync.maybeWhen(
-      data: (p) => p,
-      orElse: () => null,
-    );
-    if (profile == null) {
-      // Profile not yet loaded — wait for it with a timeout
-      debugPrint('AutopilotSettingsService: Waiting for profile to load...');
-      try {
-        profile = await _ref.read(currentUserProfileProvider.future)
-            .timeout(const Duration(seconds: 10));
-      } catch (e) {
-        debugPrint('AutopilotSettingsService: No profile found after waiting, cannot generate schedules: $e');
-        return;
-      }
-    }
-    if (profile == null) {
-      debugPrint('AutopilotSettingsService: No profile found, cannot generate schedules');
+  ///
+  /// When [force] is true, the weekly refresh-gate check is skipped — the
+  /// generation runs unconditionally. Manual triggers (e.g. the
+  /// "Generate This Week's Schedule" button) should pass `force: true`.
+  /// Automatic timer-driven calls should leave it `false`.
+  ///
+  /// Wraps the entire pipeline with:
+  ///   - a re-entrancy guard (skips if a generation is already in flight)
+  ///   - a 30-second safety-net timeout
+  ///   - try/catch that surfaces errors via [autopilotGenerationStateProvider]
+  ///     so the UI can display a retry affordance instead of spinning forever.
+  Future<void> generateAndPopulateSchedules({bool force = false}) async {
+    final genState = _ref.read(autopilotGenerationStateProvider.notifier);
+
+    // Re-entrancy guard — Case C from the bug report. If a generation is
+    // already running, don't start a second one on top of it.
+    final currentStatus = _ref.read(autopilotGenerationStateProvider).status;
+    if (currentStatus == AutopilotGenerationStatus.loading) {
+      debugPrint(
+          'AutopilotSettingsService: Generation already in progress, skipping');
       return;
     }
 
-    debugPrint('AutopilotSettingsService: Generating autopilot schedules...');
+    // Refresh-gate guard — Case D from the bug report. Honor the weekly
+    // cadence for automatic calls but allow manual triggers to bypass it.
+    if (!force) {
+      final lastGenerated = _ref.read(autopilotLastGeneratedProvider);
+      if (lastGenerated != null) {
+        final daysSince = DateTime.now().difference(lastGenerated).inDays;
+        if (daysSince < 7) {
+          debugPrint(
+              'AutopilotSettingsService: Refresh gate not met ($daysSince days since last generation), skipping');
+          return;
+        }
+      }
+    }
+
+    genState.setLoading();
 
     try {
-      // Generate autopilot schedule items
+      // Try to get the profile, waiting for it if it's still loading
+      var profileAsync = _ref.read(currentUserProfileProvider);
+      var profile = profileAsync.maybeWhen(
+        data: (p) => p,
+        orElse: () => null,
+      );
+      if (profile == null) {
+        debugPrint('AutopilotSettingsService: Waiting for profile to load...');
+        profile = await _ref
+            .read(currentUserProfileProvider.future)
+            .timeout(const Duration(seconds: 10));
+      }
+      if (profile == null) {
+        debugPrint(
+            'AutopilotSettingsService: No profile found, cannot generate schedules');
+        genState.setError('No user profile found.');
+        return;
+      }
+
+      debugPrint('AutopilotSettingsService: Generating autopilot schedules...');
+
+      // Generate autopilot schedule items — wrapped in a 30s safety-net
+      // timeout so the UI can never be stuck on the spinner indefinitely
+      // even if the underlying AI call hangs.
       final generationService = _ref.read(autopilotGenerationServiceProvider);
-      final autopilotItems = await generationService.generateWeeklySchedule(
-        profile: profile,
+      final autopilotItems = await generationService
+          .generateWeeklySchedule(profile: profile)
+          .timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException(
+              'Schedule generation timed out after 30 seconds');
+        },
       );
 
-      debugPrint('AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
+      debugPrint(
+          'AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
 
       // Convert to regular ScheduleItem format (using user's IANA timezone for display)
+      final tz = profile.timeZone;
       final scheduleItems = autopilotItems
-          .map((item) => _convertToScheduleItem(item, ianaTimezone: profile?.timeZone))
+          .map((item) => _convertToScheduleItem(item, ianaTimezone: tz))
           .toList();
 
       // Add to user's schedules (merge with existing)
       final schedulesNotifier = _ref.read(schedulesProvider.notifier);
       await schedulesNotifier.addAll(scheduleItems);
 
-      // Mark schedule as generated
+      // Mark schedule as generated (also moves the next-refresh window
+      // forward to seven days from now).
       await markScheduleGenerated();
 
       // Schedule the weekly brief notification
-      final notificationService = _ref.read(autopilotNotificationServiceProvider);
+      final notificationService =
+          _ref.read(autopilotNotificationServiceProvider);
       await notificationService.scheduleWeeklyBrief(
         profile: profile,
         schedule: autopilotItems,
       );
 
-      debugPrint('AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
-    } catch (e) {
-      debugPrint('AutopilotSettingsService: Failed to generate schedules: $e');
+      debugPrint(
+          'AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
+
+      genState.setIdle();
+    } on TimeoutException catch (e, stack) {
+      debugPrint('AutopilotSettingsService: Generation timed out: $e\n$stack');
+      genState.setError(
+          'Schedule generation timed out. Tap "Generate This Week\u2019s Schedule" to try again.');
+    } catch (e, stack) {
+      debugPrint('AutopilotSettingsService: Failed to generate schedules: $e\n$stack');
+      genState.setError(
+          'Couldn\u2019t generate schedule. Tap to try again.');
     }
   }
 
