@@ -283,7 +283,7 @@ class _TeamCard extends ConsumerWidget {
                   enabled: !entry.isCrewMember,
                   onChanged: entry.isCrewMember
                       ? null
-                      : (val) => _toggleAutopilot(ref, config, val),
+                      : (val) => _toggleAutopilot(context, ref, config, val),
                 ),
               ],
             ),
@@ -333,12 +333,35 @@ class _TeamCard extends ConsumerWidget {
     );
   }
 
-  void _toggleAutopilot(
-      WidgetRef ref, GameDayAutopilotConfig config, bool value) {
-    ref.read(gameDayAutopilotNotifierProvider.notifier).toggleAutopilot(
-          teamSlug: config.teamSlug,
-          enabled: value,
+  Future<void> _toggleAutopilot(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+    bool value,
+  ) async {
+    debugPrint(
+      '\u{1F3DF}\u{FE0F} Game Day Autopilot set to: $value for team: ${config.teamSlug}',
+    );
+    try {
+      await ref
+          .read(gameDayAutopilotNotifierProvider.notifier)
+          .toggleAutopilot(
+            teamSlug: config.teamSlug,
+            enabled: value,
+          );
+    } catch (e, st) {
+      debugPrint('[GameDayAutopilot] toggleAutopilot failed: $e\n$st');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not update Game Day Autopilot for ${config.teamName}.',
+            ),
+            duration: const Duration(seconds: 6),
+          ),
         );
+      }
+    }
   }
 }
 

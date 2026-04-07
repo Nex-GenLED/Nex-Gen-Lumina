@@ -193,6 +193,18 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      // Game Day Autopilot subcollection - per-team autopilot configs
+      // (one doc per team slug, e.g. "atlanta-braves"). Written by the
+      // GameDayAutopilotNotifier when the user toggles the Autopilot
+      // switch on the Game Day team card. Without these rules the write
+      // is denied silently and the toggle appears unresponsive.
+      match /game_day_autopilot/{configId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
       // Referrals subcollection - tracks people the user has referred.
       // Read by ambassadorTierProvider and the rewards-tracking stream in
       // the Refer & Earn screen. Written by ReferralAttributionService when
