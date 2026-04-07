@@ -193,31 +193,51 @@ void setupWiFi() {
   WiFi.disconnect(true);
   delay(1000);
 
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
+  // If no hardcoded SSID, use WiFiManager captive portal
+  if (strlen(WIFI_SSID) == 0) {
+    Serial.println("No WiFi credentials configured — starting captive portal");
+    Serial.print("Connect to AP: ");
+    Serial.println(deviceName);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(300); // 5 min timeout, then reboot
+    wm.setAPCallback([](WiFiManager* wm) {
+      Serial.println("Captive portal started");
+      blinkLed(3, 200);
+    });
 
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500);
-    Serial.print(".");
-    Serial.print(WiFi.status());
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.print("Connected! IP: ");
-    Serial.println(WiFi.localIP());
+    if (!wm.autoConnect(deviceName.c_str())) {
+      Serial.println("WiFi config timed out — rebooting");
+      delay(3000);
+      ESP.restart();
+    }
   } else {
-    Serial.println();
-    Serial.print("Failed! WiFi status: ");
-    Serial.println(WiFi.status());
-    Serial.println("Restarting in 5 seconds...");
-    delay(5000);
-    ESP.restart();
+    Serial.print("Connecting to ");
+    Serial.println(WIFI_SSID);
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+      delay(500);
+      Serial.print(".");
+      Serial.print(WiFi.status());
+      attempts++;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println();
+      Serial.print("Failed! WiFi status: ");
+      Serial.println(WiFi.status());
+      Serial.println("Restarting in 5 seconds...");
+      delay(5000);
+      ESP.restart();
+    }
   }
+
+  Serial.println();
+  Serial.print("Connected! IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 // ============================================================================

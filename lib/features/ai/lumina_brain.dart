@@ -15,6 +15,7 @@ import 'package:nexgen_command/data/team_color_database.dart';
 import 'package:nexgen_command/data/team_color_resolver.dart';
 import 'package:nexgen_command/data/holiday_color_database.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart' show safeRGBW;
 import 'package:nexgen_command/features/ai/compound_command_detector.dart';
 import 'package:nexgen_command/features/ai/user_variety_profile.dart';
 import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
@@ -516,7 +517,12 @@ class LuminaBrain {
         colorEntries: holiday.colors
             .map((c) => {
                   'name': c.name,
-                  'rgb': rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true),
+                  // Funnel through safeRGBW for consistency with the team
+                  // path. rgbToRgbw(forceZeroWhite: true) already produces a
+                  // 4-channel result; safeRGBW just guarantees clamping and
+                  // an explicit W slot so future regressions can't slip in.
+                  'rgb':
+                      safeRGBW(rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true)),
                 })
             .toList(),
         suggestedEffects: holiday.suggestedEffects,
@@ -556,11 +562,15 @@ class LuminaBrain {
           colorEntries: teamResult.team.colors.asMap().entries.map((e) {
             final i = e.key;
             final tc = e.value;
-            final rgb =
-                i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b, 0];
+            // Funnel every team color through safeRGBW so the W channel is
+            // explicit (W=0) — prevents WLED from auto-extracting W and
+            // washing dark branded reds (e.g. Chiefs `[227,24,55]`) into pink.
+            final rgb = i < ledRgb.length
+                ? safeRGBW(ledRgb[i])
+                : safeRGBW([tc.r, tc.g, tc.b]);
             return {
               'name': tc.name,
-              'rgb': rgb.length >= 4 ? rgb : [...rgb, 0],
+              'rgb': rgb,
             };
           }).toList(),
           suggestedEffects: teamResult.team.suggestedEffects.isNotEmpty
@@ -745,21 +755,27 @@ class LuminaBrain {
         break;
     }
 
+    // Every team color is funneled through safeRGBW so the W channel is
+    // explicit (W=0). Without this, WLED auto-extracts W = min(R,G,B) from
+    // any 3-channel input, washing dark branded reds (Chiefs `[227,24,55]`)
+    // into pink on RGBW strips.
     final colorsArray = <Map<String, dynamic>>[];
     for (var i = 0; i < team.colors.length; i++) {
       final tc = team.colors[i];
-      final rgb = i < ledRgb.length ? ledRgb[i] : [tc.r, tc.g, tc.b, 0];
+      final rgb = i < ledRgb.length
+          ? safeRGBW(ledRgb[i])
+          : safeRGBW([tc.r, tc.g, tc.b]);
       colorsArray.add({
         'name': tc.name,
-        'rgb': rgb.length >= 4 ? rgb : [...rgb, 0],
+        'rgb': rgb,
       });
     }
 
     final segCol = <List<int>>[];
     for (var i = 0; i < team.colors.length; i++) {
       final rgb = i < ledRgb.length
-          ? ledRgb[i]
-          : [team.colors[i].r, team.colors[i].g, team.colors[i].b, 0];
+          ? safeRGBW(ledRgb[i])
+          : safeRGBW([team.colors[i].r, team.colors[i].g, team.colors[i].b]);
       segCol.add(rgb);
     }
 
@@ -806,15 +822,20 @@ class LuminaBrain {
     final intensity = holiday.defaultIntensity;
     final isStatic = effectId == 0;
 
+    // Funnel every holiday color through safeRGBW for consistency with the
+    // team path. rgbToRgbw(forceZeroWhite: true) already produces a 4-channel
+    // result; safeRGBW guarantees clamping and an explicit W slot, so a
+    // future regression that introduces a 3-channel array can't cause WLED
+    // to auto-extract the white channel.
     final colorsArray = holiday.colors.map((c) {
       return {
         'name': c.name,
-        'rgb': rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true),
+        'rgb': safeRGBW(rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true)),
       };
     }).toList();
 
     final segCol = holiday.colors
-        .map((c) => rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true))
+        .map((c) => safeRGBW(rgbToRgbw(c.r, c.g, c.b, forceZeroWhite: true)))
         .toList();
 
     final wledPayload = {
@@ -826,7 +847,7 @@ class LuminaBrain {
           'on': true,
           'bri': 255,
           'col': segCol.isEmpty
-              ? [rgbToRgbw(255, 255, 255, forceZeroWhite: true)]
+              ? [safeRGBW(rgbToRgbw(255, 255, 255, forceZeroWhite: true))]
               : segCol,
           'fx': effectId,
           'sx': speed,

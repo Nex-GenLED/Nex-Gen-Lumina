@@ -3,6 +3,37 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/utils/rgbw_validation.dart';
 
+/// Guarantees a color array is a 4-channel `[R, G, B, W]` list with W explicitly
+/// set. Used by sports team and holiday color paths to prevent WLED's W-channel
+/// auto-calculation from washing dark branded colors (e.g. Chiefs red
+/// `[227, 24, 55]`) into pink on RGBW strips.
+///
+/// - 4-channel input: clamped to 0–255 and returned as-is.
+/// - 3-channel input: clamped and W=0 is appended (no auto-white extraction).
+/// - Anything else: returns `[0, 0, 0, 0]` to fail safe.
+///
+/// This is the canonical wrapper any code path that produces a `col` entry from
+/// a team or holiday brand color should funnel through.
+List<int> safeRGBW(List<int> color) {
+  if (color.length == 4) {
+    return [
+      color[0].clamp(0, 255),
+      color[1].clamp(0, 255),
+      color[2].clamp(0, 255),
+      color[3].clamp(0, 255),
+    ];
+  }
+  if (color.length == 3) {
+    return [
+      color[0].clamp(0, 255),
+      color[1].clamp(0, 255),
+      color[2].clamp(0, 255),
+      0, // Explicit W:0 — prevents WLED auto white-channel bleed
+    ];
+  }
+  return [0, 0, 0, 0];
+}
+
 /// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
 ///
 /// If [channelIds] is empty, or the payload has no `seg` key, the payload is

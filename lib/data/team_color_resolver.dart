@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/data/team_color_database.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 
 /// How a team was matched.
 enum TeamMatchType {
@@ -64,20 +65,25 @@ class TeamResolverResult {
         'name': team.officialName,
         'league': team.league,
         'colors': {
+          // Every rgb entry is funneled through safeRGBW so the W channel is
+          // always explicit (W=0). This prevents WLED from auto-extracting
+          // W = min(R,G,B) when the JSON is later relayed to a controller —
+          // the bug that washed dark branded reds (e.g. Chiefs `[227,24,55]`)
+          // into pink on RGBW strips.
           if (primary != null)
             'primary': {
               'name': primary.name,
-              'rgb': [primary.r, primary.g, primary.b],
+              'rgb': safeRGBW([primary.r, primary.g, primary.b]),
             },
           if (secondary != null)
             'secondary': {
               'name': secondary.name,
-              'rgb': [secondary.r, secondary.g, secondary.b],
+              'rgb': safeRGBW([secondary.r, secondary.g, secondary.b]),
             },
           if (accent != null)
             'accent': {
               'name': accent.name,
-              'rgb': [accent.r, accent.g, accent.b],
+              'rgb': safeRGBW([accent.r, accent.g, accent.b]),
             },
         },
       },

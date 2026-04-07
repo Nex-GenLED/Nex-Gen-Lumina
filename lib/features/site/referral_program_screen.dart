@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,12 +17,78 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Reads the server-assigned referral code from the user's Firestore document.
+///
+/// If the user is authenticated but has no [referralCode] field (legacy users
+/// created before the assignReferralCode Cloud Function was deployed, or users
+/// where that function failed), this provider performs a client-side fallback:
+/// it generates a fresh `LUM-XXXX` code, claims it transactionally in
+/// `referral_codes/{code}`, and writes it back to `users/{uid}.referralCode`
+/// using `merge: true`. This mirrors the Cloud Function logic exactly so a
+/// code generated this way is fully usable for redemption.
+///
+/// Returns an empty string only when the user is genuinely unauthenticated.
 final referralCodeProvider = FutureProvider<String>((ref) async {
   final user = ref.watch(authStateProvider).asData?.value;
   if (user == null) return '';
-  final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-  return (doc.data()?['referralCode'] as String?) ?? '';
+
+  final db = FirebaseFirestore.instance;
+  final userRef = db.collection('users').doc(user.uid);
+  final snap = await userRef.get();
+  final existing = snap.data()?['referralCode'] as String?;
+  if (existing != null && existing.isNotEmpty) return existing;
+
+  // Fallback: generate and claim a code on the client.
+  return _ensureReferralCode(user, userRef);
 });
+
+const _kReferralCodeChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const _kReferralCodeLen = 4;
+const _kReferralCodeMaxAttempts = 5;
+
+String _generateReferralCode() {
+  final rng = Random.secure();
+  final buf = StringBuffer('LUM-');
+  for (var i = 0; i < _kReferralCodeLen; i++) {
+    buf.write(_kReferralCodeChars[rng.nextInt(_kReferralCodeChars.length)]);
+  }
+  return buf.toString();
+}
+
+/// Mirrors the [assignReferralCode] Cloud Function: generate a `LUM-XXXX`
+/// code, claim it in `referral_codes/{code}` via transaction, then write it
+/// to the user doc with `merge: true`. Retries on collision up to 5 times.
+Future<String> _ensureReferralCode(
+  User user,
+  DocumentReference<Map<String, dynamic>> userRef,
+) async {
+  final db = FirebaseFirestore.instance;
+
+  for (var attempt = 0; attempt < _kReferralCodeMaxAttempts; attempt++) {
+    final code = _generateReferralCode();
+    final codeRef = db.collection('referral_codes').doc(code);
+
+    try {
+      await db.runTransaction((tx) async {
+        final existing = await tx.get(codeRef);
+        if (existing.exists) {
+          throw _ReferralCodeCollision();
+        }
+        tx.set(codeRef, {'uid': user.uid});
+        tx.set(userRef, {'referralCode': code}, SetOptions(merge: true));
+      });
+      return code;
+    } on _ReferralCodeCollision {
+      // Try again with a fresh code
+      continue;
+    }
+  }
+
+  throw StateError(
+    'Failed to assign referral code after $_kReferralCodeMaxAttempts attempts',
+  );
+}
+
+class _ReferralCodeCollision implements Exception {}
 
 class ReferralProgramScreen extends ConsumerStatefulWidget {
   const ReferralProgramScreen({super.key});
@@ -143,9 +212,25 @@ class _ReferralProgramScreenState extends ConsumerState<ReferralProgramScreen> {
                     ),
                   ]),
                 ),
-                error: (_, __) => Text('Unable to load referral code', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.error)),
+                error: (_, __) => Row(children: [
+                  Expanded(
+                    child: Text(
+                      'Unable to load referral code. Pull to refresh or try again.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Retry',
+                    onPressed: () => ref.invalidate(referralCodeProvider),
+                  ),
+                ]),
                 data: (code) {
                   if (code.isEmpty) {
+                    // Only reached when the user is genuinely unauthenticated
+                    // (the auth-stream hasn't resolved or the user is signed out).
+                    // Authenticated users with a missing referralCode field are
+                    // handled by the client-side fallback in referralCodeProvider.
                     return Text('Sign in to get your referral code', style: Theme.of(context).textTheme.bodyMedium);
                   }
                   return Column(children: [

@@ -1360,21 +1360,29 @@ class PatternCard extends ConsumerWidget {
         }
       }
 
+      // Extract per-segment fields from the payload once so spacing
+      // patterns (grp/spc) reach the local preview state and the home
+      // dashboard's roofline renders the correct on/off cadence.
+      final segList = pattern.wledPayload['seg'];
+      final firstSeg = (segList is List && segList.isNotEmpty && segList.first is Map)
+          ? (segList.first as Map)
+          : const <dynamic, dynamic>{};
+      final patternSpeed = (firstSeg['sx'] as int?) ?? 128;
+      final patternIntensity = (firstSeg['ix'] as int?) ?? 128;
+      final patternGrp = (firstSeg['grp'] as int?) ?? 1;
+      final patternSpc = (firstSeg['spc'] as int?) ?? 0;
+
       // Update preview immediately so home screen roofline matches device
       try {
         final colors = _getColors();
         ref.read(wledStateProvider.notifier).applyLocalPreview(
           colors: colors,
           effectId: effectId,
-          speed: pattern.wledPayload['seg'] is List &&
-                  (pattern.wledPayload['seg'] as List).isNotEmpty
-              ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
-              : 128,
-          intensity: pattern.wledPayload['seg'] is List &&
-                  (pattern.wledPayload['seg'] as List).isNotEmpty
-              ? ((pattern.wledPayload['seg'] as List).first['ix'] as int?) ?? 128
-              : 128,
+          speed: patternSpeed,
+          intensity: patternIntensity,
           effectName: pattern.name,
+          colorGroupSize: patternGrp,
+          spacing: patternSpc,
         );
       } catch (e) {
         debugPrint('Error in pattern grid applyLocalPreview: $e');
@@ -1384,12 +1392,11 @@ class PatternCard extends ConsumerWidget {
       ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
         colors: _getColors(),
         effectId: effectId,
-        speed: pattern.wledPayload['seg'] is List &&
-                (pattern.wledPayload['seg'] as List).isNotEmpty
-            ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
-            : 128,
+        speed: patternSpeed,
         brightness: pattern.wledPayload['bri'] as int? ?? 255,
         name: pattern.name,
+        colorGroupSize: patternGrp,
+        spacing: patternSpc,
       );
 
       if (context.mounted) {

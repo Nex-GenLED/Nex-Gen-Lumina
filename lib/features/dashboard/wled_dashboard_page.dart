@@ -44,11 +44,13 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
-({List<Color> colors, int effectId, int speed, int intensity}) _extractPreviewFromPayload(
+({List<Color> colors, int effectId, int speed, int intensity, int colorGroupSize, int spacing}) _extractPreviewFromPayload(
     Map<String, dynamic> payload) {
   var effectId = 0;
   var speed = 128;
   var intensity = 128;
+  var colorGroupSize = 1;
+  var spacing = 0;
   final colors = <Color>[];
 
   try {
@@ -59,6 +61,8 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
         effectId = (first['fx'] as int?) ?? 0;
         speed = (first['sx'] as int?) ?? 128;
         intensity = (first['ix'] as int?) ?? 128;
+        colorGroupSize = (first['grp'] as int?) ?? 1;
+        spacing = (first['spc'] as int?) ?? 0;
         final cols = first['col'];
         if (cols is List) {
           for (final col in cols) {
@@ -83,6 +87,8 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
     effectId: effectId,
     speed: speed,
     intensity: intensity,
+    colorGroupSize: colorGroupSize,
+    spacing: spacing,
   );
 }
 
@@ -677,6 +683,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           targetAspectRatio: targetAspectRatio,
                           imageAlignment: const Offset(0, 0.4),
                           useBoxFitCover: true,
+                          colorGroupSize: state.colorGroupSize,
+                          spacing: state.spacing,
                         ),
                       );
                     },
@@ -792,6 +800,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             speed: preview.speed,
             intensity: preview.intensity,
             effectName: favorite.patternName,
+            colorGroupSize: preview.colorGroupSize,
+            spacing: preview.spacing,
           );
         } catch (e) {
           debugPrint('Error in preset chip applyLocalPreview: $e');
@@ -1308,6 +1318,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       speed: preview.speed,
                       intensity: preview.intensity,
                       effectName: patternName,
+                      colorGroupSize: preview.colorGroupSize,
+                      spacing: preview.spacing,
                     );
                     ref.read(activePresetLabelProvider.notifier).state = patternName;
                   } catch (e) {
@@ -1373,6 +1385,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     speed: preview.speed,
                     intensity: preview.intensity,
                     effectName: favorite.patternName,
+                    colorGroupSize: preview.colorGroupSize,
+                    spacing: preview.spacing,
                   );
                 } catch (e) {
                   debugPrint('Error in favorite grid applyLocalPreview: $e');

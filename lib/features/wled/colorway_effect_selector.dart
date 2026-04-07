@@ -256,6 +256,8 @@ class _ColorwayEffectSelectorPageState
       speed: speed,
       intensity: intensity,
       effectName: '${widget.paletteNode.name} - $effectName',
+      colorGroupSize: colorGroup,
+      spacing: spacing,
     );
 
     // Show feedback with offline awareness

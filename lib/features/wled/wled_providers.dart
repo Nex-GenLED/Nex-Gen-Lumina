@@ -413,6 +413,8 @@ class WledNotifier extends Notifier<WledStateModel> {
     int effectId = state.effectId;
     int paletteId = state.paletteId;
     bool reverse = state.reverse;
+    int colorGroupSize = state.colorGroupSize;
+    int spacing = state.spacing;
 
     if (firstSeg != null) {
       final sx = firstSeg['sx'];
@@ -429,6 +431,15 @@ class WledNotifier extends Notifier<WledStateModel> {
 
       final rev = firstSeg['rev'];
       if (rev is bool) reverse = rev;
+
+      // WLED grouping/spacing for spaced patterns (e.g. "1 On 2 Off").
+      // Without parsing these, the home dashboard preview falls back to
+      // "all on" defaults even though the device is showing the spacing.
+      final grp = firstSeg['grp'];
+      if (grp is int) colorGroupSize = grp.clamp(1, 64);
+
+      final spc = firstSeg['spc'];
+      if (spc is int) spacing = spc.clamp(0, 64);
 
       final cols = firstSeg['col'];
       if (cols is List && cols.isNotEmpty && cols.first is List) {
@@ -474,6 +485,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       paletteId: paletteId,
       presetId: ps,
       reverse: reverse,
+      colorGroupSize: colorGroupSize,
+      spacing: spacing,
       connected: true,
     );
 
@@ -641,6 +654,11 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// This allows users to see the roofline LED preview on the house image even when
   /// the WLED controller is offline. The next successful device poll will sync with
   /// actual device state.
+  ///
+  /// [colorGroupSize] and [spacing] map to WLED `grp`/`spc`. Pass them when
+  /// applying spacing patterns (e.g. "1 On 2 Off") so the home dashboard
+  /// roofline preview matches the device. They reset to defaults (1/0) when
+  /// not provided so non-spaced patterns clear any previous spacing.
   void applyLocalPreview({
     required List<Color> colors,
     required int effectId,
@@ -648,6 +666,8 @@ class WledNotifier extends Notifier<WledStateModel> {
     int intensity = 128,
     int brightness = 255,
     String? effectName,
+    int colorGroupSize = 1,
+    int spacing = 0,
   }) {
     state = state.copyWith(
       isOn: true,
@@ -658,8 +678,10 @@ class WledNotifier extends Notifier<WledStateModel> {
       intensity: intensity,
       brightness: brightness,
       customEffectName: effectName,
+      colorGroupSize: colorGroupSize,
+      spacing: spacing,
     );
-    debugPrint('🎨 Applied local preview: ${colors.length} colors, effect: $effectName (offline OK)');
+    debugPrint('🎨 Applied local preview: ${colors.length} colors, effect: $effectName, grp=$colorGroupSize spc=$spacing (offline OK)');
   }
 
   /// Clears custom Lumina pattern metadata (e.g., when user manually adjusts pattern).

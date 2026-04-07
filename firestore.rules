@@ -192,6 +192,46 @@ service cloud.firestore {
         // Users can delete their properties
         allow delete: if isOwner(userId);
       }
+
+      // Referrals subcollection - tracks people the user has referred.
+      // Read by ambassadorTierProvider and the rewards-tracking stream in
+      // the Refer & Earn screen. Written by ReferralAttributionService when
+      // a new prospect signs up with this user's code, and by Cloud Functions
+      // (referralPipelineService) on status transitions.
+      match /referrals/{referralId} {
+        // Owner can read their own referrals; dealers/admins can see all referrals
+        allow read: if canReadUserData(userId);
+
+        // Any authenticated user can create a referral doc here — the
+        // ReferralAttributionService writes to the *referrer's* subcollection
+        // from the *prospect's* signup flow, so the writer is not the doc owner.
+        allow create: if request.auth != null;
+
+        // Owner or any authenticated user (Cloud Functions / dealer flows
+        // updating status) can update.
+        allow update: if request.auth != null;
+
+        // Only owner can delete
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ── Referral Codes (reverse lookup: code → uid) ──
+    // Populated by the assignReferralCode Cloud Function on user create,
+    // and by client-side fallback in referral_program_screen.dart for
+    // legacy users whose user doc is missing the referralCode field.
+    match /referral_codes/{code} {
+      // Any authenticated user can read (validateCode in signup flow)
+      allow read: if request.auth != null;
+
+      // Self-claim: a user may create a code entry only if it points to
+      // their own uid. Existence check before claim is enforced via
+      // Firestore transaction in the client to avoid collisions.
+      allow create: if request.auth != null &&
+                       request.resource.data.uid == request.auth.uid;
+
+      // No client-side updates or deletes — only Cloud Functions/admin
+      allow update, delete: if false;
     }
     
     // Sites - private to each user

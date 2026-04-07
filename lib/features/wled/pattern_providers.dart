@@ -613,12 +613,20 @@ class ExplorePreviewState {
   final int brightness;
   final String name;
 
+  /// LEDs per color group (WLED `grp`). 1 = no grouping.
+  final int colorGroupSize;
+
+  /// Dark (off) LEDs after each lit group (WLED `spc`). 0 = no spacing.
+  final int spacing;
+
   const ExplorePreviewState({
     required this.colors,
     required this.effectId,
     this.speed = 128,
     this.brightness = 255,
     this.name = '',
+    this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 }
 

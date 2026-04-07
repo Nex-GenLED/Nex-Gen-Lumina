@@ -3,21 +3,26 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 
-/// Top-10 team primary colors (RGB).
+/// Top-10 team primary colors as 4-channel `[R, G, B, W]` arrays.
+///
+/// W is explicitly 0 — without it, WLED auto-extracts W = min(R,G,B) from any
+/// 3-channel input, which lights the dedicated white LED and washes dark
+/// branded reds (e.g. Chiefs `[227, 24, 55]`) into pink on RGBW strips.
 const kTeamPrimaryColors = <String, List<int>>{
-  'Chiefs': [227, 24, 55],
-  'Royals': [0, 70, 135],
-  'Eagles': [0, 76, 84],
-  'Cowboys': [0, 34, 68],
-  'Packers': [24, 72, 23],
-  'Lakers': [85, 37, 130],
-  'Yankees': [0, 48, 135],
-  'Dodgers': [0, 90, 156],
-  'Warriors': [29, 66, 138],
-  '49ers': [170, 0, 0],
+  'Chiefs':   [227,  24,  55, 0],
+  'Royals':   [  0,  70, 135, 0],
+  'Eagles':   [  0,  76,  84, 0],
+  'Cowboys':  [  0,  34,  68, 0],
+  'Packers':  [ 24,  72,  23, 0],
+  'Lakers':   [ 85,  37, 130, 0],
+  'Yankees':  [  0,  48, 135, 0],
+  'Dodgers':  [  0,  90, 156, 0],
+  'Warriors': [ 29,  66, 138, 0],
+  '49ers':    [170,   0,   0, 0],
 };
 
 /// Manages game-day WLED automations: pre-game lighting, game-time palette,
@@ -289,12 +294,13 @@ class SportsAlertService {
   }
 
   /// Build WLED-compatible color array from team name.
-  /// Returns [[r,g,b,0]] with team primary color (W=0 for saturated).
+  /// Returns `[[r,g,b,0]]` with team primary color funneled through
+  /// [safeRGBW] so the W channel is always explicit (W=0) and never
+  /// auto-extracted by WLED — preventing the dark-red → pink bug.
   List<List<int>> _teamColorsForPayload(String teamName) {
-    final rgb = kTeamPrimaryColors[teamName] ?? [0, 200, 255]; // Cyan fallback
-    return [
-      [rgb[0], rgb[1], rgb[2], 0],
-    ];
+    final rgb =
+        kTeamPrimaryColors[teamName] ?? const [0, 200, 255, 0]; // Cyan fallback
+    return [safeRGBW(rgb)];
   }
 
   /// Try to extract a team name from a reason string like "Chiefs game day".

@@ -427,27 +427,29 @@ class RooflineLightPainter extends CustomPainter {
     });
   }
 
-  /// Paint solid color along the roofline path - every pixel is color1.
+  /// Paint solid color along the roofline path. Cycles colors via
+  /// [_getColorForLed] so brightness-gradient patterns (multiple
+  /// progressively-dim colors with `grp` band width) render the gradient
+  /// across the strip instead of flat color1.
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
-    final color = colors.first;
     final cycle = colorGroupSize + spacing;
     for (int i = 0; i < positions.length; i++) {
       if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
-      _drawLedDot(canvas, positions[i], color, brightness);
+      _drawLedDot(canvas, positions[i], _getColorForLed(i, colors), brightness);
     }
   }
 
-  /// Paint breathing effect along path - every pixel is color1, brightness pulsing.
+  /// Paint breathing effect along path - pulsing opacity, color cycled per LED
+  /// so brightness-gradient breathing variants display correctly.
   void _paintBreathePath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final breathePhase = math.sin(animationPhase * math.pi * 2);
     final breatheIntensity = 0.3 + (breathePhase + 1) / 2 * 0.7;
     final effectiveBrightness = brightness * breatheIntensity;
-    final color = colors.first;
     final cycle = colorGroupSize + spacing;
 
     for (int i = 0; i < positions.length; i++) {
       if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
-      _drawLedDot(canvas, positions[i], color, effectiveBrightness);
+      _drawLedDot(canvas, positions[i], _getColorForLed(i, colors), effectiveBrightness);
     }
   }
 

@@ -1019,6 +1019,8 @@ class _ExploreRooflinePreview extends ConsumerWidget {
                             forceOn: true,
                             targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
                             useBoxFitCover: true,
+                            colorGroupSize: preview.colorGroupSize,
+                            spacing: preview.spacing,
                           );
                         },
                       ),

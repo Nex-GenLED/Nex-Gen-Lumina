@@ -40,6 +40,7 @@ Sales Mode is a dedicated field tool built into the Nex-Gen Lumina app. It gives
 - **Zone builder** — map LED run lengths, injection points, power mounts, and product types for each area of the home
 - **Estimate generation** — automatically build a professional, itemized estimate from your zone measurements
 - **Customer signature** — present the estimate and collect a digital signature right on your phone or tablet
+- **Materials & checkout** — calculate material lists, pull inventory, and reconcile after installation
 - **Job tracking** — follow each job from draft through pre-wire to completed installation
 
 Sales Mode is accessible from the login screen or from Settings within the app. You do not need a customer account to use it — just your Sales PIN.
@@ -312,7 +313,178 @@ After the customer signs:
 
 ---
 
-## 6. Job Tracking
+## 6. Materials & Checkout Lifecycle
+
+After an estimate is signed and installation dates are scheduled, the next phase is preparing the physical materials for the job. The Materials & Checkout system tracks every item from calculation through installation and reconciliation.
+
+### Overview
+
+The materials lifecycle has four phases, each with its own screen:
+
+```
+Material List  -->  Checkout  -->  Day 1 Check-In  -->  Final Check-In
+  (Calculate)      (Pull stock)    (Log usage)          (Reconcile)
+```
+
+A phase indicator bar at the top of each screen shows your progress through these stages.
+
+### Phase 1: Material List
+
+**Screen:** JobMaterialListScreen — accessed from the Job Detail screen
+
+When you open a job's material list for the first time, you will see an empty state with a **Calculate Materials** button. Tap it to generate the full bill of materials based on your zone measurements.
+
+The calculation engine analyzes every zone and produces line items for:
+
+| Category | Examples |
+|----------|----------|
+| **Light Pixel Nodes** | 1-PCS, 5-PCS, 10-PCS packs (optimized packing) |
+| **Rope Lighting** | Diffused rope light pieces (5m each) |
+| **Rails** | 1-piece and 2-piece aluminum rails (per color) |
+| **Connector Wires** | Extension wires in 1ft, 2ft, 5ft, 10ft, 20ft lengths |
+| **Accessories** | T-connectors, Y-connectors, amplifiers, radar sensors |
+| **Controllers** | Controller units |
+| **Power Supplies** | 350W and 600W supplies |
+
+Each line shows two quantities:
+
+- **Calculated qty** — the exact amount needed based on zone measurements
+- **Overage qty** — the amount to actually order, including a buffer (10% for lights, rails, and rope; 15% for connectors)
+
+<div class="tip">
+<strong>Tip:</strong> The calculation handles corner cuts automatically. Corners require cutting 80mm from rail ends, which loses 2 lights per corner. The engine adds replacement rails and adjusts pixel counts to compensate.
+</div>
+
+**Stock status** is shown for each line item:
+
+| Chip | Meaning |
+|------|---------|
+| **In Stock** | Sufficient inventory available |
+| **Low Stock** | Some available, but less than the overage qty |
+| **Insufficient** | Not enough on hand — reorder before checkout |
+| **Set qty** | Y-connector — your project manager will set the quantity during approval |
+
+**Summary stats** at the top show total run footage, zone count, corner count, and number of line items.
+
+<div class="warning">
+<strong>Note:</strong> Wire runs and power outlet costs are included in the sales estimate, not the material list. The material list covers physical LED components only.
+</div>
+
+**Approving the list:** When the material list looks correct, tap **Approve Material List**. This moves the status from Draft to Approved and enables the Checkout phase.
+
+---
+
+### Phase 2: Checkout
+
+**Screen:** MaterialCheckoutScreen — accessed via **Go to Checkout** on the material list
+
+This screen lets you adjust the pull quantity for each line item before physically pulling materials from inventory. Every line shows a stepper control where you can increase or decrease the quantity.
+
+For each item, you will see:
+
+- **Suggested qty** — the overage amount (default pull quantity)
+- **Available stock** — how many are on hand in your dealer's inventory
+- **Stepper** — tap **-** or **+** to adjust
+
+<div class="warning">
+<strong>Stock guard:</strong> If you try to pull more than what is available, a red warning banner appears at the top listing every item with insufficient stock. You cannot confirm checkout until all quantities are within available limits.
+</div>
+
+**Connector wires** are pre-calculated using an optimized packing algorithm that minimizes the number of pieces (preferring longer lengths). The section header notes this.
+
+**Y-connectors** that were set to 0 by your project manager are dimmed and cannot be adjusted.
+
+When quantities are set, tap **Confirm Checkout**. The system:
+
+1. Deducts pulled quantities from dealer inventory
+2. Reserves those materials against the job
+3. Advances the job to **Checked Out** status
+4. Navigates you to the Day 1 Check-In screen
+
+You can also tap **Export Packing List** to generate a PDF packing slip to accompany the materials.
+
+---
+
+### Phase 3: Day 1 Check-In
+
+**Screen:** MaterialDay1CheckInScreen — accessed after checkout or from the job detail
+
+After the pre-wire day, log what was actually used. This screen shows every checked-out line item with:
+
+- **Pulled qty** — how many were checked out
+- **Used Today** — enter the number consumed during Day 1
+- **Remaining** — auto-calculated (pulled minus used)
+- **Photo evidence** — tap the camera icon to photograph installed materials
+
+<div class="tip">
+<strong>Tip:</strong> Take photos as you install. The camera button uploads each photo directly to the job record. A green checkmark confirms the upload succeeded.
+</div>
+
+**Validation:** If you enter a "Used Today" value that exceeds the pulled quantity, the field turns red with an error message. You must fix all errors before saving.
+
+Tap **Save Day 1 Report** when complete. Materials remain reserved — nothing returns to inventory yet. After saving, the screen becomes read-only with a **Proceed to Final Check-In** button.
+
+<div class="warning">
+<strong>Important:</strong> Materials stay reserved in inventory until the Final Check-In is complete. This prevents other jobs from claiming materials that are still on your truck.
+</div>
+
+---
+
+### Phase 4: Final Check-In
+
+**Screen:** MaterialFinalCheckInScreen — accessed after Day 1 is saved
+
+This is the reconciliation step after the installation is finished. For each line item, enter:
+
+- **Day 2 Used** — materials consumed on installation day
+- **Returned** — materials going back to inventory
+
+The system automatically computes:
+
+- **Waste** = Checked Out - Day 1 Used - Day 2 Used - Returned
+
+Three summary cards at the top show dollar totals:
+
+| Card | Color | Shows |
+|------|-------|-------|
+| **Total Used** | Cyan | Cost of all materials consumed (Day 1 + Day 2) |
+| **Returned** | Green | Cost of materials returned to inventory |
+| **Waste / Loss** | Amber | Cost of unaccounted materials + efficiency percentage |
+
+<div class="tip">
+<strong>Efficiency metric:</strong> The waste card shows your efficiency percentage. For example, 96.5% efficiency means only 3.5% of checked-out materials were lost. Aim for 95%+ efficiency on every job.
+</div>
+
+**Waste color coding:**
+
+| Waste Level | Color |
+|-------------|-------|
+| 0% (no waste) | Green |
+| Up to 5% of checkout | Amber |
+| Over 5% of checkout | Red |
+
+**Validation:** Day 2 Used + Returned cannot exceed what was remaining after Day 1. Fix any errors before submitting.
+
+Tap **Complete Job & Reconcile Inventory** to finalize. The system:
+
+1. Returns unused materials to dealer inventory
+2. Records waste quantities for reporting
+3. Marks the job as **Complete**
+4. Navigates you back to the job list
+
+### Material Status Summary
+
+| Status | Meaning | Who acts |
+|--------|---------|----------|
+| **Draft** | Calculated but not reviewed | PM reviews |
+| **Approved** | PM approved — ready for checkout | Installer pulls stock |
+| **Checked Out** | Materials pulled from inventory | Installer begins work |
+| **Day 1 Complete** | Day 1 usage logged with photos | Installer completes install |
+| **Complete** | Inventory reconciled, job closed | Automatic |
+
+---
+
+## 7. Job Tracking
 
 ### My Estimates Screen
 
@@ -356,7 +528,7 @@ Tap any job in the list to open its full detail view. From here you can:
 
 ---
 
-## 7. Best Practices
+## 8. Best Practices
 
 ### Before the Visit
 
@@ -387,7 +559,7 @@ Tap any job in the list to open its full detail view. From here you can:
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -402,7 +574,7 @@ Tap any job in the list to open its full detail view. From here you can:
 
 ---
 
-## 9. Quick Reference Card
+## 10. Quick Reference Card
 
 | Action | How |
 |--------|-----|
@@ -417,6 +589,11 @@ Tap any job in the list to open its full detail view. From here you can:
 | **Schedule install dates** | Visit Review → tap Day 1 / Day 2 date fields |
 | **Share an estimate** | Estimate Preview → tap **Share** (copies link to clipboard) |
 | **Collect signature** | Estimate Preview → **Proceed to Signature** → hand device to customer |
+| **Calculate materials** | Job Detail → **Materials** → **Calculate Materials** |
+| **Approve material list** | Material List → **Approve Material List** |
+| **Check out materials** | Material List → **Go to Checkout** → adjust quantities → **Confirm Checkout** |
+| **Log Day 1 usage** | Day 1 Check-In → enter used quantities + photos → **Save Day 1 Report** |
+| **Final reconciliation** | Final Check-In → enter Day 2 + returns → **Complete Job & Reconcile Inventory** |
 | **Extend session** | Tap **Extend** on the timeout warning dialog |
 | **Exit Sales Mode** | Sales Landing → **Exit** (top-right corner) |
 

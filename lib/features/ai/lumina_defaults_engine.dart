@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/effect_database.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart' show safeRGBW;
 import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/utils/sky_darkness_provider.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -506,14 +507,17 @@ class LuminaDefaultsEngine {
     required int brightness,
     required int speed,
   }) {
-    final cols = colors.take(3).map((c) => [
+    // Funnel every color through safeRGBW so the W channel is explicit (W=0).
+    // Without this, WLED auto-extracts W = min(R,G,B), which lights the
+    // dedicated white LED and washes dark branded reds (e.g. Chiefs
+    // `[227, 24, 55]`) into pink on RGBW strips.
+    final cols = colors.take(3).map((c) => safeRGBW([
           (c.r * 255).round(),
           (c.g * 255).round(),
           (c.b * 255).round(),
-          0,
-        ]).toList();
+        ])).toList();
     if (cols.isEmpty) {
-      cols.add([255, 255, 255, 0]);
+      cols.add(safeRGBW([255, 255, 255]));
     }
 
     return {

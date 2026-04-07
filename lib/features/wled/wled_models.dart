@@ -28,6 +28,14 @@ class WledStateModel {
   /// This preserves the exact effect name from AI responses
   final String? customEffectName;
 
+  /// LEDs per color group (WLED `grp`). 1 = no grouping.
+  /// Used by spacing/architectural patterns to render every Nth LED lit.
+  final int colorGroupSize;
+
+  /// Dark (off) LEDs after each lit group (WLED `spc`). 0 = no spacing.
+  /// Used by spacing/architectural patterns (e.g. "1 On 2 Off").
+  final int spacing;
+
   const WledStateModel({
     required this.isOn,
     required this.brightness,
@@ -44,6 +52,8 @@ class WledStateModel {
     this.colorSequence = const [],
     this.colorNames = const [],
     this.customEffectName,
+    this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 
   WledStateModel copyWith({
@@ -63,6 +73,8 @@ class WledStateModel {
     List<String>? colorNames,
     String? customEffectName,
     bool clearCustomEffectName = false,
+    int? colorGroupSize,
+    int? spacing,
   }) =>
       WledStateModel(
         isOn: isOn ?? this.isOn,
@@ -80,6 +92,8 @@ class WledStateModel {
         colorSequence: colorSequence ?? this.colorSequence,
         colorNames: colorNames ?? this.colorNames,
         customEffectName: clearCustomEffectName ? null : (customEffectName ?? this.customEffectName),
+        colorGroupSize: colorGroupSize ?? this.colorGroupSize,
+        spacing: spacing ?? this.spacing,
       );
 
   /// Get the effect name - prefers custom name from Lumina, falls back to lookup
@@ -104,6 +118,8 @@ class WledStateModel {
         colorSequence: [],
         colorNames: [],
         customEffectName: null,
+        colorGroupSize: 1,
+        spacing: 0,
       );
 }
 
