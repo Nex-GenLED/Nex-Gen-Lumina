@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -119,8 +120,10 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     double? latitude,
     double? longitude,
   }) async {
+    debugPrint('🏘️ [NeighborhoodNotifier] createGroup invoked');
     state = const AsyncValue.loading();
     try {
+      debugPrint('🏘️ [NeighborhoodNotifier] Delegating to NeighborhoodService...');
       final group = await _service.createGroup(
         name,
         displayName: displayName,
@@ -131,11 +134,14 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
         latitude: latitude,
         longitude: longitude,
       );
+      debugPrint('🏘️ [NeighborhoodNotifier] Service returned group ${group.id}');
       ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
       markNeighborhoodSyncOnboardingComplete(); // auto-complete on first group created
       state = const AsyncValue.data(null);
       return group;
     } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodNotifier] createGroup FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodNotifier] Stack: $st');
       state = AsyncValue.error(e, st);
       return null;
     }

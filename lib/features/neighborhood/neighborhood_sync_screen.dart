@@ -2177,12 +2177,34 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
   }
 
   Future<void> _createGroup() async {
+    debugPrint('🏘️ [NeighborhoodSync] Create group tapped');
     final name = _groupNameController.text.trim();
+    debugPrint('🏘️ Group name: "$name"');
+
     if (name.isEmpty) {
+      debugPrint('🏘️ ABORT: name is empty');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a name for your crew.'),
           backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    debugPrint('🏘️ Current user UID: ${user?.uid}');
+    debugPrint('🏘️ Current user null: ${user == null}');
+    debugPrint('🏘️ Current user anonymous: ${user?.isAnonymous}');
+    debugPrint('🏘️ Current user emailVerified: ${user?.emailVerified}');
+
+    if (user == null) {
+      debugPrint('🏘️ ERROR: user is null — aborting');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be signed in to create a group.'),
+          backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -2195,6 +2217,11 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
     double? longitude;
 
     try {
+      debugPrint('🏘️ Calling NeighborhoodNotifier.createGroup...');
+      debugPrint('🏘️   displayName: ${_homeNameController.text.trim()}');
+      debugPrint('🏘️   isPublic: $_isPublic');
+      debugPrint('🏘️   street/city: ${_streetController.text.trim()} / ${_cityController.text.trim()}');
+
       final group = await ref.read(neighborhoodNotifierProvider.notifier).createGroup(
         name,
         displayName: _homeNameController.text.trim().isNotEmpty
@@ -2214,7 +2241,12 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
         longitude: longitude,
       );
 
-      if (!mounted) return;
+      debugPrint('🏘️ Notifier returned: ${group == null ? "null (failed)" : "group ${group.id}"}');
+
+      if (!mounted) {
+        debugPrint('🏘️ Widget unmounted — bailing');
+        return;
+      }
 
       if (group == null) {
         // Notifier swallows exceptions and returns null on failure.
@@ -2223,18 +2255,23 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
         final errorMsg = notifierState.hasError
             ? 'Could not create your crew: ${notifierState.error}'
             : 'Could not create your crew. Please try again.';
-        debugPrint('Block party creation failed: $errorMsg');
+        debugPrint('🏘️ ERROR: Block party creation failed: $errorMsg');
+        if (notifierState.hasError) {
+          debugPrint('🏘️ Notifier error stack: ${notifierState.stackTrace}');
+        }
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMsg),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
           ),
         );
         return;
       }
 
+      debugPrint('🏘️ Write succeeded, popping dialog and navigating');
       Navigator.pop(context, group);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2243,7 +2280,8 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
         ),
       );
     } catch (e, stack) {
-      debugPrint('Block party creation failed: $e\n$stack');
+      debugPrint('🏘️ ERROR during group creation: $e');
+      debugPrint('🏘️ Stack: $stack');
       if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2251,6 +2289,7 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
           content: Text('Could not create your crew: $e'),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 8),
         ),
       );
     }

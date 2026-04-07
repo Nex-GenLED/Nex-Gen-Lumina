@@ -38,13 +38,21 @@ class NeighborhoodService {
     double? latitude,
     double? longitude,
   }) async {
+    debugPrint('🏘️ [NeighborhoodService] createGroup START');
     final uid = _currentUid;
-    if (uid == null) throw Exception('User not authenticated');
+    debugPrint('🏘️ [NeighborhoodService] uid=$uid');
+    if (uid == null) {
+      debugPrint('🏘️ [NeighborhoodService] ABORT: not authenticated');
+      throw Exception('User not authenticated');
+    }
 
     final inviteCode = _generateInviteCode();
     final now = DateTime.now();
 
     final docRef = _neighborhoodsRef.doc();
+    debugPrint('🏘️ [NeighborhoodService] Writing to: neighborhoods/${docRef.id}');
+    debugPrint('🏘️ [NeighborhoodService] inviteCode=$inviteCode');
+
     final group = NeighborhoodGroup(
       id: docRef.id,
       name: name,
@@ -61,7 +69,19 @@ class NeighborhoodService {
       longitude: longitude,
     );
 
-    await docRef.set(UserService.sanitizeForFirestore(group.toFirestore()));
+    final groupPayload = UserService.sanitizeForFirestore(group.toFirestore());
+    debugPrint('🏘️ [NeighborhoodService] Group doc payload keys: ${groupPayload.keys.toList()}');
+    debugPrint('🏘️ [NeighborhoodService] creatorUid in payload: ${groupPayload['creatorUid']}');
+    debugPrint('🏘️ [NeighborhoodService] memberUids in payload: ${groupPayload['memberUids']}');
+
+    try {
+      await docRef.set(groupPayload);
+      debugPrint('🏘️ [NeighborhoodService] Group doc write SUCCESS');
+    } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodService] Group doc write FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodService] Stack: $st');
+      rethrow;
+    }
 
     // Add creator as first member
     final member = NeighborhoodMember(
@@ -71,9 +91,21 @@ class NeighborhoodService {
       lastSeen: now,
       isOnline: true,
     );
-    await docRef.collection('members').doc(uid).set(UserService.sanitizeForFirestore(member.toFirestore()));
+    try {
+      await docRef.collection('members').doc(uid).set(UserService.sanitizeForFirestore(member.toFirestore()));
+      debugPrint('🏘️ [NeighborhoodService] Member doc write SUCCESS');
+    } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodService] Member doc write FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodService] Stack: $st');
+      // Roll back the group doc so we don't leave a half-created group
+      try {
+        await docRef.delete();
+        debugPrint('🏘️ [NeighborhoodService] Rolled back group doc');
+      } catch (_) {}
+      rethrow;
+    }
 
-    debugPrint('Created neighborhood group: ${group.name} (${group.inviteCode})');
+    debugPrint('🏘️ Created neighborhood group: ${group.name} (${group.inviteCode})');
     return group;
   }
 
