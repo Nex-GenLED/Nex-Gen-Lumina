@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../../widgets/glass_app_bar.dart';
 import '../../../widgets/premium_card.dart';
@@ -169,7 +170,10 @@ class _ZoneAssignmentScreenState extends ConsumerState<ZoneAssignmentScreen> {
     return Scaffold(
       appBar: GlassAppBar(title: Text('Set Up ${team.teamName}')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        // Bottom padding clears the GlassDockNavBar overlay so the
+        // "Save Alert" button at the end of this list isn't hidden
+        // behind the dock on devices with a home indicator.
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
         children: [
           // ── Color preview bar ──
           _ColorPreviewBar(team: team),

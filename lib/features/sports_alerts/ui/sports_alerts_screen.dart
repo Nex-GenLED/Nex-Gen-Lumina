@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../../widgets/glass_app_bar.dart';
 import '../../../widgets/premium_card.dart';
@@ -85,7 +86,9 @@ class SportsAlertsScreen extends ConsumerWidget {
           ),
 
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+            // Bottom padding clears the GlassDockNavBar so the last
+            // team card / "Add Team" button isn't hidden behind it.
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 // ── Master toggle card ──

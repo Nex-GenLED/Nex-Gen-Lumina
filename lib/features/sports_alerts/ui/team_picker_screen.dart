@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../../widgets/glass_app_bar.dart';
 import '../data/team_colors.dart';
@@ -139,7 +140,10 @@ class _TeamPickerScreenState extends ConsumerState<TeamPickerScreen> {
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                    // Bottom padding clears the GlassDockNavBar so the
+                    // last team row isn't hidden behind it.
+                    padding: EdgeInsets.fromLTRB(
+                        16, 4, 16, navBarTotalHeight(context) + 16),
                     itemCount: teams.length,
                     itemBuilder: (context, i) {
                       final entry = teams[i];

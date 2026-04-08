@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../autopilot/game_day_autopilot_config.dart';
 import '../../autopilot/game_day_autopilot_providers.dart';
@@ -360,7 +361,10 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                  // Bottom padding clears the GlassDockNavBar so the
+                  // last team row isn't hidden behind the dock.
+                  padding: EdgeInsets.fromLTRB(
+                      16, 4, 16, navBarTotalHeight(context) + 16),
                   itemCount: teams.length,
                   itemBuilder: (context, i) {
                     final entry = teams[i];
@@ -403,7 +407,9 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
     };
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+      // Bottom padding clears the GlassDockNavBar so step 2's CTA
+      // ("Continue") at the end of this list isn't hidden behind it.
+      padding: EdgeInsets.fromLTRB(16, 0, 16, navBarTotalHeight(context) + 16),
       children: [
         // Team color banner
         Container(

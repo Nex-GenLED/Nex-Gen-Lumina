@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app_colors.dart';
 import '../../theme.dart';
 import '../../widgets/glass_app_bar.dart';
 import '../../widgets/section_header.dart';
@@ -58,7 +59,10 @@ class GameDayScreen extends ConsumerWidget {
 
           // ── Body ──
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            // Bottom padding clears the GlassDockNavBar so the last
+            // section ("Join a Crew" / Add Team button) isn't hidden
+            // behind the dock on devices with a home indicator.
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 // Hero description

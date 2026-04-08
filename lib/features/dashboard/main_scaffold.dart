@@ -136,7 +136,10 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
                 backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                 body: Stack(
                   children: [
-                    Positioned.fill(child: widget.navigationShell),
+                    Positioned.fill(
+                      child: _ShellBranchHost(
+                          navigationShell: widget.navigationShell),
+                    ),
                     Positioned(
                       left: 0,
                       right: 0,
@@ -168,6 +171,59 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
 
   void _showExitDemoSheet(BuildContext context) {
     showDemoExitSheet(context, ref);
+  }
+}
+
+/// Wraps the StatefulNavigationShell with two app-wide keyboard-dismiss
+/// behaviors that every screen inherits automatically.
+///
+/// **Note on bottom nav inset**: The dock-height inset is NOT applied
+/// here via MediaQuery injection. The codebase already has an
+/// established `navBarTotalHeight(context)` helper in `app_colors.dart`
+/// (used by 30+ screens) that returns `kNavBarContentHeight + bottom
+/// device inset`. Injecting an additional 100px into MediaQuery here
+/// would double-pad every screen that already calls that helper. New
+/// screens with hidden bottom buttons should be fixed by adding
+/// `padding: EdgeInsets.only(bottom: navBarTotalHeight(context))`
+/// to their scrollable, matching the existing convention.
+///
+/// 1. **Tap-outside keyboard dismiss** — translucent GestureDetector
+///    that calls `unfocus()` when the user taps an inert area. The
+///    `HitTestBehavior.translucent` flag is critical: without it the
+///    detector either swallows taps to interactive children
+///    (`opaque`) or never receives taps in empty regions (default).
+///
+/// 2. **Scroll-triggered keyboard dismiss** — listens for
+///    [ScrollStartNotification] anywhere in the descendant tree and
+///    calls `unfocus()` when scrolling begins. This is functionally
+///    equivalent to setting
+///    `keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag`
+///    on every scroll view in the app, applied once at the shell.
+///    Dropdowns and autocomplete overlays use the root Overlay (a
+///    sibling of this Navigator), so their internal scrolls do NOT
+///    bubble up here and will not interfere with autocomplete UX.
+class _ShellBranchHost extends StatelessWidget {
+  final Widget navigationShell;
+  const _ShellBranchHost({required this.navigationShell});
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        // Only dismiss for user-initiated drags, not programmatic
+        // scrolls (e.g., scrollToIndex animations).
+        if (notification.dragDetails != null) {
+          FocusManager.instance.primaryFocus?.unfocus();
+        }
+        // Return false so the notification continues bubbling.
+        return false;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: navigationShell,
+      ),
+    );
   }
 }
 
