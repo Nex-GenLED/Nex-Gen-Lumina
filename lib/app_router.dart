@@ -42,6 +42,7 @@ import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
 import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart';
 import 'package:nexgen_command/features/properties/my_properties_screen.dart';
+import 'package:nexgen_command/features/auth/staff_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_landing_screen.dart';
@@ -337,6 +338,21 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
       ),
+      // ===== STAFF PIN (root navigator) =====
+      // Unified PIN entry — reachable only via the hidden 5-tap gesture
+      // on the Lumina logo on the login screen. Routes the user to
+      // Corporate / Sales / Installer mode based on which PIN store
+      // matches. The legacy single-purpose PIN routes
+      // (/installer/pin, /sales/pin, /corporate/pin) remain registered
+      // below for now, but nothing on the login screen navigates to
+      // them directly anymore.
+      GoRoute(
+        path: AppRoutes.staffPin,
+        name: 'staff-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: StaffPinScreen()),
+      ),
+
       // ===== INSTALLER / MEDIA / ADMIN (root navigator) =====
       GoRoute(
         path: AppRoutes.installerLanding,
@@ -1011,6 +1027,11 @@ class AppRoutes {
   static const String segmentSetup = '/segment-setup';
   static const String rooflineSetupWizard = '/roofline-setup-wizard';
   static const String currentColors = '/settings/current-colors';
+  // Unified staff PIN entry — reachable only via the hidden 5-tap
+  // gesture on the Lumina logo on the login screen. Routes the user to
+  // Corporate / Sales / Installer mode based on which PIN store matches
+  // (see lib/features/auth/staff_pin_screen.dart for the routing order).
+  static const String staffPin = '/staff/pin';
   // Installer mode routes
   static const String installerLanding = '/installer';
   static const String installerPin = '/installer/pin';
