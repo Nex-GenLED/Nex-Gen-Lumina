@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -119,6 +121,37 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
+    // Establish a Firebase Auth session before any Firestore reads.
+    // The PIN validation paths (app_config/master_*, installers,
+    // dealers) all require `request.auth != null` per firestore.rules,
+    // and the PINs themselves are short enough that the rule is the
+    // actual security boundary — we cannot loosen it. If the user is
+    // already signed in (e.g. opened the staff PIN screen from a
+    // logged-in session), we leave that session alone. Otherwise we
+    // create an anonymous session that will be discarded when the
+    // user is bumped to Corporate / Sales / Installer mode.
+    //
+    // REQUIRES Anonymous Auth to be enabled in the Firebase Console
+    // (Authentication → Sign-in method → Anonymous). If it isn't,
+    // signInAnonymously() throws admin-restricted-operation and PIN
+    // validation will fail with "Invalid PIN".
+    _ensureAuthSession();
+  }
+
+  Future<void> _ensureAuthSession() async {
+    if (FirebaseAuth.instance.currentUser != null) return;
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+      debugPrint('StaffPinScreen: anonymous auth session established');
+    } catch (e) {
+      debugPrint('StaffPinScreen: signInAnonymously failed: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage =
+              'Auth unavailable. Enable Anonymous sign-in in Firebase.';
+        });
+      }
+    }
   }
 
   @override

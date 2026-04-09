@@ -71,10 +71,22 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   // Check if this is a demo route (allowed without auth)
   final isDemoRoute = state.matchedLocation.startsWith('/demo');
 
+  // The unified staff PIN screen is reachable from the hidden 5-tap
+  // gesture on the login page and does its own PIN validation against
+  // Firestore — no Firebase Auth session required. It must be allowed
+  // through the auth gate for both unauthenticated and authenticated
+  // users so the login screen's hidden gesture actually opens it.
+  final isStaffPinRoute = state.matchedLocation == AppRoutes.staffPin;
+
   // If user is not logged in
   if (!isLoggedIn) {
-    // Allow auth routes, welcome wizard, demo routes, and demo browsing
-    if (isAuthRoute || state.matchedLocation == AppRoutes.welcome || isDemoRoute || isDemoBrowsingFlag) {
+    // Allow auth routes, welcome wizard, demo routes, demo browsing,
+    // and the unified staff PIN screen.
+    if (isAuthRoute ||
+        state.matchedLocation == AppRoutes.welcome ||
+        isDemoRoute ||
+        isDemoBrowsingFlag ||
+        isStaffPinRoute) {
       return null;
     }
     return AppRoutes.login;
@@ -118,9 +130,11 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.dashboard;
   }
 
-  // Allow link routes, installer/sales routes, and first-run without further checks
+  // Allow link routes, installer/sales routes, first-run, welcome,
+  // and the unified staff PIN screen without further checks.
   final isFirstRunRoute = state.matchedLocation == AppRoutes.firstRun;
   if (isLinkRoute || isInstallerRoute || isSalesRoute || isFirstRunRoute ||
+      isStaffPinRoute ||
       state.matchedLocation == AppRoutes.welcome) {
     return null;
   }

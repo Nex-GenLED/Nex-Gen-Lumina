@@ -75,12 +75,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (_logoTapCount >= _logoTapTarget) {
       _logoTapCount = 0;
-      // Defer navigation slightly so the tap event finishes propagating
-      // before we push a new route. Avoids any chance of the gesture
-      // arena getting confused mid-tap.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) context.push(AppRoutes.staffPin);
-      });
+      context.push(AppRoutes.staffPin);
       return;
     }
 
@@ -304,9 +299,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // visible logo, not just the Icon hitbox. Behavior is
                   // invisible to a casual observer — no ripple, no
                   // animation, no counter display.
-                  GestureDetector(
+                  // NOTE: We use Listener(onPointerDown: ...) instead of
+                  // GestureDetector(onTap: ...) here because this widget
+                  // lives inside a SingleChildScrollView. With
+                  // GestureDetector the scroll view wins the gesture
+                  // arena on any tap that has the slightest finger
+                  // movement (logcat shows the scrollable receiving
+                  // 'on fling' events for what the user perceives as
+                  // pure taps), so onTap silently never fires. Listener
+                  // sits below the gesture arena and receives every
+                  // pointer-down event regardless of who eventually
+                  // wins the arena, which is exactly what we want for
+                  // a 5-tap counter.
+                  Listener(
                     behavior: HitTestBehavior.opaque,
-                    onTap: _onLogoTap,
+                    onPointerDown: (_) => _onLogoTap(),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -328,10 +335,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 4),
                   // "POWERED BY NEX-GEN" subtitle — separate hidden 5-tap
                   // gesture that reveals the App Store reviewer button.
-                  // Stays invisible to casual observers; no ripple.
-                  GestureDetector(
+                  // Same Listener pattern as the logo above to avoid the
+                  // SingleChildScrollView gesture arena swallowing taps.
+                  Listener(
                     behavior: HitTestBehavior.opaque,
-                    onTap: _onSubtitleTap,
+                    onPointerDown: (_) => _onSubtitleTap(),
                     child: Text(
                       'POWERED BY NEX-GEN',
                       style: GoogleFonts.montserrat(
