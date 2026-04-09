@@ -2,7 +2,7 @@ name: nexgen_command
 description: "Nex-Gen Lumina – Premium mobile app for controlling permanent outdoor pixel LED systems powered by WLED."
 publish_to: "none"
 
-version: 2.1.3+5
+version: 2.2.0+6
 
 environment:
   sdk: ^3.6.0
