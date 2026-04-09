@@ -94,11 +94,16 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // User is logged in
 
-  // Anonymous users are only allowed on installer routes.
-  // The installer flow uses anonymous auth to avoid session conflicts
-  // when creating customer accounts during the setup wizard.
+  // Anonymous users are only allowed on installer/sales routes and
+  // the unified staff PIN screen. The staff PIN flow itself
+  // establishes an anonymous session in StaffPinScreen.initState so
+  // it can read PIN hashes from Firestore (which require auth), so
+  // any subsequent visit to /staff/pin from an anonymous session
+  // must also be allowed — otherwise the second tap-five gesture
+  // (e.g. after the user backs out of installer mode) silently
+  // bounces back to /login.
   if (user.isAnonymous) {
-    if (isInstallerRoute || isSalesRoute) return null; // Allow installer & sales routes
+    if (isInstallerRoute || isSalesRoute || isStaffPinRoute) return null;
     return AppRoutes.login; // Block everything else for anonymous users
   }
 

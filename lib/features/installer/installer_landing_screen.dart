@@ -210,6 +210,36 @@ class InstallerLandingScreen extends ConsumerWidget {
                   ),
                   if (hasSession) ...[
                     const SizedBox(height: 12),
+                    // Direct entry to the install wizard for a brand-new
+                    // customer install — bypasses the Day 2 queue, which
+                    // otherwise requires a pre-existing sales job. The
+                    // wizard is fully self-contained: customer info →
+                    // controller setup → zone configuration → handoff,
+                    // and creates the customer's Firebase Auth account
+                    // at the handoff step.
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () => context.push(AppRoutes.installerWizard),
+                        icon: const Icon(Icons.add_home_outlined),
+                        label: const Text(
+                          'New Customer Install',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: NexGenPalette.green,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
