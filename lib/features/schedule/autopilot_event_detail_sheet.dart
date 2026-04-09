@@ -154,7 +154,10 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
               // ---- SECTION 5: Autopilot Footer ----
               _buildFooter(),
 
-              const SizedBox(height: 16),
+              // Trailing space clears the glass dock nav bar overlay so
+              // the footer/actions aren't hidden behind the dock when
+              // this sheet is opened from the scheduling screen.
+              const SizedBox(height: 16 + kBottomNavBarPadding),
             ],
           ),
         ),
