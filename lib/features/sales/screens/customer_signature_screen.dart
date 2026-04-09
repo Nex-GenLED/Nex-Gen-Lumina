@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +9,7 @@ import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
+import 'package:nexgen_command/features/sales/services/sales_job_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:signature/signature.dart';
 
@@ -87,19 +87,16 @@ class _CustomerSignatureScreenState extends ConsumerState<CustomerSignatureScree
       );
       final downloadUrl = await storageRef.getDownloadURL();
 
-      // 3. Update Firestore
-      final now = DateTime.now();
-      await FirebaseFirestore.instance
-          .collection('sales_jobs')
-          .doc(job.id)
-          .update({
-        'status': SalesJobStatus.estimateSigned.name,
-        'estimateSignedAt': Timestamp.fromDate(now),
-        'customerSignatureUrl': downloadUrl,
-        'updatedAt': Timestamp.fromDate(now),
-      });
+      // 3. Atomically write status + signature url + timestamps via the
+      //    service. This pushes the job into the Day 1 electrician queue
+      //    (estimateSigned status is one of the two statuses Day1QueueScreen
+      //    listens for).
+      await ref
+          .read(salesJobServiceProvider)
+          .markEstimateSigned(job.id, downloadUrl);
 
       // 4. Update local state
+      final now = DateTime.now();
       ref.read(activeJobProvider.notifier).state = job.copyWith(
         status: SalesJobStatus.estimateSigned,
         estimateSignedAt: now,

@@ -111,8 +111,13 @@ class _EstimatePreviewScreenState extends ConsumerState<EstimatePreviewScreen> {
                         _buildHeader(job, prospect),
                         const Divider(color: NexGenPalette.line, height: 1),
 
-                        // Per-zone sections
-                        ...job.zones.map((zone) => _buildZoneSection(zone)),
+                        // Body — prefer the line-item breakdown when the
+                        // wizard has generated one; otherwise fall back to
+                        // the legacy per-zone display.
+                        if (job.estimateBreakdown != null) ...[
+                          _buildBreakdownSection(job.estimateBreakdown!),
+                        ] else
+                          ...job.zones.map((zone) => _buildZoneSection(zone)),
 
                         // Total
                         _buildTotalSection(job),
@@ -290,10 +295,132 @@ class _EstimatePreviewScreenState extends ConsumerState<EstimatePreviewScreen> {
     );
   }
 
+  // ── Line-item breakdown (Estimate Wizard) ───────────────────
+
+  Widget _buildBreakdownSection(EstimateBreakdown breakdown) {
+    // Group line items by category for readability.
+    final byCategory = <EstimateLineCategory, List<EstimateLineItem>>{};
+    for (final item in breakdown.lineItems) {
+      byCategory.putIfAbsent(item.category, () => []).add(item);
+    }
+    // Display in a stable, customer-friendly order.
+    const order = [
+      EstimateLineCategory.strip,
+      EstimateLineCategory.controller,
+      EstimateLineCategory.power,
+      EstimateLineCategory.hardware,
+      EstimateLineCategory.labor,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final category in order)
+            if (byCategory[category] != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: Text(
+                  category.label.toUpperCase(),
+                  style: TextStyle(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              for (final item in byCategory[category]!) _buildLineRow(item),
+              const SizedBox(height: 12),
+            ],
+
+          // Subtotals
+          const Divider(color: NexGenPalette.line, height: 24),
+          _subtotalRow('Materials', breakdown.subtotalMaterial),
+          const SizedBox(height: 4),
+          _subtotalRow('Labor', breakdown.subtotalLabor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLineRow(EstimateLineItem item) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.description,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
+                ),
+                if (item.quantity > 0)
+                  Text(
+                    '${item.quantity.toStringAsFixed(item.quantity == item.quantity.roundToDouble() ? 0 : 1)} '
+                    '${item.unit}'
+                    '${item.unitRetailPrice > 0 ? ' · \$${item.unitRetailPrice.toStringAsFixed(2)}/${item.unit}' : ''}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.45),
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            item.retailTotal > 0
+                ? '\$${item.retailTotal.toStringAsFixed(0)}'
+                : 'Included',
+            style: TextStyle(
+              color: item.retailTotal > 0
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.5),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _subtotalRow(String label, double amount) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.65),
+            fontSize: 13,
+          ),
+        ),
+        Text(
+          '\$${amount.toStringAsFixed(0)}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── Total section ───────────────────────────────────────────
 
   Widget _buildTotalSection(SalesJob job) {
-    final total = job.zones.fold(0.0, (acc, z) => acc + z.priceUsd);
+    final total = job.estimateBreakdown?.subtotalRetail ??
+        job.zones.fold<double>(0.0, (acc, z) => acc + z.priceUsd);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),

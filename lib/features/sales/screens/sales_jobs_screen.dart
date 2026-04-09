@@ -20,7 +20,9 @@ class _SalesJobsScreenState extends ConsumerState<SalesJobsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final jobsAsync = ref.watch(salesJobsStreamProvider);
+    final jobsAsync = ref.watch(
+      salesJobsByStatusProvider(_filter == null ? null : [_filter!]),
+    );
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -54,20 +56,16 @@ class _SalesJobsScreenState extends ConsumerState<SalesJobsScreen> {
                 child: Text('Error: $e', style: TextStyle(color: Colors.red.withValues(alpha: 0.7))),
               ),
               data: (jobs) {
-                final filtered = _filter == null
-                    ? jobs
-                    : jobs.where((j) => j.status == _filter).toList();
-
-                if (filtered.isEmpty) return _buildEmptyState();
+                if (jobs.isEmpty) return _buildEmptyState();
 
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                  itemCount: filtered.length,
+                  itemCount: jobs.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _JobCard(
-                    job: filtered[i],
+                    job: jobs[i],
                     onTap: () => context.push(
-                      AppRoutes.salesJobDetail.replaceFirst(':jobId', filtered[i].id),
+                      AppRoutes.salesJobDetail.replaceFirst(':jobId', jobs[i].id),
                     ),
                   ),
                 );
@@ -163,15 +161,17 @@ class _JobCard extends StatelessWidget {
     SalesJobStatus.estimateSigned => const Color(0xFF00D4FF), // cyan/teal
     SalesJobStatus.prewireScheduled => const Color(0xFFFFAB00), // amber
     SalesJobStatus.prewireComplete => const Color(0xFFFFAB00),
+    SalesJobStatus.installScheduled => const Color(0xFF00E5A0), // green
     SalesJobStatus.installComplete => const Color(0xFF00E5A0), // green
   };
 
   static double _statusProgress(SalesJobStatus s) => switch (s) {
     SalesJobStatus.draft => 0.0,
-    SalesJobStatus.estimateSent => 0.2,
-    SalesJobStatus.estimateSigned => 0.4,
-    SalesJobStatus.prewireScheduled => 0.6,
-    SalesJobStatus.prewireComplete => 0.8,
+    SalesJobStatus.estimateSent => 0.17,
+    SalesJobStatus.estimateSigned => 0.33,
+    SalesJobStatus.prewireScheduled => 0.5,
+    SalesJobStatus.prewireComplete => 0.67,
+    SalesJobStatus.installScheduled => 0.83,
     SalesJobStatus.installComplete => 1.0,
   };
 

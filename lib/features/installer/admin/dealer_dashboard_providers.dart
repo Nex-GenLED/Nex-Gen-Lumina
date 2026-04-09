@@ -153,6 +153,7 @@ DealerActivityEvent _jobToActivity(SalesJob job) {
       type = DealerActivityType.estimateSigned;
     case SalesJobStatus.prewireScheduled:
     case SalesJobStatus.prewireComplete:
+    case SalesJobStatus.installScheduled:
       type = DealerActivityType.prewireComplete;
     case SalesJobStatus.installComplete:
       type = DealerActivityType.installComplete;

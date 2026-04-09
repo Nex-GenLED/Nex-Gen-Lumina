@@ -5,7 +5,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/sales/models/dealer_messaging_config.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
+import 'package:nexgen_command/features/sales/services/dealer_messaging_config_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sales Session
@@ -208,6 +211,72 @@ final salesJobsStreamProvider = StreamProvider<List<SalesJob>>((ref) {
       .map((snap) => snap.docs
           .map((doc) => SalesJob.fromJson(doc.data()))
           .toList());
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales Jobs By Status — server-side filtered stream
+//
+// Pass `null` (or an empty list) to return all jobs for the current dealer.
+// Pass a list of [SalesJobStatus] values to apply a Firestore
+// `where('status', whereIn: [...])` clause server-side. The Day 1 queue
+// uses this to fetch `[estimateSigned, prewireScheduled]` in one query.
+//
+// Dealer code resolution: prefers the active sales session (Sales Mode);
+// falls back to the active installer session (Installer Mode) so the same
+// provider can power both the salesperson's "My Estimates" list and the
+// electrician's Day 1 queue.
+//
+// Note: combining `where('dealerCode')` + `where('status', whereIn: ...)`
+// + `orderBy('createdAt')` reuses the existing composite index on
+// `dealerCode + status + createdAt` (Firestore handles whereIn against
+// the same index). No second composite index is required.
+// ─────────────────────────────────────────────────────────────────────────────
+
+final salesJobsByStatusProvider =
+    StreamProvider.family<List<SalesJob>, List<SalesJobStatus>?>(
+        (ref, statuses) {
+  // Prefer the sales session, fall back to the installer session.
+  final salesSession = ref.watch(currentSalesSessionProvider);
+  final installerSession = ref.watch(installerSessionProvider);
+  final dealerCode =
+      salesSession?.dealerCode ?? installerSession?.dealer.dealerCode;
+  if (dealerCode == null || dealerCode.isEmpty) {
+    return const Stream.empty();
+  }
+
+  Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+      .collection('sales_jobs')
+      .where('dealerCode', isEqualTo: dealerCode);
+
+  if (statuses != null && statuses.isNotEmpty) {
+    query = query.where(
+      'status',
+      whereIn: statuses.map((s) => s.name).toList(),
+    );
+  }
+
+  return query
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs
+          .map((doc) => SalesJob.fromJson(doc.data()))
+          .toList());
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dealer Messaging Config — live stream of dealers/{dealerCode}/config/messaging
+//
+// Family-keyed by dealerCode so the config screen can pass the resolved
+// dealer code from the dealer dashboard tab. Emits
+// DealerMessagingConfig.defaults() when the document doesn't exist yet,
+// so the screen always renders something and freshly-provisioned
+// dealers don't see a loading spinner forever.
+// ─────────────────────────────────────────────────────────────────────────────
+
+final dealerMessagingConfigProvider =
+    StreamProvider.family<DealerMessagingConfig, String>((ref, dealerCode) {
+  final service = ref.watch(dealerMessagingConfigServiceProvider);
+  return service.watchConfig(dealerCode);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

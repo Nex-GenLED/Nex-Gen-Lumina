@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +7,7 @@ import 'package:nexgen_command/features/referrals/services/referral_pipeline_ser
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/sales/screens/zone_builder_screen.dart';
+import 'package:nexgen_command/features/sales/services/sales_job_service.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Step 3 of 3 — Visit review screen.
@@ -83,10 +83,7 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
         updatedAt: DateTime.now(),
       );
 
-      await FirebaseFirestore.instance
-          .collection('sales_jobs')
-          .doc(job.id)
-          .set(updated.toJson(), SetOptions(merge: true));
+      await ref.read(salesJobServiceProvider).updateJob(updated);
 
       ref.read(activeJobProvider.notifier).state = updated;
 
@@ -124,10 +121,7 @@ class _VisitReviewScreenState extends ConsumerState<VisitReviewScreen> {
       updatedAt: DateTime.now(),
     );
 
-    await FirebaseFirestore.instance
-        .collection('sales_jobs')
-        .doc(job.id)
-        .set(updated.toJson(), SetOptions(merge: true));
+    await ref.read(salesJobServiceProvider).updateJob(updated);
 
     ref.read(activeJobProvider.notifier).state = updated;
 

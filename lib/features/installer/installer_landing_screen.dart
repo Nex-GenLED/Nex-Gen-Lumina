@@ -232,7 +232,95 @@ class InstallerLandingScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.push(AppRoutes.day1Queue),
+                        icon: const Icon(
+                          Icons.electrical_services_outlined,
+                          color: NexGenPalette.cyan,
+                        ),
+                        label: const Text(
+                          'Day 1 Queue',
+                          style: TextStyle(
+                            color: NexGenPalette.cyan,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.push(AppRoutes.day2Queue),
+                        icon: const Icon(
+                          Icons.construction_outlined,
+                          color: NexGenPalette.green,
+                        ),
+                        label: const Text(
+                          'Day 2 Queue',
+                          style: TextStyle(
+                            color: NexGenPalette.green,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: NexGenPalette.green.withValues(alpha: 0.4),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
+                  // ── Corporate (Nex-Gen internal) entry point ──
+                  // Always visible — gated downstream by the corporate PIN
+                  // screen, which validates against
+                  // app_config/master_corporate_pin in Firestore.
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => context.push(AppRoutes.corporatePin),
+                      icon: const Icon(
+                        Icons.business_center_outlined,
+                        color: NexGenPalette.gold,
+                      ),
+                      label: const Text(
+                        'Corporate (Nex-Gen)',
+                        style: TextStyle(
+                          color: NexGenPalette.gold,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: NexGenPalette.gold.withValues(alpha: 0.4),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

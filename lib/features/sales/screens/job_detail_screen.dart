@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/referrals/services/referral_pipeline_ser
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/services/install_plan_service.dart';
 import 'package:nexgen_command/features/sales/services/pdf_service.dart';
+import 'package:nexgen_command/features/sales/services/sales_job_service.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Job detail screen — shows full job info and provides status actions.
@@ -53,14 +54,8 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen> {
     setState(() => _isUpdating = true);
 
     try {
+      await ref.read(salesJobServiceProvider).updateStatus(_job!.id, newStatus);
       final now = DateTime.now();
-      await FirebaseFirestore.instance
-          .collection('sales_jobs')
-          .doc(_job!.id)
-          .update({
-        'status': newStatus.name,
-        'updatedAt': Timestamp.fromDate(now),
-      });
 
       setState(() {
         _job = _job!.copyWith(status: newStatus, updatedAt: now);
@@ -297,6 +292,11 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen> {
           _actionButton('Mark install complete', NexGenPalette.green,
             () => _updateStatus(SalesJobStatus.installComplete)),
         ];
+      case SalesJobStatus.installScheduled:
+        return [
+          _actionButton('Mark install complete', NexGenPalette.green,
+            () => _updateStatus(SalesJobStatus.installComplete)),
+        ];
       default:
         return [];
     }
@@ -326,6 +326,7 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen> {
     SalesJobStatus.estimateSigned => NexGenPalette.cyan,
     SalesJobStatus.prewireScheduled => NexGenPalette.amber,
     SalesJobStatus.prewireComplete => NexGenPalette.amber,
+    SalesJobStatus.installScheduled => NexGenPalette.green,
     SalesJobStatus.installComplete => NexGenPalette.green,
   };
 

@@ -10,6 +10,7 @@ import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
+import 'package:nexgen_command/features/sales/services/sales_job_service.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
@@ -284,11 +285,8 @@ class _ProspectInfoScreenState extends ConsumerState<ProspectInfoScreen> {
         updatedAt: now,
       );
 
-      // Save to Firestore
-      await FirebaseFirestore.instance
-          .collection('sales_jobs')
-          .doc(jobId)
-          .set(job.toJson(), SetOptions(merge: true));
+      // Save to Firestore via service
+      await ref.read(salesJobServiceProvider).updateJob(job);
 
       ref.read(activeJobProvider.notifier).state = job;
 

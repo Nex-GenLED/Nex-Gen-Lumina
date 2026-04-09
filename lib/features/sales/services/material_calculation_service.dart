@@ -75,6 +75,199 @@ class MaterialCalculationService {
     );
   }
 
+  // ── Estimate calculation (Estimate Wizard data) ──────────────────────────
+  //
+  // Synchronous, dealer-pricing-driven estimate generation. Reads the new
+  // ChannelRun / PowerInjectionPoint / ControllerMount fields populated by
+  // the Estimate Wizard (see Prompt 2) and produces an EstimateBreakdown
+  // suitable for display on EstimatePreviewScreen and persistence on the
+  // SalesJob document.
+  //
+  // Unlike calculateForJob() this does NOT touch the dealers/{code}/
+  // materialCatalog Firestore collection — all unit prices come from the
+  // [DealerPricing] argument so the wizard can generate an estimate
+  // immediately without an extra round-trip.
+
+  /// Build a customer-facing line-item estimate from the wizard data on
+  /// [job], using [pricing] for unit prices and waste factor.
+  EstimateBreakdown calculateEstimate(SalesJob job, DealerPricing pricing) {
+    final lineItems = <EstimateLineItem>[];
+
+    double subtotalMaterial = 0;
+    double dealerMaterialCost = 0;
+
+    // ── LED strip — one line per channel run ──────────────────────────────
+    double totalRunFeet = 0;
+    for (final run in job.channelRuns) {
+      if (run.linearFeet <= 0) continue;
+      totalRunFeet += run.linearFeet;
+
+      final orderedFeet = run.linearFeet * (1 + pricing.wasteFactor);
+
+      final stripDescription = run.label.isEmpty
+          ? 'Channel ${run.channelNumber} LED strip'
+          : '${run.label} — LED strip';
+      final stripLine = EstimateLineItem(
+        id: EstimateLineItem.stableId(
+          description: stripDescription,
+          category: EstimateLineCategory.strip,
+        ),
+        description: stripDescription,
+        quantity: double.parse(orderedFeet.toStringAsFixed(2)),
+        unit: 'ft',
+        unitRetailPrice: pricing.pricePerLinearFoot,
+        unitDealerCost: pricing.dealerCostPerLinearFoot,
+        category: EstimateLineCategory.strip,
+      );
+      lineItems.add(stripLine);
+      subtotalMaterial += stripLine.retailTotal;
+      dealerMaterialCost += stripLine.dealerCostTotal;
+    }
+
+    // ── Power injection hardware ──────────────────────────────────────────
+    //
+    // Each PowerInjectionPoint contributes:
+    //   • one injection-point hardware line
+    //   • one wire run line, sized by gauge and a heuristic distance
+    //
+    // Wire footage heuristic: if the user recorded an outlet distance, use
+    // that. Otherwise fall back to the existing WireGauge.fromDistance
+    // table by walking distanceFromStartFeet — this matches the legacy
+    // ZoneEditorSheet behavior in zone_builder_screen.dart.
+    if (job.powerInjectionPoints.isNotEmpty) {
+      // Group identical injection-point hardware into a single line.
+      final injCount = job.powerInjectionPoints.length;
+      const injHardwareDescription =
+          'Power injection hardware (T-connector + tap)';
+      final injHardwareLine = EstimateLineItem(
+        id: EstimateLineItem.stableId(
+          description: injHardwareDescription,
+          category: EstimateLineCategory.hardware,
+        ),
+        description: injHardwareDescription,
+        quantity: injCount.toDouble(),
+        unit: 'unit',
+        // Hardware retail/cost are folded into the dealer's per-unit
+        // controller/power board prices today; expose a 0-priced line so
+        // the customer sees the part count without double-billing.
+        unitRetailPrice: 0,
+        unitDealerCost: 0,
+        category: EstimateLineCategory.hardware,
+      );
+      lineItems.add(injHardwareLine);
+
+      // Wire footage — sum across all injection points.
+      double wireFeet = 0;
+      for (final p in job.powerInjectionPoints) {
+        if (p.outletDistanceFeet != null && p.outletDistanceFeet! > 0) {
+          wireFeet += p.outletDistanceFeet!;
+        } else if (p.distanceFromStartFeet > 0) {
+          // Heuristic: assume the wire run from the controller is roughly
+          // the injection point's distance from the run start.
+          wireFeet += p.distanceFromStartFeet;
+        }
+      }
+      // Apply the same waste factor to wire as to strip.
+      wireFeet = wireFeet * (1 + pricing.wasteFactor);
+      if (wireFeet > 0) {
+        const wireDescription = 'Power injection wire runs';
+        final wireLine = EstimateLineItem(
+          id: EstimateLineItem.stableId(
+            description: wireDescription,
+            category: EstimateLineCategory.power,
+          ),
+          description: wireDescription,
+          quantity: double.parse(wireFeet.toStringAsFixed(2)),
+          unit: 'ft',
+          unitRetailPrice: 0,
+          unitDealerCost: 0,
+          category: EstimateLineCategory.power,
+        );
+        lineItems.add(wireLine);
+      }
+    }
+
+    // ── Controller — one per job ──────────────────────────────────────────
+    const controllerDescription = 'WLED controller';
+    final controllerLine = EstimateLineItem(
+      id: EstimateLineItem.stableId(
+        description: controllerDescription,
+        category: EstimateLineCategory.controller,
+      ),
+      description: controllerDescription,
+      quantity: 1,
+      unit: 'unit',
+      unitRetailPrice: pricing.controllerRetailPrice,
+      unitDealerCost: pricing.dealerControllerCost,
+      category: EstimateLineCategory.controller,
+    );
+    lineItems.add(controllerLine);
+    subtotalMaterial += controllerLine.retailTotal;
+    dealerMaterialCost += controllerLine.dealerCostTotal;
+
+    // ── Power board — one per controller ──────────────────────────────────
+    const powerBoardDescription = 'Power distribution board';
+    final powerBoardLine = EstimateLineItem(
+      id: EstimateLineItem.stableId(
+        description: powerBoardDescription,
+        category: EstimateLineCategory.power,
+      ),
+      description: powerBoardDescription,
+      quantity: 1,
+      unit: 'unit',
+      unitRetailPrice: pricing.powerBoardRetailPrice,
+      unitDealerCost: pricing.dealerPowerBoardCost,
+      category: EstimateLineCategory.power,
+    );
+    lineItems.add(powerBoardLine);
+    subtotalMaterial += powerBoardLine.retailTotal;
+    dealerMaterialCost += powerBoardLine.dealerCostTotal;
+
+    // ── Labor — max(flat min, totalFt × per-foot rate) ────────────────────
+    final perFootLabor = totalRunFeet * pricing.laborRatePerFoot;
+    final laborTotal = perFootLabor < pricing.flatLaborMinimum
+        ? pricing.flatLaborMinimum
+        : perFootLabor;
+
+    final laborDescription = perFootLabor < pricing.flatLaborMinimum
+        ? 'Professional installation (flat minimum)'
+        : 'Professional installation';
+    final laborLine = EstimateLineItem(
+      id: EstimateLineItem.stableId(
+        description: laborDescription,
+        category: EstimateLineCategory.labor,
+      ),
+      description: laborDescription,
+      quantity: perFootLabor < pricing.flatLaborMinimum
+          ? 1
+          : double.parse(totalRunFeet.toStringAsFixed(2)),
+      unit: perFootLabor < pricing.flatLaborMinimum ? 'flat' : 'ft',
+      unitRetailPrice: perFootLabor < pricing.flatLaborMinimum
+          ? pricing.flatLaborMinimum
+          : pricing.laborRatePerFoot,
+      unitDealerCost: 0,
+      category: EstimateLineCategory.labor,
+    );
+    lineItems.add(laborLine);
+
+    final subtotalRetail = subtotalMaterial + laborTotal;
+    final estimatedMargin = subtotalRetail - dealerMaterialCost;
+    final estimatedMarginPct =
+        subtotalRetail > 0 ? (estimatedMargin / subtotalRetail) * 100 : 0;
+
+    return EstimateBreakdown(
+      lineItems: lineItems,
+      subtotalMaterial: double.parse(subtotalMaterial.toStringAsFixed(2)),
+      subtotalLabor: double.parse(laborTotal.toStringAsFixed(2)),
+      subtotalRetail: double.parse(subtotalRetail.toStringAsFixed(2)),
+      dealerMaterialCost: double.parse(dealerMaterialCost.toStringAsFixed(2)),
+      estimatedMargin: double.parse(estimatedMargin.toStringAsFixed(2)),
+      estimatedMarginPct:
+          double.parse(estimatedMarginPct.toStringAsFixed(2)),
+      generatedAt: DateTime.now(),
+    );
+  }
+
   // ── Catalog loader ───────────────────────────────────────────────────────
 
   Future<Map<String, MaterialItem>> _loadCatalog(String dealerCode) async {

@@ -249,6 +249,54 @@ class InventoryService {
 
     await batch.commit();
   }
+
+  // ── STOCK RECEIVED — manual inventory replenishment ─────────────────────
+  //
+  // Optimistic dealer-side stock replenishment used by the inventory
+  // dashboard's "Receive Stock" action. Atomically:
+  //   • increments dealers/{dealerCode}/inventory/{materialId}.quantityOnHand
+  //   • writes a 'stock_received' ledger entry to dealers/{dealerCode}/inventoryLedger
+  //
+  // The dashboard calls this immediately when the dealer marks an order
+  // as received — there's no pending-order intermediate state. Negative
+  // quantities are rejected so this method can't accidentally be used as
+  // a backdoor for stock corrections.
+
+  Future<void> recordStockReceived({
+    required String dealerCode,
+    required String materialId,
+    required double quantity,
+    required String installerId,
+    String? note,
+  }) async {
+    if (quantity <= 0) {
+      throw ArgumentError('quantity must be > 0');
+    }
+
+    final batch = _db.batch();
+    final now = Timestamp.now();
+
+    // 1. Bump on-hand stock
+    final invDoc = _inventoryCol(dealerCode).doc(materialId);
+    batch.update(invDoc, {
+      'quantityOnHand': FieldValue.increment(quantity),
+      'lastUpdated': now,
+      'lastUpdatedBy': installerId,
+    });
+
+    // 2. Audit trail entry
+    final ledgerEntry = _dealerLedger(dealerCode).doc();
+    batch.set(ledgerEntry, {
+      'type': 'stock_received',
+      'materialId': materialId,
+      'quantity': quantity,
+      'performedBy': installerId,
+      'timestamp': now,
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+
+    await batch.commit();
+  }
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────

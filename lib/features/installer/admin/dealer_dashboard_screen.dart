@@ -11,6 +11,8 @@ import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/referrals/models/referral_reward.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
+import 'package:nexgen_command/features/sales/screens/dealer_messaging_config_screen.dart';
+import 'package:nexgen_command/features/sales/screens/inventory_dashboard_screen.dart';
 import 'package:nexgen_command/theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ Color _statusColor(SalesJobStatus status) {
     case SalesJobStatus.prewireScheduled:
     case SalesJobStatus.prewireComplete:
       return const Color(0xFFEF9F27);
+    case SalesJobStatus.installScheduled:
     case SalesJobStatus.installComplete:
       return const Color(0xFF00D4FF);
   }
@@ -52,9 +55,11 @@ double _statusProgress(SalesJobStatus status) {
     case SalesJobStatus.estimateSigned:
       return 0.5;
     case SalesJobStatus.prewireScheduled:
-      return 0.65;
+      return 0.6;
     case SalesJobStatus.prewireComplete:
-      return 0.8;
+      return 0.75;
+    case SalesJobStatus.installScheduled:
+      return 0.9;
     case SalesJobStatus.installComplete:
       return 1.0;
   }
@@ -80,7 +85,7 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
   }
 
   @override
@@ -189,11 +194,15 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
           labelStyle:
               const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           unselectedLabelStyle: const TextStyle(fontSize: 13),
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(text: 'Overview'),
             Tab(text: 'Pipeline'),
             Tab(text: 'Team'),
             Tab(text: 'Payouts'),
+            Tab(text: 'Inventory'),
+            Tab(text: 'Messaging'),
           ],
         ),
       ),
@@ -207,6 +216,8 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
           _PipelineTab(dealerCode: dealerCode),
           _TeamTab(dealerCode: dealerCode),
           _PayoutsTab(dealerCode: dealerCode),
+          InventoryDashboardScreen(dealerCode: dealerCode),
+          DealerMessagingConfigScreen(dealerCode: dealerCode),
         ],
       ),
     );

@@ -49,6 +49,10 @@ import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_pin_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_dashboard_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/dealer_detail_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_job_detail_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
 import 'package:nexgen_command/features/sales/screens/sales_pin_screen.dart';
 import 'package:nexgen_command/features/sales/screens/sales_landing_screen.dart';
@@ -59,6 +63,16 @@ import 'package:nexgen_command/features/sales/screens/estimate_preview_screen.da
 import 'package:nexgen_command/features/sales/screens/customer_signature_screen.dart';
 import 'package:nexgen_command/features/sales/screens/sales_jobs_screen.dart';
 import 'package:nexgen_command/features/sales/screens/job_detail_screen.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step1_home_photo.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step2_controller.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step3_channels.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step4_injections.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step5_summary.dart';
+import 'package:nexgen_command/features/sales/screens/day1_queue_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day1_blueprint_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_queue_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_blueprint_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_wrap_up_screen.dart';
 import 'package:nexgen_command/features/referrals/screens/payout_approval_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 import 'package:nexgen_command/features/game_day/game_day_screen.dart';
@@ -402,6 +416,119 @@ class AppRouter {
           child: JobDetailScreen(jobId: state.pathParameters['jobId'] ?? ''),
         ),
       ),
+      // Estimate Wizard (5 steps) — parallel to the legacy zone builder.
+      GoRoute(
+        path: AppRoutes.salesWizardStep1,
+        name: 'sales-wizard-step1',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep1HomePhoto(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep2,
+        name: 'sales-wizard-step2',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep2Controller(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep3,
+        name: 'sales-wizard-step3',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep3Channels(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep4,
+        name: 'sales-wizard-step4',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep4Injections(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep5,
+        name: 'sales-wizard-step5',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep5Summary(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      // Day 1 dispatch — electrician queue + per-job blueprint stub.
+      // Both screens are role-gated behind installerModeActiveProvider
+      // and bounce to AppRoutes.installerPin if no session is active.
+      GoRoute(
+        path: AppRoutes.day1Queue,
+        name: 'day1-queue',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: Day1QueueScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day1JobBlueprint,
+        name: 'day1-job-blueprint',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day1BlueprintScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      // Day 2 install dispatch — queue + per-job blueprint + wrap-up.
+      // All three screens are role-gated behind installerModeActiveProvider
+      // (the queue checks; the blueprint and wrap-up trust the queue gate).
+      GoRoute(
+        path: AppRoutes.day2Queue,
+        name: 'day2-queue',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: Day2QueueScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day2JobBlueprint,
+        name: 'day2-job-blueprint',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day2BlueprintScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day2WrapUp,
+        name: 'day2-wrap-up',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day2WrapUpScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
 
       GoRoute(
         path: AppRoutes.mediaLanding,
@@ -450,6 +577,48 @@ class AppRouter {
         name: 'dealer-payouts',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: PayoutApprovalScreen()),
+      ),
+
+      // ===== CORPORATE MODE ROUTES (root navigator) =====
+      GoRoute(
+        path: AppRoutes.corporatePin,
+        name: 'corporate-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(fullscreenDialog: true, child: CorporatePinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.corporateDashboard,
+        name: 'corporate-dashboard',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: CorporateDashboardScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.corporateDealerDetailBase}/:dealerCode',
+        name: 'corporate-dealer-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final code = state.pathParameters['dealerCode'] ?? '';
+          final name = state.extra is String ? state.extra as String : null;
+          return MaterialPage(
+            child: DealerDetailScreen(
+              dealerCode: code,
+              dealerName: name,
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.corporateJobDetailBase}/:jobId',
+        name: 'corporate-job-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final id = state.pathParameters['jobId'] ?? '';
+          return MaterialPage(child: CorporateJobDetailScreen(jobId: id));
+        },
       ),
 
       // ===== COMMERCIAL MODE ROUTES (root navigator) =====
@@ -856,6 +1025,20 @@ class AppRoutes {
   static const String salesEstimateSign = '/sales/estimate/sign';
   static const String salesJobs = '/sales/jobs';
   static const String salesJobDetail = '/sales/jobs/:jobId';
+  // Estimate wizard — :jobId pulls the in-progress SalesJob from
+  // activeJobProvider via EstimateWizardNotifier.
+  static const String salesWizardStep1 = '/sales/jobs/:jobId/wizard/home-photo';
+  static const String salesWizardStep2 = '/sales/jobs/:jobId/wizard/controller';
+  static const String salesWizardStep3 = '/sales/jobs/:jobId/wizard/channels';
+  static const String salesWizardStep4 = '/sales/jobs/:jobId/wizard/injections';
+  static const String salesWizardStep5 = '/sales/jobs/:jobId/wizard/summary';
+  // Day 1 electrician dispatch — gated behind installerModeActiveProvider.
+  static const String day1Queue = '/day1/queue';
+  static const String day1JobBlueprint = '/day1/jobs/:jobId/blueprint';
+  // Day 2 install dispatch — gated behind installerModeActiveProvider.
+  static const String day2Queue = '/day2/queue';
+  static const String day2JobBlueprint = '/day2/jobs/:jobId/blueprint';
+  static const String day2WrapUp = '/day2/jobs/:jobId/wrap-up';
   // Media mode routes
   static const String mediaLanding = '/media';
   static const String mediaAccessCode = '/media/code';
@@ -865,6 +1048,17 @@ class AppRoutes {
   static const String adminDashboard = '/admin/dashboard';
   // Dealer dashboard
   static const String dealerDashboard = '/dealer/dashboard';
+
+  // ===== CORPORATE MODE =====
+  static const String corporatePin = '/corporate/pin';
+  static const String corporateDashboard = '/corporate/dashboard';
+  /// Base path for the dealer detail screen — full route is
+  /// `/corporate/dealers/:dealerCode` (declared with the path parameter
+  /// in the GoRouter config above).
+  static const String corporateDealerDetailBase = '/corporate/dealers';
+  /// Base path for the corporate read-only job detail screen — full
+  /// route is `/corporate/jobs/:jobId`.
+  static const String corporateJobDetailBase = '/corporate/jobs';
   // Dealer payout approval
   static const String dealerPayouts = '/dealer/payouts';
   // Neighborhood sync — nested under /dashboard so the dashboard button

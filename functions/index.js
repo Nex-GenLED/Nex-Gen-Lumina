@@ -53,6 +53,20 @@ exports.notifyReferrerOfApproval = notifyReferrerOfApproval;
 const { sendWeeklyBrief } = require("./lib/sendWeeklyBrief");
 exports.sendWeeklyBrief = sendWeeklyBrief;
 
+// ── Messaging ──────────────────────────────────────────────────────────────
+// SMS + email customer messaging pipeline. messaging-helpers.ts is a
+// shared support module imported by both functions below — it has no
+// require/exports entry of its own.
+
+const { onSalesJobStatusChanged } = require("./lib/onSalesJobStatusChanged");
+exports.onSalesJobStatusChanged = onSalesJobStatusChanged;
+
+const { createCustomerAccount } = require("./lib/createCustomerAccount");
+exports.createCustomerAccount = createCustomerAccount;
+
+const { sendInstallReminders } = require("./lib/sendInstallReminders");
+exports.sendInstallReminders = sendInstallReminders;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)
@@ -65,6 +79,16 @@ const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
 // Google Home OAuth configuration (add to .env file)
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
 const googleClientSecret = defineString("GOOGLE_CLIENT_SECRET");
+
+// Messaging — Twilio (SMS) configuration (add to .env file)
+const twilioAccountSid = defineString("TWILIO_ACCOUNT_SID");
+const twilioAuthToken = defineString("TWILIO_AUTH_TOKEN");
+const twilioFromNumber = defineString("TWILIO_FROM_NUMBER");
+
+// Messaging — Resend (email) configuration (add to .env file)
+const resendApiKey = defineString("RESEND_API_KEY");
+const resendFromEmail = defineString("RESEND_FROM_EMAIL");
+const resendFromName = defineString("RESEND_FROM_NAME");
 
 /**
  * OpenAI Proxy Cloud Function for Lumina AI
