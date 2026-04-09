@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/ble/provisioning_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:go_router/go_router.dart';
@@ -124,8 +126,69 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     }
   }
 
+  /// Request the platform-specific runtime Bluetooth permissions
+  /// required for BLE scanning. Android 12+ needs BLUETOOTH_SCAN +
+  /// BLUETOOTH_CONNECT (separate from the legacy BLUETOOTH/
+  /// BLUETOOTH_ADMIN flags declared in the manifest for ≤ API 30).
+  /// iOS 13+ needs Permission.bluetooth. Returns true only if every
+  /// required permission is granted.
+  Future<bool> _ensureBluetoothPermissions() async {
+    try {
+      final List<Permission> required;
+      if (Platform.isAndroid) {
+        required = [
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+        ];
+      } else if (Platform.isIOS) {
+        required = [Permission.bluetooth];
+      } else {
+        return true;
+      }
+
+      // Check current statuses first to avoid re-prompting if already granted.
+      final Map<Permission, PermissionStatus> statuses = {};
+      for (final p in required) {
+        statuses[p] = await p.status;
+      }
+      final missing = statuses.entries
+          .where((e) => !e.value.isGranted)
+          .map((e) => e.key)
+          .toList();
+
+      if (missing.isEmpty) return true;
+
+      final results = await missing.request();
+      return results.values.every((s) => s.isGranted);
+    } catch (e) {
+      debugPrint('Bluetooth permission check failed: $e');
+      return false;
+    }
+  }
+
   Future<void> _startScan() async {
     try {
+      // Request runtime Bluetooth permissions BEFORE attempting to scan.
+      // On Android 12+ FlutterBluePlus.startScan silently fails (no
+      // throw, no results) if BLUETOOTH_SCAN/BLUETOOTH_CONNECT haven't
+      // been granted at runtime. The welcome wizard does not request
+      // these, so the installer flow that drops directly into this
+      // screen would otherwise hit a black hole at the customer's
+      // house. iOS requires Permission.bluetooth on iOS 13+.
+      if (!kIsWeb && !kSimulationMode) {
+        final granted = await _ensureBluetoothPermissions();
+        if (!granted) {
+          if (mounted) {
+            setState(() {
+              _isScanning = false;
+              _statusText =
+                  'Bluetooth permission denied. Open Settings → Apps → Lumina → Permissions to enable Nearby devices, then return here.';
+            });
+          }
+          return;
+        }
+      }
+
       setState(() => _isScanning = true);
       await FlutterBluePlus.stopScan();
       // Filter by the Improv service UUID; some devices mask it, so we will also apply a name fallback in onData.
