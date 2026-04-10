@@ -281,7 +281,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     if (ip.isEmpty) return;
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No auth session — please re-enter your PIN')),
+        );
+      }
+      return;
+    }
 
     try {
       await FirebaseFirestore.instance
@@ -295,6 +302,10 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      // Invalidate the controllers stream so it re-evaluates with the
+      // current auth session. The stream was likely cached as empty from
+      // before the anonymous session was established.
+      ref.invalidate(controllersStreamProvider);
       _checkAllControllerStatus();
     } catch (e) {
       if (mounted) {
