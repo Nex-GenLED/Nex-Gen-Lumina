@@ -235,6 +235,17 @@ class _ProspectInfoScreenState extends ConsumerState<ProspectInfoScreen> {
     if (suggestion.postcode != null) {
       final zip = suggestion.postcode!.replaceAll(RegExp(r'\D'), '');
       _zipCtrl.text = zip.length > 5 ? zip.substring(0, 5) : zip;
+    } else if (suggestion.placeId != null) {
+      _fetchPostcode(suggestion.placeId!);
+    }
+  }
+
+  Future<void> _fetchPostcode(String placeId) async {
+    final geocoder = ref.read(geocodingServiceProvider);
+    final postcode = await geocoder.fetchPlacePostcode(placeId);
+    if (postcode != null && mounted) {
+      final zip = postcode.replaceAll(RegExp(r'\D'), '');
+      _zipCtrl.text = zip.length > 5 ? zip.substring(0, 5) : zip;
     }
   }
 

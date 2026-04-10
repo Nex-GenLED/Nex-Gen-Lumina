@@ -27,6 +27,9 @@ class AddressSuggestion {
   final String? state;
   final String? postcode;
 
+  /// Google Places place ID (used for fetching details like postcode)
+  final String? placeId;
+
   const AddressSuggestion({
     required this.displayName,
     required this.shortAddress,
@@ -38,6 +41,7 @@ class AddressSuggestion {
     this.city,
     this.state,
     this.postcode,
+    this.placeId,
   });
 
   /// Returns the street address (house number + street name)
@@ -134,6 +138,9 @@ class GeocodingService {
             state = secondaryParts[1];
           }
 
+          // Extract placeId for fetching details (postcode, etc.)
+          final placeId = placePrediction['placeId'] as String?;
+
           results.add(AddressSuggestion(
             displayName: fullText.isNotEmpty ? fullText : '$mainText, $secondaryText',
             shortAddress: mainText,
@@ -144,6 +151,7 @@ class GeocodingService {
             street: street,
             city: city,
             state: state,
+            placeId: placeId,
           ));
         }
         return results;
@@ -230,6 +238,36 @@ class GeocodingService {
       debugPrint('GeocodingService: Photon search error $e');
     }
     return [];
+  }
+
+  /// Fetch postal code from Google Places Details API using a place ID.
+  Future<String?> fetchPlacePostcode(String placeId) async {
+    try {
+      final uri = Uri.parse('https://places.googleapis.com/v1/places/$placeId');
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(uri);
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      req.headers.set('X-Goog-Api-Key', _googleApiKey);
+      req.headers.set('X-Goog-FieldMask', 'addressComponents');
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final components = data['addressComponents'] as List? ?? [];
+        for (final comp in components) {
+          final c = comp as Map<String, dynamic>;
+          final types = (c['types'] as List?)?.cast<String>() ?? [];
+          if (types.contains('postal_code')) {
+            return c['shortText'] as String? ?? c['longText'] as String?;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('GeocodingService: Place details error $e');
+    }
+    return null;
   }
 
   Future<GeocodeResult?> geocode(String address) async {

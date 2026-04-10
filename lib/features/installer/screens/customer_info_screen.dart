@@ -133,6 +133,20 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
       // Take first 5 digits of zip code
       final zip = suggestion.postcode!.replaceAll(RegExp(r'\D'), '');
       _zipController.text = zip.length > 5 ? zip.substring(0, 5) : zip;
+    } else if (suggestion.placeId != null) {
+      // Google Places autocomplete doesn't include postcode —
+      // fetch it from Place Details API
+      _fetchPostcode(suggestion.placeId!);
+    }
+  }
+
+  /// Fetch postcode from Google Places Details for the selected place.
+  Future<void> _fetchPostcode(String placeId) async {
+    final geocoder = ref.read(geocodingServiceProvider);
+    final postcode = await geocoder.fetchPlacePostcode(placeId);
+    if (postcode != null && mounted) {
+      final zip = postcode.replaceAll(RegExp(r'\D'), '');
+      _zipController.text = zip.length > 5 ? zip.substring(0, 5) : zip;
     }
   }
 
