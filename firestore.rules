@@ -119,8 +119,11 @@ service cloud.firestore {
 
       // Controllers subcollection - WLED devices registered to user
       match /controllers/{controllerId} {
-        // Users can read their own controllers, media users can view for content
-        allow read: if canReadUserData(userId);
+        // Users can read their own controllers, media users can view for content.
+        // Any authenticated user can also read — the installer wizard migrates
+        // controllers from the anonymous UID to the customer UID, which requires
+        // reading the source collection under a different user's path.
+        allow read: if canReadUserData(userId) || request.auth != null;
 
         // Users can create controllers (from device discovery/setup).
         // Any authenticated user can create — the installer wizard adds
@@ -131,8 +134,9 @@ service cloud.firestore {
         // Users can update their controllers (rename, IP changes, etc.)
         allow update: if isOwner(userId) || request.auth != null;
 
-        // Users can delete their controllers
-        allow delete: if isOwner(userId);
+        // Users can delete their controllers. Any authenticated user is
+        // allowed so the installer can clean up duplicates during setup.
+        allow delete: if isOwner(userId) || request.auth != null;
       }
 
       // NOTE: Schedules are stored as an array field on the /users/{userId}
