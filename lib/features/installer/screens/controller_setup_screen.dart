@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -174,11 +175,133 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
   }
 
   Future<void> _addController() async {
-    // Navigate to BLE provisioning via GoRouter (not Navigator.pushNamed,
-    // which can't resolve GoRouter routes and silently does nothing).
-    await context.push(AppRoutes.deviceSetup);
-    // Refresh status after returning
-    _checkAllControllerStatus();
+    // Show option: BLE scan or manual IP entry
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Add Controller', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.bluetooth, color: NexGenPalette.cyan),
+                title: const Text('BLE Scan (New Device)', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers not yet on WiFi', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ble'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.wifi, color: NexGenPalette.green),
+                title: const Text('Enter IP Address', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers already on the network', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ip'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (choice == 'ble') {
+      await context.push(AppRoutes.deviceSetup);
+      _checkAllControllerStatus();
+    } else if (choice == 'ip') {
+      await _addControllerByIp();
+    }
+  }
+
+  Future<void> _addControllerByIp() async {
+    final ipCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Add Controller by IP', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: ipCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'IP Address',
+                hintText: '192.168.1.100',
+                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                filled: true,
+                fillColor: NexGenPalette.matteBlack,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Name (optional)',
+                hintText: 'e.g., Front Roofline',
+                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                filled: true,
+                fillColor: NexGenPalette.matteBlack,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+            child: const Text('Add', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final ip = ipCtrl.text.trim();
+    if (ip.isEmpty) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('controllers')
+          .add({
+        'ip': ip,
+        'name': nameCtrl.text.trim().isEmpty ? 'Controller ($ip)' : nameCtrl.text.trim(),
+        'wifiConfigured': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      _checkAllControllerStatus();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add controller: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _capturePhoto(ImageSource source) async {
