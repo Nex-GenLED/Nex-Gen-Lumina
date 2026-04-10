@@ -1,10 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,42 +18,46 @@ import 'package:nexgen_command/theme.dart';
 //
 // Unified 4-digit PIN entry that handles all three staff roles:
 //
-//   • Corporate (Nex-Gen HQ)        — app_config/master_corporate_pin
-//   • Sales (master sales PIN)      — app_config/master_sales_pin
-//   • Installer (master + per-installer)
-//                                   — app_config/master_installer
-//                                   — installers/{auto}.fullPin
+//   • Corporate (Nex-Gen HQ)
+//   • Sales (master sales PIN OR per-installer PIN reuse)
+//   • Installer (master installer PIN OR per-installer PIN)
 //
 // Reachable only via the hidden 5-tap gesture on the Lumina logo on the
 // login screen. No visible entry point exists. The screen's title is the
 // generic "Staff Access" with no indication of which role is being
 // requested.
 //
-// PIN routing logic (Option C — explicit hash checks before fallback):
+// PIN validation is delegated entirely to the existing notifiers. This
+// screen never reads from Firestore directly — it just calls the
+// notifier methods in the right order and routes on the first one that
+// returns true:
 //
-//   1. Compute SHA-256 of the entered PIN once.
-//   2. Read app_config/master_corporate_pin. If pin_hash matches →
-//      call CorporateModeNotifier.authenticate(pin) → route to
-//      AppRoutes.corporateDashboard.
-//   3. Read app_config/master_sales_pin. If pin_hash matches →
-//      call SalesModeNotifier.enterSalesMode(pin) → route to
-//      AppRoutes.salesLanding.
-//   4. Read app_config/master_installer. If pin_hash matches →
-//      call InstallerModeNotifier.enterInstallerMode(pin) → route to
-//      AppRoutes.installerLanding.
-//   5. Fall through: call InstallerModeNotifier.enterInstallerMode(pin)
-//      which checks the installers collection for individual installer
-//      PINs. If it returns true → route to AppRoutes.installerLanding.
-//   6. Otherwise: "Invalid PIN", clear, increment failed-attempts counter.
+//   1. CorporateModeNotifier.authenticate(pin)
+//        → app_config/master_corporate_pin
+//        → routes to AppRoutes.corporateDashboard
 //
-// Why this order resolves the master/installer overlap: master Corporate
-// and master Sales PINs are explicit hash matches, so they take priority
-// over the installer collection fallback. An individual installer PIN
-// (e.g. dealer 88 + installer 01 = "8801") doesn't match any of the
-// master hashes and falls through to enterInstallerMode's collection
-// lookup, landing the user in Installer mode — not Sales mode, even
-// though SalesModeNotifier.enterSalesMode also has a fallback to the
-// installers collection.
+//   2. InstallerModeNotifier.enterInstallerMode(pin)
+//        → app_config/master_installer (master installer PIN)
+//        → installers collection by fullPin (per-installer PIN)
+//        → routes to AppRoutes.installerLanding
+//
+//   3. SalesModeNotifier.enterSalesMode(pin)
+//        → app_config/master_sales_pin (master sales PIN)
+//        → installers collection by fullPin (sales fallback)
+//        → routes to AppRoutes.salesLanding
+//
+// Why this order resolves the per-installer PIN ambiguity: a per-installer
+// PIN like "8801" matches BOTH enterInstallerMode's installer-collection
+// fallback AND enterSalesMode's installer-collection fallback. By calling
+// Installer before Sales, per-installer PINs always claim Installer mode
+// first and Sales never sees them. The master sales PIN is the only
+// thing that should reach Sales — it doesn't match any installer doc, so
+// Installer rejects it and Sales gets the next try.
+//
+// Why Corporate is first: CorporateModeNotifier.authenticate has no
+// installer-collection fallback at all, so it can never accidentally
+// claim a per-installer PIN. Putting it first costs nothing and keeps
+// the master corporate PIN authoritative.
 //
 // Lockout: after 5 failed PIN entries, the screen is locked for 30
 // seconds with a visible countdown. After the timer elapses, the user
@@ -66,29 +66,20 @@ import 'package:nexgen_command/theme.dart';
 //
 // IMPORTANT — KNOWN ISSUE for the wizard flow:
 //
-// This screen does NOT call FirebaseAuth.signInAnonymously(). The PIN
-// validation only does Firestore reads, which work without auth as
-// long as the security rules allow unauthenticated reads on
-// app_config/* and installers/* (they currently do for these specific
-// docs).
-//
-// HOWEVER, lib/features/installer/installer_setup_wizard.dart line 506
-// calls FirebaseAuth.instance.createUserWithEmailAndPassword(...) deep
-// inside the customer-account-creation step, AND line 512 calls
+// lib/features/installer/installer_setup_wizard.dart line 506 calls
+// FirebaseAuth.instance.createUserWithEmailAndPassword(...) deep inside
+// the customer-account-creation step, AND line 512 calls
 // FirebaseAuth.instance.signInAnonymously() to re-establish the session
-// after that side effect. Both calls fail when Anonymous Auth is
-// disabled in the Firebase Console. The previous login-screen behavior
-// hid this by establishing an anonymous session up front; with that
-// removed, an installer entering the wizard via this PIN screen will
-// hit the same auth failure deeper in the flow.
+// after that side effect. Both calls require Anonymous Auth to be
+// enabled in the Firebase Console. This screen establishes an anonymous
+// session in initState so the notifier Firestore reads work even when
+// the user has no Firebase Auth session, but the wizard's deeper auth
+// calls have the same dependency and need Anonymous Auth enabled.
 //
-// This is queued for a separate follow-up prompt that migrates the
-// wizard's customer-account creation to use the createCustomerAccount
-// Cloud Function (built in messaging Prompt 1) instead of the inline
-// FirebaseAuth call. For now: the staff PIN screen works end-to-end
-// for Corporate, Sales, and Installer mode entry; the install wizard's
-// customer-account step still requires Anonymous Auth to be enabled in
-// the Firebase Console.
+// Queued for a separate follow-up prompt that migrates the wizard's
+// customer-account creation to use the createCustomerAccount Cloud
+// Function (built in messaging Prompt 1) instead of the inline
+// FirebaseAuth call.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class StaffPinScreen extends ConsumerStatefulWidget {
@@ -187,106 +178,48 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
     });
   }
 
-  // ── Hash + master-PIN check helpers ────────────────────────────────────
-
-  String _hashPin(String pin) {
-    return sha256.convert(utf8.encode(pin)).toString();
-  }
-
-  /// Read [docName] under app_config and compare its `pin_hash` field
-  /// against [enteredHash]. Returns false on missing doc, missing field,
-  /// or any read error — never throws. Used to gate the three master-PIN
-  /// check stages before falling through to enterInstallerMode().
-  Future<bool> _checkMasterHash({
-    required String docName,
-    required String enteredHash,
-  }) async {
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('app_config')
-          .doc(docName)
-          .get();
-      if (!snap.exists) return false;
-      final stored = snap.data()?['pin_hash'] as String?;
-      if (stored == null || stored.isEmpty) return false;
-      return stored == enteredHash;
-    } catch (_) {
-      return false;
-    }
-  }
-
   // ── PIN validation pipeline ────────────────────────────────────────────
+  //
+  // Delegates entirely to the existing notifiers — no direct Firestore
+  // reads, no hashing, no field-name assumptions. Each notifier handles
+  // its own master-PIN + fallback logic internally. We just call them
+  // in the right order and route on the first one that returns true.
+  //
+  // Order: Corporate → Installer → Sales. See the header comment for
+  // why this ordering resolves the per-installer PIN ambiguity.
 
   Future<void> _validatePin() async {
     setState(() => _isValidating = true);
 
     final pin = _enteredPin;
-    final hash = _hashPin(pin);
 
-    // ── Stage 1: Corporate master PIN ──
-    if (await _checkMasterHash(
-      docName: 'master_corporate_pin',
-      enteredHash: hash,
-    )) {
-      final ok = await ref
-          .read(corporateModeProvider.notifier)
-          .authenticate(pin);
-      if (!mounted) return;
-      if (ok) {
-        _onSuccess(AppRoutes.corporateDashboard);
-        return;
-      }
-      // Hash matched but the notifier rejected — fall through to the
-      // failure path. Should be impossible in practice but handled
-      // defensively so we don't show success UI on a failed authenticate.
+    // ── 1. Corporate ──
+    final corporateOk = await ref
+        .read(corporateModeProvider.notifier)
+        .authenticate(pin);
+    if (!mounted) return;
+    if (corporateOk) {
+      _onSuccess(AppRoutes.corporateDashboard);
+      return;
     }
 
-    // ── Stage 2: Sales master PIN ──
-    if (await _checkMasterHash(
-      docName: 'master_sales_pin',
-      enteredHash: hash,
-    )) {
-      final ok = await ref
-          .read(salesModeProvider.notifier)
-          .enterSalesMode(pin);
-      if (!mounted) return;
-      if (ok) {
-        _onSuccess(AppRoutes.salesLanding);
-        return;
-      }
-    }
-
-    // ── Stage 3: Installer master PIN ──
-    //
-    // Note: the doc name is 'master_installer' (not 'master_installer_pin'
-    // — the installer notifier diverges from the corporate/sales naming).
-    if (await _checkMasterHash(
-      docName: 'master_installer',
-      enteredHash: hash,
-    )) {
-      final ok = await ref
-          .read(installerModeActiveProvider.notifier)
-          .enterInstallerMode(pin);
-      if (!mounted) return;
-      if (ok) {
-        _onSuccess(AppRoutes.installerLanding);
-        return;
-      }
-    }
-
-    // ── Stage 4: Fall through to per-installer PIN lookup ──
-    //
-    // enterInstallerMode does its own master + installers-collection
-    // checks internally. We've already ruled out the master hash above,
-    // so this call effectively just runs the installers-collection
-    // lookup. If a matching active installer + active dealer is found,
-    // the notifier returns true.
+    // ── 2. Installer ──
     final installerOk = await ref
         .read(installerModeActiveProvider.notifier)
         .enterInstallerMode(pin);
     if (!mounted) return;
     if (installerOk) {
       _onSuccess(AppRoutes.installerLanding);
+      return;
+    }
+
+    // ── 3. Sales ──
+    final salesOk = await ref
+        .read(salesModeProvider.notifier)
+        .enterSalesMode(pin);
+    if (!mounted) return;
+    if (salesOk) {
+      _onSuccess(AppRoutes.salesLanding);
       return;
     }
 
