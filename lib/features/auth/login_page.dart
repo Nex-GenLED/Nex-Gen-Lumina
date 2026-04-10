@@ -28,6 +28,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
+  bool _obscurePassword = true;
 
   // ── Hidden gestures ────────────────────────────────────────────────────
   //
@@ -394,7 +395,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         // Password
                         TextFormField(
                           controller: _passwordCtrl,
-                          obscureText: true,
+                          obscureText: _obscurePassword,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Password',
@@ -402,6 +403,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
                             prefixIcon: const Icon(Icons.lock_outline, color: Colors.cyanAccent),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off, color: Colors.cyanAccent),
+                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            ),
                             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
                             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.cyanAccent)),
                             errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.redAccent)),
