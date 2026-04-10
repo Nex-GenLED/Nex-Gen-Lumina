@@ -689,15 +689,15 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         });
       }
 
-      // 9. Sign out anonymous installer session
-      // We always sign out here because the installer entered via anonymous auth.
-      // Whether we created a new customer account or linked an existing one,
-      // the anonymous session should be cleaned up when the wizard completes.
-      await FirebaseAuth.instance.signOut();
+      // NOTE: Do NOT sign out here. Signing out fires AuthStateListenable
+      // which triggers GoRouter's redirect, destroying the wizard widget
+      // tree and the handoff credentials dialog before the installer can
+      // read the customer's temp password. Sign-out is deferred to the
+      // "Done" button inside _showHandoffCredentials() instead.
 
       setState(() => _isProcessing = false);
 
-      // 10. Show handoff credentials screen
+      // 9. Show handoff credentials screen
       if (mounted) {
         _showHandoffCredentials(
           customerName: customerInfo.name,
@@ -846,6 +846,12 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
               // Reset all wizard state
               resetInstallerWizardState(ref);
               ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+              // Sign out the anonymous/installer session NOW — after the
+              // installer has seen the credentials. Doing this earlier
+              // (in _completeSetup) would fire AuthStateListenable and
+              // trigger GoRouter to redirect to /login, destroying the
+              // dialog before the installer could read the temp password.
+              await FirebaseAuth.instance.signOut();
               if (mounted) this.context.go('/');
             },
             style: ElevatedButton.styleFrom(
