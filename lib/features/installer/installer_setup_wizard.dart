@@ -512,23 +512,33 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         await FirebaseAuth.instance.signInAnonymously();
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
-          // Account already exists — look up the existing user doc
-          final existingQuery = await FirebaseFirestore.instance
-              .collection('users')
-              .where('email', isEqualTo: customerInfo.email.trim().toLowerCase())
-              .limit(1)
-              .get();
-          if (existingQuery.docs.isNotEmpty) {
-            userId = existingQuery.docs.first.id;
-            isExistingAccount = true;
-          } else {
-            // Email exists in Auth but no Firestore doc yet —
-            // Create a placeholder doc keyed by a generated ID. When the customer
-            // signs in, the auth flow will merge this into their real profile.
+          // Account already exists — try to look up the existing user doc.
+          // This query may fail with PERMISSION_DENIED if the current
+          // session is anonymous (anonymous users can't query /users by
+          // email per firestore.rules). In that case, fall through to
+          // the placeholder path — the customer's real uid will be
+          // resolved when they sign in with their existing password.
+          try {
+            final existingQuery = await FirebaseFirestore.instance
+                .collection('users')
+                .where('email', isEqualTo: customerInfo.email.trim().toLowerCase())
+                .limit(1)
+                .get();
+            if (existingQuery.docs.isNotEmpty) {
+              userId = existingQuery.docs.first.id;
+              isExistingAccount = true;
+            } else {
+              final placeholderRef = FirebaseFirestore.instance.collection('users').doc();
+              userId = placeholderRef.id;
+              isExistingAccount = true;
+              debugPrint('Installer: Auth account exists without Firestore doc, using placeholder $userId');
+            }
+          } catch (queryError) {
+            // Permission denied or network error — use a placeholder.
             final placeholderRef = FirebaseFirestore.instance.collection('users').doc();
             userId = placeholderRef.id;
             isExistingAccount = true;
-            debugPrint('Installer: Auth account exists without Firestore doc, using placeholder $userId');
+            debugPrint('Installer: Could not query existing user ($queryError), using placeholder $userId');
           }
         } else {
           rethrow;
