@@ -284,9 +284,96 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: _handleForgotPassword,
+            child: const Text(
+              'Forgot password? Send reset email',
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final email = FirebaseAuth.instance.currentUser?.email;
+    if (email != null && email.isNotEmpty) {
+      // User is signed in — send reset to their email directly
+      try {
+        await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Password reset email sent to $email'),
+              backgroundColor: NexGenPalette.cyan,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to send reset email: $e')),
+          );
+        }
+      }
+    } else {
+      // No email on current user — show a text field dialog
+      final emailCtrl = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: NexGenPalette.gunmetal90,
+          title: const Text('Reset Password', style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: emailCtrl,
+            autofocus: true,
+            keyboardType: TextInputType.emailAddress,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              labelText: 'Email address',
+              labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+              filled: true,
+              fillColor: NexGenPalette.matteBlack,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+              child: const Text('Send', style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && emailCtrl.text.trim().isNotEmpty) {
+        try {
+          await FirebaseAuth.instance.sendPasswordResetEmail(
+            email: emailCtrl.text.trim(),
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Password reset email sent to ${emailCtrl.text.trim()}'),
+                backgroundColor: NexGenPalette.cyan,
+              ),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to send reset email: $e')),
+            );
+          }
+        }
+      }
+    }
   }
 
   // ── Page 2: Preferences ──

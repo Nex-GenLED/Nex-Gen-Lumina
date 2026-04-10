@@ -210,6 +210,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     );
 
     if (choice == 'ble') {
+      if (!mounted) return;
       await context.push(AppRoutes.deviceSetup);
       _checkAllControllerStatus();
     } else if (choice == 'ip') {

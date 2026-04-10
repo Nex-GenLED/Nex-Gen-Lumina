@@ -472,6 +472,54 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
+  /// Copies all controller documents from the installer's anonymous UID to
+  /// the customer's UID, then deletes the originals. Uses a batch write
+  /// for atomicity. A failure here is non-blocking — the handoff still
+  /// completes, but the customer won't see their controllers until they're
+  /// re-added manually.
+  Future<void> _migrateControllersToCustomer(
+    String? fromUid,
+    String toUid,
+  ) async {
+    if (fromUid == null || fromUid.isEmpty) {
+      debugPrint('Installer: skipping controller migration — no source UID');
+      return;
+    }
+    if (fromUid == toUid) {
+      debugPrint('Installer: skipping controller migration — same UID');
+      return;
+    }
+    try {
+      final sourceCol = FirebaseFirestore.instance
+          .collection('users')
+          .doc(fromUid)
+          .collection('controllers');
+      final destCol = FirebaseFirestore.instance
+          .collection('users')
+          .doc(toUid)
+          .collection('controllers');
+
+      final snapshot = await sourceCol.get();
+      if (snapshot.docs.isEmpty) {
+        debugPrint('Installer: no controllers to migrate from $fromUid');
+        return;
+      }
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snapshot.docs) {
+        // Copy to customer UID with the same doc ID
+        batch.set(destCol.doc(doc.id), doc.data());
+        // Delete from installer/anonymous UID
+        batch.delete(sourceCol.doc(doc.id));
+      }
+      await batch.commit();
+      debugPrint('Installer: migrated ${snapshot.docs.length} controller(s) '
+          'from $fromUid to $toUid');
+    } catch (e) {
+      debugPrint('Installer: controller migration failed (non-blocking): $e');
+    }
+  }
+
   Future<void> _completeSetup() async {
     final customerInfo = ref.read(installerCustomerInfoProvider);
     final session = ref.read(installerSessionProvider);
@@ -494,6 +542,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       // 1. Generate temporary password
       final tempPassword = _generateTempPassword();
 
+      // Capture the anonymous/installer UID BEFORE createUserWithEmailAndPassword
+      // overwrites FirebaseAuth.currentUser with the new customer account.
+      // This is the UID under which controllers were added during the wizard.
+      final installerAnonymousUid = FirebaseAuth.instance.currentUser?.uid;
+
       // 2. Create Firebase Auth account for customer (or link existing account)
       //
       // IMPORTANT: createUserWithEmailAndPassword() auto-signs-in as the new
@@ -508,6 +561,17 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           password: tempPassword,
         );
         userId = credential.user!.uid;
+        // Send password reset email while still signed in as the customer.
+        // This gives them a proper "Set your password" link instead of
+        // relying on the installer reading a temp password aloud.
+        try {
+          await FirebaseAuth.instance.sendPasswordResetEmail(
+            email: customerInfo.email.trim().toLowerCase(),
+          );
+          debugPrint('Installer: password reset email sent to ${customerInfo.email}');
+        } catch (resetErr) {
+          debugPrint('Installer: password reset email failed (non-blocking): $resetErr');
+        }
         // Customer account created — sign back in anonymously for remaining writes
         await FirebaseAuth.instance.signInAnonymously();
       } on FirebaseAuthException catch (e) {
@@ -544,6 +608,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           rethrow;
         }
       }
+
+      // 2b. Migrate controllers from the installer's anonymous UID to the
+      // customer's UID so controllersStreamProvider finds them on first login.
+      await _migrateControllersToCustomer(installerAnonymousUid, userId);
 
       // 3. Get installer-collected configuration
       final siteMode = ref.read(installerSiteModeProvider);
