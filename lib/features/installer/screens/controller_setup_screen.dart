@@ -233,7 +233,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
             TextField(
               controller: ipCtrl,
               autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: TextInputType.url,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 labelText: 'IP Address',

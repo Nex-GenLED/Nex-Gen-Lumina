@@ -122,11 +122,14 @@ service cloud.firestore {
         // Users can read their own controllers, media users can view for content
         allow read: if canReadUserData(userId);
 
-        // Users can create controllers (from device discovery/setup)
-        allow create: if isOwner(userId);
+        // Users can create controllers (from device discovery/setup).
+        // Any authenticated user can create — the installer wizard adds
+        // controllers under the customer's UID during the setup flow,
+        // and the installer is signed in as an anonymous/different user.
+        allow create: if request.auth != null;
 
         // Users can update their controllers (rename, IP changes, etc.)
-        allow update: if isOwner(userId);
+        allow update: if isOwner(userId) || request.auth != null;
 
         // Users can delete their controllers
         allow delete: if isOwner(userId);
