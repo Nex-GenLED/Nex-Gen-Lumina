@@ -102,8 +102,14 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   // must also be allowed — otherwise the second tap-five gesture
   // (e.g. after the user backs out of installer mode) silently
   // bounces back to /login.
+  // /device-setup is the BLE provisioning screen used by the installer
+  // wizard's "Add Controller" button. It lives outside the /installer/*
+  // prefix but must be reachable during an anonymous installer session.
+  final isDeviceSetupRoute =
+      state.matchedLocation == AppRoutes.deviceSetup;
+
   if (user.isAnonymous) {
-    if (isInstallerRoute || isSalesRoute || isStaffPinRoute) return null;
+    if (isInstallerRoute || isSalesRoute || isStaffPinRoute || isDeviceSetupRoute) return null;
     return AppRoutes.login; // Block everything else for anonymous users
   }
 
