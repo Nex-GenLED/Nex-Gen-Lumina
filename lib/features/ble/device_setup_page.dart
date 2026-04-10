@@ -18,6 +18,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
@@ -89,10 +90,12 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       return;
     }
 
-    // Anonymous users entered via the staff PIN → installer mode flow.
-    // They have no Firestore user doc and no installation_role, but they
-    // are authenticated installers — skip the role check entirely.
-    if (user.isAnonymous) return;
+    // If there's an active installer session (the user authenticated via
+    // the staff PIN flow), they're a verified installer regardless of
+    // what their Firestore user doc says. This covers both anonymous
+    // users (no doc at all) and real users whose doc has a non-installer
+    // role (e.g. 'unlinked').
+    if (ref.read(installerModeActiveProvider)) return;
 
     try {
       final userDoc = await FirebaseFirestore.instance
