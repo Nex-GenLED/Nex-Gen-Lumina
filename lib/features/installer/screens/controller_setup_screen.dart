@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -171,12 +173,12 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     }
   }
 
-  void _addController() {
-    // Navigate to BLE provisioning
-    Navigator.of(context).pushNamed('/device-setup').then((_) {
-      // Refresh status after returning
-      _checkAllControllerStatus();
-    });
+  Future<void> _addController() async {
+    // Navigate to BLE provisioning via GoRouter (not Navigator.pushNamed,
+    // which can't resolve GoRouter routes and silently does nothing).
+    await context.push(AppRoutes.deviceSetup);
+    // Refresh status after returning
+    _checkAllControllerStatus();
   }
 
   Future<void> _capturePhoto(ImageSource source) async {
