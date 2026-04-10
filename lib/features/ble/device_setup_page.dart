@@ -75,6 +75,8 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
 
   /// Verify the current user has permission to add new controllers.
   /// Only primary users and installers can pair new devices.
+  /// Anonymous users are always allowed through — they entered via the
+  /// installer PIN flow and have already been authenticated.
   Future<void> _checkPairingPermission() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -86,6 +88,11 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       }
       return;
     }
+
+    // Anonymous users entered via the staff PIN → installer mode flow.
+    // They have no Firestore user doc and no installation_role, but they
+    // are authenticated installers — skip the role check entirely.
+    if (user.isAnonymous) return;
 
     try {
       final userDoc = await FirebaseFirestore.instance
