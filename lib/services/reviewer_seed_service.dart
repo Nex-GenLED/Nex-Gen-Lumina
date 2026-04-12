@@ -48,6 +48,25 @@ class ReviewerSeedService {
         preGameLighting: true,
         scoreCelebrations: true,
         timeZone: 'America/Chicago',
+        // Custom roofline traced to match the stock demo home image
+        // (assets/images/Demohomephoto.jpg). The house is multi-gabled:
+        // left porch overhang → center upper peak → bay window bump →
+        // garage roofline. Points are normalized 0-1 coordinates.
+        rooflineMask: {
+          'points': [
+            {'x': 0.03, 'y': 0.38},  // left eave (porch overhang start)
+            {'x': 0.15, 'y': 0.28},  // porch peak
+            {'x': 0.22, 'y': 0.35},  // valley between porch and main
+            {'x': 0.38, 'y': 0.08},  // center upper gable peak
+            {'x': 0.52, 'y': 0.30},  // valley to right section
+            {'x': 0.58, 'y': 0.22},  // bay window bump peak
+            {'x': 0.65, 'y': 0.32},  // down to garage transition
+            {'x': 0.78, 'y': 0.22},  // garage roofline peak
+            {'x': 0.97, 'y': 0.35},  // far right eave
+          ],
+          'mask_height': 0.40,
+          'is_manually_drawn': true,
+        },
       );
 
       await FirebaseFirestore.instance
