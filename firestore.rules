@@ -200,6 +200,17 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      // Roofline Configuration subcollection - multi-segment roofline trace data
+      // Written by RooflineEditorScreen when the user saves their traced
+      // roofline, and by the legacy migration provider. Single doc at
+      // /users/{userId}/roofline_config/config.
+      match /roofline_config/{configId} {
+        allow read: if canReadUserData(userId);
+        allow create: if isOwner(userId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
       // Game Day Autopilot subcollection - per-team autopilot configs
       // (one doc per team slug, e.g. "atlanta-braves"). Written by the
       // GameDayAutopilotNotifier when the user toggles the Autopilot

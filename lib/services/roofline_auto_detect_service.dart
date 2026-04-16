@@ -6,9 +6,15 @@ import 'package:nexgen_command/models/roofline_mask.dart';
 
 /// Service that auto-detects the roofline from a house photo.
 ///
-/// Uses edge detection on the upper portion of the image to find
-/// the dominant horizontal edge line, which typically corresponds
-/// to the roofline where permanent LEDs are installed.
+/// Uses a two-pass strategy:
+///   1. **Sky segmentation** — sample the sky color from the top rows and scan
+///      downward in each column to find where the image diverges from sky.
+///   2. **Edge refinement** — run a Sobel-Y gradient pass in a narrow band
+///      around the sky boundary to snap to the nearest strong horizontal edge.
+///
+/// This approach is far more accurate than raw edge detection alone because it
+/// ignores tree lines, ground-level fences, and other strong edges that are not
+/// the roofline.
 class RooflineAutoDetectService {
   /// Detect the roofline from an image provider.
   ///
@@ -16,11 +22,9 @@ class RooflineAutoDetectService {
   /// detected roofline. Returns null if detection fails.
   static Future<RooflineMask?> detectFromImage(ImageProvider imageProvider) async {
     try {
-      // Load the image as ui.Image
       final image = await _loadImage(imageProvider);
       if (image == null) return null;
 
-      // Get raw pixel data (RGBA)
       final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (byteData == null) return null;
 
@@ -28,9 +32,7 @@ class RooflineAutoDetectService {
       final height = image.height;
       final pixels = byteData.buffer.asUint8List();
 
-      // Run edge detection on the upper 50% of the image
-      final rooflinePoints = _detectEdges(pixels, width, height);
-
+      final rooflinePoints = _detect(pixels, width, height);
       if (rooflinePoints.isEmpty) return null;
 
       return RooflineMask(
@@ -45,7 +47,8 @@ class RooflineAutoDetectService {
     }
   }
 
-  /// Load an ImageProvider into a ui.Image.
+  // ── Image loading ──────────────────────────────────────────────────────
+
   static Future<ui.Image?> _loadImage(ImageProvider provider) async {
     try {
       final stream = provider.resolve(ImageConfiguration.empty);
@@ -64,120 +67,261 @@ class RooflineAutoDetectService {
     }
   }
 
-  /// Get the grayscale luminance of a pixel at (x, y).
-  static int _luminance(Uint8List pixels, int width, int x, int y) {
-    final i = (y * width + x) * 4;
-    if (i + 2 >= pixels.length) return 0;
-    // ITU-R BT.601 luma: 0.299*R + 0.587*G + 0.114*B
-    return ((pixels[i] * 299 + pixels[i + 1] * 587 + pixels[i + 2] * 114) / 1000).round();
+  // ── Pixel helpers ──────────────────────────────────────────────────────
+
+  static int _r(Uint8List px, int w, int x, int y) => px[(y * w + x) * 4];
+  static int _g(Uint8List px, int w, int x, int y) => px[(y * w + x) * 4 + 1];
+  static int _b(Uint8List px, int w, int x, int y) => px[(y * w + x) * 4 + 2];
+
+  static int _luminance(Uint8List px, int w, int x, int y) {
+    final i = (y * w + x) * 4;
+    if (i + 2 >= px.length) return 0;
+    return ((px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000).round();
   }
 
-  /// Run Sobel-inspired vertical edge detection on the upper portion.
-  ///
-  /// Strategy:
-  /// 1. Compute vertical gradient (Sobel-Y) for the upper 50% of the image
-  /// 2. For each column, find the row with the strongest vertical edge
-  /// 3. Smooth the result to get a continuous roofline
-  /// 4. Convert to normalized coordinates
-  static List<Offset> _detectEdges(Uint8List pixels, int width, int height) {
-    // Focus on the upper 55% of the image where the roofline likely is
-    final scanHeight = (height * 0.55).round();
-    if (scanHeight < 10 || width < 10) return [];
+  /// Squared color distance between a pixel and a reference RGB triple.
+  static double _colorDistSq(Uint8List px, int w, int x, int y,
+      double refR, double refG, double refB) {
+    final dr = _r(px, w, x, y) - refR;
+    final dg = _g(px, w, x, y) - refG;
+    final db = _b(px, w, x, y) - refB;
+    return dr * dr + dg * dg + db * db;
+  }
 
-    // Step 1: Compute vertical gradient magnitude per pixel
-    // Using a simplified Sobel-Y kernel:
-    //  -1 -2 -1
-    //   0  0  0
-    //   1  2  1
-    final gradientMap = Float32List(width * scanHeight);
+  // ── Main detection pipeline ────────────────────────────────────────────
 
-    for (int y = 1; y < scanHeight - 1; y++) {
-      for (int x = 1; x < width - 1; x++) {
-        final topLeft = _luminance(pixels, width, x - 1, y - 1);
-        final top = _luminance(pixels, width, x, y - 1);
-        final topRight = _luminance(pixels, width, x + 1, y - 1);
-        final bottomLeft = _luminance(pixels, width, x - 1, y + 1);
-        final bottom = _luminance(pixels, width, x, y + 1);
-        final bottomRight = _luminance(pixels, width, x + 1, y + 1);
+  static List<Offset> _detect(Uint8List pixels, int width, int height) {
+    if (height < 20 || width < 20) return [];
 
-        // Sobel-Y: emphasizes horizontal edges (vertical gradient)
-        final gy = (-topLeft - 2 * top - topRight + bottomLeft + 2 * bottom + bottomRight).abs();
+    // ── Pass 1: Compute the sky reference color ──
+    // Sample the top 3% of the image (but at least 4 rows, at most 30).
+    final skyRows = (height * 0.03).round().clamp(4, 30);
+    double skyR = 0, skyG = 0, skyB = 0;
+    int skySamples = 0;
 
-        gradientMap[y * width + x] = gy.toDouble();
+    // Sample from the central 80% width to avoid corner vignetting.
+    final xMargin = (width * 0.10).round();
+    for (int y = 0; y < skyRows; y++) {
+      for (int x = xMargin; x < width - xMargin; x++) {
+        skyR += _r(pixels, width, x, y);
+        skyG += _g(pixels, width, x, y);
+        skyB += _b(pixels, width, x, y);
+        skySamples++;
       }
     }
+    if (skySamples == 0) return [];
+    skyR /= skySamples;
+    skyG /= skySamples;
+    skyB /= skySamples;
 
-    // Step 2: Divide image into vertical columns and find the strongest
-    // edge row in each column. Use ~30-50 sample columns for a smooth result.
-    final numSamples = width > 600 ? 40 : (width > 300 ? 30 : 20);
-    final columnWidth = width / numSamples;
+    // Compute the variance of sky color to set an adaptive threshold.
+    double skyVariance = 0;
+    for (int y = 0; y < skyRows; y++) {
+      for (int x = xMargin; x < width - xMargin; x++) {
+        skyVariance += _colorDistSq(pixels, width, x, y, skyR, skyG, skyB);
+      }
+    }
+    skyVariance /= skySamples;
+    // Threshold = mean sky variance * multiplier. Higher multiplier = more
+    // tolerant of sky color variation (clouds, gradient skies).
+    final skyThreshold = skyVariance * 5.0 + 900.0; // floor of 900 ≈ 30² RGB distance
 
-    final rawEdgeRows = <double>[];
+    // ── Pass 2: Sky boundary scan ──
+    // For each column, scan downward and find the first row where the color
+    // diverges from sky for a sustained run (3+ consecutive non-sky rows).
+    // Limit scan to upper 70% — the roofline is almost never in the bottom 30%.
+    final scanLimit = (height * 0.70).round();
+    final numCols = width > 800 ? 60 : (width > 400 ? 45 : 30);
+    final colWidth = width / numCols;
 
-    for (int col = 0; col < numSamples; col++) {
-      final xStart = (col * columnWidth).round();
-      final xEnd = ((col + 1) * columnWidth).round().clamp(0, width);
+    final skyBoundaryRows = List<double>.filled(numCols, -1);
 
-      double maxGradient = 0;
-      int bestRow = scanHeight ~/ 3; // Default to upper third
+    for (int col = 0; col < numCols; col++) {
+      final xStart = (col * colWidth).round().clamp(0, width - 1);
+      final xEnd = ((col + 1) * colWidth).round().clamp(0, width);
+      final bandWidth = xEnd - xStart;
+      if (bandWidth <= 0) continue;
 
-      // Scan each row in this column band
-      for (int y = 3; y < scanHeight - 3; y++) {
-        double columnGradientSum = 0;
-        int count = 0;
+      int consecutiveNonSky = 0;
+      int boundaryRow = -1;
 
+      for (int y = skyRows; y < scanLimit; y++) {
+        // Average color distance from sky across this column band.
+        double avgDist = 0;
         for (int x = xStart; x < xEnd; x++) {
-          columnGradientSum += gradientMap[y * width + x];
-          count++;
+          avgDist += _colorDistSq(pixels, width, x, y, skyR, skyG, skyB);
         }
+        avgDist /= bandWidth;
 
-        final avgGradient = count > 0 ? columnGradientSum / count : 0.0;
+        if (avgDist > skyThreshold) {
+          consecutiveNonSky++;
+          if (consecutiveNonSky >= 3) {
+            boundaryRow = y - 2; // First row of the run
+            break;
+          }
+        } else {
+          consecutiveNonSky = 0;
+        }
+      }
 
-        if (avgGradient > maxGradient) {
-          maxGradient = avgGradient;
+      skyBoundaryRows[col] = boundaryRow >= 0 ? boundaryRow.toDouble() : -1;
+    }
+
+    // ── Pass 3: Edge refinement ──
+    // For each column with a sky boundary, look for the strongest Sobel-Y
+    // edge within ±refineRadius rows. This snaps to the actual architectural
+    // edge rather than the approximate color transition.
+    final refineRadius = (height * 0.04).round().clamp(3, 30);
+    final refinedRows = List<double>.filled(numCols, -1);
+
+    for (int col = 0; col < numCols; col++) {
+      if (skyBoundaryRows[col] < 0) {
+        refinedRows[col] = -1;
+        continue;
+      }
+
+      final centerRow = skyBoundaryRows[col].round();
+      final yMin = (centerRow - refineRadius).clamp(1, height - 2);
+      final yMax = (centerRow + refineRadius).clamp(1, height - 2);
+
+      final xStart = (col * colWidth).round().clamp(1, width - 2);
+      final xEnd = ((col + 1) * colWidth).round().clamp(1, width - 1);
+      final bandWidth = xEnd - xStart;
+      if (bandWidth <= 0) {
+        refinedRows[col] = skyBoundaryRows[col];
+        continue;
+      }
+
+      double bestGradient = 0;
+      int bestRow = centerRow;
+
+      for (int y = yMin; y <= yMax; y++) {
+        double gradientSum = 0;
+        for (int x = xStart; x < xEnd; x++) {
+          // Sobel-Y: emphasizes horizontal edges.
+          final topLeft = _luminance(pixels, width, x - 1, y - 1);
+          final top = _luminance(pixels, width, x, y - 1);
+          final topRight = _luminance(pixels, width, x + 1, y - 1);
+          final bottomLeft = _luminance(pixels, width, x - 1, y + 1);
+          final bottom = _luminance(pixels, width, x, y + 1);
+          final bottomRight = _luminance(pixels, width, x + 1, y + 1);
+
+          final gy = (-topLeft - 2 * top - topRight +
+                       bottomLeft + 2 * bottom + bottomRight).abs();
+          gradientSum += gy;
+        }
+        final avgGradient = gradientSum / bandWidth;
+
+        if (avgGradient > bestGradient) {
+          bestGradient = avgGradient;
           bestRow = y;
         }
       }
 
-      rawEdgeRows.add(bestRow.toDouble());
+      // Only snap to edge if it's reasonably strong; otherwise keep sky boundary.
+      refinedRows[col] = bestGradient > 15 ? bestRow.toDouble() : skyBoundaryRows[col];
     }
 
-    // Step 3: Smooth the detected edge rows to reduce noise.
-    // Use a simple moving average with window size 5.
-    final smoothedRows = _smoothCurve(rawEdgeRows, windowSize: 5);
+    // ── Pass 4: Fill gaps and filter ──
+    // Columns where sky boundary wasn't found (e.g. tree occluded the sky)
+    // are filled by interpolating from neighbors.
+    _fillGaps(refinedRows);
 
-    // Step 4: Filter out obvious outliers (rows that deviate too much
-    // from the median). The roofline should be fairly consistent.
-    final median = _median(smoothedRows);
-    final maxDeviation = height * 0.15; // Allow 15% of image height deviation
+    // Median filter (window 5) — much more robust to outlier spikes than mean.
+    final medianFiltered = _medianFilter(refinedRows, windowSize: 5);
 
-    final filteredRows = smoothedRows.map((row) {
-      if ((row - median).abs() > maxDeviation) return median;
-      return row;
-    }).toList();
+    // Light smoothing pass to remove small jitter.
+    final smoothed = _smoothCurve(medianFiltered, windowSize: 3);
 
-    // Re-smooth after filtering
-    final finalRows = _smoothCurve(filteredRows, windowSize: 3);
-
-    // Step 5: Convert to normalized (0-1) coordinates
+    // ── Pass 5: Normalize and simplify ──
     final points = <Offset>[];
-    for (int i = 0; i < numSamples; i++) {
-      final normalizedX = (i + 0.5) / numSamples;
-      final normalizedY = finalRows[i] / height;
-      points.add(Offset(normalizedX.clamp(0.0, 1.0), normalizedY.clamp(0.0, 1.0)));
+    for (int i = 0; i < numCols; i++) {
+      if (smoothed[i] < 0) continue;
+      final nx = (i + 0.5) / numCols;
+      final ny = smoothed[i] / height;
+      points.add(Offset(nx.clamp(0.0, 1.0), ny.clamp(0.0, 1.0)));
     }
 
-    // Step 6: Simplify to reduce point count while preserving shape.
-    // Use Douglas-Peucker-inspired simplification.
-    final simplified = _simplifyPoints(points, epsilon: 0.008);
+    if (points.length < 2) return [];
 
-    // Ensure we have at least 2 points
-    if (simplified.length < 2) return points.length >= 2 ? [points.first, points.last] : [];
+    // Douglas-Peucker simplification — keep enough detail for peaks/gables.
+    final simplified = _simplifyPoints(points, epsilon: 0.006);
+    if (simplified.length < 2) {
+      return points.length >= 2 ? [points.first, points.last] : [];
+    }
 
     return simplified;
   }
 
-  /// Simple moving average smoothing.
+  // ── Gap filling ────────────────────────────────────────────────────────
+
+  /// Fill -1 gaps in the row array by linear interpolation from neighbors.
+  static void _fillGaps(List<double> rows) {
+    // Forward pass: find first valid value.
+    int firstValid = -1;
+    for (int i = 0; i < rows.length; i++) {
+      if (rows[i] >= 0) { firstValid = i; break; }
+    }
+    if (firstValid < 0) return; // No valid data at all.
+
+    // Fill leading gap.
+    for (int i = 0; i < firstValid; i++) {
+      rows[i] = rows[firstValid];
+    }
+
+    // Fill trailing gap.
+    int lastValid = firstValid;
+    for (int i = rows.length - 1; i >= 0; i--) {
+      if (rows[i] >= 0) { lastValid = i; break; }
+    }
+    for (int i = lastValid + 1; i < rows.length; i++) {
+      rows[i] = rows[lastValid];
+    }
+
+    // Interpolate interior gaps.
+    int gapStart = -1;
+    for (int i = firstValid; i <= lastValid; i++) {
+      if (rows[i] < 0) {
+        if (gapStart < 0) gapStart = i;
+      } else {
+        if (gapStart >= 0) {
+          // Interpolate from gapStart-1 to i.
+          final from = rows[gapStart - 1];
+          final to = rows[i];
+          final span = i - gapStart + 1;
+          for (int j = gapStart; j < i; j++) {
+            rows[j] = from + (to - from) * (j - gapStart + 1) / span;
+          }
+          gapStart = -1;
+        }
+      }
+    }
+  }
+
+  // ── Median filter ──────────────────────────────────────────────────────
+
+  static List<double> _medianFilter(List<double> values, {int windowSize = 5}) {
+    final result = List<double>.from(values);
+    final half = windowSize ~/ 2;
+    final window = <double>[];
+
+    for (int i = 0; i < values.length; i++) {
+      window.clear();
+      for (int j = i - half; j <= i + half; j++) {
+        if (j >= 0 && j < values.length && values[j] >= 0) {
+          window.add(values[j]);
+        }
+      }
+      if (window.isNotEmpty) {
+        window.sort();
+        result[i] = window[window.length ~/ 2];
+      }
+    }
+    return result;
+  }
+
+  // ── Moving average smoothing ───────────────────────────────────────────
+
   static List<double> _smoothCurve(List<double> values, {int windowSize = 5}) {
     final result = List<double>.filled(values.length, 0);
     final halfWindow = windowSize ~/ 2;
@@ -186,36 +330,23 @@ class RooflineAutoDetectService {
       double sum = 0;
       int count = 0;
       for (int j = i - halfWindow; j <= i + halfWindow; j++) {
-        if (j >= 0 && j < values.length) {
+        if (j >= 0 && j < values.length && values[j] >= 0) {
           sum += values[j];
           count++;
         }
       }
-      result[i] = sum / count;
+      result[i] = count > 0 ? sum / count : values[i];
     }
     return result;
   }
 
-  /// Compute the median of a list of doubles.
-  static double _median(List<double> values) {
-    final sorted = List<double>.from(values)..sort();
-    final mid = sorted.length ~/ 2;
-    if (sorted.length % 2 == 0) {
-      return (sorted[mid - 1] + sorted[mid]) / 2;
-    }
-    return sorted[mid];
-  }
+  // ── Douglas-Peucker simplification ─────────────────────────────────────
 
-  /// Douglas-Peucker line simplification.
-  /// Reduces the number of points while preserving the shape.
   static List<Offset> _simplifyPoints(List<Offset> points, {double epsilon = 0.01}) {
     if (points.length <= 2) return points;
 
-    // Find the point with the maximum distance from the line
-    // between the first and last points
     double maxDistance = 0;
     int maxIndex = 0;
-
     final first = points.first;
     final last = points.last;
 
@@ -227,41 +358,32 @@ class RooflineAutoDetectService {
       }
     }
 
-    // If max distance is greater than epsilon, recursively simplify
     if (maxDistance > epsilon) {
       final left = _simplifyPoints(points.sublist(0, maxIndex + 1), epsilon: epsilon);
       final right = _simplifyPoints(points.sublist(maxIndex), epsilon: epsilon);
-
-      // Combine (remove duplicate point at junction)
       return [...left.sublist(0, left.length - 1), ...right];
     }
 
-    // Otherwise, return just the endpoints
     return [first, last];
   }
 
-  /// Perpendicular distance from a point to a line defined by two points.
   static double _perpendicularDistance(Offset point, Offset lineStart, Offset lineEnd) {
     final dx = lineEnd.dx - lineStart.dx;
     final dy = lineEnd.dy - lineStart.dy;
-    final length = (dx * dx + dy * dy);
+    final length = dx * dx + dy * dy;
 
-    if (length == 0) {
-      // Line start and end are the same point
-      return (point - lineStart).distance;
-    }
+    if (length == 0) return (point - lineStart).distance;
 
-    // Project point onto line
     final t = ((point.dx - lineStart.dx) * dx + (point.dy - lineStart.dy) * dy) / length;
     final tClamped = t.clamp(0.0, 1.0);
-
     final projection = Offset(
       lineStart.dx + tClamped * dx,
       lineStart.dy + tClamped * dy,
     );
-
     return (point - projection).distance;
   }
+
+  // ── Templates ──────────────────────────────────────────────────────────
 
   /// Common roofline templates for manual fallback.
   static List<RooflineTemplate> get templates => const [
