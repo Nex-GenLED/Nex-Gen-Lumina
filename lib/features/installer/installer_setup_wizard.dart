@@ -472,14 +472,20 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
-  /// Copies all controller documents from the installer's anonymous UID to
-  /// the customer's UID, then deletes the originals. Uses a batch write
-  /// for atomicity. A failure here is non-blocking — the handoff still
-  /// completes, but the customer won't see their controllers until they're
-  /// re-added manually.
+  /// Copies controller documents that were added during the installer wizard
+  /// from the installer's UID to the customer's UID, then deletes the
+  /// originals. Uses a batch write for atomicity.
+  ///
+  /// Only controllers whose document IDs are in [controllerIds] are migrated.
+  /// If [controllerIds] is empty, ALL controllers are migrated (legacy
+  /// fallback for safety).
+  ///
+  /// A failure here is non-blocking — the handoff still completes, but the
+  /// customer won't see their controllers until they're re-added manually.
   Future<void> _migrateControllersToCustomer(
     String? fromUid,
     String toUid,
+    Set<String> controllerIds,
   ) async {
     if (fromUid == null || fromUid.isEmpty) {
       debugPrint('Installer: skipping controller migration — no source UID');
@@ -505,15 +511,28 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return;
       }
 
+      // Only migrate controllers that belong to this installation session.
+      // This prevents the admin's own pre-existing controllers from being
+      // moved to the customer's account.
+      final docsToMigrate = controllerIds.isEmpty
+          ? snapshot.docs
+          : snapshot.docs.where((d) => controllerIds.contains(d.id)).toList();
+
+      if (docsToMigrate.isEmpty) {
+        debugPrint('Installer: no matching controllers to migrate '
+            '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
+        return;
+      }
+
       final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snapshot.docs) {
+      for (final doc in docsToMigrate) {
         // Copy to customer UID with the same doc ID
         batch.set(destCol.doc(doc.id), doc.data());
         // Delete from installer/anonymous UID
         batch.delete(sourceCol.doc(doc.id));
       }
       await batch.commit();
-      debugPrint('Installer: migrated ${snapshot.docs.length} controller(s) '
+      debugPrint('Installer: migrated ${docsToMigrate.length} controller(s) '
           'from $fromUid to $toUid');
     } catch (e) {
       debugPrint('Installer: controller migration failed (non-blocking): $e');
@@ -609,14 +628,20 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         }
       }
 
-      // 2b. Migrate controllers from the installer's anonymous UID to the
-      // customer's UID so controllersStreamProvider finds them on first login.
-      await _migrateControllersToCustomer(installerAnonymousUid, userId);
-
       // 3. Get installer-collected configuration
       final siteMode = ref.read(installerSiteModeProvider);
       final selectedControllers = ref.read(installerSelectedControllersProvider);
       final linkedControllers = ref.read(installerLinkedControllersProvider);
+
+      // 2b. Migrate controllers from the installer's UID to the customer's
+      // UID so controllersStreamProvider finds them on first login. Only move
+      // the controllers that were selected for this installation — leave the
+      // admin's own controllers untouched.
+      await _migrateControllersToCustomer(
+        installerAnonymousUid,
+        userId,
+        selectedControllers,
+      );
       final zones = ref.read(installerZonesProvider);
       final photoUrl = ref.read(installerPhotoUrlProvider);
       final maxSubUsers = siteMode == SiteMode.commercial ? 20 : 5;

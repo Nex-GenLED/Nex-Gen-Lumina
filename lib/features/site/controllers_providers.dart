@@ -2,18 +2,24 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
-/// Streams the current user's controllers collection
+/// Streams the current user's controllers collection.
+/// Watches [authStateProvider] so the stream rebuilds automatically when the
+/// signed-in user changes (e.g. installer flow → customer login).
 final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
-  final user = FirebaseAuth.instance.currentUser;
+  final user = ref.watch(authStateProvider).maybeWhen(
+    data: (u) => u,
+    orElse: () => null,
+  );
   if (user == null) {
-    debugPrint('🔒 controllersStreamProvider: No user logged in');
+    debugPrint('controllersStreamProvider: No user logged in');
     return const Stream.empty();
   }
 
-  debugPrint('📡 controllersStreamProvider: Listening to controllers for user ${user.uid}');
+  debugPrint('controllersStreamProvider: Listening to controllers for user ${user.uid}');
 
   // Don't use orderBy to avoid composite index requirement - we'll sort in memory
   final col = FirebaseFirestore.instance
@@ -22,14 +28,12 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
       .collection('controllers');
 
   return col.snapshots().map((snap) {
-    debugPrint('📦 controllersStreamProvider: Received ${snap.docs.length} controllers from Firestore');
+    debugPrint('controllersStreamProvider: Received ${snap.docs.length} controllers from Firestore');
 
     final controllers = snap.docs.map((d) {
       final data = d.data();
       final createdTs = data['createdAt'];
       final updatedTs = data['updatedAt'];
-
-      debugPrint('   - Controller ${d.id}: name=${data['name']}, ip=${data['ip']}');
 
       return ControllerInfo(
         id: d.id,
