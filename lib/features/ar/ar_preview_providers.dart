@@ -1,12 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/effect_database.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/models/roofline_segment.dart';
 
 /// Provider for the user's roofline mask configuration.
 /// Returns the mask from the user's profile, or null if not set.
+///
+/// In demo mode, synthesizes a mask from the first demo segment's points
+/// so legacy consumers (AnimatedRooflineOverlay fallback path) render
+/// correctly without an authenticated user profile.
 final rooflineMaskProvider = Provider<RooflineMask?>((ref) {
+  // DEMO MODE: synthesize a mask from the first demo segment's points.
+  final isDemo = ref.watch(demoExperienceActiveProvider);
+  if (isDemo) {
+    final demoConfig = ref.watch(demoRooflineConfigProvider);
+    if (demoConfig == null || demoConfig.segments.isEmpty) {
+      return null;
+    }
+    RooflineSegment firstWithPoints;
+    try {
+      firstWithPoints =
+          demoConfig.segments.firstWhere((s) => s.points.length >= 2);
+    } catch (_) {
+      return null;
+    }
+    return RooflineMask(
+      points: firstWithPoints.points,
+      isManuallyDrawn: true,
+    );
+  }
+
+  // PRODUCTION: read from user profile.
   final profile = ref.watch(currentUserProfileProvider).maybeWhen(
     data: (u) => u,
     orElse: () => null,

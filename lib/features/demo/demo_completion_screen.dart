@@ -9,8 +9,10 @@ import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/demo/demo_lead_service.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
+import 'package:nexgen_command/features/demo/demo_stock_home.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_scaffold.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 
 /// Demo completion screen - the conversion point.
 ///
@@ -179,7 +181,6 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
   @override
   Widget build(BuildContext context) {
     final lead = ref.watch(demoLeadProvider);
-    final patternsViewed = ref.watch(demoPatternsViewedProvider);
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -190,59 +191,85 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
         child: SafeArea(
           child: _showingContactForm
               ? _buildContactForm()
-              : _buildCompletionSummary(lead, patternsViewed),
+              : _buildCompletionSummary(lead),
         ),
       ),
     );
   }
 
-  Widget _buildCompletionSummary(DemoLead? lead, List<String> patternsViewed) {
+  Widget _buildCompletionSummary(DemoLead? lead) {
+    final photoBytes = ref.watch(demoPhotoProvider);
+    final usingStock = ref.watch(demoUsingStockPhotoProvider);
+    final rooflineConfig = ref.watch(demoRooflineConfigProvider);
+    final hasConfig = rooflineConfig != null &&
+        rooflineConfig.segments.any((s) => s.points.length >= 2);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Success header
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  NexGenPalette.cyan,
-                  NexGenPalette.blue,
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: NexGenPalette.cyan.withValues(alpha: 0.4),
-                  blurRadius: 30,
-                  spreadRadius: 5,
+          // ═══ 1. Roofline hero — personalized moment ═══
+          if (hasConfig) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: AspectRatio(
+                aspectRatio: 994 / 492,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Base image
+                    if (usingStock)
+                      Image.asset(
+                        DemoStockHome.imageAssetPath,
+                        fit: BoxFit.cover,
+                      )
+                    else if (photoBytes != null)
+                      Image.memory(
+                        photoBytes,
+                        fit: BoxFit.cover,
+                      )
+                    else
+                      Container(color: NexGenPalette.gunmetal),
+                    // LED overlay — the money shot
+                    const AnimatedRooflineOverlay(
+                      useBoxFitCover: true,
+                      targetAspectRatio: 994 / 492,
+                      forceOn: true,
+                      brightness: 255,
+                    ),
+                    // Subtle bottom gradient for title legibility
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 64,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0x00000000), Color(0x99000000)],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-            child: const Icon(
-              Icons.celebration,
-              size: 50,
-              color: Colors.black,
-            ),
-          ),
+            const SizedBox(height: 28),
+          ],
 
-          const SizedBox(height: 32),
-
+          // ═══ 2 & 3. Title + subtitle ═══
           Text(
-            'Demo Complete!',
+            'This Could Be Your Home',
             style: Theme.of(context).textTheme.headlineMedium,
             textAlign: TextAlign.center,
           ),
-
-          const SizedBox(height: 12),
-
+          const SizedBox(height: 8),
           Text(
-            'You\'ve experienced the Nex-Gen difference',
+            'Ready to make it real?',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: NexGenPalette.textMedium,
                 ),
@@ -251,42 +278,74 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
 
           const SizedBox(height: 32),
 
-          // Summary stats
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildStatCard(
-                Icons.palette_outlined,
-                '${patternsViewed.length}',
-                'Patterns\nViewed',
-              ),
-              _buildStatCard(
-                Icons.schedule_outlined,
-                '3',
-                'Schedules\nPreviewed',
-              ),
-              _buildStatCard(
-                Icons.auto_awesome_outlined,
-                '1',
-                'AI\nSession',
-              ),
-            ],
+          // ═══ 4. PRIMARY CTA: Consultation ═══
+          DemoGlassCard(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        NexGenPalette.cyan,
+                        NexGenPalette.blue,
+                      ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: NexGenPalette.cyan.withValues(alpha: 0.35),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.calendar_today_rounded,
+                    size: 32,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Get Your Free Consultation',
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'A Nex-Gen specialist will design a lighting plan '
+                  'tailored to your home',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: NexGenPalette.textMedium,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                DemoPrimaryButton(
+                  label: 'Request Free Consultation',
+                  icon: Icons.arrow_forward,
+                  onPressed: () {
+                    setState(() => _showingContactForm = true);
+                  },
+                ),
+              ],
+            ),
           ),
 
-          const SizedBox(height: 40),
+          const SizedBox(height: 20),
 
-          // Explore the app CTA
+          // ═══ 5. SECONDARY CTA: Explore the app ═══
           SizedBox(
             width: double.infinity,
-            height: 52,
-            child: FilledButton(
+            height: 48,
+            child: OutlinedButton.icon(
               onPressed: () {
-                // Activate demo mode so the main app uses DemoWledRepository
                 ref.read(demoModeProvider.notifier).state = true;
                 ref.read(demoBrowsingProvider.notifier).state = true;
                 isDemoBrowsingFlag = true;
 
-                // Log analytics (fire and forget)
                 final leadService = ref.read(demoLeadServiceProvider);
                 final leadId = ref.read(demoLeadProvider)?.id;
                 if (leadId != null) {
@@ -296,127 +355,54 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
                       .catchError((e) => debugPrint('Demo analytics: $e')));
                 }
 
-                // Navigate to main app shell
                 context.go(AppRoutes.dashboard);
               },
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF00D4FF),
-                foregroundColor: const Color(0xFF07091A),
+              icon: const Icon(Icons.explore_outlined, size: 18),
+              label: const Text('Explore the app first'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: NexGenPalette.cyan,
+                side: BorderSide(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.6),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
                 textStyle: const TextStyle(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
               ),
-              child: const Text('Explore the app \u2192'),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'See exactly what your home could look like',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontSize: 11,
-                  color: NexGenPalette.textMedium,
-                ),
-            textAlign: TextAlign.center,
-          ),
-
-          const SizedBox(height: 24),
-
-          // CTA Card
-          DemoGlassCard(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                const Icon(
-                  Icons.lightbulb,
-                  size: 48,
-                  color: NexGenPalette.cyan,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Ready to Transform Your Home?',
-                  style: Theme.of(context).textTheme.titleLarge,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Get a free consultation with a Nex-Gen lighting specialist',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: NexGenPalette.textMedium,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                DemoPrimaryButton(
-                  label: 'Request Free Consultation',
-                  icon: Icons.calendar_today,
-                  onPressed: () {
-                    setState(() => _showingContactForm = true);
-                  },
-                ),
-              ],
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
 
-          // Secondary options
-          Row(
-            children: [
-              Expanded(
-                child: DemoSecondaryButton(
-                  label: 'Create Account',
-                  icon: Icons.person_add_outlined,
-                  onPressed: _navigateToSignup,
-                ),
-              ),
-            ],
+          // ═══ 6. Tertiary: Create Account ═══
+          TextButton.icon(
+            onPressed: _navigateToSignup,
+            icon: const Icon(Icons.person_add_outlined, size: 16),
+            label: const Text('Create an account'),
+            style: TextButton.styleFrom(
+              foregroundColor: NexGenPalette.textMedium,
+            ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
 
+          // ═══ Return to login (de-emphasized) ═══
           TextButton(
             onPressed: () {
               ref.read(demoSessionProvider.notifier).endDemo();
               context.go(AppRoutes.login);
             },
+            style: TextButton.styleFrom(
+              foregroundColor: NexGenPalette.textMedium.withValues(alpha: 0.7),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
             child: const Text('Return to Login'),
           ),
 
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard(IconData icon, String value, String label) {
-    return DemoGlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            size: 28,
-            color: NexGenPalette.cyan,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: NexGenPalette.cyan,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: NexGenPalette.textMedium,
-                ),
-            textAlign: TextAlign.center,
-          ),
+          const SizedBox(height: 16),
         ],
       ),
     );

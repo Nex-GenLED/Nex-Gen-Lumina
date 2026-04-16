@@ -1,0 +1,123 @@
+{
+  "name": "Sample Home Roofline",
+  "photo_path": "assets/images/Demohomephoto.jpg",
+  "total_channel_count": 2,
+  "segments": [
+    {
+      "id": "demo_upper_left_eave",
+      "name": "Upper Left Eave",
+      "pixel_count": 28,
+      "start_pixel": 0,
+      "type": "run",
+      "anchor_pixels": [0, 26],
+      "anchor_led_count": 2,
+      "sort_order": 0,
+      "direction": "left_to_right",
+      "level": 2,
+      "channel_index": 0,
+      "is_connected_to_previous": false,
+      "is_primary": true,
+      "points": [
+        {"x": 0.15, "y": 0.28},
+        {"x": 0.38, "y": 0.20}
+      ]
+    },
+    {
+      "id": "demo_upper_peak",
+      "name": "Upper Front Peak",
+      "pixel_count": 20,
+      "start_pixel": 28,
+      "type": "peak",
+      "anchor_pixels": [0, 10, 19],
+      "anchor_led_count": 2,
+      "sort_order": 1,
+      "direction": "left_to_right",
+      "level": 2,
+      "channel_index": 0,
+      "is_connected_to_previous": true,
+      "is_primary": true,
+      "points": [
+        {"x": 0.38, "y": 0.20},
+        {"x": 0.50, "y": 0.11},
+        {"x": 0.62, "y": 0.20}
+      ]
+    },
+    {
+      "id": "demo_upper_right_eave",
+      "name": "Upper Right Eave",
+      "pixel_count": 28,
+      "start_pixel": 48,
+      "type": "run",
+      "anchor_pixels": [0, 26],
+      "anchor_led_count": 2,
+      "sort_order": 2,
+      "direction": "left_to_right",
+      "level": 2,
+      "channel_index": 0,
+      "is_connected_to_previous": true,
+      "is_primary": true,
+      "points": [
+        {"x": 0.62, "y": 0.20},
+        {"x": 0.85, "y": 0.28}
+      ]
+    },
+    {
+      "id": "demo_lower_left_run",
+      "name": "Lower Left Run",
+      "pixel_count": 45,
+      "start_pixel": 76,
+      "type": "run",
+      "anchor_pixels": [0, 43],
+      "anchor_led_count": 2,
+      "sort_order": 3,
+      "direction": "left_to_right",
+      "level": 1,
+      "channel_index": 1,
+      "is_connected_to_previous": false,
+      "is_primary": true,
+      "points": [
+        {"x": 0.08, "y": 0.52},
+        {"x": 0.42, "y": 0.52}
+      ]
+    },
+    {
+      "id": "demo_porch_peak",
+      "name": "Front Porch Peak",
+      "pixel_count": 22,
+      "start_pixel": 121,
+      "type": "peak",
+      "anchor_pixels": [0, 11, 21],
+      "anchor_led_count": 2,
+      "sort_order": 4,
+      "direction": "left_to_right",
+      "level": 1,
+      "channel_index": 1,
+      "is_connected_to_previous": true,
+      "is_primary": true,
+      "points": [
+        {"x": 0.42, "y": 0.52},
+        {"x": 0.50, "y": 0.44},
+        {"x": 0.58, "y": 0.52}
+      ]
+    },
+    {
+      "id": "demo_lower_right_run",
+      "name": "Lower Right Run",
+      "pixel_count": 45,
+      "start_pixel": 143,
+      "type": "run",
+      "anchor_pixels": [0, 43],
+      "anchor_led_count": 2,
+      "sort_order": 5,
+      "direction": "left_to_right",
+      "level": 1,
+      "channel_index": 1,
+      "is_connected_to_previous": true,
+      "is_primary": true,
+      "points": [
+        {"x": 0.58, "y": 0.52},
+        {"x": 0.92, "y": 0.52}
+      ]
+    }
+  ]
+}

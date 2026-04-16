@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../autopilot/game_day_autopilot_background_worker.dart';
 import '../../neighborhood/services/sync_event_background_persistence.dart';
 import '../../neighborhood/services/sync_event_background_worker.dart';
 import '../data/team_colors.dart';
@@ -104,11 +105,21 @@ void _onStart(ServiceInstance service) async {
   final syncWorker = SyncEventBackgroundWorker(service, syncEspnApi);
   syncWorker.startMonitoring();
 
+  // ── Game Day Autopilot Background Worker ──────────────────────────
+  final gameDayEspnApi = EspnApiService();
+  final gameDayScheduleService = GameScheduleService();
+  final gameDayWorker = GameDayAutopilotBackgroundWorker(
+    espnApi: gameDayEspnApi,
+    scheduleService: gameDayScheduleService,
+  );
+  await gameDayWorker.startMonitoring();
+
   // Listen for IP updates from the UI isolate.
   final updateIpsSub = service.on('updateIps').listen((data) {
     if (data != null && data['ips'] is List) {
       controllerIps = List<String>.from(data['ips'] as List);
       syncWorker.updateControllerIps(controllerIps);
+      gameDayWorker.updateControllerIps(controllerIps);
     }
   });
 
@@ -128,6 +139,9 @@ void _onStart(ServiceInstance service) async {
     espnApi.dispose();
     scheduleService.dispose();
     syncWorker.dispose();
+    gameDayWorker.dispose();
+    gameDayEspnApi.dispose();
+    gameDayScheduleService.dispose();
     alertSub?.cancel();
     pollTimer?.cancel();
     updateIpsSub.cancel();
@@ -140,14 +154,22 @@ void _onStart(ServiceInstance service) async {
     final configs = await _loadConfigs();
     final active = configs.where((c) => c.isEnabled).toList();
 
-    // Check if sync events are active (even if no sports alerts)
+    // Check all workload sources before deciding what to do
     final syncEvents = await loadSyncEventsForBackground();
     final hasSyncEvents = syncEvents.any((e) => e.isEnabled && !e.isManual);
     final hasActiveSession = await loadActiveSession() != null;
+    final hasGameDayWork = await gameDayWorker.hasActiveWorkload();
 
-    if (active.isEmpty && !hasSyncEvents && !hasActiveSession) {
+    if (active.isEmpty && !hasSyncEvents && !hasActiveSession && !hasGameDayWork) {
       _updateNotification(service, 'No active alerts');
       return;
+    }
+
+    // ── Game Day Autopilot evaluation ─────────────────────────────
+    try {
+      await gameDayWorker.evaluate();
+    } catch (e) {
+      debugPrint('[SportsBackground] Game Day evaluate failed: $e');
     }
 
     // ── Sports alerts polling ──────────────────────────────────────
@@ -163,9 +185,11 @@ void _onStart(ServiceInstance service) async {
         );
         trigger.handleAlertEvent(event, config);
 
-        // Also notify the sync worker so Neighborhood Sync Game Day
-        // sessions can broadcast the celebration to all participants.
+        // Notify sync worker for group-level celebration broadcasts.
         syncWorker.onScoreAlertEvent(event);
+
+        // Notify game day worker for personal celebration flashes.
+        gameDayWorker.onScoreAlertEvent(event);
       });
 
       // Run the score check.
@@ -182,12 +206,18 @@ void _onStart(ServiceInstance service) async {
 
       _updateNotification(service, intervalInfo.notificationBody);
 
-      // Only auto-stop if no sync events are being monitored either
-      if (intervalInfo.shouldStop && !hasSyncEvents && !hasActiveSession) {
+      // Only auto-stop if no sync events, no active session, and no Game Day
+      if (intervalInfo.shouldStop &&
+          !hasSyncEvents &&
+          !hasActiveSession &&
+          !hasGameDayWork) {
         monitor.dispose();
         espnApi.dispose();
         scheduleService.dispose();
         syncWorker.dispose();
+        gameDayWorker.dispose();
+        gameDayEspnApi.dispose();
+        gameDayScheduleService.dispose();
         alertSub?.cancel();
         pollTimer?.cancel();
         await service.stopSelf();

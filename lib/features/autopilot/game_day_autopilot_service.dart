@@ -21,10 +21,14 @@ import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 
+import '../../utils/sun_utils.dart';
+import '../schedule/calendar_entry.dart';
+import '../sports_alerts/models/game_event.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
 import 'game_day_autopilot_config.dart';
+import 'team_design_catalog.dart';
 
 // ---------------------------------------------------------------------------
 // Autopilot session state
@@ -151,6 +155,23 @@ class GameDayAutopilotService {
   /// Callback invoked when the session phase changes (for UI updates).
   void Function(AutopilotSession session)? onSessionChanged;
 
+  /// Callback invoked when the service needs to write calendar entries.
+  /// Set by the provider layer. Returns true on success.
+  Future<bool> Function(List<CalendarEntry> entries)? onWriteCalendarEntries;
+
+  /// Callback to read user's current location. Returns (lat, lon) or
+  /// null if not available. Used for daylight filter.
+  ({double lat, double lon})? Function()? onGetUserLocation;
+
+  /// Callback to read the user's preferred effect styles for design
+  /// auto-selection. Returns empty list if no preferences set.
+  List<String> Function()? onGetPreferredStyles;
+
+  /// Callback to read the current calendar entry for a given date key,
+  /// if one exists. Used to check for user overrides that should win
+  /// over autopilot-generated entries.
+  CalendarEntry? Function(String dateKey)? onGetCalendarEntry;
+
   GameDayAutopilotService({
     required EspnApiService espnApi,
     required GameScheduleService scheduleService,
@@ -218,6 +239,106 @@ class GameDayAutopilotService {
     );
     _applyDesign(design);
     _notifySessionChanged(config.teamSlug);
+  }
+
+  /// Populate the calendar with entries for all upcoming games for a team.
+  /// Fetches the full season schedule from ESPN, applies the daylight
+  /// filter, generates a design per game based on variety mode, and
+  /// writes CalendarEntry records via onWriteCalendarEntries.
+  ///
+  /// Safe to call repeatedly — writes are idempotent (same dateKey
+  /// overwrites previous autopilot entry). Returns the number of entries
+  /// written, or 0 on failure.
+  Future<int> populateCalendarForTeam(
+    GameDayAutopilotConfig config, {
+    int lookaheadDays = 180,
+  }) async {
+    if (onWriteCalendarEntries == null) {
+      debugPrint('[GameDayAutopilot] populateCalendar: no write callback');
+      return 0;
+    }
+
+    final now = DateTime.now();
+    final season = now.year;
+
+    List<GameEvent> games;
+    try {
+      games = await _scheduleService.fetchSeasonSchedule(
+        espnTeamId: config.espnTeamId,
+        sport: config.sport,
+        season: season,
+        homeGamesOnly: false,
+      );
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] populateCalendar fetch failed: $e');
+      return 0;
+    }
+
+    if (games.isEmpty) {
+      debugPrint('[GameDayAutopilot] populateCalendar: no games found for '
+          '${config.teamName} season $season');
+      return 0;
+    }
+
+    // Build design catalog once for rotation
+    final catalog = TeamDesignCatalog.build(
+      teamName: config.teamName,
+      primary: config.primaryColor,
+      secondary: config.secondaryColor,
+      brightness: config.brightness,
+    );
+
+    final location = onGetUserLocation?.call();
+    final entries = <CalendarEntry>[];
+    final cutoff = now.add(Duration(days: lookaheadDays));
+    int gameIndex = 0;
+
+    for (final game in games) {
+      // Only future games within lookahead window
+      if (game.scheduledDate.isBefore(now)) continue;
+      if (game.scheduledDate.isAfter(cutoff)) continue;
+
+      // Apply daylight filter if enabled
+      if (config.skipDayGames &&
+          _isDaylightOnlyGame(game, config, location)) {
+        debugPrint('[GameDayAutopilot] skipping daylight game: '
+            '${game.homeTeam} vs ${game.awayTeam} on ${game.scheduledDate}');
+        continue;
+      }
+
+      // Select design based on variety mode
+      final design = _selectDesignForGame(config, catalog, game, gameIndex);
+
+      // Compute on/off times
+      final onTime = _computeOnTime(config, game);
+      final offTime = _computeOffTime(config, game);
+
+      entries.add(_buildCalendarEntry(
+        config: config,
+        game: game,
+        design: design,
+        onTime: onTime,
+        offTime: offTime,
+      ));
+
+      gameIndex++;
+    }
+
+    if (entries.isEmpty) {
+      debugPrint('[GameDayAutopilot] populateCalendar: no entries after '
+          'filter for ${config.teamName}');
+      return 0;
+    }
+
+    final ok = await onWriteCalendarEntries!(entries);
+    if (ok) {
+      debugPrint('[GameDayAutopilot] populateCalendar: wrote '
+          '${entries.length} entries for ${config.teamName}');
+      return entries.length;
+    }
+    debugPrint('[GameDayAutopilot] populateCalendar: write failed for '
+        '${config.teamName}');
+    return 0;
   }
 
   /// Cancel an active session for a team.
@@ -355,18 +476,54 @@ class GameDayAutopilotService {
     GameDayAutopilotConfig config,
     DateTime? gameStart,
   ) async {
+    // Daylight filter — skip activation if game is daylight-only
+    if (config.skipDayGames && gameStart != null) {
+      final location = onGetUserLocation?.call();
+      if (location != null) {
+        final estimatedEnd = gameStart.add(config.estimatedDuration);
+        final sunset = SunUtils.sunsetLocal(
+          location.lat,
+          location.lon,
+          gameStart,
+        );
+        if (sunset != null &&
+            estimatedEnd.isBefore(
+                sunset.subtract(const Duration(minutes: 30)))) {
+          debugPrint('[GameDayAutopilot] Skipping ${config.teamName} — '
+              'daylight game (ends $estimatedEnd before sunset $sunset)');
+          return;
+        }
+      }
+    }
+
+    // Check for user override on this date — if present, user's
+    // manual settings win over autopilot.
+    if (gameStart != null && onGetCalendarEntry != null) {
+      final dateKey = '${gameStart.year}-'
+          '${gameStart.month.toString().padLeft(2, '0')}-'
+          '${gameStart.day.toString().padLeft(2, '0')}';
+      final entry = onGetCalendarEntry!(dateKey);
+      if (entry != null && entry.type == CalendarEntryType.user) {
+        debugPrint('[GameDayAutopilot] User override present for $dateKey, '
+            'autopilot deferring to user settings');
+        return;
+      }
+    }
+
     _sessions[config.teamSlug] = AutopilotSession(
       teamSlug: config.teamSlug,
       phase: AutopilotSessionPhase.preGame,
       gameStart: gameStart,
     );
 
-    // Select and apply design.
-    final design = selectDesign(config);
+    // Select design — now passes user's style preferences via callback
+    final preferredStyles = onGetPreferredStyles?.call() ?? const [];
+    final design = selectDesign(config, preferredStyles: preferredStyles);
     _applyDesign(design);
     _notifySessionChanged(config.teamSlug);
 
-    debugPrint('[GameDayAutopilot] Pre-game activated for ${config.teamName}');
+    debugPrint('[GameDayAutopilot] Pre-game activated for '
+        '${config.teamName} with design: ${design.designName}');
   }
 
   // ── Internal: Active session updates ───────────────────────────────────
@@ -452,6 +609,112 @@ class GameDayAutopilotService {
       case AutopilotSessionPhase.completed:
         break;
     }
+  }
+
+  // ── Internal: Calendar population helpers ───────────────────────────────
+
+  /// Returns true if the entire game is in daylight at the user's
+  /// location. A game is daylight-only when its end time is more
+  /// than 30 minutes before local sunset on the game's date.
+  bool _isDaylightOnlyGame(
+    GameEvent game,
+    GameDayAutopilotConfig config,
+    ({double lat, double lon})? location,
+  ) {
+    if (location == null) return false;
+    final gameEnd = game.scheduledDate.add(config.estimatedDuration);
+    final sunset = SunUtils.sunsetLocal(
+      location.lat,
+      location.lon,
+      game.scheduledDate,
+    );
+    if (sunset == null) return false;
+    return gameEnd.isBefore(sunset.subtract(const Duration(minutes: 30)));
+  }
+
+  /// Select a design for a specific game based on config's variety mode.
+  TeamDesign _selectDesignForGame(
+    GameDayAutopilotConfig config,
+    List<TeamDesign> catalog,
+    GameEvent game,
+    int gameIndex,
+  ) {
+    switch (config.designVariety) {
+      case AutopilotVarietyMode.fixed:
+        if (config.designMode == AutopilotDesignMode.saved &&
+            config.savedDesignPayload != null) {
+          return TeamDesign(
+            name: config.savedDesignName ?? 'Custom',
+            effectId: config.effectId,
+            speed: config.speed,
+            intensity: config.intensity,
+            colorGroupSize: 1,
+            wledPayload: config.savedDesignPayload!,
+          );
+        }
+        return catalog.first;
+
+      case AutopilotVarietyMode.rotating:
+        return TeamDesignCatalog.selectForRotation(catalog, gameIndex);
+
+      case AutopilotVarietyMode.random:
+        return TeamDesignCatalog.selectForRandom(
+          catalog,
+          game.scheduledDate.millisecondsSinceEpoch ~/ 1000,
+        );
+    }
+  }
+
+  /// Compute the on-time for a calendar entry in "HH:mm" 24-hour format.
+  String _computeOnTime(GameDayAutopilotConfig config, GameEvent game) {
+    if (config.onTimeOverride != null) return config.onTimeOverride!;
+    final leadMinutes = config.effectiveLeadTimeMinutes;
+    final onTime =
+        game.scheduledDate.subtract(Duration(minutes: leadMinutes));
+    return _formatHHmm(onTime);
+  }
+
+  /// Compute the off-time for a calendar entry.
+  String _computeOffTime(GameDayAutopilotConfig config, GameEvent game) {
+    if (config.offTimeOverride != null) return config.offTimeOverride!;
+    final offTime = game.scheduledDate
+        .add(config.estimatedDuration)
+        .add(const Duration(minutes: 60));
+    return _formatHHmm(offTime);
+  }
+
+  static String _formatHHmm(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:'
+      '${dt.minute.toString().padLeft(2, '0')}';
+
+  /// Build a CalendarEntry for a game.
+  CalendarEntry _buildCalendarEntry({
+    required GameDayAutopilotConfig config,
+    required GameEvent game,
+    required TeamDesign design,
+    required String onTime,
+    required String offTime,
+  }) {
+    final dateKey = '${game.scheduledDate.year}-'
+        '${game.scheduledDate.month.toString().padLeft(2, '0')}-'
+        '${game.scheduledDate.day.toString().padLeft(2, '0')}';
+
+    final opponent = game.isHome ? game.awayTeam : game.homeTeam;
+    final vsOrAt = game.isHome ? 'vs' : '@';
+    final note =
+        '${config.teamName} $vsOrAt $opponent — Game Day autopilot';
+
+    return CalendarEntry(
+      dateKey: dateKey,
+      patternName: design.name,
+      color: config.primaryColor,
+      onTime: onTime,
+      offTime: offTime,
+      brightness: (config.brightness * 100 / 255).round().clamp(0, 100),
+      type: CalendarEntryType.autopilot,
+      autopilot: true,
+      note: note,
+    );
   }
 
   // ── Internal: WLED payload ─────────────────────────────────────────────

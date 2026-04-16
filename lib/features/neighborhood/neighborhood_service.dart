@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'neighborhood_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -198,6 +200,23 @@ class NeighborhoodService {
     // If creator leaves and no other members, delete the group
     if (group.creatorUid == uid && group.memberUids.length <= 1) {
       await deleteGroup(groupId);
+    }
+
+    // Clear any handoff state for this user. Finding 5.1 from sync
+    // audit — leaving a group mid-handoff would otherwise leave orphaned
+    // state that causes silent resume failures.
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('handoff')
+          .doc('current')
+          .delete();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('sync_handoff_state');
+    } catch (e) {
+      debugPrint('Failed to clear handoff state on leave: $e');
+      // Non-fatal — continue with leave-group completion.
     }
 
     debugPrint('Left neighborhood group: ${group.name}');

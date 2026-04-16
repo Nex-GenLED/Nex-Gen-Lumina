@@ -52,6 +52,7 @@ class DemoScaffold extends ConsumerWidget {
               showSkip: showSkip,
               onBack: () {
                 ref.read(demoFlowProvider.notifier).previousStep();
+                Navigator.of(context).pop();
               },
               onSkip: onSkip ?? () {
                 ref.read(demoFlowProvider.notifier).skipStep();

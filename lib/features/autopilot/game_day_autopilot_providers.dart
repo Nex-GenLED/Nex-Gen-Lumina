@@ -16,12 +16,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_providers.dart';
+import '../schedule/calendar_providers.dart';
+import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
 import '../wled/wled_providers.dart';
+import 'autopilot_providers.dart';
 import 'game_day_autopilot_config.dart';
 import 'game_day_autopilot_service.dart';
+import 'game_day_background_persistence.dart';
 
 // ---------------------------------------------------------------------------
 // Service singletons
@@ -72,6 +76,52 @@ final gameDayAutopilotServiceProvider =
     }
   };
 
+  svc.onWriteCalendarEntries = (entries) async {
+    try {
+      final notifier = ref.read(calendarScheduleProvider.notifier);
+      return await notifier.applyEntries(entries);
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to write calendar entries: $e');
+      return false;
+    }
+  };
+
+  svc.onGetUserLocation = () {
+    try {
+      final profileAsync = ref.read(currentUserProfileProvider);
+      final profile = profileAsync.maybeWhen(
+        data: (p) => p,
+        orElse: () => null,
+      );
+      if (profile?.latitude == null || profile?.longitude == null) {
+        return null;
+      }
+      return (lat: profile!.latitude!, lon: profile.longitude!);
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to get user location: $e');
+      return null;
+    }
+  };
+
+  svc.onGetPreferredStyles = () {
+    try {
+      return ref.read(preferredEffectStylesProvider);
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to read preferred styles: $e');
+      return const [];
+    }
+  };
+
+  svc.onGetCalendarEntry = (dateKey) {
+    try {
+      final entries = ref.read(calendarScheduleProvider);
+      return entries[dateKey];
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to read calendar entry: $e');
+      return null;
+    }
+  };
+
   ref.onDispose(svc.dispose);
   return svc;
 });
@@ -109,6 +159,55 @@ final enabledAutopilotConfigsProvider =
   );
 });
 
+// ---------------------------------------------------------------------------
+// Background persistence: SharedPreferences bridge for the background isolate
+// ---------------------------------------------------------------------------
+
+/// Side-effect provider: persists Game Day configs and user context to
+/// SharedPreferences so the background worker can read them when the app
+/// is closed. Watches all upstream state — any change triggers a re-save.
+///
+/// Kept alive by [gameDayBackgroundPersistenceKeepAliveProvider] which is
+/// watched from main_scaffold.dart.
+final _gameDayBackgroundPersistenceProvider = Provider<void>((ref) {
+  // Persist configs on any change
+  final configsAsync = ref.watch(gameDayAutopilotConfigsProvider);
+  configsAsync.whenData((configs) {
+    final bgConfigs = configs
+        .map(BackgroundGameDayAutopilotConfig.fromConfig)
+        .toList();
+    unawaited(saveGameDayConfigsForBackground(bgConfigs));
+  });
+
+  // Persist user team priority
+  final teamPriority = ref.watch(sportsTeamPriorityProvider);
+  unawaited(saveUserTeamPriority(teamPriority));
+
+  // Persist user preferred styles
+  final preferredStyles = ref.watch(preferredEffectStylesProvider);
+  unawaited(saveUserPreferredStyles(preferredStyles));
+
+  // Persist user location and UID from profile
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  profileAsync.whenData((profile) {
+    if (profile?.latitude != null && profile?.longitude != null) {
+      unawaited(saveUserLocation(BackgroundUserLocation(
+        latitude: profile!.latitude!,
+        longitude: profile.longitude!,
+      )));
+    } else {
+      unawaited(saveUserLocation(null));
+    }
+    unawaited(saveGameDayUserUid(profile?.id));
+  });
+});
+
+/// Public provider to keep the background persistence side-effect alive.
+/// Watch from a top-level widget (main_scaffold.dart).
+final gameDayBackgroundPersistenceKeepAliveProvider = Provider<void>((ref) {
+  ref.watch(_gameDayBackgroundPersistenceProvider);
+});
+
 /// Whether a specific team has autopilot enabled.
 final teamAutopilotEnabledProvider =
     Provider.family<bool, String>((ref, teamSlug) {
@@ -139,6 +238,8 @@ final teamAutopilotConfigProvider =
 
 class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Timer? _evaluationTimer;
+  Timer? _refreshTimer;
+  Timer? _backgroundSyncTimer;
 
   @override
   Map<String, AutopilotSession> build() {
@@ -149,6 +250,24 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       (_) => _evaluate(),
     );
 
+    // Weekly calendar refresh — catches ESPN schedule changes (rescheduled
+    // games, postseason additions). Runs every 24 hours, but only actually
+    // hits ESPN if the cached schedule has expired (24h TTL in
+    // GameScheduleService).
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(
+      const Duration(hours: 24),
+      (_) => refreshAllCalendars(),
+    );
+
+    // Periodically reload background session state so the UI reflects
+    // what the background worker is doing when the app opens mid-session.
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _syncFromBackground(),
+    );
+
     // Wire session change notifications to state updates.
     final service = ref.watch(gameDayAutopilotServiceProvider);
     service.onSessionChanged = (session) {
@@ -157,10 +276,16 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
     ref.onDispose(() {
       _evaluationTimer?.cancel();
+      _refreshTimer?.cancel();
+      _backgroundSyncTimer?.cancel();
     });
 
-    // Run initial evaluation after a short delay.
-    Future.delayed(const Duration(seconds: 5), _evaluate);
+    // Run initial evaluation after a short delay, then refresh calendars
+    // to catch any newly-enabled teams or schedule changes since last launch.
+    Future.delayed(const Duration(seconds: 5), () async {
+      await _evaluate();
+      await refreshAllCalendars();
+    });
 
     return const {};
   }
@@ -171,6 +296,42 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
     final service = ref.read(gameDayAutopilotServiceProvider);
     await service.evaluateConfigs(configs);
+  }
+
+  /// Reload session state from SharedPreferences (written by the
+  /// background worker) and merge with in-memory sessions. Background
+  /// state takes precedence for teams it has session data for.
+  Future<void> _syncFromBackground() async {
+    try {
+      final bgSessions = await loadGameDaySessions();
+      if (bgSessions.isEmpty) return;
+
+      final merged = Map<String, AutopilotSession>.from(state);
+      bgSessions.forEach((slug, bgSession) {
+        merged[slug] = _hydrateSession(bgSession);
+      });
+      state = merged;
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to sync from background: $e');
+    }
+  }
+
+  /// Convert a BackgroundAutopilotSession into the foreground
+  /// AutopilotSession model.
+  AutopilotSession _hydrateSession(BackgroundAutopilotSession bg) {
+    final phase = AutopilotSessionPhase.values.firstWhere(
+      (p) => p.name == bg.phase,
+      orElse: () => AutopilotSessionPhase.idle,
+    );
+    return AutopilotSession(
+      teamSlug: bg.teamSlug,
+      phase: phase,
+      gameStart: bg.gameStart,
+      gameEndDetected: bg.gameEndDetected,
+      countdownEnd: bg.countdownEnd,
+      activeGameId: bg.activeGameId,
+      usedFallbackTimer: bg.usedFallbackTimer,
+    );
   }
 
   /// Toggle autopilot for a team. Creates or updates the Firestore document.
@@ -232,7 +393,92 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     if (!enabled) {
       ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
       state = Map.from(state)..remove(teamSlug);
+      return;
     }
+
+    // If enabling, populate the calendar with upcoming games.
+    _populateCalendarInBackground(teamSlug);
+  }
+
+  /// Fire-and-forget calendar population for a team. Errors are logged
+  /// but don't surface to the caller.
+  void _populateCalendarInBackground(String teamSlug) {
+    Future(() async {
+      try {
+        final configs =
+            ref.read(gameDayAutopilotConfigsProvider).valueOrNull ?? [];
+        final config =
+            configs.where((c) => c.teamSlug == teamSlug).firstOrNull;
+        if (config == null) return;
+
+        final service = ref.read(gameDayAutopilotServiceProvider);
+        final count = await service.populateCalendarForTeam(config);
+        debugPrint('[GameDayAutopilot] Background calendar populate: '
+            '$count entries for $teamSlug');
+      } catch (e) {
+        debugPrint('[GameDayAutopilot] Background populate failed: $e');
+      }
+    });
+  }
+
+  /// Refresh the calendar entries for all enabled autopilot teams.
+  /// Called automatically every 24 hours by the refresh timer.
+  /// Can also be called manually from the Game Day screen.
+  Future<void> refreshAllCalendars() async {
+    final configs = ref.read(enabledAutopilotConfigsProvider);
+    final service = ref.read(gameDayAutopilotServiceProvider);
+    for (final config in configs) {
+      try {
+        await service.populateCalendarForTeam(config);
+      } catch (e) {
+        debugPrint('[GameDayAutopilot] refreshAllCalendars failed for '
+            '${config.teamSlug}: $e');
+      }
+    }
+  }
+
+  /// Update per-team autopilot settings (skip day games, variety mode,
+  /// lead time, on/off overrides). Only non-null fields are written.
+  /// Re-populates the calendar in the background after updating.
+  Future<void> updateTeamSettings({
+    required String teamSlug,
+    bool? skipDayGames,
+    AutopilotVarietyMode? designVariety,
+    int? leadTimeMinutesOverride,
+    String? onTimeOverride,
+    String? offTimeOverride,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) return;
+
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug);
+
+    final updates = <String, dynamic>{
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    };
+    if (skipDayGames != null) updates['skip_day_games'] = skipDayGames;
+    if (designVariety != null) {
+      updates['design_variety'] = designVariety.name;
+    }
+    if (leadTimeMinutesOverride != null) {
+      updates['lead_time_minutes_override'] = leadTimeMinutesOverride;
+    }
+    if (onTimeOverride != null) updates['on_time_override'] = onTimeOverride;
+    if (offTimeOverride != null) {
+      updates['off_time_override'] = offTimeOverride;
+    }
+
+    await docRef.update(updates);
+
+    // Re-populate calendar with new settings
+    _populateCalendarInBackground(teamSlug);
   }
 
   /// Save a custom design for a team's autopilot.

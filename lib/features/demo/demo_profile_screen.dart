@@ -6,6 +6,8 @@ import 'package:nexgen_command/features/demo/demo_lead_service.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_scaffold.dart';
+import 'package:nexgen_command/features/demo/demo_code_screen.dart'
+    show validatedDemoCodeProvider;
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:uuid/uuid.dart';
@@ -52,6 +54,9 @@ class _DemoProfileScreenState extends ConsumerState<DemoProfileScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      // Read dealer code for attribution
+      final dealerDemoCode = ref.read(validatedDemoCodeProvider);
+
       // Create lead object
       final lead = DemoLead(
         id: const Uuid().v4(),
@@ -63,6 +68,9 @@ class _DemoProfileScreenState extends ConsumerState<DemoProfileScreen> {
         zipCode: _zipController.text.trim(),
         homeType: _selectedHomeType,
         referralSource: _selectedReferralSource,
+        dealerCode: dealerDemoCode?.code,
+        dealerName: dealerDemoCode?.dealerName,
+        market: dealerDemoCode?.market,
         capturedAt: DateTime.now(),
       );
 

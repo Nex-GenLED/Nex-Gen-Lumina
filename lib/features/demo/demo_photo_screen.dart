@@ -6,8 +6,11 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
+import 'package:nexgen_command/features/demo/demo_stock_home.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_scaffold.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/services/roofline_auto_detect_service.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Demo photo capture screen.
@@ -25,6 +28,7 @@ class DemoPhotoScreen extends ConsumerStatefulWidget {
 
 class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
   final ImagePicker _picker = ImagePicker();
+  static const int _demoTotalPixelCount = 180;
   Uint8List? _capturedPhoto;
   bool _isLoading = false;
 
@@ -45,6 +49,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
         });
         ref.read(demoPhotoProvider.notifier).state = bytes;
         ref.read(demoUsingStockPhotoProvider.notifier).state = false;
+        await _runAutoDetectFromBytes(bytes);
       }
     } catch (e) {
       if (!mounted) return;
@@ -73,6 +78,7 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
         });
         ref.read(demoPhotoProvider.notifier).state = bytes;
         ref.read(demoUsingStockPhotoProvider.notifier).state = false;
+        await _runAutoDetectFromBytes(bytes);
       }
     } catch (e) {
       if (!mounted) return;
@@ -84,10 +90,45 @@ class _DemoPhotoScreenState extends ConsumerState<DemoPhotoScreen> {
     }
   }
 
-  void _useStockPhoto() {
-    ref.read(demoUsingStockPhotoProvider.notifier).state = true;
-    ref.read(demoPhotoProvider.notifier).state = null;
-    _continueToNext();
+  Future<void> _useStockPhoto() async {
+    setState(() => _isLoading = true);
+    try {
+      final stockConfig = await DemoStockHome.load();
+      ref.read(demoUsingStockPhotoProvider.notifier).state = true;
+      ref.read(demoPhotoProvider.notifier).state = null;
+      ref.read(demoRooflineConfigProvider.notifier).state = stockConfig;
+      _continueToNext();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load sample home: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _runAutoDetectFromBytes(Uint8List bytes) async {
+    try {
+      final mask = await RooflineAutoDetectService.detectFromImage(
+        MemoryImage(bytes),
+      );
+      if (mask == null || mask.points.length < 2) {
+        // Auto-detect failed — clear config so downstream knows not to
+        // render a trace. The user can still continue to the roofline
+        // review screen where they'll see an empty state.
+        ref.read(demoRooflineConfigProvider.notifier).state = null;
+        return;
+      }
+      final config = migrateFromLegacyMask(
+        maskPoints: mask.points,
+        totalPixelCount: _demoTotalPixelCount,
+      );
+      ref.read(demoRooflineConfigProvider.notifier).state = config;
+    } catch (e) {
+      debugPrint('Demo auto-detect failed: $e');
+      ref.read(demoRooflineConfigProvider.notifier).state = null;
+    }
   }
 
   void _continueToNext() {

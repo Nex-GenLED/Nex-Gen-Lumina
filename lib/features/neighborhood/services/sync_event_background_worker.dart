@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:http/http.dart' as http;
 
+import '../../autopilot/game_day_background_persistence.dart';
 import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
@@ -369,6 +370,23 @@ class SyncEventBackgroundWorker {
   // ── Session Initiation ──────────────────────────────────────────────────
 
   /// Trigger a sync session — calls Cloud Function and applies local WLED.
+  /// Check whether this sync event should defer to an active Game Day
+  /// session. Shortform (gameDay) sync events always proceed — they
+  /// coordinate at the same level. Longform (holiday/custom) events
+  /// defer if a personal Game Day session is active.
+  Future<bool> _checkPriorityBeforeStart(
+    BackgroundSyncEventConfig config,
+  ) async {
+    if (config.category == 'gameDay') return true;
+
+    final activeGameDay = await loadActiveGameDaySession();
+    if (activeGameDay == null) return true;
+
+    debugPrint('[SyncBgWorker] Deferring "${config.name}" — Game Day '
+        'active for ${activeGameDay.teamSlug}');
+    return false;
+  }
+
   Future<void> _triggerSession(
     BackgroundSyncEventConfig config, {
     String? gameId,
@@ -383,6 +401,9 @@ class SyncEventBackgroundWorker {
       debugPrint('[SyncBgWorker] Session already active, skipping');
       return;
     }
+
+    // Priority check: longform events defer to active Game Day sessions.
+    if (!await _checkPriorityBeforeStart(config)) return;
 
     final groupId = config.groupId.isNotEmpty
         ? config.groupId

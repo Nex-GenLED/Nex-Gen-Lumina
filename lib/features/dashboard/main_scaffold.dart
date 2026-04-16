@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
@@ -88,6 +89,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     ref.watch(autoConnectControllerProvider);
+    ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
 
     final isSimpleMode = ref.watch(simpleModeProvider);
     final luminaState = ref.watch(luminaSheetProvider);

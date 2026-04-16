@@ -517,6 +517,20 @@ class SyncHandoffManager {
     await _clearPausedStateFromFirestore(uid);
   }
 
+  // ── CLEANUP ON GROUP LEAVE ──────────────────────────────────────────
+
+  /// Clear all handoff state for a user who is leaving a group. Prevents
+  /// orphaned handoff state (Finding 5.1 from sync audit) that would
+  /// cause silent resume failures when the user joins a new group later.
+  Future<void> clearUserHandoffState(String uid) async {
+    _cancelAllTimers();
+    _state = const HandoffState();
+    _emitState();
+    await _persistState();
+    await _clearPausedStateFromFirestore(uid);
+    debugPrint('[SyncHandoffManager] Cleared handoff state for user $uid');
+  }
+
   // ── USER JOINS SHORTFORM GROUP MID-LONGFORM ─────────────────────────
 
   /// Called when a user joins a shortForm group while they have an active

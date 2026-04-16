@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -60,10 +61,26 @@ final rooflineConfigServiceProvider = Provider<RooflineConfigService>((ref) {
   return RooflineConfigService();
 });
 
-/// Provider that streams the current user's roofline configuration.
-/// Returns null if the user is not logged in or has no configuration.
+/// Provider that streams the current roofline configuration.
+///
+/// In demo mode (demoExperienceActiveProvider == true), returns the
+/// demo-scoped configuration so AnimatedRooflineOverlay renders the
+/// stock home roofline (or the user's photo with auto-detected
+/// polyline) correctly. Without this branch, demo users see no LED
+/// overlay at all because demo users are not authenticated.
+///
+/// In production (non-demo) mode, streams from Firestore unchanged.
+/// Returns null if the user is not logged in and not in demo.
 final currentRooflineConfigProvider =
     StreamProvider<RooflineConfiguration?>((ref) {
+  // DEMO MODE: short-circuit to the demo-scoped config.
+  final isDemo = ref.watch(demoExperienceActiveProvider);
+  if (isDemo) {
+    final demoConfig = ref.watch(demoRooflineConfigProvider);
+    return Stream.value(demoConfig);
+  }
+
+  // PRODUCTION: stream from Firestore, requires authenticated user.
   final authState = ref.watch(authStateProvider);
   final user = authState.valueOrNull;
 

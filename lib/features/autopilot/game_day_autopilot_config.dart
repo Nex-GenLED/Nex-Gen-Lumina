@@ -41,6 +41,23 @@ enum AutopilotDesignMode {
 }
 
 // ---------------------------------------------------------------------------
+// Design variety mode
+// ---------------------------------------------------------------------------
+
+/// How pre-game designs are selected across multiple games.
+enum AutopilotVarietyMode {
+  /// Same design every game (saved or fallback).
+  fixed,
+
+  /// Cycle through the team's design catalog in order.
+  /// Default for new autopilot configs.
+  rotating,
+
+  /// Deterministic random pick per game (seeded by game date).
+  random,
+}
+
+// ---------------------------------------------------------------------------
 // GameDayAutopilotConfig
 // ---------------------------------------------------------------------------
 
@@ -94,6 +111,34 @@ class GameDayAutopilotConfig {
   /// Whether score celebrations should fire during the game.
   final bool scoreCelebrationEnabled;
 
+  /// Whether to skip games where the entire game is in daylight at the
+  /// user's location. When true (default), a game is skipped if its end
+  /// time is more than 30 minutes before local sunset on the game's date.
+  /// Night / evening games are unaffected — autopilot activates as normal.
+  final bool skipDayGames;
+
+  /// How pre-game designs rotate across games.
+  /// - fixed: use the same design (saved or fallback) for every game
+  /// - rotating: cycle through the team design catalog in order
+  /// - random: pick a deterministic random design per game (seeded by
+  ///   game date so repeat views match)
+  final AutopilotVarietyMode designVariety;
+
+  /// Lead-time-before-game override in minutes. When null, defaults to 30.
+  /// Applies to all future games for this team unless overridden by a
+  /// per-date user CalendarEntry.
+  final int? leadTimeMinutesOverride;
+
+  /// Fixed on-time override in "HH:MM" 24-hour format. When non-null,
+  /// ignores leadTimeMinutesOverride and uses this absolute time for all
+  /// future games. Useful for users who want "always 5:00 PM regardless
+  /// of kickoff."
+  final String? onTimeOverride;
+
+  /// Fixed off-time override in "HH:MM" 24-hour format. When non-null,
+  /// ignores "game end + 60min" default. Same semantics as onTimeOverride.
+  final String? offTimeOverride;
+
   /// When this config was created.
   final DateTime createdAt;
 
@@ -116,6 +161,11 @@ class GameDayAutopilotConfig {
     this.intensity = 128,
     this.brightness = 200,
     this.scoreCelebrationEnabled = true,
+    this.skipDayGames = true,
+    this.designVariety = AutopilotVarietyMode.rotating,
+    this.leadTimeMinutesOverride,
+    this.onTimeOverride,
+    this.offTimeOverride,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -138,6 +188,9 @@ class GameDayAutopilotConfig {
   /// Estimated game duration for this sport.
   Duration get estimatedDuration => estimatedGameDuration(sport);
 
+  /// Effective lead time in minutes. Falls back to 30 if no override set.
+  int get effectiveLeadTimeMinutes => leadTimeMinutesOverride ?? 30;
+
   // ── Serialization ──────────────────────────────────────────────────────
 
   Map<String, dynamic> toFirestore() => {
@@ -156,6 +209,12 @@ class GameDayAutopilotConfig {
         'intensity': intensity,
         'brightness': brightness,
         'score_celebration_enabled': scoreCelebrationEnabled,
+        'skip_day_games': skipDayGames,
+        'design_variety': designVariety.name,
+        if (leadTimeMinutesOverride != null)
+          'lead_time_minutes_override': leadTimeMinutesOverride,
+        if (onTimeOverride != null) 'on_time_override': onTimeOverride,
+        if (offTimeOverride != null) 'off_time_override': offTimeOverride,
         'created_at': Timestamp.fromDate(createdAt),
         'updated_at': Timestamp.fromDate(updatedAt),
       };
@@ -180,6 +239,12 @@ class GameDayAutopilotConfig {
       brightness: (data['brightness'] as num?)?.toInt() ?? 200,
       scoreCelebrationEnabled:
           data['score_celebration_enabled'] as bool? ?? true,
+      skipDayGames: data['skip_day_games'] as bool? ?? true,
+      designVariety: _parseVarietyMode(data['design_variety'] as String?),
+      leadTimeMinutesOverride:
+          (data['lead_time_minutes_override'] as num?)?.toInt(),
+      onTimeOverride: data['on_time_override'] as String?,
+      offTimeOverride: data['off_time_override'] as String?,
       createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -195,6 +260,11 @@ class GameDayAutopilotConfig {
     int? intensity,
     int? brightness,
     bool? scoreCelebrationEnabled,
+    bool? skipDayGames,
+    AutopilotVarietyMode? designVariety,
+    int? leadTimeMinutesOverride,
+    String? onTimeOverride,
+    String? offTimeOverride,
     DateTime? updatedAt,
   }) {
     return GameDayAutopilotConfig(
@@ -214,6 +284,12 @@ class GameDayAutopilotConfig {
       brightness: brightness ?? this.brightness,
       scoreCelebrationEnabled:
           scoreCelebrationEnabled ?? this.scoreCelebrationEnabled,
+      skipDayGames: skipDayGames ?? this.skipDayGames,
+      designVariety: designVariety ?? this.designVariety,
+      leadTimeMinutesOverride:
+          leadTimeMinutesOverride ?? this.leadTimeMinutesOverride,
+      onTimeOverride: onTimeOverride ?? this.onTimeOverride,
+      offTimeOverride: offTimeOverride ?? this.offTimeOverride,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -224,6 +300,14 @@ class GameDayAutopilotConfig {
     return AutopilotDesignMode.values.firstWhere(
       (e) => e.name == value,
       orElse: () => AutopilotDesignMode.fallback,
+    );
+  }
+
+  static AutopilotVarietyMode _parseVarietyMode(String? value) {
+    if (value == null) return AutopilotVarietyMode.rotating;
+    return AutopilotVarietyMode.values.firstWhere(
+      (e) => e.name == value,
+      orElse: () => AutopilotVarietyMode.rotating,
     );
   }
 

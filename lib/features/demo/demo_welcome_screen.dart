@@ -151,23 +151,9 @@ class DemoWelcomeScreen extends ConsumerWidget {
                       const SizedBox(height: 16),
                       _buildFeatureItem(
                         context,
-                        Icons.palette_outlined,
-                        'Explore 500+ Patterns',
-                        'Browse holidays, sports teams, and custom designs',
-                      ),
-                      const SizedBox(height: 16),
-                      _buildFeatureItem(
-                        context,
-                        Icons.schedule_outlined,
-                        'Smart Scheduling',
-                        'See how automation syncs with sunrise & sunset',
-                      ),
-                      const SizedBox(height: 16),
-                      _buildFeatureItem(
-                        context,
-                        Icons.auto_awesome_outlined,
-                        'Meet Lumina AI',
-                        'Your personal lighting assistant',
+                        Icons.roofing_outlined,
+                        'See Your Roofline Transformed',
+                        'Preview your home with Nex-Gen smart LED lighting in seconds',
                       ),
 
                       const SizedBox(height: 40),
@@ -232,7 +218,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Takes about 3 minutes',
+                        'Takes about 90 seconds',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: NexGenPalette.textMedium,
                             ),
