@@ -8,6 +8,87 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/models/controller_type.dart';
+
+/// Parsed response from WLED GET /json/info.
+class WledInfoResponse {
+  /// Maximum number of segments the firmware supports (proxy for channel count).
+  final int maxseg;
+
+  /// Architecture string reported by the device (e.g. "esp32").
+  final String arch;
+
+  /// WLED firmware version string (e.g. "0.14.0").
+  final String ver;
+
+  /// The raw JSON map, kept for forward compatibility.
+  final Map<String, dynamic> raw;
+
+  const WledInfoResponse({
+    required this.maxseg,
+    required this.arch,
+    required this.ver,
+    this.raw = const {},
+  });
+}
+
+/// Result of comparing a [WledInfoResponse] against an expected [ControllerType].
+class ControllerValidationResult {
+  /// Whether the reported capabilities match expectations.
+  final bool isMatch;
+
+  /// Human-readable warning when [isMatch] is false (null when matched).
+  final String? warningMessage;
+
+  /// Always `true` — mismatches are warnings, not blockers.
+  final bool canProceed;
+
+  const ControllerValidationResult({
+    required this.isMatch,
+    this.warningMessage,
+    this.canProceed = true,
+  });
+}
+
+/// Compares a live [WledInfoResponse] against the dealer-selected
+/// [ControllerType] and returns a validation result.
+///
+/// This is a non-blocking check — [ControllerValidationResult.canProceed] is
+/// always `true`.  Dealers may have intentionally mis-selected; the warning
+/// lets them double-check.
+ControllerValidationResult validateControllerMatch(
+  WledInfoResponse info,
+  ControllerType expected,
+) {
+  switch (expected) {
+    case ControllerType.digOcta:
+      if (info.maxseg < 8) {
+        return ControllerValidationResult(
+          isMatch: false,
+          warningMessage:
+              'This controller reports fewer than 8 channels '
+              '(maxseg=${info.maxseg}). '
+              'Verify hardware matches selection.',
+        );
+      }
+      return const ControllerValidationResult(isMatch: true);
+
+    case ControllerType.skikbily:
+      if (info.maxseg < 4) {
+        return ControllerValidationResult(
+          isMatch: false,
+          warningMessage:
+              'This controller reports fewer than 4 channels '
+              '(maxseg=${info.maxseg}). '
+              'Verify hardware matches selection.',
+        );
+      }
+      return const ControllerValidationResult(isMatch: true);
+
+    case ControllerType.genericWled:
+      return const ControllerValidationResult(isMatch: true);
+  }
+}
 
 /// Converts an RGB color to RGBW format with auto-calculated white channel.
 /// WLED handles GRB color order conversion internally when configured correctly.
@@ -103,6 +184,52 @@ class WledService implements WledRepository {
       debugPrint('WLED getState status ${res.statusCode}: $body');
     } catch (e) {
       debugPrint('WLED getState error: $e');
+    }
+    return null;
+  }
+
+  /// Fetches device info from GET /json/info and returns a parsed
+  /// [WledInfoResponse], or `null` on failure.
+  ///
+  /// Existing callers that only need RGBW support or LED count should continue
+  /// to use [supportsRgbw] / [getTotalLedCount] — this method is for richer
+  /// inspection during pairing.
+  Future<WledInfoResponse?> getInfo() async {
+    if (_simulate) {
+      return const WledInfoResponse(
+        maxseg: 10,
+        arch: 'esp32',
+        ver: '0.14.0-sim',
+      );
+    }
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.getUrl(_uri('/json/info'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final info = jsonDecode(body) as Map<String, dynamic>;
+        final leds = info['leds'];
+        final maxseg =
+            (leds is Map && leds['maxseg'] is num)
+                ? (leds['maxseg'] as num).toInt()
+                : 0;
+        final arch = info['arch'] as String? ?? '';
+        final ver = info['ver'] as String? ?? '';
+        return WledInfoResponse(
+          maxseg: maxseg,
+          arch: arch,
+          ver: ver,
+          raw: info,
+        );
+      }
+      debugPrint('WLED getInfo status ${res.statusCode}: $body');
+    } catch (e) {
+      debugPrint('WLED getInfo error: $e');
     }
     return null;
   }
