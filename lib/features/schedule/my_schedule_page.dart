@@ -837,19 +837,23 @@ class _DayHeroCard extends StatelessWidget {
         ? '🎉 Holiday'
         : calEntry?.type == CalendarEntryType.user
             ? '👤 User Set'
-            : recurringFirst != null
-                ? '🔁 Recurring'
-                : isPast
-                    ? '—'
-                    : '⚡ Auto-Pilot';
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? '⚡ Game Day'
+                : recurringFirst != null
+                    ? '🔁 Recurring'
+                    : isPast
+                        ? '—'
+                        : '⚡ Auto-Pilot';
 
     final typeColor = calEntry?.type == CalendarEntryType.holiday
         ? NexGenPalette.amber
         : calEntry?.type == CalendarEntryType.user
             ? NexGenPalette.cyan
-            : recurringFirst != null
-                ? NexGenPalette.violet
-                : NexGenPalette.textMedium;
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? NexGenPalette.cyan
+                : recurringFirst != null
+                    ? NexGenPalette.violet
+                    : NexGenPalette.textMedium;
 
     // Extract WLED effect info for the pixel strip
     final wledPayload = calEntry != null ? null : recurringFirst?.wledPayload;
@@ -864,9 +868,11 @@ class _DayHeroCard extends StatelessWidget {
         ? 'Holiday'
         : calEntry?.type == CalendarEntryType.user
             ? calEntry!.autopilot ? 'AI-Generated' : 'Manual'
-            : recurringFirst != null
-                ? 'Recurring Schedule'
-                : 'Autopilot';
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? 'Game Day Autopilot'
+                : recurringFirst != null
+                    ? 'Recurring Schedule'
+                    : 'Autopilot';
 
     final effectLabel = effectId != null
         ? _wledEffectName(effectId)
@@ -1738,6 +1744,10 @@ class _WeekDayCell extends StatelessWidget {
           shape: BoxShape.circle,
         ),
       );
+    }
+    if (entry?.type == CalendarEntryType.autopilot) {
+      return Icon(Icons.auto_awesome,
+          size: 8, color: NexGenPalette.cyan);
     }
     if (entry?.autopilot == true) {
       return Container(

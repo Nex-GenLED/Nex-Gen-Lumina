@@ -6,7 +6,7 @@
 
 import 'package:flutter/material.dart';
 
-enum CalendarEntryType { auto, user, holiday }
+enum CalendarEntryType { auto, user, holiday, autopilot }
 
 class CalendarEntry {
   final String dateKey;       // 'YYYY-MM-DD'

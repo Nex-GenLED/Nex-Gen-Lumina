@@ -998,8 +998,8 @@ class _ExploreRooflinePreview extends ConsumerWidget {
               padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: SizedBox(
-                  height: 160,
+                child: AspectRatio(
+                  aspectRatio: 994 / 492,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -1007,7 +1007,7 @@ class _ExploreRooflinePreview extends ConsumerWidget {
                       Image.asset(
                         'assets/images/Demohomephoto.jpg',
                         fit: BoxFit.cover,
-                        alignment: const Alignment(0, 0.3),
+                        alignment: Alignment.center,
                       ),
                       // Roofline overlay
                       LayoutBuilder(

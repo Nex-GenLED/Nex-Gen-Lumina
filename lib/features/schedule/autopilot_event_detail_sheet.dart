@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -9,6 +11,8 @@ import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/utils/effect_display_meta.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
+import 'calendar_entry.dart';
+import 'calendar_entry_editor.dart';
 
 /// Shows a detail bottom sheet for an [AutopilotEvent] schedule entry.
 ///
@@ -413,7 +417,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
             color: NexGenPalette.textMedium,
             onTap: () {
               Navigator.of(context).pop();
-              // TODO: wire to schedule edit flow once available
+              _openEditor(context, ref);
             },
           ),
         ),
@@ -516,6 +520,49 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
       await eventRepo.deleteEvent(uid, event.id);
     }
     if (context.mounted) Navigator.of(context).pop();
+  }
+
+  /// Open the calendar entry editor for this event.
+  void _openEditor(BuildContext context, WidgetRef ref) {
+    // Convert AutopilotEvent → CalendarEntry for the editor
+    final dateKey = '${event.startTime.year}-'
+        '${event.startTime.month.toString().padLeft(2, '0')}-'
+        '${event.startTime.day.toString().padLeft(2, '0')}';
+    final onTime =
+        '${event.startTime.hour.toString().padLeft(2, '0')}:'
+        '${event.startTime.minute.toString().padLeft(2, '0')}';
+    final offTime =
+        '${event.endTime.hour.toString().padLeft(2, '0')}:'
+        '${event.endTime.minute.toString().padLeft(2, '0')}';
+
+    final entry = CalendarEntry(
+      dateKey: dateKey,
+      patternName: event.patternName,
+      onTime: onTime,
+      offTime: offTime,
+      brightness: (_bri * 100 / 255).round().clamp(0, 100),
+      type: CalendarEntryType.autopilot,
+      autopilot: true,
+      note: event.sourceDetail,
+    );
+
+    // Try to find matching team config for scope-choice
+    final configs = ref
+        .read(gameDayAutopilotConfigsProvider)
+        .maybeWhen(
+          data: (c) => c,
+          orElse: () => const <GameDayAutopilotConfig>[],
+        );
+    final teamConfig = configs
+        .where((c) => event.sourceDetail.contains(c.teamName))
+        .firstOrNull;
+
+    showCalendarEntryEditor(
+      context,
+      ref,
+      entry: entry,
+      teamConfig: teamConfig,
+    );
   }
 
   // ---------------------------------------------------------------------------

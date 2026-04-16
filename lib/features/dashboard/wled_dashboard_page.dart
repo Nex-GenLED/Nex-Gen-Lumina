@@ -652,14 +652,14 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
-        child: SizedBox(
-          height: 350,
+        child: AspectRatio(
+          aspectRatio: 994 / 492,
           child: Stack(fit: StackFit.expand, children: [
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
-              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, 0.4))
+              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: Alignment.center)
             else if (!profileAsync.isLoading)
-              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.4)),
+              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: Alignment.center),
             // Sky color overlay — sits above photo, below controls
             Positioned.fill(
               child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
@@ -681,7 +681,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           brightness: state.brightness,
                           forceOn: state.isOn,
                           targetAspectRatio: targetAspectRatio,
-                          imageAlignment: const Offset(0, 0.4),
+                          imageAlignment: Offset.zero,
                           useBoxFitCover: true,
                           colorGroupSize: state.colorGroupSize,
                           spacing: state.spacing,
@@ -1639,14 +1639,14 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     // Define time slot boundaries and their themes
     final slots = <_SkySlot>[
-      _SkySlot(0, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
-      _SkySlot(5, [const Color(0xFF1A0533), const Color(0xFF8B3A62), const Color(0xFFE8855A)], 0.75, 'Dawn'),
-      _SkySlot(7, [const Color(0xFF1A6BAD), const Color(0xFF7EC8E3), const Color(0xFFFFD89B)], 0.55, 'Morning'),
-      _SkySlot(10, [const Color(0xFF2980B9), const Color(0xFF87CEEB)], 0.35, 'Midday'),
-      _SkySlot(15, [const Color(0xFF1A6BAD), const Color(0xFFFFB347)], 0.50, 'Afternoon'),
-      _SkySlot(18, [const Color(0xFFFF6B35), const Color(0xFFFF4500), const Color(0xFF8B1A8B)], 0.72, 'Sunset'),
-      _SkySlot(20, [const Color(0xFF2C1654), const Color(0xFF0D0D2B)], 0.85, 'Dusk'),
-      _SkySlot(22, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
+      _SkySlot(0, [const Color(0xFF000000), const Color(0xFF020818)], 0.22, 'Night'),
+      _SkySlot(5, [const Color(0xFF1A0533), const Color(0xFF8B3A62), const Color(0xFFE8855A)], 0.18, 'Dawn'),
+      _SkySlot(7, [const Color(0xFF1A6BAD), const Color(0xFF7EC8E3), const Color(0xFFFFD89B)], 0.10, 'Morning'),
+      _SkySlot(10, [const Color(0xFF2980B9), const Color(0xFF87CEEB)], 0.00, 'Midday'),
+      _SkySlot(15, [const Color(0xFF1A6BAD), const Color(0xFFFFB347)], 0.08, 'Afternoon'),
+      _SkySlot(18, [const Color(0xFFFF6B35), const Color(0xFFFF4500), const Color(0xFF8B1A8B)], 0.18, 'Sunset'),
+      _SkySlot(20, [const Color(0xFF2C1654), const Color(0xFF0D0D2B)], 0.20, 'Dusk'),
+      _SkySlot(22, [const Color(0xFF000000), const Color(0xFF020818)], 0.22, 'Night'),
     ];
 
     // Find current and next slot
@@ -1778,8 +1778,13 @@ class _PresetChip extends StatelessWidget {
   }
 }
 
-/// Animated sky gradient overlay that fades from top to vertical midpoint.
-/// Uses AnimatedContainer with a 90-second duration so transitions are very gradual.
+/// Flat uniform color wash representing the sky tint for the current
+/// time of day. No gradient — a single color with low opacity is applied
+/// evenly across the image, so the tint reads as ambient atmosphere
+/// rather than a vignette.
+///
+/// Transitions between time slots use AnimatedContainer's 90-second
+/// tween so the sky shift is gradual and imperceptible during use.
 class _SkyGradientOverlay extends StatelessWidget {
   final _SkyTheme skyTheme;
 
@@ -1787,29 +1792,17 @@ class _SkyGradientOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final overlayColors = skyTheme.skyColors
-        .map((c) => c.withValues(alpha: skyTheme.overlayOpacity))
-        .toList();
-
-    // Build stops: evenly distribute sky colors, then end with transparent at 1.0
-    final totalStops = overlayColors.length + 1;
-    final stops = <double>[
-      for (int i = 0; i < overlayColors.length; i++)
-        i / (totalStops - 1),
-      1.0,
-    ];
+    // Use the dominant (first) sky color at the slot's opacity.
+    // If a slot ever has zero colors, fall back to transparent.
+    final baseColor = skyTheme.skyColors.isNotEmpty
+        ? skyTheme.skyColors.first
+        : Colors.transparent;
+    final washColor = baseColor.withValues(alpha: skyTheme.overlayOpacity);
 
     return AnimatedContainer(
       duration: const Duration(seconds: 90),
       curve: Curves.linear,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.center,
-          colors: [...overlayColors, Colors.transparent],
-          stops: stops,
-        ),
-      ),
+      color: washColor,
     );
   }
 }

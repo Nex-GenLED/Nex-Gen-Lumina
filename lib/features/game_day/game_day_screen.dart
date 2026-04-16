@@ -162,13 +162,21 @@ class GameDayScreen extends ConsumerWidget {
 // Team Card — shows one team's full Game Day config
 // ===========================================================================
 
-class _TeamCard extends ConsumerWidget {
+class _TeamCard extends ConsumerStatefulWidget {
   final GameDayTeamEntry entry;
 
   const _TeamCard({required this.entry});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TeamCard> createState() => _TeamCardState();
+}
+
+class _TeamCardState extends ConsumerState<_TeamCard> {
+  bool _settingsExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
     final config = entry.config;
     final crew = entry.crew;
     final gameAsync = ref.watch(upcomingGameProvider(config.teamSlug));
@@ -289,6 +297,12 @@ class _TeamCard extends ConsumerWidget {
                       ? null
                       : (val) => _toggleAutopilot(context, ref, config, val),
                 ),
+
+                // Expandable settings — only when autopilot is enabled
+                if (config.enabled && !entry.isCrewMember) ...[
+                  const SizedBox(height: 4),
+                  _buildSettingsExpander(context, ref, config),
+                ],
               ],
             ),
           ),
@@ -313,8 +327,6 @@ class _TeamCard extends ConsumerWidget {
 
   void _openDesignPicker(
       BuildContext context, WidgetRef ref, GameDayAutopilotConfig config) {
-    // Navigate to explore with the team's category pre-selected.
-    // The team slug maps to a library node in the sports hierarchy.
     final nodeId = 'team_${config.teamSlug}';
     context.push('/explore/library/$nodeId');
   }
@@ -325,7 +337,6 @@ class _TeamCard extends ConsumerWidget {
       teamSlug: config.teamSlug,
       enabled: config.enabled,
     );
-    // Update the score celebration field specifically.
     ref.read(gameDayAutopilotNotifierProvider.notifier).saveDesign(
       teamSlug: config.teamSlug,
       designName: config.savedDesignName ?? config.designLabel,
@@ -366,6 +377,305 @@ class _TeamCard extends ConsumerWidget {
         );
       }
     }
+  }
+
+  // ── Settings expander ──────────────────────────────────────────────
+
+  Widget _buildSettingsExpander(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) {
+    return Column(
+      children: [
+        const Divider(height: 24, color: NexGenPalette.line),
+        InkWell(
+          onTap: () => setState(() => _settingsExpanded = !_settingsExpanded),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.tune_rounded,
+                    size: 18, color: NexGenPalette.cyan),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Autopilot Settings',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: NexGenPalette.textMedium,
+                    ),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _settingsExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.expand_more,
+                      size: 20, color: NexGenPalette.textMedium),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: _buildSettingsContent(context, ref, config),
+          crossFadeState: _settingsExpanded
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSettingsContent(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. Skip day games toggle
+          _ToggleRow(
+            icon: Icons.wb_sunny_outlined,
+            label: 'Skip day games',
+            value: config.skipDayGames,
+            onChanged: (val) {
+              ref
+                  .read(gameDayAutopilotNotifierProvider.notifier)
+                  .updateTeamSettings(
+                    teamSlug: config.teamSlug,
+                    skipDayGames: val,
+                  );
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 28, bottom: 8),
+            child: Text(
+              'Skip games that are fully in daylight at your location',
+              style: TextStyle(
+                fontSize: 11,
+                color: NexGenPalette.textMedium.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+          const Divider(height: 16, color: NexGenPalette.line),
+
+          // 2. Design variety
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded,
+                    size: 18, color: NexGenPalette.cyan),
+                const SizedBox(width: 10),
+                const Text(
+                  'Design variety',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: NexGenPalette.textMedium,
+                  ),
+                ),
+                const Spacer(),
+                Tooltip(
+                  message: 'Autopilot generates 6 team-themed designs\n'
+                      '(Solid, Chase, Breathe, Twinkle, etc.)\n'
+                      'using your team\'s colors.',
+                  child: Icon(Icons.help_outline,
+                      size: 16,
+                      color:
+                          NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                ),
+              ],
+            ),
+          ),
+          _buildVarietyRadio(ref, config, AutopilotVarietyMode.rotating,
+              'Rotate through team designs'),
+          _buildVarietyRadio(ref, config, AutopilotVarietyMode.fixed,
+              'Same pattern every game'),
+          _buildVarietyRadio(ref, config, AutopilotVarietyMode.random,
+              'Random team design'),
+          const Divider(height: 16, color: NexGenPalette.line),
+
+          // 3. Lead time
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.timer_outlined,
+                    size: 18, color: NexGenPalette.cyan),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Lead time before game',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: NexGenPalette.textMedium,
+                    ),
+                  ),
+                ),
+                _buildLeadTimePicker(ref, config),
+              ],
+            ),
+          ),
+          const Divider(height: 16, color: NexGenPalette.line),
+
+          // 4. Refresh schedule button
+          Center(
+            child: TextButton.icon(
+              onPressed: () async {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Refreshing game schedule...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+                await ref
+                    .read(gameDayAutopilotNotifierProvider.notifier)
+                    .refreshAllCalendars();
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Schedule refreshed!'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Refresh Schedule'),
+              style: TextButton.styleFrom(
+                foregroundColor: NexGenPalette.cyan,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVarietyRadio(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+    AutopilotVarietyMode mode,
+    String label,
+  ) {
+    return InkWell(
+      onTap: () {
+        ref
+            .read(gameDayAutopilotNotifierProvider.notifier)
+            .updateTeamSettings(
+              teamSlug: config.teamSlug,
+              designVariety: mode,
+            );
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(left: 28),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 32,
+              child: Radio<AutopilotVarietyMode>(
+                value: mode,
+                groupValue: config.designVariety,
+                onChanged: (val) {
+                  if (val == null) return;
+                  ref
+                      .read(gameDayAutopilotNotifierProvider.notifier)
+                      .updateTeamSettings(
+                        teamSlug: config.teamSlug,
+                        designVariety: val,
+                      );
+                },
+                activeColor: NexGenPalette.cyan,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: config.designVariety == mode
+                    ? NexGenPalette.textHigh
+                    : NexGenPalette.textMedium,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLeadTimePicker(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) {
+    final minutes = config.effectiveLeadTimeMinutes;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: minutes > 0
+                ? () => _setLeadTime(ref, config, (minutes - 15).clamp(0, 180))
+                : null,
+            child: Icon(Icons.remove,
+                size: 16,
+                color: minutes > 0
+                    ? NexGenPalette.textHigh
+                    : NexGenPalette.textMedium.withValues(alpha: 0.3)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '${minutes}m',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: NexGenPalette.textHigh,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: minutes < 180
+                ? () =>
+                    _setLeadTime(ref, config, (minutes + 15).clamp(0, 180))
+                : null,
+            child: Icon(Icons.add,
+                size: 16,
+                color: minutes < 180
+                    ? NexGenPalette.textHigh
+                    : NexGenPalette.textMedium.withValues(alpha: 0.3)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _setLeadTime(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+    int minutes,
+  ) {
+    ref
+        .read(gameDayAutopilotNotifierProvider.notifier)
+        .updateTeamSettings(
+          teamSlug: config.teamSlug,
+          leadTimeMinutesOverride: minutes,
+        );
   }
 }
 
