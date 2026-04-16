@@ -1,12 +1,20 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/services/image_upload_service.dart';
+import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Step 2: Controller Setup screen for the installer wizard
@@ -27,16 +35,55 @@ class ControllerSetupScreen extends ConsumerStatefulWidget {
 class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
   final Map<String, bool> _controllerStatus = {};
   final Map<String, bool> _checkingStatus = {};
+  final Map<String, ControllerType> _controllerTypes = {};
+  final Set<String> _pushingDefaults = {};
+  final Set<String> _backgroundCheckInFlight = {};
+  Timer? _statusRefreshTimer;
   bool _isUploading = false;
   String? _validationError;
 
   @override
   void initState() {
     super.initState();
-    // Check status of all controllers on load
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAllControllerStatus();
+      _loadControllerTypes();
+      _statusRefreshTimer = Timer.periodic(
+        const Duration(seconds: 15),
+        (_) {
+          if (mounted) _checkAllControllerStatusSilently();
+        },
+      );
     });
+  }
+
+  @override
+  void dispose() {
+    _statusRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Reads the `controller_type` field from each Firestore controller document
+  /// so we can show type-specific UI (e.g. "Apply NGL Defaults" for SKIKBILY).
+  Future<void> _loadControllerTypes() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('controllers')
+          .get();
+      for (final doc in snap.docs) {
+        final typeStr = doc.data()['controller_type'] as String?;
+        if (typeStr != null) {
+          _controllerTypes[doc.id] = ControllerType.fromFirestore(typeStr);
+        }
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Failed to load controller types: $e');
+    }
   }
 
   Future<void> _checkAllControllerStatus() async {
@@ -74,6 +121,49 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
           _checkingStatus[controller.id] = false;
         });
       }
+    }
+  }
+
+  /// Background-safe variant of [_checkAllControllerStatus] that does NOT
+  /// show a spinner on each card. Used by the 15-second periodic refresh.
+  Future<void> _checkAllControllerStatusSilently() async {
+    final controllersAsync = ref.read(controllersStreamProvider);
+    controllersAsync.whenData((controllers) {
+      for (final controller in controllers) {
+        _checkControllerStatusSilently(controller);
+      }
+    });
+  }
+
+  /// Pings a single controller without showing a spinner. Skips if a visible
+  /// or background check is already in flight for this controller.
+  Future<void> _checkControllerStatusSilently(ControllerInfo controller) async {
+    if (_checkingStatus[controller.id] == true) return;
+    if (_backgroundCheckInFlight.contains(controller.id)) return;
+    _backgroundCheckInFlight.add(controller.id);
+
+    try {
+      final service = WledService('http://${controller.ip}');
+      final state = await service.getState().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => null,
+      );
+      if (mounted) {
+        final isOnline = state != null;
+        if (_controllerStatus[controller.id] != isOnline) {
+          setState(() {
+            _controllerStatus[controller.id] = isOnline;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted && _controllerStatus[controller.id] != false) {
+        setState(() {
+          _controllerStatus[controller.id] = false;
+        });
+      }
+    } finally {
+      _backgroundCheckInFlight.remove(controller.id);
     }
   }
 
@@ -170,12 +260,368 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     }
   }
 
-  void _addController() {
-    // Navigate to BLE provisioning
-    Navigator.of(context).pushNamed('/device-setup').then((_) {
-      // Refresh status after returning
+  Future<void> _addController() async {
+    // Show option: BLE scan or manual IP entry
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Add Controller', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.bluetooth, color: NexGenPalette.cyan),
+                title: const Text('BLE Scan (New Device)', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers not yet on WiFi', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ble'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.wifi, color: NexGenPalette.green),
+                title: const Text('Enter IP Address', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers already on the network', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ip'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (choice == 'ble') {
+      if (!mounted) return;
+      await context.push(AppRoutes.deviceSetup);
       _checkAllControllerStatus();
-    });
+    } else if (choice == 'ip') {
+      await _addControllerByIp();
+    }
+  }
+
+  /// Shows a bottom sheet with three tappable hardware-type cards and returns
+  /// the user's selection, or `null` if they dismiss.
+  Future<ControllerType?> _pickControllerType() async {
+    var selected = ControllerType.digOcta;
+
+    return showModalBottomSheet<ControllerType>(
+      context: context,
+      backgroundColor: NexGenPalette.matteBlack,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select controller hardware',
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: ControllerType.values.map((type) {
+                    final isSelected = type == selected;
+                    return Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          right: type != ControllerType.values.last ? 10 : 0,
+                        ),
+                        child: GestureDetector(
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setSheetState(() => selected = type);
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.gunmetal,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? NexGenPalette.cyan
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                SvgPicture.asset(
+                                  type.iconAsset,
+                                  width: 48,
+                                  height: 48,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  type.fullName,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: NexGenPalette.textHigh,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  type.defaultChannelCount != null
+                                      ? '${type.defaultChannelCount} channels'
+                                      : 'Variable',
+                                  style: TextStyle(
+                                    color: NexGenPalette.textHigh
+                                        .withValues(alpha: 0.6),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, selected),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: NexGenPalette.cyan,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Continue',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addControllerByIp() async {
+    // Step 1: Pick controller hardware type
+    final controllerType = await _pickControllerType();
+    if (controllerType == null || !mounted) return;
+
+    // Step 2: IP entry (unchanged)
+    final ipCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Add Controller by IP', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: ipCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.url,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'IP Address',
+                hintText: '192.168.1.100',
+                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                filled: true,
+                fillColor: NexGenPalette.matteBlack,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Name (optional)',
+                hintText: 'e.g., Front Roofline',
+                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                filled: true,
+                fillColor: NexGenPalette.matteBlack,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+            child: const Text('Add', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final ip = ipCtrl.text.trim();
+    if (ip.isEmpty) return;
+
+    // Step 3: Validate controller type against live device info
+    if (mounted) {
+      final proceed = await _validateControllerType(ip, controllerType);
+      if (!proceed || !mounted) return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No auth session — please re-enter your PIN')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final docRef = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('controllers')
+          .add({
+        'ip': ip,
+        'name': nameCtrl.text.trim().isEmpty ? 'Controller ($ip)' : nameCtrl.text.trim(),
+        'wifiConfigured': true,
+        'controller_type': controllerType.toFirestore(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      _controllerTypes[docRef.id] = controllerType;
+      // Invalidate the controllers stream so it re-evaluates with the
+      // current auth session. The stream was likely cached as empty from
+      // before the anonymous session was established.
+      ref.invalidate(controllersStreamProvider);
+      _checkAllControllerStatus();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add controller: $e')),
+        );
+      }
+    }
+  }
+
+  /// Fetches /json/info from [ip], validates against [expected], and shows a
+  /// warning dialog if the channel count doesn't match. Returns `true` if the
+  /// caller should proceed with saving, `false` to abort.
+  Future<bool> _validateControllerType(
+    String ip,
+    ControllerType expected,
+  ) async {
+    final service = WledService('http://$ip');
+    final info = await service.getInfo().timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => null,
+    );
+
+    // If we can't reach the device at all, let the existing status-check
+    // flow surface the problem — don't block the add.
+    if (info == null) return true;
+
+    final result = validateControllerMatch(info, expected);
+    if (result.isMatch || result.warningMessage == null) return true;
+
+    if (!mounted) return false;
+
+    final continueAnyway = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: NexGenPalette.violet, width: 2),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: NexGenPalette.violet, size: 24),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Hardware Mismatch',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              result.warningMessage!,
+              style: const TextStyle(
+                color: NexGenPalette.textHigh,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'WLED ${info.ver}  •  ${info.arch}',
+              style: TextStyle(
+                color: NexGenPalette.textHigh.withValues(alpha: 0.6),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Go Back',
+                style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.violet,
+            ),
+            child: const Text('Continue Anyway',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    return continueAnyway == true;
   }
 
   Future<void> _capturePhoto(ImageSource source) async {
@@ -197,14 +643,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         return;
       }
 
-      // Use a temporary ID for installer uploads
-      final tempId = 'installer_${DateTime.now().millisecondsSinceEpoch}';
+      // Use the current auth user's ID for Storage path (matches security rules)
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final uploadId = currentUser?.uid ?? 'installer_${DateTime.now().millisecondsSinceEpoch}';
       final service = ImageUploadService();
 
-      final url = await service.pickAndUploadHousePhoto(
-        tempId,
-        source: source,
-      );
+      // Upload the already-picked image bytes directly (don't re-pick)
+      final bytes = await image.readAsBytes();
+      final url = await service.uploadImage(uploadId, bytes);
 
       if (url != null && mounted) {
         ref.read(installerPhotoUrlProvider.notifier).state = url;
@@ -388,6 +834,13 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     bool? isOnline,
     required bool isChecking,
   }) {
+    final ctrlType = _controllerTypes[controller.id];
+    final showApplyDefaults =
+        ctrlType == ControllerType.skikbily &&
+        isOnline == true &&
+        !isChecking;
+    final isPushing = _pushingDefaults.contains(controller.id);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -398,136 +851,300 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
           width: isSelected ? 2 : 1,
         ),
       ),
-      child: InkWell(
-        onTap: () => _toggleControllerSelection(controller.id),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              // Selection checkbox
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isSelected ? NexGenPalette.cyan : Colors.transparent,
-                  border: Border.all(
-                    color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                    width: 2,
-                  ),
-                ),
-                child: isSelected
-                    ? const Icon(Icons.check, color: Colors.black, size: 16)
-                    : null,
-              ),
-              const SizedBox(width: 16),
-
-              // Controller info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      controller.name ?? 'Unnamed Controller',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () => _toggleControllerSelection(controller.id),
+            borderRadius: showApplyDefaults
+                ? const BorderRadius.vertical(top: Radius.circular(12))
+                : BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  // Selection checkbox
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? NexGenPalette.cyan : Colors.transparent,
+                      border: Border.all(
+                        color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                        width: 2,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      controller.ip,
-                      style: const TextStyle(
-                        color: NexGenPalette.textMedium,
-                        fontSize: 14,
+                    child: isSelected
+                        ? const Icon(Icons.check, color: Colors.black, size: 16)
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+
+                  // Controller info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          controller.name ?? 'Unnamed Controller',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          controller.ip,
+                          style: const TextStyle(
+                            color: NexGenPalette.textMedium,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Status indicator
+                  if (isChecking)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: NexGenPalette.cyan,
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isOnline == null
+                            ? NexGenPalette.textMedium
+                            : isOnline
+                                ? Colors.green
+                                : Colors.red,
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  const SizedBox(width: 12),
 
-              // Status indicator
-              if (isChecking)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: NexGenPalette.cyan,
-                  ),
-                )
-              else
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isOnline == null
-                        ? NexGenPalette.textMedium
-                        : isOnline
-                            ? Colors.green
-                            : Colors.red,
-                  ),
-                ),
-              const SizedBox(width: 12),
-
-              // Actions menu
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: NexGenPalette.textMedium),
-                color: NexGenPalette.gunmetal90,
-                onSelected: (value) {
-                  switch (value) {
-                    case 'rename':
-                      _renameController(controller);
-                      break;
-                    case 'refresh':
-                      _checkControllerStatus(controller);
-                      break;
-                    case 'delete':
-                      _deleteController(controller);
-                      break;
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'rename',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit, color: Colors.white, size: 20),
-                        SizedBox(width: 12),
-                        Text('Rename', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'refresh',
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh, color: Colors.white, size: 20),
-                        SizedBox(width: 12),
-                        Text('Check Status', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                        SizedBox(width: 12),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
+                  // Actions menu
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: NexGenPalette.textMedium),
+                    color: NexGenPalette.gunmetal90,
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'rename':
+                          _renameController(controller);
+                          break;
+                        case 'refresh':
+                          _checkControllerStatus(controller);
+                          break;
+                        case 'delete':
+                          _deleteController(controller);
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, color: Colors.white, size: 20),
+                            SizedBox(width: 12),
+                            Text('Rename', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'refresh',
+                        child: Row(
+                          children: [
+                            Icon(Icons.refresh, color: Colors.white, size: 20),
+                            SizedBox(width: 12),
+                            Text('Check Status', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            SizedBox(width: 12),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+
+          // "Apply NGL Defaults" — only for SKIKBILY controllers that are online
+          if (showApplyDefaults)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: isPushing
+                      ? null
+                      : () => _applyNglDefaults(controller),
+                  icon: isPushing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: NexGenPalette.green,
+                          ),
+                        )
+                      : const Icon(Icons.tune, color: NexGenPalette.green, size: 18),
+                  label: Text(
+                    isPushing ? 'Applying...' : 'Apply NGL Defaults',
+                    style: TextStyle(
+                      color: isPushing ? NexGenPalette.textMedium : NexGenPalette.green,
+                      fontSize: 13,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    side: BorderSide(
+                      color: isPushing
+                          ? NexGenPalette.line
+                          : NexGenPalette.green.withValues(alpha: 0.5),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  Future<void> _applyNglDefaults(ControllerInfo controller) async {
+    // Confirmation dialog — this writes persistent config.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text(
+          'Apply NGL Defaults?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'This will overwrite the controller\'s current LED settings. Continue?',
+          style: TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.green,
+            ),
+            child:
+                const Text('Apply', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _pushingDefaults.add(controller.id));
+
+    final ctrlType = _controllerTypes[controller.id] ?? ControllerType.genericWled;
+    final result = await pushDefaultsForControllerType(controller.ip, ctrlType);
+
+    if (!mounted) return;
+    setState(() => _pushingDefaults.remove(controller.id));
+
+    if (result.success && result.warnings.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('SKIKBILY configured with NGL defaults'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else if (result.success && result.warnings.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.amber.shade700,
+          content: Text(
+            'Configured with warnings: ${result.warnings.length} setting(s) need manual verification.',
+            style: const TextStyle(color: NexGenPalette.textHigh),
+          ),
+          action: SnackBarAction(
+            label: 'Details',
+            textColor: NexGenPalette.textHigh,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: NexGenPalette.gunmetal90,
+                  title: const Text(
+                    'Configuration Warnings',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: result.warnings
+                        .map((w) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('• ',
+                                      style: TextStyle(
+                                          color: NexGenPalette.textHigh)),
+                                  Expanded(
+                                    child: Text(w,
+                                        style: const TextStyle(
+                                            color: NexGenPalette.textHigh,
+                                            fontSize: 14)),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('OK',
+                          style: TextStyle(color: NexGenPalette.cyan)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.errorMessage ?? 'Configuration push failed'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Widget _buildEmptyState() {
@@ -717,38 +1334,40 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Replace Photo',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Replace Photo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
-              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
-              title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.gallery);
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
+                title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
+                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.gallery);
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
