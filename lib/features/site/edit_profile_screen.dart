@@ -68,6 +68,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   List<String> _sportsTeamPriority = [];
   bool _weeklySchedulePreviewEnabled = true;
 
+  // Display preferences
+  String _timeFormat = '12h'; // '12h' or '24h'
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -121,6 +124,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         _sportsTeamPriority = List.from(m.sportsTeams);
       }
       _weeklySchedulePreviewEnabled = m.weeklySchedulePreviewEnabled;
+      _timeFormat = m.timeFormat;
     }
   }
 
@@ -174,6 +178,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         customHolidays: _customHolidays,
         sportsTeamPriority: _sportsTeamPriority,
         weeklySchedulePreviewEnabled: _weeklySchedulePreviewEnabled,
+        timeFormat: _timeFormat,
       );
 
       if (existing == null) {
@@ -438,6 +443,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 sunInfo: _sunInfo,
               ),
               const SizedBox(height: 16),
+              _DisplayPreferencesCard(
+                timeFormat: _timeFormat,
+                onTimeFormatChanged: (v) => setState(() => _timeFormat = v),
+              ),
+              const SizedBox(height: 16),
               _ArchitectureCard(
                 builderValue: _builder,
                 onBuilderChanged: (v) => setState(() {
@@ -530,6 +540,51 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         onPressed: _saving ? null : _onSave,
         icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
         label: Text(_saving ? 'Saving…' : 'Update Profile'),
+      ),
+    );
+  }
+}
+
+class _DisplayPreferencesCard extends StatelessWidget {
+  final String timeFormat;
+  final ValueChanged<String> onTimeFormatChanged;
+
+  const _DisplayPreferencesCard({
+    required this.timeFormat,
+    required this.onTimeFormatChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Display Preferences',
+      leading: const Icon(Icons.schedule_outlined, color: NexGenPalette.cyan),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Time Format', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'How times appear across schedules, game days, and summaries.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
+          ),
+          const SizedBox(height: 12),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment<String>(
+                value: '12h',
+                label: Text('12-hour (7:05 PM)'),
+              ),
+              ButtonSegment<String>(
+                value: '24h',
+                label: Text('24-hour (19:05)'),
+              ),
+            ],
+            selected: {timeFormat},
+            onSelectionChanged: (s) => onTimeFormatChanged(s.first),
+            showSelectedIcon: false,
+          ),
+        ],
       ),
     );
   }

@@ -93,6 +93,9 @@ class UserModel {
   // Profile enrichment for personalization and suggestions
   final String? location; // freeform city/region/country
   final String? timeZone; // e.g., America/Chicago
+  /// Preferred time format for display: '12h' (e.g. 7:05 PM) or '24h' (19:05).
+  /// Defaults to '12h'.
+  final String timeFormat;
   final List<String> preferredCategoryIds; // aligns with PatternCategory ids
   final List<String> interestTags; // freeform: teams, holidays, keywords
   final bool allowSuggestions; // enable seasonal/event suggestions
@@ -272,6 +275,7 @@ class UserModel {
     this.userRole = UserRole.residential,
     String? location,
     this.timeZone,
+    this.timeFormat = '12h',
     List<String>? preferredCategoryIds,
     List<String>? interestTags,
     this.allowSuggestions = true,
@@ -384,6 +388,7 @@ class UserModel {
       userRole: _parseUserRole(json['user_role'] as String?),
       location: json['location'] as String?,
       timeZone: json['time_zone'] as String?,
+      timeFormat: _parseTimeFormat(json['time_format'] as String?),
       preferredCategoryIds: (json['preferred_category_ids'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       interestTags: (json['interest_tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       allowSuggestions: (json['allow_suggestions'] as bool?) ?? true,
@@ -504,6 +509,11 @@ class UserModel {
     );
   }
 
+  /// Parse time format from string, defaulting to 12-hour.
+  static String _parseTimeFormat(String? value) {
+    return value == '24h' ? '24h' : '12h';
+  }
+
   /// Parse user role from string, defaulting to residential
   static UserRole _parseUserRole(String? roleStr) {
     if (roleStr == null) return UserRole.residential;
@@ -532,6 +542,7 @@ class UserModel {
       'user_role': userRole.name,
       'location': location,
       'time_zone': timeZone,
+      'time_format': timeFormat,
       'preferred_category_ids': preferredCategoryIds,
       'interest_tags': interestTags,
       'allow_suggestions': allowSuggestions,
@@ -616,6 +627,7 @@ class UserModel {
     UserRole? userRole,
     String? location,
     String? timeZone,
+    String? timeFormat,
     List<String>? preferredCategoryIds,
     List<String>? interestTags,
     bool? allowSuggestions,
@@ -697,6 +709,7 @@ class UserModel {
       userRole: userRole ?? this.userRole,
       location: location ?? this.location,
       timeZone: timeZone ?? this.timeZone,
+      timeFormat: timeFormat ?? this.timeFormat,
       preferredCategoryIds: preferredCategoryIds ?? this.preferredCategoryIds,
       interestTags: interestTags ?? this.interestTags,
       allowSuggestions: allowSuggestions ?? this.allowSuggestions,

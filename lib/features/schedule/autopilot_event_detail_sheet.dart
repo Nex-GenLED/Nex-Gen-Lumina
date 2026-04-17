@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/utils/effect_display_meta.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'calendar_entry.dart';
 import 'calendar_entry_editor.dart';
@@ -76,21 +77,16 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
     return 'Fast';
   }
 
-  String _formatTime(DateTime dt) {
-    final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-    final min = dt.minute.toString().padLeft(2, '0');
-    final ampm = dt.hour < 12 ? 'AM' : 'PM';
-    return '$hour:$min $ampm';
-  }
-
   static const _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   static const _days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
-  String get _timeRange =>
-      '${_formatTime(event.startTime)} – ${_formatTime(event.endTime)}';
+  String _timeRange(String timeFormat) {
+    return '${formatTime(event.startTime, timeFormat: timeFormat)} – '
+        '${formatTime(event.endTime, timeFormat: timeFormat)}';
+  }
 
   String get _dateLabel {
-    final d = event.startTime;
+    final d = event.startTime.toLocal();
     final dayName = _days[d.weekday - 1];
     final monthName = _months[d.month - 1];
     return '$dayName, $monthName ${d.day}';
@@ -105,6 +101,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
     final meta = EffectDisplayMeta.fromId(_fxId);
     final colors = _colors;
     final accentColor = colors.first;
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -136,7 +133,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
               ),
 
               // ---- SECTION 1: Header ----
-              _buildHeader(accentColor),
+              _buildHeader(accentColor, timeFormat),
 
               const SizedBox(height: 14),
 
@@ -173,7 +170,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
   // Section 1: Header
   // ---------------------------------------------------------------------------
 
-  Widget _buildHeader(Color accent) {
+  Widget _buildHeader(Color accent, String timeFormat) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -193,7 +190,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
             Icon(Icons.schedule, size: 13, color: NexGenPalette.textSecondary),
             const SizedBox(width: 4),
             Text(
-              '$_dateLabel  ·  $_timeRange',
+              '$_dateLabel  ·  ${_timeRange(timeFormat)}',
               style: TextStyle(
                 fontSize: 12,
                 color: NexGenPalette.textSecondary,
@@ -524,16 +521,20 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
 
   /// Open the calendar entry editor for this event.
   void _openEditor(BuildContext context, WidgetRef ref) {
-    // Convert AutopilotEvent → CalendarEntry for the editor
-    final dateKey = '${event.startTime.year}-'
-        '${event.startTime.month.toString().padLeft(2, '0')}-'
-        '${event.startTime.day.toString().padLeft(2, '0')}';
+    // Convert AutopilotEvent → CalendarEntry for the editor.
+    // Use local time since dateKey/onTime/offTime represent wall-clock
+    // values the user sees in the calendar.
+    final start = event.startTime.toLocal();
+    final end = event.endTime.toLocal();
+    final dateKey = '${start.year}-'
+        '${start.month.toString().padLeft(2, '0')}-'
+        '${start.day.toString().padLeft(2, '0')}';
     final onTime =
-        '${event.startTime.hour.toString().padLeft(2, '0')}:'
-        '${event.startTime.minute.toString().padLeft(2, '0')}';
+        '${start.hour.toString().padLeft(2, '0')}:'
+        '${start.minute.toString().padLeft(2, '0')}';
     final offTime =
-        '${event.endTime.hour.toString().padLeft(2, '0')}:'
-        '${event.endTime.minute.toString().padLeft(2, '0')}';
+        '${end.hour.toString().padLeft(2, '0')}:'
+        '${end.minute.toString().padLeft(2, '0')}';
 
     final entry = CalendarEntry(
       dateKey: dateKey,

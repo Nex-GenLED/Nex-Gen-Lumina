@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/services/autopilot_generation_service.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/schedule_type_badge.dart';
 
 /// Provider for the generated weekly schedule.
@@ -600,7 +601,7 @@ class _HappyHourBanner extends StatelessWidget {
 }
 
 /// Horizontal chip list of game day times for commercial profiles.
-class _GameDayChipsRow extends StatelessWidget {
+class _GameDayChipsRow extends ConsumerWidget {
   final List<AutopilotScheduleItem> schedule;
   final ValueChanged<DateTime>? onDayTap;
 
@@ -609,7 +610,8 @@ class _GameDayChipsRow extends StatelessWidget {
   static const _dayAbbreviations = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final gameDayItems = schedule
         .where((item) => item.trigger == AutopilotTrigger.gameDay)
         .toList()
@@ -627,8 +629,9 @@ class _GameDayChipsRow extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
             final item = gameDayItems[index];
-            final dayAbbr = _dayAbbreviations[item.scheduledTime.weekday - 1];
-            final timeStr = _formatTime(item.scheduledTime);
+            final localTime = item.scheduledTime.toLocal();
+            final dayAbbr = _dayAbbreviations[localTime.weekday - 1];
+            final timeStr = formatTime(item.scheduledTime, timeFormat: timeFormat);
 
             return ActionChip(
               avatar: const Text('\u{1F3C8}', style: TextStyle(fontSize: 14)),
@@ -645,13 +648,6 @@ class _GameDayChipsRow extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _formatTime(DateTime time) {
-    final hour = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$minute $period';
   }
 }
 
@@ -855,7 +851,7 @@ class _ScheduleListViewState extends State<_ScheduleListView> {
 ///
 /// When [item.isApproved] is true, the card shows a glowing shadow using the
 /// item's primary WLED color.
-class _ScheduleItemCard extends StatelessWidget {
+class _ScheduleItemCard extends ConsumerWidget {
   final AutopilotScheduleItem item;
   final VoidCallback? onEdit;
   final VoidCallback? onApprove;
@@ -867,7 +863,8 @@ class _ScheduleItemCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final primaryColor = _getPrimaryColor();
     final displayColors = _extractColors();
     final isGameDay = item.trigger == AutopilotTrigger.gameDay ||
@@ -925,7 +922,7 @@ class _ScheduleItemCard extends StatelessWidget {
         patternName: item.patternName,
         previewColors: displayColors,
         effectName: item.reason,
-        timeLabel: _formatTime(item.scheduledTime),
+        timeLabel: formatTime(item.scheduledTime, timeFormat: timeFormat),
         recurrenceLabel: item.repeatDays.isEmpty
             ? item.trigger.displayName
             : item.repeatDays.join(', '),
@@ -965,12 +962,5 @@ class _ScheduleItemCard extends StatelessWidget {
       }
     }
     return displayColors;
-  }
-
-  String _formatTime(DateTime time) {
-    final hour = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$minute $period';
   }
 }

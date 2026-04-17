@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app_colors.dart';
 import '../../../theme.dart';
+import '../../../utils/time_format.dart';
 import '../../autopilot/game_day_autopilot_config.dart';
 import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../autopilot/game_day_autopilot_service.dart';
@@ -964,10 +965,11 @@ class _GameDayAutopilotSectionState
   }
 
   String _formatGameDate(DateTime date) {
+    final timeFormat = ref.read(timeFormatPreferenceProvider);
     final local = date.toLocal();
     final now = DateTime.now();
     final diff = date.difference(now);
-    final time = _formatTime12(local);
+    final time = formatTime(local, timeFormat: timeFormat);
 
     if (diff.inDays == 0 && diff.inMinutes > -120) {
       return 'Today at $time';
@@ -981,14 +983,6 @@ class _GameDayAutopilotSectionState
       ];
       return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day} at $time';
     }
-  }
-
-  String _formatTime12(DateTime dt) {
-    final hour = dt.hour;
-    final minute = dt.minute;
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    return '$h12:${minute.toString().padLeft(2, '0')} $period';
   }
 
   IconData _sessionIcon(AutopilotSessionPhase phase) => switch (phase) {

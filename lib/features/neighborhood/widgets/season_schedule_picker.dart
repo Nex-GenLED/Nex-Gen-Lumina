@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme.dart';
+import '../../../utils/time_format.dart';
 import '../../sports_alerts/models/game_event.dart';
 import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
@@ -331,7 +332,7 @@ class _SeasonSchedulePickerState extends ConsumerState<SeasonSchedulePicker> {
   }
 }
 
-class _GameRow extends StatelessWidget {
+class _GameRow extends ConsumerWidget {
   final GameEvent game;
   final bool isExcluded;
   final Color teamColor;
@@ -347,8 +348,9 @@ class _GameRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localDate = game.scheduledDate.toLocal();
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final isIncluded = !isExcluded && !isPast;
 
     return InkWell(
@@ -397,7 +399,7 @@ class _GameRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    _formatTime(localDate),
+                    formatTime(localDate, timeFormat: timeFormat),
                     style: TextStyle(
                       color: isPast ? Colors.grey.shade800 : Colors.grey.shade600,
                       fontSize: 11,
@@ -487,14 +489,4 @@ class _GameRow extends StatelessWidget {
     return '$wd, $mo ${dt.day}';
   }
 
-  static String _formatTime(DateTime dt) {
-    final hour = dt.hour == 0
-        ? 12
-        : dt.hour > 12
-            ? dt.hour - 12
-            : dt.hour;
-    final min = dt.minute.toString().padLeft(2, '0');
-    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$min $ampm';
-  }
 }

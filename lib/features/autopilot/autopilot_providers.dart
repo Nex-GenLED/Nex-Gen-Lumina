@@ -414,8 +414,13 @@ class AutopilotSettingsService {
 
       // Convert to regular ScheduleItem format (using user's IANA timezone for display)
       final tz = profile.timeZone;
+      final userTimeFormat = profile.timeFormat;
       final scheduleItems = autopilotItems
-          .map((item) => _convertToScheduleItem(item, ianaTimezone: tz))
+          .map((item) => _convertToScheduleItem(
+                item,
+                ianaTimezone: tz,
+                timeFormat: userTimeFormat,
+              ))
           .toList();
 
       // Add to user's schedules (merge with existing)
@@ -485,12 +490,16 @@ class AutopilotSettingsService {
   }
 
   /// Convert an AutopilotScheduleItem to a regular ScheduleItem.
-  ScheduleItem _convertToScheduleItem(AutopilotScheduleItem item, {String? ianaTimezone}) {
+  ScheduleItem _convertToScheduleItem(
+    AutopilotScheduleItem item, {
+    String? ianaTimezone,
+    String timeFormat = '12h',
+  }) {
     // Resolve display time in the user's timezone
     final localTime = _toLocalTime(item.scheduledTime, ianaTimezone);
 
     // Format time label
-    String timeLabel = _formatTime(localTime);
+    String timeLabel = _formatTime(localTime, timeFormat);
 
     // Add trigger context to time label for special triggers
     if (item.trigger == AutopilotTrigger.sunset) {
@@ -541,13 +550,17 @@ class AutopilotSettingsService {
     }
   }
 
-  /// Format time as "h:mm AM/PM"
-  String _formatTime(DateTime dt) {
+  /// Format time as "h:mm AM/PM" (12h) or "HH:mm" (24h).
+  String _formatTime(DateTime dt, String timeFormat) {
+    final minute = dt.minute.toString().padLeft(2, '0');
+    if (timeFormat == '24h') {
+      final hour = dt.hour.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
     final hour = dt.hour;
-    final minute = dt.minute;
     final period = hour >= 12 ? 'PM' : 'AM';
     final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+    return '$hour12:$minute $period';
   }
 
   /// Format date as "Jan 21" style

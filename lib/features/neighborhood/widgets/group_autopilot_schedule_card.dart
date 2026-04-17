@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../utils/time_format.dart';
 import '../../../widgets/schedule_type_badge.dart';
 import '../models/group_game_day_autopilot.dart';
 import '../providers/group_autopilot_providers.dart';
@@ -32,6 +33,7 @@ class GroupAutopilotScheduleCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final memberCount = ref.watch(groupAutopilotMemberCountProvider);
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
 
     return ScheduleIdentityCard(
       type: ScheduleEntryType.gameDaySyncAutopilot,
@@ -42,7 +44,7 @@ class GroupAutopilotScheduleCard extends ConsumerWidget {
       previewColors: const [],
       effectName: designName != null ? config.teamName : null,
       timeLabel: gameDateTime != null
-          ? _formatGameDateTime(gameDateTime!)
+          ? _formatGameDateTime(gameDateTime!, timeFormat)
           : 'Game Days Only',
       recurrenceLabel: 'Game Days Only',
       teamName: config.teamName,
@@ -51,29 +53,23 @@ class GroupAutopilotScheduleCard extends ConsumerWidget {
     );
   }
 
-  String _formatGameDateTime(DateTime dt) {
+  String _formatGameDateTime(DateTime dt, String timeFormat) {
+    final local = dt.toLocal();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final gameDay = DateTime(dt.year, dt.month, dt.day);
+    final gameDay = DateTime(local.year, local.month, local.day);
     final diff = gameDay.difference(today).inDays;
 
-    final timeFmt = _formatTime(dt);
+    final timeFmt = formatTime(dt, timeFormat: timeFormat);
     if (diff == 0) return 'Today at $timeFmt';
     if (diff == 1) return 'Tomorrow at $timeFmt';
-    if (diff < 7) return '${_weekdayName(dt.weekday)} at $timeFmt';
+    if (diff < 7) return '${_weekdayName(local.weekday)} at $timeFmt';
 
     const months = [
       '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return '${months[dt.month]} ${dt.day} at $timeFmt';
-  }
-
-  static String _formatTime(DateTime dt) {
-    final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-    final period = dt.hour < 12 ? 'AM' : 'PM';
-    final min = dt.minute.toString().padLeft(2, '0');
-    return '$hour:$min $period';
+    return '${months[local.month]} ${local.day} at $timeFmt';
   }
 
   static String _weekdayName(int weekday) {

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 
 /// A card displaying pending autopilot suggestions.
 ///
@@ -140,7 +141,7 @@ class _AutopilotSuggestionsCardState
 }
 
 /// Individual suggestion tile with swipe actions.
-class _SuggestionTile extends StatefulWidget {
+class _SuggestionTile extends ConsumerStatefulWidget {
   final AutopilotSuggestion suggestion;
   final Future<void> Function() onApply;
   final Future<void> Function() onReject;
@@ -152,10 +153,10 @@ class _SuggestionTile extends StatefulWidget {
   });
 
   @override
-  State<_SuggestionTile> createState() => _SuggestionTileState();
+  ConsumerState<_SuggestionTile> createState() => _SuggestionTileState();
 }
 
-class _SuggestionTileState extends State<_SuggestionTile> {
+class _SuggestionTileState extends ConsumerState<_SuggestionTile> {
   bool _isApplying = false;
   bool _reasonExpanded = false;
 
@@ -424,11 +425,10 @@ class _SuggestionTileState extends State<_SuggestionTile> {
   }
 
   String _formatScheduledTime(DateTime time) {
-    final hour = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    final monthDay = '${time.month}/${time.day}';
-    return '$monthDay at $hour:$minute $period';
+    final local = time.toLocal();
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final monthDay = '${local.month}/${local.day}';
+    return '$monthDay at ${formatTime(time, timeFormat: timeFormat)}';
   }
 }
 

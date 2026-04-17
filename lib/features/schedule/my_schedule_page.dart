@@ -29,6 +29,7 @@ import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/features/ai/light_effect_animator.dart';
 import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/schedule_type_badge.dart';
 import 'package:nexgen_command/widgets/section_header.dart';
@@ -3659,9 +3660,14 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
 
                     // Use the original ID when editing, or generate a new one
                     final id = widget.editing?.id ?? 'sch-${DateTime.now().millisecondsSinceEpoch}';
-                    final timeLabel = _onTrigger == _TriggerType.specificTime ? _formatTime(_onTime) : _onSolar;
+                    final timeFormat = ref.read(timeFormatPreferenceProvider);
+                    final timeLabel = _onTrigger == _TriggerType.specificTime
+                        ? formatTimeOfDay(_onTime, timeFormat: timeFormat)
+                        : _onSolar;
                     final offTimeLabel = _hasOffTime
-                        ? (_offTrigger == _TriggerType.specificTime ? _formatTime(_offTime) : _offSolar)
+                        ? (_offTrigger == _TriggerType.specificTime
+                            ? formatTimeOfDay(_offTime, timeFormat: timeFormat)
+                            : _offSolar)
                         : null;
                     final days = _selectedDays.map((i) => _dayAbbr[i]).toList(growable: false);
                     String actionLabel;
@@ -3719,12 +3725,6 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     );
   }
 
-  String _formatTime(TimeOfDay t) {
-    final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
-    final m = t.minute.toString().padLeft(2, '0');
-    final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$h:$m $ampm';
-  }
 }
 
 // Circular single-letter day chip used in editor
