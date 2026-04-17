@@ -78,7 +78,10 @@ class GameDayScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   ...teamEntries.map((entry) => Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: _TeamCard(entry: entry),
+                        child: _TeamCard(
+                          entry: entry,
+                          canDelete: teamEntries.length > 1,
+                        ),
                       )),
                 ],
 
@@ -164,8 +167,9 @@ class GameDayScreen extends ConsumerWidget {
 
 class _TeamCard extends ConsumerStatefulWidget {
   final GameDayTeamEntry entry;
+  final bool canDelete;
 
-  const _TeamCard({required this.entry});
+  const _TeamCard({required this.entry, this.canDelete = true});
 
   @override
   ConsumerState<_TeamCard> createState() => _TeamCardState();
@@ -251,6 +255,16 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                   loading: () => const SizedBox.shrink(),
                   error: (_, __) => const SizedBox.shrink(),
                 ),
+                if (widget.canDelete) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    color: NexGenPalette.textMedium,
+                    tooltip: 'Remove team',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => _confirmRemove(context, ref, config),
+                  ),
+                ],
               ],
             ),
           ),
@@ -329,6 +343,57 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       BuildContext context, WidgetRef ref, GameDayAutopilotConfig config) {
     final nodeId = 'team_${config.teamSlug}';
     context.push('/explore/library/$nodeId');
+  }
+
+  Future<void> _confirmRemove(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal,
+        title: Text('Remove ${config.teamName} from My Teams?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ref.read(gameDayAutopilotNotifierProvider.notifier).removeTeam(
+            teamSlug: config.teamSlug,
+            teamName: config.teamName,
+          );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('${config.teamName} removed.'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[GameDay] removeTeam failed: $e\n$st');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not remove ${config.teamName}: $e'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   void _toggleLiveScoring(

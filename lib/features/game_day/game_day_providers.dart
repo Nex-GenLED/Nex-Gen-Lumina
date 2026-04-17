@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
+import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
@@ -57,16 +58,41 @@ final isCrewHostProvider = Provider.family<bool, String>((ref, crewId) {
 
 /// Combined view: user's individual Game Day autopilot configs + crew status.
 /// This is the primary data source for the Game Day screen.
+///
+/// Source of truth: the authenticated user's Firestore profile document
+/// (`sports_team_priority` / `sports_teams`). A Game Day autopilot config
+/// is only surfaced if the user has explicitly selected that team in their
+/// profile. No fallbacks, defaults, or geo-based suggestions — orphaned
+/// subcollection docs from prior sessions are ignored.
 final gameDayTeamsProvider =
     Provider<List<GameDayTeamEntry>>((ref) {
   final configs =
       ref.watch(gameDayAutopilotConfigsProvider).valueOrNull ?? [];
   final crews = ref.watch(userCrewsProvider).valueOrNull ?? [];
   final uid = FirebaseAuth.instance.currentUser?.uid;
+  final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+
+  final selectedTokens = <String>{
+    ...?profile?.sportsTeamPriority,
+    ...?profile?.sportsTeams,
+  }
+      .map((s) => s.trim().toLowerCase())
+      .where((s) => s.isNotEmpty)
+      .toSet();
+
+  if (selectedTokens.isEmpty) return const [];
 
   final entries = <GameDayTeamEntry>[];
 
   for (final config in configs) {
+    final configName = config.teamName.toLowerCase();
+    final configSlug = config.teamSlug.toLowerCase();
+    final matches = selectedTokens.any((token) =>
+        configName.contains(token) ||
+        token.contains(configName) ||
+        configSlug.endsWith(token.replaceAll(' ', '_')));
+    if (!matches) continue;
+
     // Find if user is in a crew for this team.
     final crew = crews
         .where((c) => c.teamSlug == config.teamSlug)
