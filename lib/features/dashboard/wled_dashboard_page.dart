@@ -691,14 +691,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   );
                 }),
               ),
-            // Gradient overlay for legibility
-            Positioned.fill(
+            // Gradient overlay for legibility — anchored above the lifted
+            // Now Playing bar so the newly exposed bottom strip of photo
+            // isn't darkened.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              height: 130,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
-                    colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
+                    colors: [Colors.black.withValues(alpha: 0.45), Colors.transparent],
                   ),
                 ),
               ),
@@ -874,9 +880,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   /// Unified Now Playing bar — owns pattern name, brightness slider, tune toggle, and power.
   Widget _buildNowPlayingBar(BuildContext context, WidgetRef ref, WledStateModel state) {
     return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
+      left: 10,
+      right: 10,
+      bottom: 10,
       child: Consumer(builder: (context, ref, _) {
         final wledState = ref.watch(wledStateProvider);
         final isOn = wledState.isOn;
@@ -884,10 +890,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         final isUnsaved = ref.watch(isUnsavedCustomConfigProvider);
 
         return ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
+          borderRadius: BorderRadius.circular(16),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
