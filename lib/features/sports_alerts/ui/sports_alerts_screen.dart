@@ -22,19 +22,28 @@ import 'team_picker_screen.dart';
 
 String _sportEmoji(SportType sport) => switch (sport) {
       SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
-      SportType.nba || SportType.ncaaMB => '\u{1F3C0}',
+      SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
       SportType.mlb => '\u26BE',
       SportType.nhl => '\u{1F3D2}',
-      SportType.mls || SportType.fifa || SportType.championsLeague => '\u26BD',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        '\u26BD',
     };
 
 /// Default test event type per sport.
 AlertEventType _testEventType(SportType sport) => switch (sport) {
       SportType.nfl || SportType.ncaaFB => AlertEventType.touchdown,
-      SportType.nba || SportType.ncaaMB => AlertEventType.clutchBasket,
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        AlertEventType.clutchBasket,
       SportType.mlb => AlertEventType.run,
       SportType.nhl => AlertEventType.goal,
-      SportType.mls || SportType.fifa || SportType.championsLeague => AlertEventType.soccerGoal,
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        AlertEventType.soccerGoal,
     };
 
 // ---------------------------------------------------------------------------

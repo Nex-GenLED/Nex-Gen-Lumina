@@ -240,6 +240,8 @@ class _SeasonRenewalSheetState extends ConsumerState<_SeasonRenewalSheet> {
         return '$_nextSeason-${(_nextSeason + 1) % 100}';
       case SportType.mlb:
       case SportType.mls:
+      case SportType.nwsl:
+      case SportType.wnba:
       case SportType.fifa:
       case SportType.championsLeague:
         return '$_nextSeason';

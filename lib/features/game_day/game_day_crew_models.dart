@@ -93,10 +93,11 @@ class GameDayCrew {
   /// Sport emoji for display.
   String get sportEmoji => switch (sport) {
         SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
-        SportType.nba || SportType.ncaaMB => '\u{1F3C0}',
+        SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
         SportType.mlb => '\u{26BE}',
         SportType.nhl => '\u{1F3D2}',
         SportType.mls ||
+        SportType.nwsl ||
         SportType.fifa ||
         SportType.championsLeague =>
           '\u{26BD}',

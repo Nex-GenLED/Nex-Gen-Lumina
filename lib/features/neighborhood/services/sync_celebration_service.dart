@@ -169,11 +169,13 @@ class SyncCelebrationService {
         if (points == 2) return AlertEventType.safety;
         return AlertEventType.fieldGoal;
       case SportType.nba:
+      case SportType.wnba:
       case SportType.ncaaMB:
         return AlertEventType.clutchBasket;
       case SportType.nhl:
         return AlertEventType.goal;
       case SportType.mls:
+      case SportType.nwsl:
       case SportType.fifa:
       case SportType.championsLeague:
         return AlertEventType.soccerGoal;

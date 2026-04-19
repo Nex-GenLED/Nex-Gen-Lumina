@@ -509,6 +509,7 @@ class TeamColorDatabase {
     _team(id: 'seattle_reign', name: 'Seattle Reign FC', city: 'Seattle', league: 'NWSL', colors: [TeamColor.hex('Reign Blue', 0xFF0B3D91), TeamColor.hex('Reign Gold', 0xFFFFD700)], aliases: ['seattle reign', 'reign', 'seattle nwsl']),
     _team(id: 'utah_royals', name: 'Utah Royals FC', city: 'Utah', league: 'NWSL', colors: [TeamColor.hex('Royals Gold', 0xFFFFD700), TeamColor.hex('Royals Blue', 0xFF0B3D91)], aliases: ['utah royals', 'royals nwsl', 'utah nwsl']),
     _team(id: 'washington_spirit', name: 'Washington Spirit', city: 'Washington', league: 'NWSL', colors: [TeamColor.hex('Spirit Black', 0xFF0A0A0A), TeamColor.hex('Spirit Red', 0xFFAD1831)], aliases: ['washington spirit', 'spirit', 'dc nwsl']),
+    _team(id: 'boston_unity', name: 'Boston Unity Soccer Partners', city: 'Boston', league: 'NWSL', colors: [TeamColor.hex('Boston Navy', 0xFF0E2240), TeamColor.hex('Boston Red', 0xFFE03A3E)], aliases: ['boston unity', 'boston nwsl', 'boston legacy', 'boston womens soccer']),
   ];
 
   // =======================================================================
@@ -528,6 +529,7 @@ class TeamColorDatabase {
     _team(id: 'storm', name: 'Seattle Storm', city: 'Seattle', league: 'WNBA', colors: [TeamColor.hex('Storm Green', 0xFF2C5234), TeamColor.hex('Storm Gold', 0xFFFFC72C)], aliases: ['seattle storm', 'storm', 'seattle wnba']),
     _team(id: 'mystics', name: 'Washington Mystics', city: 'Washington', league: 'WNBA', colors: [TeamColor.hex('Mystics Red', 0xFFE31837), TeamColor.hex('Mystics Navy', 0xFF002B5C), TeamColor.hex('Mystics White', 0xFFFFFFFF)], aliases: ['washington mystics', 'mystics', 'dc wnba', 'washington wnba']),
     _team(id: 'valkyries', name: 'Golden State Valkyries', city: 'Golden State', league: 'WNBA', colors: [TeamColor.hex('Valkyries Purple', 0xFF582C83), TeamColor.hex('Valkyries Gold', 0xFFDAA900), TeamColor.hex('Valkyries Sea', 0xFF00B2A9)], aliases: ['golden state valkyries', 'valkyries', 'gs valkyries', 'bay area wnba']),
+    _team(id: 'portland_fire', name: 'Portland Fire', city: 'Portland', league: 'WNBA', colors: [TeamColor.hex('Portland Fire Red', 0xFFE03A3E), TeamColor.hex('Portland Fire Black', 0xFF000000)], aliases: ['portland fire', 'fire', 'portland wnba']),
   ];
 
   // =======================================================================

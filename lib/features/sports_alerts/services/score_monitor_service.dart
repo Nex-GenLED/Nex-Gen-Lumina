@@ -24,6 +24,19 @@ class ScoreMonitorService {
   /// De-duplication keys: "gameId|homeScore|awayScore|eventType".
   final Set<String> _emittedKeys = {};
 
+  /// Last celebration timestamp keyed by "teamSlug|gameId". Used to enforce
+  /// per-sport cooldowns for high-frequency scoring leagues (basketball).
+  final Map<String, DateTime> _lastCelebrationAt = {};
+
+  /// Minimum gap between celebration emissions for a single team in a
+  /// single game. Basketball sports fire frequently so we throttle them;
+  /// other sports are rare enough that the dedup key alone is sufficient.
+  static Duration _celebrationCooldown(SportType sport) => switch (sport) {
+        SportType.nba || SportType.wnba || SportType.ncaaMB =>
+          const Duration(seconds: 30),
+        _ => Duration.zero,
+      };
+
   final StreamController<ScoreAlertEvent> _alertController =
       StreamController<ScoreAlertEvent>.broadcast();
 
@@ -58,6 +71,23 @@ class ScoreMonitorService {
   void reset() {
     _gameStateCache.clear();
     _emittedKeys.clear();
+    _lastCelebrationAt.clear();
+  }
+
+  /// True when this team+game has emitted a celebration within the sport's
+  /// cooldown window. Zero-duration cooldowns always return false.
+  bool _isOnCooldown(ScoreAlertEvent event, GameState game) {
+    final cooldown = _celebrationCooldown(event.sport);
+    if (cooldown == Duration.zero) return false;
+    final key = '${event.teamSlug}|${game.gameId}';
+    final last = _lastCelebrationAt[key];
+    if (last == null) return false;
+    return event.timestamp.difference(last) < cooldown;
+  }
+
+  void _markEmitted(ScoreAlertEvent event, GameState game) {
+    if (_celebrationCooldown(event.sport) == Duration.zero) return;
+    _lastCelebrationAt['${event.teamSlug}|${game.gameId}'] = event.timestamp;
   }
 
   /// Release resources.
@@ -95,7 +125,9 @@ class ScoreMonitorService {
         for (final event in events) {
           final dedupKey = _dedupKey(event, game);
           if (_emittedKeys.contains(dedupKey)) continue;
+          if (_isOnCooldown(event, game)) continue;
           _emittedKeys.add(dedupKey);
+          _markEmitted(event, game);
           _alertController.add(event);
         }
       }
@@ -107,6 +139,8 @@ class ScoreMonitorService {
       if (game.status == GameStatus.final_) {
         _gameStateCache.remove(game.gameId);
         _emittedKeys.removeWhere((k) => k.startsWith('${game.gameId}|'));
+        _lastCelebrationAt
+            .removeWhere((k, _) => k.endsWith('|${game.gameId}'));
       }
     }
   }
@@ -168,6 +202,7 @@ class ScoreMonitorService {
         events.addAll(_diffNfl(delta, config, current, now));
 
       case SportType.nba:
+      case SportType.wnba:
         events.addAll(
           _diffNba(delta, config, current, now, previous),
         );
@@ -204,6 +239,7 @@ class ScoreMonitorService {
         }
 
       case SportType.mls:
+      case SportType.nwsl:
       case SportType.fifa:
       case SportType.championsLeague:
         // Soccer goals: +1 increments, use soccerGoal event (20s animation).

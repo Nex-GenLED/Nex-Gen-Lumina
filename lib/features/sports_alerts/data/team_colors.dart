@@ -498,6 +498,104 @@ const Map<String, TeamColors> kTeamColors = {
   ),
 
   // =========================================================================
+  //  WNBA — 13 teams (includes 2026 Portland Fire expansion)
+  // =========================================================================
+  // ESPN team IDs verified against site.api.espn.com/.../basketball/wnba.
+  // Portland Fire launches 2026 — ESPN ID left blank until published.
+
+  'wnba_dream': TeamColors(
+    primary: Color(0xFFE31837),
+    secondary: Color(0xFF0C2340),
+    teamName: 'Atlanta Dream',
+    sport: SportType.wnba,
+    espnTeamId: '20',
+  ),
+  'wnba_sky': TeamColors(
+    primary: Color(0xFF418FDE),
+    secondary: Color(0xFFFFCD00),
+    teamName: 'Chicago Sky',
+    sport: SportType.wnba,
+    espnTeamId: '19',
+  ),
+  'wnba_sun': TeamColors(
+    primary: Color(0xFFF05123),
+    secondary: Color(0xFF0A2240),
+    teamName: 'Connecticut Sun',
+    sport: SportType.wnba,
+    espnTeamId: '18',
+  ),
+  'wnba_wings': TeamColors(
+    primary: Color(0xFF002B5C),
+    secondary: Color(0xFFC4D600),
+    teamName: 'Dallas Wings',
+    sport: SportType.wnba,
+    espnTeamId: '3',
+  ),
+  'wnba_fever': TeamColors(
+    primary: Color(0xFF002D62),
+    secondary: Color(0xFFE03A3E),
+    teamName: 'Indiana Fever',
+    sport: SportType.wnba,
+    espnTeamId: '5',
+  ),
+  'wnba_aces': TeamColors(
+    primary: Color(0xFFC4032B),
+    secondary: Color(0xFF000000),
+    teamName: 'Las Vegas Aces',
+    sport: SportType.wnba,
+    espnTeamId: '17',
+  ),
+  'wnba_sparks': TeamColors(
+    primary: Color(0xFF552583),
+    secondary: Color(0xFFFDB927),
+    teamName: 'Los Angeles Sparks',
+    sport: SportType.wnba,
+    espnTeamId: '6',
+  ),
+  'wnba_lynx': TeamColors(
+    primary: Color(0xFF0C2340),
+    secondary: Color(0xFF78BE21),
+    teamName: 'Minnesota Lynx',
+    sport: SportType.wnba,
+    espnTeamId: '8',
+  ),
+  'wnba_liberty': TeamColors(
+    primary: Color(0xFF6ECEB2),
+    secondary: Color(0xFF000000),
+    teamName: 'New York Liberty',
+    sport: SportType.wnba,
+    espnTeamId: '9',
+  ),
+  'wnba_mercury': TeamColors(
+    primary: Color(0xFFE56020),
+    secondary: Color(0xFF201747),
+    teamName: 'Phoenix Mercury',
+    sport: SportType.wnba,
+    espnTeamId: '11',
+  ),
+  'wnba_portland_fire': TeamColors(
+    primary: Color(0xFFE03A3E),
+    secondary: Color(0xFF000000),
+    teamName: 'Portland Fire',
+    sport: SportType.wnba,
+    espnTeamId: '',
+  ),
+  'wnba_storm': TeamColors(
+    primary: Color(0xFF2C5234),
+    secondary: Color(0xFFFFC72C),
+    teamName: 'Seattle Storm',
+    sport: SportType.wnba,
+    espnTeamId: '14',
+  ),
+  'wnba_mystics': TeamColors(
+    primary: Color(0xFFE03A3E),
+    secondary: Color(0xFF002B5C),
+    teamName: 'Washington Mystics',
+    sport: SportType.wnba,
+    espnTeamId: '16',
+  ),
+
+  // =========================================================================
   //  MLB — 30 teams
   // =========================================================================
 
@@ -1174,6 +1272,112 @@ const Map<String, TeamColors> kTeamColors = {
     teamName: 'San Diego FC',
     sport: SportType.mls,
     espnTeamId: '24816',
+  ),
+
+  // =========================================================================
+  //  NWSL — 14 teams (includes Boston expansion 2026)
+  // =========================================================================
+  // ESPN NWSL team IDs sourced from site.api.espn.com/.../soccer/usa.nwsl.
+  // Boston Unity Soccer Partners launches 2026 — ESPN ID blank until fixtures
+  // publish.
+
+  'nwsl_angel_city': TeamColors(
+    primary: Color(0xFFFF5C5C),
+    secondary: Color(0xFF000000),
+    teamName: 'Angel City FC',
+    sport: SportType.nwsl,
+    espnTeamId: '21146',
+  ),
+  'nwsl_boston': TeamColors(
+    primary: Color(0xFF0E2240),
+    secondary: Color(0xFFE03A3E),
+    teamName: 'Boston Unity Soccer Partners',
+    sport: SportType.nwsl,
+    espnTeamId: '',
+  ),
+  'nwsl_chicago_red_stars': TeamColors(
+    primary: Color(0xFF003366),
+    secondary: Color(0xFFEF3E42),
+    teamName: 'Chicago Red Stars',
+    sport: SportType.nwsl,
+    espnTeamId: '18210',
+  ),
+  'nwsl_dash': TeamColors(
+    primary: Color(0xFFFF6B00),
+    secondary: Color(0xFF00B5E2),
+    teamName: 'Houston Dash',
+    sport: SportType.nwsl,
+    espnTeamId: '9738',
+  ),
+  'nwsl_kc_current': TeamColors(
+    primary: Color(0xFF00A3AD),
+    secondary: Color(0xFFD7263D),
+    teamName: 'Kansas City Current',
+    sport: SportType.nwsl,
+    espnTeamId: '21191',
+  ),
+  'nwsl_gotham': TeamColors(
+    primary: Color(0xFF000000),
+    secondary: Color(0xFFF4C300),
+    teamName: 'NJ/NY Gotham FC',
+    sport: SportType.nwsl,
+    espnTeamId: '18214',
+  ),
+  'nwsl_nc_courage': TeamColors(
+    primary: Color(0xFF003153),
+    secondary: Color(0xFF85C1E9),
+    teamName: 'North Carolina Courage',
+    sport: SportType.nwsl,
+    espnTeamId: '19141',
+  ),
+  'nwsl_orlando_pride': TeamColors(
+    primary: Color(0xFF5E2B7E),
+    secondary: Color(0xFFFFFFFF),
+    teamName: 'Orlando Pride',
+    sport: SportType.nwsl,
+    espnTeamId: '18216',
+  ),
+  'nwsl_portland_thorns': TeamColors(
+    primary: Color(0xFF004B28),
+    secondary: Color(0xFFC5B783),
+    teamName: 'Portland Thorns',
+    sport: SportType.nwsl,
+    espnTeamId: '18219',
+  ),
+  'nwsl_racing_louisville': TeamColors(
+    primary: Color(0xFF6C2E8D),
+    secondary: Color(0xFFFFD100),
+    teamName: 'Racing Louisville',
+    sport: SportType.nwsl,
+    espnTeamId: '20905',
+  ),
+  'nwsl_san_diego_wave': TeamColors(
+    primary: Color(0xFF003DA5),
+    secondary: Color(0xFFFF5733),
+    teamName: 'San Diego Wave',
+    sport: SportType.nwsl,
+    espnTeamId: '21145',
+  ),
+  'nwsl_seattle_reign': TeamColors(
+    primary: Color(0xFF0B3D91),
+    secondary: Color(0xFFFFD700),
+    teamName: 'Seattle Reign',
+    sport: SportType.nwsl,
+    espnTeamId: '18221',
+  ),
+  'nwsl_utah_royals': TeamColors(
+    primary: Color(0xFFFFD700),
+    secondary: Color(0xFF0B3D91),
+    teamName: 'Utah Royals',
+    sport: SportType.nwsl,
+    espnTeamId: '18222',
+  ),
+  'nwsl_washington_spirit': TeamColors(
+    primary: Color(0xFF0A0A0A),
+    secondary: Color(0xFFAD1831),
+    teamName: 'Washington Spirit',
+    sport: SportType.nwsl,
+    espnTeamId: '18225',
   ),
 
   // =========================================================================

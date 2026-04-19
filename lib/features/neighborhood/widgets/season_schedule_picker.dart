@@ -53,6 +53,8 @@ int currentSeasonYear(SportType sport) {
       return now.month <= 6 ? now.year - 1 : now.year;
     case SportType.mlb:
     case SportType.mls:
+    case SportType.nwsl:
+    case SportType.wnba:
     case SportType.fifa:
     case SportType.championsLeague:
       return now.year;
@@ -224,6 +226,8 @@ class _SeasonSchedulePickerState extends ConsumerState<SeasonSchedulePicker> {
         return '$_season-${(_season + 1) % 100}';
       case SportType.mlb:
       case SportType.mls:
+      case SportType.nwsl:
+      case SportType.wnba:
       case SportType.fifa:
       case SportType.championsLeague:
         return '$_season';

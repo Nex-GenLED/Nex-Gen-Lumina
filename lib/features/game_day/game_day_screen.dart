@@ -21,10 +21,14 @@ import 'game_day_providers.dart';
 
 String _sportEmoji(SportType sport) => switch (sport) {
       SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
-      SportType.nba || SportType.ncaaMB => '\u{1F3C0}',
+      SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
       SportType.mlb => '\u26BE',
       SportType.nhl => '\u{1F3D2}',
-      SportType.mls || SportType.fifa || SportType.championsLeague => '\u26BD',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        '\u26BD',
     };
 
 // ===========================================================================
@@ -255,16 +259,27 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                   loading: () => const SizedBox.shrink(),
                   error: (_, __) => const SizedBox.shrink(),
                 ),
-                if (widget.canDelete) ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    color: NexGenPalette.textMedium,
-                    tooltip: 'Remove team',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => _confirmRemove(context, ref, config),
-                  ),
-                ],
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  color: widget.canDelete
+                      ? NexGenPalette.textMedium
+                      : NexGenPalette.textMedium.withValues(alpha: 0.3),
+                  tooltip: widget.canDelete
+                      ? 'Remove team'
+                      : 'Add another team before removing this one.',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: widget.canDelete
+                      ? () => _confirmRemove(context, ref, config)
+                      : () => ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Add another team before removing this one.',
+                              ),
+                              duration: Duration(seconds: 2),
+                            ),
+                          ),
+                ),
               ],
             ),
           ),
@@ -1396,7 +1411,28 @@ class _TeamPickerSheet extends ConsumerStatefulWidget {
 
 class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
   final _searchController = TextEditingController();
-  SportType? _sportFilter;
+  String? _categoryFilter;
+
+  // Category chips group leagues by sport so WNBA sits next to NBA under
+  // "Basketball" and NWSL next to MLS under "Soccer".
+  static final List<({String label, Set<SportType> sports})> _categories = [
+    (label: 'Football', sports: {SportType.nfl, SportType.ncaaFB}),
+    (
+      label: 'Basketball',
+      sports: {SportType.nba, SportType.wnba, SportType.ncaaMB},
+    ),
+    (label: 'Baseball', sports: {SportType.mlb}),
+    (label: 'Hockey', sports: {SportType.nhl}),
+    (
+      label: 'Soccer',
+      sports: {
+        SportType.mls,
+        SportType.nwsl,
+        SportType.fifa,
+        SportType.championsLeague,
+      },
+    ),
+  ];
 
   @override
   void initState() {
@@ -1415,8 +1451,11 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
   @override
   Widget build(BuildContext context) {
     var teams = ref.watch(gameDayFilteredTeamsProvider);
-    if (_sportFilter != null) {
-      teams = teams.where((e) => e.value.sport == _sportFilter).toList();
+    if (_categoryFilter != null) {
+      final allowed = _categories
+              .firstWhere((c) => c.label == _categoryFilter)
+              .sports;
+      teams = teams.where((e) => allowed.contains(e.value.sport)).toList();
     }
 
     return Column(
@@ -1487,14 +1526,15 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
             children: [
               _FilterChip(
                 label: 'All',
-                selected: _sportFilter == null,
-                onTap: () => setState(() => _sportFilter = null),
+                selected: _categoryFilter == null,
+                onTap: () => setState(() => _categoryFilter = null),
               ),
-              for (final sport in SportType.values)
+              for (final category in _categories)
                 _FilterChip(
-                  label: sport.displayName,
-                  selected: _sportFilter == sport,
-                  onTap: () => setState(() => _sportFilter = sport),
+                  label: category.label,
+                  selected: _categoryFilter == category.label,
+                  onTap: () =>
+                      setState(() => _categoryFilter = category.label),
                 ),
             ],
           ),

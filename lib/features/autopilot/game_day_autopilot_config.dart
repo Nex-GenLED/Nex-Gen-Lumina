@@ -18,9 +18,13 @@ import '../sports_alerts/models/sport_type.dart';
 Duration estimatedGameDuration(SportType sport) => switch (sport) {
       SportType.mlb => const Duration(hours: 3),
       SportType.nfl || SportType.ncaaFB => const Duration(hours: 3, minutes: 30),
-      SportType.nba || SportType.ncaaMB => const Duration(hours: 2, minutes: 30),
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        const Duration(hours: 2, minutes: 30),
       SportType.nhl => const Duration(hours: 2, minutes: 30),
-      SportType.mls || SportType.fifa || SportType.championsLeague =>
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
         const Duration(hours: 2),
     };
 

@@ -38,7 +38,7 @@ List<_SensitivityOption> _sensitivityOptions(SportType sport) => switch (sport) 
             description: 'Only touchdowns trigger lights',
           ),
         ],
-      SportType.nba => [
+      SportType.nba || SportType.wnba => [
           const _SensitivityOption(
             value: AlertSensitivity.allEvents,
             label: 'Quarter Wins + Clutch',
@@ -62,7 +62,12 @@ List<_SensitivityOption> _sensitivityOptions(SportType sport) => switch (sport) 
             description: 'Multi-run innings and big moments',
           ),
         ],
-      SportType.nhl || SportType.mls || SportType.fifa || SportType.championsLeague => [
+      SportType.nhl ||
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        [
           const _SensitivityOption(
             value: AlertSensitivity.allEvents,
             label: 'Every Goal',
@@ -114,18 +119,28 @@ class _SensitivityOption {
 /// Default preview event type per sport.
 AlertEventType _previewEventType(SportType sport) => switch (sport) {
       SportType.nfl || SportType.ncaaFB => AlertEventType.touchdown,
-      SportType.nba || SportType.ncaaMB => AlertEventType.clutchBasket,
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        AlertEventType.clutchBasket,
       SportType.mlb => AlertEventType.run,
       SportType.nhl => AlertEventType.goal,
-      SportType.mls || SportType.fifa || SportType.championsLeague => AlertEventType.soccerGoal,
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        AlertEventType.soccerGoal,
     };
 
 String _previewLabel(SportType sport) => switch (sport) {
       SportType.nfl || SportType.ncaaFB => 'Preview Touchdown Animation',
-      SportType.nba || SportType.ncaaMB => 'Preview Clutch Basket Animation',
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        'Preview Clutch Basket Animation',
       SportType.mlb => 'Preview Run Animation',
       SportType.nhl => 'Preview Goal Animation',
-      SportType.mls || SportType.fifa || SportType.championsLeague => 'Preview Soccer Goal Animation',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        'Preview Soccer Goal Animation',
     };
 
 // ---------------------------------------------------------------------------

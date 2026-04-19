@@ -139,10 +139,15 @@ class GameDaySyncConfig {
 
   static IconData _sportIcon(SportType sport) => switch (sport) {
         SportType.nfl || SportType.ncaaFB => Icons.sports_football,
-        SportType.nba || SportType.ncaaMB => Icons.sports_basketball,
+        SportType.nba || SportType.wnba || SportType.ncaaMB =>
+          Icons.sports_basketball,
         SportType.mlb => Icons.sports_baseball,
         SportType.nhl => Icons.sports_hockey,
-        SportType.mls || SportType.fifa || SportType.championsLeague => Icons.sports_soccer,
+        SportType.mls ||
+        SportType.nwsl ||
+        SportType.fifa ||
+        SportType.championsLeague =>
+          Icons.sports_soccer,
       };
 }
 
@@ -1119,10 +1124,14 @@ class _GameDayTeamRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final sportEmoji = switch (team.sport) {
       SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
-      SportType.nba || SportType.ncaaMB => '\u{1F3C0}',
+      SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
       SportType.mlb => '\u{26BE}',
       SportType.nhl => '\u{1F3D2}',
-      SportType.mls || SportType.fifa || SportType.championsLeague => '\u{26BD}',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        '\u{26BD}',
     };
 
     return InkWell(
