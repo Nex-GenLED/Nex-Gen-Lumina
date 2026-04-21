@@ -1,7 +1,7 @@
 # Lumina Commercial Mode — Smoke Test Checklist
 
 Manual verification checklist for the commercial mode feature set.
-Run before each release candidate.
+Run before each release candidate. Owned by Nex-Gen LED LLC engineering.
 
 ---
 
@@ -35,7 +35,7 @@ Run before each release candidate.
 - [ ] In CommercialScheduleScreen, create a day-part starting in 2 minutes
 - [ ] Wait for the start time to pass
 - [ ] Verify the active day-part indicator updates in the timeline
-- [ ] Verify the WLED controller receives the assigned design (check controller HTTP endpoint or logs)
+- [ ] Verify the controller receives the assigned design (check the controller HTTP endpoint or logs)
 
 ## 4. Smart Fill Gap Coverage
 
@@ -47,7 +47,7 @@ Run before each release candidate.
 ## 5. Daylight Suppression
 
 - [ ] Configure an outdoor channel (e.g., Outdoor Facade) with `daylightSuppression: true`, `daylightMode: softDim`
-- [ ] During daylight hours: verify brightness multiplier reduces to ~0.20 (check via WLED `/json/state` brightness value)
+- [ ] During daylight hours: verify brightness multiplier reduces to ~0.20 (check via controller `/json/state` brightness value)
 - [ ] At sunset: verify brightness ramps back to 1.0 over ~10 minutes
 - [ ] At sunrise: verify brightness dims to 0.20 over ~10 minutes
 - [ ] Configure `daylightMode: hardOff` — verify outdoor channel turns fully off during daylight
@@ -59,6 +59,7 @@ Run before each release candidate.
 - [ ] Verify all channels flash the team colors
 - [ ] Reconfigure `alertChannelScope: indoorOnly` — verify only indoor channels react
 - [ ] Reconfigure `alertChannelScope: selectedChannels` with 1 channel selected — verify only that channel reacts
+- [ ] Repeat with a WNBA team and an NWSL team — verify league parity (scoring triggers, no exhaustiveness crashes)
 
 ## 7. Game Day Mode Activation
 
@@ -103,7 +104,7 @@ Run before each release candidate.
 
 - [ ] From CommercialHomeScreen: Navigate to Settings > Switch to Residential Mode
 - [ ] Verify app routes to residential dashboard (WledDashboardPage)
-- [ ] Verify all residential features work normally (WLED control, patterns, schedule)
+- [ ] Verify all residential features work normally (controller control, patterns, schedule)
 - [ ] From residential Settings: tap Switch to Commercial Mode
 - [ ] Verify app routes back to CommercialHomeScreen
 - [ ] Verify commercial schedule and location data are intact (no data loss)
@@ -127,5 +128,6 @@ Run before each release candidate.
 
 ---
 
-**Last updated**: 2026-03-25
+**Last updated**: 2026-04-21
 **Version**: v2.1.0 Commercial Mode
+**Owner**: Nex-Gen LED LLC — engineering

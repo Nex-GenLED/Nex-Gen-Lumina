@@ -1,116 +1,122 @@
 ---
 title: "Nex-Gen Lumina — Admin Operations Guide"
-subtitle: "How to manage dealers, installers, and installations as the system owner"
-author: "Nex-Gen LED"
+subtitle: "Run the dealer, installer, and corporate side of Lumina from inside the app"
+author: "Nex-Gen LED LLC"
 date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
-  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Nex-Gen Lumina — Admin Operations Guide (Internal)</div>'
-  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
+  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Nex-Gen Lumina — Admin Operations Guide (Internal)</div>'
+  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
 stylesheet: []
 body_class: guide
 ---
 
 <style>
-  body { font-family: 'Segoe UI', Arial, sans-serif; color: #222; line-height: 1.6; }
-  h1 { color: #00B8D4; border-bottom: 2px solid #00B8D4; padding-bottom: 8px; }
-  h2 { color: #00E5FF; margin-top: 28px; }
-  h3 { color: #333; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
-  th { background: #00B8D4; color: white; }
-  .tip { background: #E0F7FA; border-left: 4px solid #00B8D4; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .warning { background: #FFF3E0; border-left: 4px solid #FF9800; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .danger { background: #FFEBEE; border-left: 4px solid #F44336; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .step-box { background: #F5F5F5; border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin: 10px 0; }
-  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; color: #DCF0FF; background: #07091A; line-height: 1.6; }
+  h1, h2, h3 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+  h1 { background: linear-gradient(90deg, #6E2FFF, #00D4FF); -webkit-background-clip: text; background-clip: text; color: transparent; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; }
+  h2 { color: #00D4FF; margin-top: 28px; }
+  h3 { color: #DCF0FF; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #111527; }
+  th, td { border: 1px solid #1F2542; padding: 8px 12px; text-align: left; }
+  th { background: #6E2FFF; color: #DCF0FF; }
+  .tip { background: rgba(0, 212, 255, 0.12); border-left: 4px solid #00D4FF; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .warning { background: rgba(255, 170, 60, 0.12); border-left: 4px solid #FFAA3C; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .danger { background: rgba(244, 67, 54, 0.15); border-left: 4px solid #F44336; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .step-box { background: #111527; border: 1px solid #1F2542; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  code { background: #1F2542; color: #00D4FF; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
 </style>
 
 # Nex-Gen Lumina — Admin Operations Guide
 
-This guide is for **you, the owner of Nex-Gen LED**. It covers how to set up and manage the entire dealer/installer ecosystem from within the Lumina app. Your dealers and installers have their own guide — this one is about the admin operations they can't see.
+This is your playbook for running the admin side of Lumina — the dealer network, installer team, corporate dashboard, and everything your dealers and installers never see. Permanent residential and commercial lighting that works as hard as you do, and this guide keeps the machine behind it running smoothly.
+
+## What you'll need
+
+- Access to the Lumina app on a phone or tablet, signed in as Nex-Gen LED LLC staff
+- The **Corporate PIN** (for the Corporate Dashboard) or **Admin PIN** `9999` (for dealer/installer management)
+- Access to the Firebase Console for the Lumina production project — used for PIN hashing, demo codes, and `app_config` changes
+- A list of your active dealers and installers if you're onboarding or auditing
 
 ---
 
-## 1. Your Admin Credentials
+## 1. Staff credentials at a glance
 
-All staff PINs are entered through a single unified Staff PIN screen (see Section 2). The PIN you enter determines which mode you land in.
+Every staff PIN flows through one screen — the **Staff PIN** screen. The PIN you type decides which mode you land in.
 
-| Item | Value | Mode |
+| Item | Value | Lands you in |
 |------|-------|------|
-| **Corporate PIN** | *(set in Firestore — see Section 7A)* | Corporate Dashboard |
-| **Admin PIN** | `9999` | Admin Dashboard (dealer/installer management) |
-| **Master Installer PIN** | `8817` (Nex-Gen Administrator bypass) | Installer Mode |
-| **Sales PIN** | *(set in Firestore `app_config/master_sales_pin`)* | Sales Mode |
-| **Dev/Test PIN** | `0000` (development only — disable before launch) | Installer Mode |
+| **Corporate PIN** | Set in Firestore — see Section 7 | Corporate Dashboard |
+| **Admin PIN** | `9999` | Admin Dashboard (dealer + installer management) |
+| **Master Installer PIN** | `8817` (Nex-Gen LED LLC bypass) | Installer Mode |
+| **Sales PIN** | Set in Firestore `app_config/master_sales_pin` | Sales Mode |
+| **Dev/Test PIN** | `0000` — disable before launch | Installer Mode |
 
-### PIN Validation Priority
+### How PIN validation is prioritized
 
-When you enter a PIN on the Staff PIN screen, the app checks in this order:
+When a PIN is entered, the app checks sources in this order:
 
 1. **Corporate PIN** — SHA-256 hash compared against `app_config/master_corporate_pin`
 2. **Installer PINs** — master installer PIN (`8817`), then individual installer PINs in the `installers` collection
 3. **Sales PIN** — master sales PIN, then per-installer sales fallback
 
-This priority order means a PIN can never accidentally route to the wrong mode. Corporate is checked first because it has no collection fallback, so it can never accidentally claim an installer PIN.
+Corporate is checked first because it has no collection fallback, so it can never accidentally claim someone else's PIN. The order prevents PIN collisions from routing staff to the wrong mode.
 
 <div class="danger">
-<strong>Before launch:</strong> The admin PIN (`9999`) and master installer PIN (`8817`) are currently hardcoded. Plan to move these to hashed Firestore values (like the corporate PIN already uses) so they can be changed without an app update.
+<strong>Before you launch publicly:</strong> The Admin PIN (<code>9999</code>) and Master Installer PIN (<code>8817</code>) are hardcoded in the app. Plan to migrate both to hashed Firestore values — the same pattern the Corporate PIN already uses — so they can be rotated without an app release.
 </div>
 
 ---
 
-## 2. Accessing the Staff PIN Screen
+## 2. Getting to the Staff PIN screen
 
-As of v2.2, there is **no visible "Installer Mode" or "Admin Access" button** on the login screen. Staff access is hidden behind an invisible gesture to keep the customer-facing UI clean.
-
-### How to Open the Staff PIN Screen
+There is no visible "Installer Mode" or "Admin Access" button on the login screen — by design. Staff access is hidden behind a gesture so the customer-facing UI stays clean.
 
 <div class="step-box">
 
-1. Open the Lumina app to the **login screen**
-2. **Tap the Lumina logo 5 times** within 3 seconds (the large icon + "LUMINA" wordmark at the top)
-3. There is no visual feedback during the taps — this is intentional to keep the gesture hidden from customers
-4. After the 5th tap, the **Staff PIN screen** opens automatically
-5. Enter your PIN — the app routes you to the correct mode based on the PIN you enter (see Section 1 for priority order)
+1. Open Lumina to the **login screen**
+2. Tap the **Lumina logo** 5 times within 3 seconds (the large icon and "LUMINA" wordmark at the top)
+3. The taps give no visual feedback — that's intentional
+4. After the 5th tap the **Staff PIN** screen opens automatically
+5. Enter your PIN — the app routes you to the correct mode (see Section 1)
 
 </div>
 
 <div class="warning">
-<strong>Important:</strong> The 5 taps must happen within a 3-second window. If you pause too long between taps, the counter resets silently. Just start over.
+<strong>Heads-up:</strong> The 5 taps must happen inside a 3-second window. If you pause too long the counter silently resets — just start over.
 </div>
 
-### PIN Entry Behavior
+### How the PIN pad behaves
 
-- The PIN pad accepts **4 digits**
-- Filled digits show as **cyan circles**; empty positions show as outlined circles
-- Validation happens automatically when the 4th digit is entered — no "Submit" button needed
-- On success: light haptic feedback, then navigation to the appropriate mode
-- On failure: the dots shake and you see a red error message with remaining attempts
+- 4 digits total
+- Filled digits glow **LUMINA cyan**; empty positions show as outlined circles
+- Validation runs automatically on the 4th digit — no Submit button
+- Success: light haptic, then you land in the right mode
+- Failure: the dots shake, and you see the remaining attempts
 
-### Lockout Protection
+### Lockout
 
-- **5 failed attempts** triggers a **30-second lockout**
-- A countdown timer shows the remaining seconds in amber text
-- After 30 seconds the counter resets and you can try again
+- 5 failed attempts triggers a **30-second lockout**
+- A countdown shows the remaining seconds in amber
+- After 30 seconds the counter clears and you can try again
 - The lockout is local to the screen — dismissing and reopening the screen resets it
 
 ### Entering the Admin Dashboard
 
-Enter PIN `9999` on the Staff PIN screen. You land on the **Admin Dashboard**, which shows three live stats at the top:
+Type `9999` on the Staff PIN screen. You land on the **Admin Dashboard**, which shows three live stats across the top:
 
 - **Active Dealers** — companies you've onboarded
 - **Active Installers** — technicians across all dealers
-- **Installations** — total completed customer setups
+- **Installations** — completed customer setups to date
 
-### App Store Reviewer Reveal (Separate Gesture)
+### App Store reviewer reveal
 
-There is a second hidden gesture on the login screen: **5 taps on the "POWERED BY NEX-GEN" subtitle** (below the logo). This reveals an "App Store Review" button that autofills the reviewer test account credentials. This gesture has no time window — taps can be spaced out. This is only relevant during App Store review submissions.
+There's a second hidden gesture: **5 taps on the "POWERED BY NEX-GEN" subtitle** (under the logo). That reveals an "App Store Review" button that autofills the reviewer test credentials. No time window on this one — taps can be spaced out. Only relevant during App Store review submissions.
 
 ---
 
-## 3. The Big Picture: How It All Fits Together
+## 3. The big picture
 
 ```
 YOU (Admin PIN 9999)
@@ -128,22 +134,20 @@ YOU (Admin PIN 9999)
       └── Installer 01 → PIN 0301 (Carlos)
 ```
 
-- **You** create **Dealers** (companies that sell/install your product)
-- Each **Dealer** gets a 2-digit code (01–99) → up to 99 dealers
-- Under each Dealer you create **Installers** (their technicians)
-- Each **Installer** gets a 2-digit code (01–99) → up to 99 per dealer
+- You create **Dealers** — companies that sell and install Nex-Gen
+- Each dealer gets a 2-digit code (`01`–`99`) → up to 99 dealers
+- Under each dealer you create **Installers** — their field technicians
+- Each installer gets a 2-digit code (`01`–`99`) → up to 99 per dealer
 - The installer's **4-digit PIN** = dealer code + installer code
-- Installers use that PIN to enter Installer Mode and complete customer setups
+- That PIN is how the installer enters Installer Mode on a customer's phone during setup
 
 ---
 
-## 4. Creating Your First Dealer
-
-### Step-by-Step
+## 4. Creating a dealer
 
 1. From the Admin Dashboard, tap **Manage Dealers**
-2. Tap the **+ Add Dealer** button
-3. Fill in the dealer's information:
+2. Tap **+ Add Dealer**
+3. Fill in their info:
 
 | Field | Required | Notes |
 |-------|----------|-------|
@@ -152,33 +156,29 @@ YOU (Admin PIN 9999)
 | Email | Yes | For correspondence |
 | Phone | Yes | Business phone |
 
-4. The system **auto-assigns the next available dealer code** (starting at `01`)
+4. The system auto-assigns the next available dealer code (starting at `01`)
 5. Tap **Save**
 
-The dealer is now active and visible in the dealer list.
+The dealer is live and appears in the dealer list.
 
 <div class="tip">
-<strong>Tip:</strong> Dealer codes are assigned sequentially. If you've used 01, 02, 03 and deactivated 02, the next new dealer still gets 04 (not 02). Codes don't recycle — this prevents PIN collisions with old installers.
+<strong>Tip:</strong> Dealer codes are sequential and don't recycle. If you've used 01, 02, 03 and deactivate 02, the next new dealer still gets 04 — not 02. That prevents PIN collisions with previous installers.
 </div>
 
-### What to Tell the Dealer
-
-After creating their account, give them:
+### What to hand the dealer
 
 - Their **dealer code** (e.g., `03`)
-- The **Dealer & Installer Setup Guide** PDF (you already have this at `docs/Dealer_Installer_Setup_Guide.pdf`)
-- Explain that you'll create their initial installer PINs, or give them admin access to do it themselves
+- The **Dealer & Installer Setup Guide** PDF (`docs/Dealer_Installer_Setup_Guide.pdf`)
+- A heads-up that you'll create their initial installer PINs, or that you can give them admin access to create their own
 
 ---
 
-## 5. Adding Installers Under a Dealer
-
-### Step-by-Step
+## 5. Adding installers under a dealer
 
 1. From the Admin Dashboard, tap **Manage Installers**
-2. If you have multiple dealers, select which dealer this installer belongs to
+2. If you have multiple dealers, pick the dealer this installer belongs to
 3. Tap **+ Add Installer**
-4. Fill in the installer's information:
+4. Fill in the installer's info:
 
 | Field | Required | Notes |
 |-------|----------|-------|
@@ -188,293 +188,291 @@ After creating their account, give them:
 
 5. The system auto-assigns the next installer code under that dealer
 6. Tap **Save**
-7. The **4-digit PIN** is displayed — this is what the installer uses in the field
+7. The **4-digit PIN** is displayed — share this with the technician
 
 ### Example
 
-You're adding the first installer under Dealer 03 ("Bright Ideas Inc."):
+You're adding the first installer under Dealer 03 (Bright Ideas Inc.):
 
-- System assigns installer code: `01`
+- System assigns installer code `01`
 - Combined PIN: `0301`
-- You tell Carlos: "Your PIN is 0301"
+- Tell Carlos: "Your PIN is 0301"
 
-Carlos opens the Lumina app → taps the Lumina logo 5 times → enters `0301` on the Staff PIN screen → he's in Installer Mode.
+Carlos opens Lumina → taps the Lumina logo 5 times → enters `0301` on the Staff PIN screen → he's in Installer Mode.
 
 ---
 
-## 6. Day-to-Day Management
+## 6. Day-to-day management
 
-### Viewing All Dealers
+### All dealers view
 
-**Admin Dashboard → Manage Dealers** shows every dealer with:
+**Admin Dashboard → Manage Dealers** lists every dealer with:
 
 - Dealer code
 - Company name
 - Contact name
 - Active/inactive status
-- Number of installers under them
+- Installer count
 
-### Viewing All Installers
+### All installers view
 
-**Admin Dashboard → Manage Installers** shows every installer with:
+**Admin Dashboard → Manage Installers** lists every installer with:
 
-- Their 4-digit PIN
+- 4-digit PIN
 - Name
 - Parent dealer
 - Active/inactive status
 - Total installations completed
 
-You can filter by dealer to see only one company's team.
+Filter by dealer to narrow down to one company's team.
 
-### Editing a Dealer or Installer
+### Editing a dealer or installer
 
-Tap any dealer or installer in the list to edit their contact details (name, email, phone). The dealer code and installer code **cannot be changed** after creation.
+Tap any dealer or installer to edit their contact info (name, email, phone). The dealer code and installer code **cannot change** after creation — they're baked into live PINs.
 
 ---
 
-## 7. Corporate Dashboard (Network-Level Admin)
+## 7. Corporate Dashboard — network-level oversight
 
-The **Corporate Dashboard** is a separate admin experience from the Admin Dashboard. While the Admin Dashboard (PIN `9999`) manages individual dealers and installers, the Corporate Dashboard provides network-wide analytics, inventory intelligence, and cross-dealer oversight.
+The **Corporate Dashboard** is a separate admin experience from the Admin Dashboard. The Admin Dashboard (PIN `9999`) handles dealer and installer records one at a time. The Corporate Dashboard is where you see the whole network — analytics, inventory intelligence, and cross-dealer oversight.
 
 ### Admin Dashboard vs. Corporate Dashboard
 
 | | Admin Dashboard | Corporate Dashboard |
 |---|---|---|
-| **Access** | PIN `9999` (hardcoded) | Corporate PIN (SHA-256 hashed, stored in Firestore) |
-| **Purpose** | Dealer/installer CRUD, installation records | Network analytics, pipeline oversight, inventory, pricing |
-| **Scope** | Individual dealer management | Cross-dealer, network-wide view |
-| **Session timeout** | Standard | 60 minutes (with 5-minute warning) |
+| **Access** | PIN `9999` (hardcoded today) | Corporate PIN (SHA-256 hash in Firestore) |
+| **Purpose** | Dealer + installer CRUD, installation records | Network analytics, pipeline, inventory, pricing |
+| **Scope** | One dealer at a time | Cross-dealer, network-wide |
+| **Session timeout** | Standard | 60 minutes with 5-minute warning |
 
-### How to Access
+### Getting in
 
-Use the same hidden 5-tap gesture on the Lumina logo (Section 2), then enter the **Corporate PIN**. The PIN is validated via SHA-256 hash against `app_config/master_corporate_pin` in Firestore.
+Same hidden 5-tap gesture on the Lumina logo (Section 2), then enter the Corporate PIN. Validated as a SHA-256 hash against `app_config/master_corporate_pin`.
 
-### Corporate Roles
+### Corporate roles
 
-Each corporate PIN record includes a **role** that controls what the user can see and do:
+Each corporate PIN record has a **role** that controls what the holder sees and changes.
 
-| Role | Read Access | Write Access |
+| Role | Read access | Write access |
 |------|-------------|--------------|
-| **Owner** | All tabs, all data | Full admin: dealer CRUD, pricing, PIN management, announcements |
-| **Officer** | All tabs, all data | Announcements, dealer status toggle; **cannot** change PINs |
-| **Warehouse** | Network & Pipeline (read-only); full Warehouse tab | Reorder intelligence (read-only insights) |
+| **Owner** | All tabs, all data | Full admin — dealer CRUD, pricing, PIN management, announcements |
+| **Officer** | All tabs, all data | Announcements, dealer status toggle. Cannot change PINs. |
+| **Warehouse** | Network + Pipeline (read-only); full Warehouse tab | Reorder intelligence insights (read-only) |
 | **Read-only** | All tabs (data only) | None — pure observability |
 
-### Dashboard Tabs
+### The four tabs
 
-The Corporate Dashboard has 4 tabs:
-
-1. **Network** — Dealer health overview. Header cards show active dealers, jobs this month, revenue, and average job value. Each dealer card is classified as active, quiet, or stalled.
-2. **Pipeline** — Cross-dealer job pipeline. Filter by status chips, search jobs, view stall indicators (amber at 7-14 days, red at 14+ days).
-3. **Warehouse** — Network inventory intelligence: demand view, waste analysis, reorder triggers.
+1. **Network** — Dealer health overview. Header cards show active dealers, jobs this month, revenue, average job value. Dealer cards are classified as active, quiet, or stalled.
+2. **Pipeline** — Cross-dealer job pipeline. Filter by status, search jobs, watch stall indicators (amber at 7–14 days, red at 14+ days).
+3. **Warehouse** — Network-wide inventory intelligence: demand view, waste analysis, reorder triggers.
 4. **Admin** — Dealer management, network pricing defaults, announcements, and system PIN management (Owner role only).
 
-### Managing the Corporate PIN
+### Changing the Corporate PIN
 
-The Corporate PIN is stored as a SHA-256 hash in Firestore at `app_config/master_corporate_pin`. The document contains:
+The Corporate PIN is stored as a SHA-256 hash in `app_config/master_corporate_pin`. Document fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Field | Type | What it is |
+|-------|------|------------|
 | `pin_hash` | string | SHA-256 hex digest of the PIN |
-| `displayName` | string | Label shown in the session (e.g., "Nex-Gen Corporate") |
-| `role` | string | One of: `owner`, `officer`, `warehouse`, `readonly` |
+| `displayName` | string | Label shown in-session (e.g., "Nex-Gen Corporate") |
+| `role` | string | `owner`, `officer`, `warehouse`, or `readonly` |
 
-To change the corporate PIN, update the `pin_hash` field with the SHA-256 hash of the new PIN. You can generate the hash with any SHA-256 tool.
+Generate the SHA-256 hash of the new PIN with any standard SHA-256 tool and update `pin_hash`.
 
 <div class="tip">
-<strong>Tip:</strong> For the full Corporate Dashboard walkthrough — including detailed tab descriptions, metric definitions, and workflow guides — see the dedicated <code>docs/corporate-dashboard-guide.md</code>.
+<strong>Tip:</strong> For the full Corporate Dashboard walkthrough — tab details, metric definitions, workflow guides — see <code>docs/corporate-dashboard-guide.md</code>.
 </div>
 
 ---
 
-## 8. Sales Mode Management
+## 8. Sales Mode management
 
-The Lumina app includes a Sales Mode for field representatives to conduct site surveys and generate estimates.
+The Lumina app includes a **Sales Mode** for field reps who run site surveys and generate estimates.
 
-### How Sales Mode Works
+### How it works
 
-- Sales reps use the **same hidden 5-tap gesture** on the Lumina logo (see Section 2) to open the Staff PIN screen
-- They enter their 4-digit Sales PIN (validated against `master_sales_pin` in Firestore `app_config` collection)
-- Sessions last 30 minutes with a 5-minute warning before timeout
-- Progress auto-saves on session timeout
+- Reps use the **same hidden 5-tap gesture** on the Lumina logo (Section 2) to open the Staff PIN screen
+- They enter the 4-digit Sales PIN, validated against `master_sales_pin` in the `app_config` collection
+- Sessions last 30 minutes with a 5-minute timeout warning
+- Progress auto-saves on timeout
 
-### What You Manage
+### What you manage
 
-- The master sales PIN is stored in Firestore at `app_config/master_sales_pin`
-- Currently a single shared PIN — all sales reps use the same PIN
-- To change the PIN: update the value in Firebase Console → Firestore → `app_config` collection
+- Master Sales PIN lives at `app_config/master_sales_pin`
+- Single shared PIN today — all reps use the same one
+- To rotate: update the value in Firebase Console → Firestore → `app_config`
 
-### Sales Job Data
+### Sales job data
 
-Sales jobs are stored in Firestore (created by the sales reps). Jobs track: prospect info, zone measurements, estimates, and signatures.
+Sales jobs are stored in Firestore — created by the reps in the field. Each job tracks prospect info, zone measurements, estimate, and signatures.
 
-**Job status flow:**
+**Status flow:**
 
 `Draft` → `EstimateSent` → `EstimateSigned` → `PrewireScheduled` → `PrewireComplete` → `InstallComplete`
 
-### Viewing Sales Data
+### Where you see the data
 
-- Sales job data is visible in the Admin Dashboard under sales tracking
-- Each job shows: customer name, address, status, assigned sales rep, dealer code, date
-- The Dealer Dashboard also shows jobs filtered by that dealer's team
+- Sales job data appears in the Admin Dashboard under sales tracking
+- Each row shows customer name, address, status, assigned rep, dealer code, date
+- Dealers also see their own team's jobs in their Dealer Dashboard
 
-### Automated Customer Messaging
+### Automated customer messaging
 
-The sales pipeline triggers automated SMS and email messages at key milestones (estimate signed, Day 1 scheduled, wiring complete, etc.). Dealers can configure messaging templates and timing from their Dealer Dashboard. For the full list of 8 automated customer touchpoints and how to customize them, see `docs/messaging-configuration-guide.md`.
+The sales pipeline triggers automated SMS and email at key milestones — estimate signed, Day 1 scheduled, wiring complete, and more. Dealers configure messaging templates and timing from their Dealer Dashboard. For the full list of 8 automated touchpoints and how to customize them, see `docs/messaging-configuration-guide.md`.
 
 ---
 
-## 9. Referral Reward Approval and Payout Management
+## 9. Referral rewards — approvals and payouts
 
-The Lumina app includes a referral program where dealers and customers earn rewards for referrals.
+Lumina includes a referral program. Dealers and customers earn rewards for referrals.
 
-### How the Referral Pipeline Works
+### How the pipeline works
 
 1. A dealer or customer shares their referral code
-2. The referred prospect goes through Sales Mode → Installation
-3. Upon installation completion, the referral attribution service tracks the source
-4. A reward is calculated based on the installation value and the referrer's ambassador tier
-5. The reward enters "pending" status awaiting admin approval
+2. The prospect goes through Sales Mode → Installation
+3. On install completion, referral attribution records the source
+4. A reward is calculated from the installation value and the referrer's ambassador tier
+5. The reward goes to **pending** status, waiting for your approval
 
-### Ambassador Tiers
+### Ambassador tiers
 
-| Tier | Installs Required | Benefits |
-|------|------------------|----------|
+| Tier | Installs | Benefits |
+|------|---------|----------|
 | Bronze | 0+ | Base referral reward |
 | Silver | 3+ | Increased reward |
 | Gold | 8+ | Higher reward + perks |
 | Platinum | 15+ | Maximum reward + premium perks |
 
-### Approving Payouts
+### Approving payouts
 
-1. From the Admin Dashboard, go to the **Payout Approval** screen
-2. Review pending payouts — each shows: dealer name, referral details, reward amount, reward type
+1. Admin Dashboard → **Payout Approval**
+2. Review pending payouts — dealer, referral details, amount, reward type
 3. Reward types: **Visa Gift Card** or **Nex-Gen Credit**
-4. Annual gift card cap: **$599 per dealer** (IRS reporting threshold)
+4. Annual gift card cap per dealer: **$599** (IRS reporting threshold)
 5. Approve or reject each payout
-6. Approved payouts move to "fulfilled" status
+6. Approved payouts move to **fulfilled**
 
-### Firestore Collections for Referrals
+### Firestore storage
 
-- Referral tracking data lives under dealer/user documents
-- Payout records are tracked with status (`pending`, `approved`, `fulfilled`, `gcCapReached`)
+- Referral tracking lives under dealer/user documents
+- Payout records track status: `pending`, `approved`, `fulfilled`, `gcCapReached`
 
 <div class="tip">
-<strong>Tip:</strong> Keep an eye on dealers approaching the $599 annual gift card cap. When they hit the cap, future rewards automatically default to Nex-Gen Credit until the next calendar year.
+<strong>Tip:</strong> Watch dealers approaching the $599 annual gift card cap — once they hit it, future rewards automatically default to Nex-Gen Credit until the next calendar year.
 </div>
 
 ---
 
-## 10. Deactivating & Reactivating
+## 10. Deactivating and reactivating
 
-### Deactivating an Installer
+### Deactivating an installer
 
-Tap the installer → toggle **Active** to off.
+Tap the installer → toggle **Active** off.
 
 - Their PIN stops working **immediately**
-- Any in-progress installations they had are preserved (can be resumed by another installer)
-- Their completed installation records remain intact
+- Any in-progress installations they had are preserved — another installer can resume
+- Completed installation records stay intact
 
-### Deactivating a Dealer
+### Deactivating a dealer
 
-Tap the dealer → toggle **Active** to off.
+Tap the dealer → toggle **Active** off.
 
 <div class="warning">
-<strong>Cascade effect:</strong> Deactivating a dealer <strong>automatically deactivates ALL installers</strong> under that dealer. Every one of their PINs stops working immediately.
+<strong>Cascade:</strong> Deactivating a dealer <strong>automatically deactivates every installer</strong> under that dealer. All of their PINs stop working immediately.
 </div>
 
 ### Reactivating
 
-Toggle **Active** back to on. For dealers, you must **manually reactivate each installer** — the cascade only works one direction (deactivation).
+Toggle **Active** back on. For dealers, you must **manually reactivate each installer** — the cascade only runs one direction (deactivation).
 
 ---
 
-## 11. What Happens During an Installation
+## 11. What actually happens during an installation
 
-When an installer uses their PIN and completes a setup, the system:
+When an installer completes a customer setup, the system:
 
-1. Creates a **Firebase Auth account** for the customer (email + temp password)
-2. Creates a **user profile** in Firestore at `/users/{uid}`
+1. Creates a **Firebase Auth** account for the customer (email + temp password)
+2. Creates a **user profile** at `/users/{uid}` in Firestore
 3. Creates an **installation record** at `/installations/{id}` containing:
-   - Customer info (name, email, address)
+   - Customer info — name, email, address
    - Your dealer code and installer code
    - Installer name and dealer company name
-   - Date installed
+   - Install date
    - Warranty expiration (5 years from install date)
    - Controller serial numbers
-   - Site mode (residential or commercial)
+   - Site mode — residential or commercial
 4. Links the physical controllers to the customer's account
-5. Increments the installer's installation count
-6. Shows the customer's login credentials on screen for the installer to hand off
+5. Increments the installer's install count
+6. Displays the customer's login credentials on screen for the installer to hand off
 
-You can view all installation records from the Firebase Console under the `installations` collection.
+You can audit every installation record from the Firebase Console under the `installations` collection.
 
 ---
 
-## 12. Manual IP Entry for Controller Setup
+## 12. Manual IP entry for controller setup
 
-Installers can now add controllers to a customer's account by entering an IP address directly, in addition to the existing BLE scan workflow. This is useful when a controller is already on the customer's Wi-Fi network (e.g., it was previously configured or set up by another installer).
+Installers can add controllers to a customer's account by typing an IP address directly — in addition to the usual BLE scan flow. This helps on service calls or reinstalls where the controller is already on the customer's Wi-Fi.
 
-### How It Works
+### How it works
 
 1. During controller setup, the installer taps **Add Controller**
 2. A bottom sheet offers two options:
    - **BLE Scan (New Device)** — for controllers not yet on Wi-Fi (existing flow)
-   - **Enter IP Address** — for controllers already on the network (new)
+   - **Enter IP Address** — for controllers already on the network
 3. If they choose IP entry, a dialog asks for:
 
 | Field | Required | Notes |
 |-------|----------|-------|
 | **IP Address** | Yes | The controller's local IP (e.g., `192.168.1.100`) |
-| **Name** | No | Friendly label (e.g., "Front Roofline"). Defaults to `Controller (IP)` if left blank. |
+| **Name** | No | Friendly label (e.g., "Front Roofline"). Defaults to `Controller (IP)` if blank |
 
-4. The controller is saved to Firestore under `users/{uid}/controllers` with `wifiConfigured: true`
-5. The app immediately pings the controller to verify connectivity (5-second timeout)
-6. Status indicators show: green (online), red (offline), gray (unchecked)
+4. The controller is saved to `users/{uid}/controllers` with `wifiConfigured: true`
+5. The app immediately pings the controller (5-second timeout) to confirm connectivity
+6. Status indicator: green (online), red (offline), gray (unchecked)
 
 <div class="tip">
-<strong>Tip:</strong> This is particularly helpful for service calls or reinstalls where the controller hardware is already connected to Wi-Fi. No need to re-pair via Bluetooth.
+<strong>Tip:</strong> Especially useful for service calls and reinstalls where the controller is already on the customer's Wi-Fi — no BLE re-pairing needed.
 </div>
 
 ---
 
-## 13. Firebase Collections You Own
+## 13. Firestore collections you own
 
-| Collection | What's In It | Who Writes |
+| Collection | What's in it | Who writes |
 |------------|-------------|------------|
-| `/dealers/{id}` | Dealer companies (code, name, contact, active status) | You (admin) |
-| `/installers/{id}` | Installer accounts (PIN, name, dealer, active status) | You (admin) |
-| `/installations/{id}` | Completed installation records (customer, warranty, controllers) | Installers (during setup) |
-| `/users/{uid}` | Customer accounts (profile, preferences, linked controllers) | Installer creates; customer owns |
-| `/users/{uid}/properties` | Customer properties (homes, locations) with linked controller IDs | Customer creates/manages |
-| `/dealerDemoCodes/{id}` | Demo/trial access codes for media and demo mode | You (admin, via Firebase Console) |
-| `app_config` | App-wide config (master sales PIN, corporate PIN hash, etc.) | You (admin, via Firebase Console) |
+| `/dealers/{id}` | Dealer companies — code, name, contact, active status | You |
+| `/installers/{id}` | Installer accounts — PIN, name, dealer, active status | You |
+| `/installations/{id}` | Completed installation records — customer, warranty, controllers | Installers during setup |
+| `/users/{uid}` | Customer accounts — profile, preferences, linked controllers | Installer creates; customer owns |
+| `/users/{uid}/properties` | Customer properties with linked controller IDs | Customer creates/manages |
+| `/dealerDemoCodes/{id}` | Demo/trial access codes for Media and Demo Mode | You (via Firebase Console) |
+| `app_config` | App-wide config — master sales PIN, corporate PIN hash | You (via Firebase Console) |
 
 ---
 
-## 14. Media Mode (Content Team Access)
+## 14. Media Mode — content team access
 
-Media Mode is separate from Installer Mode. It lets your content/marketing team access any customer's system for video shoots without giving them installer privileges.
+Media Mode is separate from Installer Mode. It gives the content/marketing team access to any customer's system for video shoots without granting installer privileges.
 
-### How It Works
+### How it works
 
 1. You create a **demo access code** in the `dealerDemoCodes` Firestore collection
 2. The media person opens Lumina → **Media Mode** → enters the 6-character code
 3. They can search for any customer by email or address
 4. They can **control the lights** but **cannot modify settings or create accounts**
 
-### Creating a Media Access Code
+### Creating a media access code
 
-Currently done directly in Firebase Console:
+Currently done in Firebase Console:
 
-1. Go to Firestore → `dealerDemoCodes` collection
-2. Add a document with these fields:
+1. Go to Firestore → `dealerDemoCodes`
+2. Add a document:
 
 | Field | Type | Example |
 |-------|------|---------|
 | `code` | string | `MEDIA1` |
-| `dealerCode` | string | `00` (use 00 for internal Nex-Gen) |
-| `dealerName` | string | `Nex-Gen LED` |
+| `dealerCode` | string | `00` (internal Nex-Gen) |
+| `dealerName` | string | `Nex-Gen LED LLC` |
 | `market` | string | `Internal` |
 | `isActive` | boolean | `true` |
 | `usageCount` | number | `0` |
@@ -484,86 +482,86 @@ Currently done directly in Firebase Console:
 
 ---
 
-## 15. Demo Mode Management
+## 15. Demo Mode management
 
-Demo Mode allows prospects to experience the Lumina app without a real account or hardware.
+Demo Mode lets prospects experience the Lumina app without a real account or hardware.
 
-### How It Works
+### How it works
 
 - Prospects enter a demo code on the Demo Welcome Screen
 - They go through: welcome → consent → profile collection → photo capture → roofline demo → completion
-- The demo uses `MockWledRepository` to simulate lighting without real hardware
-- Lead information is captured via the demo lead service
+- Demo Mode simulates lighting so no real hardware is needed
+- Prospect contact info is captured for follow-up
 
-### Managing Demo Codes
+### Managing demo codes
 
-Demo codes are stored in the `dealerDemoCodes` Firestore collection (same collection as Media Mode codes). Each code document has the same fields described in Section 14 above.
+Demo codes live in the same `dealerDemoCodes` collection as Media Mode codes. Each document uses the same fields described in Section 14.
 
 - Codes can have expiration dates (`expiresAt`) and usage limits (`maxUses`)
-- Track `usageCount` to measure marketing effectiveness
-- Set `isActive` to `false` to revoke a code without deleting it
+- `usageCount` tells you which channels are pulling traffic
+- Set `isActive: false` to revoke a code without deleting the record
 
-### Lead Capture
+### Lead capture
 
-- Demo sessions capture prospect contact info (name, email, phone)
-- This data can be used for follow-up by the sales team
-- Review leads in Firebase Console or through the Admin Dashboard
+- Demo sessions capture prospect name, email, phone
+- The sales team uses this data to follow up
+- Review leads in Firebase Console or from the Admin Dashboard
 
 <div class="tip">
-<strong>Tip:</strong> Create dedicated demo codes per marketing campaign or event so you can track which channels are generating the most interest.
+<strong>Tip:</strong> Create a dedicated demo code per marketing campaign or event so you can attribute leads to the right channel.
 </div>
 
 ---
 
-## 16. Dealer Dashboard Overview
+## 16. What your dealers see
 
-When dealers log in to their dashboard, they see a 4-tab interface. Understanding what your dealers see helps you support them and answer their questions.
+When dealers sign in, they land on a 4-tab Dealer Dashboard. Knowing what they see helps you support them.
 
-### Overview Tab
+### Overview tab
 
-- Stat cards showing total jobs, active installs, team size
-- Pipeline status bar (visual breakdown of job statuses)
+- Stat cards — total jobs, active installs, team size
+- Pipeline status bar — visual job status breakdown
 - Recent activity feed
 
-### Pipeline Tab
+### Pipeline tab
 
-- All sales jobs for their team
+- Every sales job from their team
 - Filterable by status
-- Tap to view full job details
+- Tap any job for full detail
 
-### Team Tab
+### Team tab
 
-- List of their installers
-- Active/inactive status for each
-- Installation counts per installer
+- Their installer roster
+- Active/inactive status
+- Install count per installer
 
-### Payouts Tab
+### Payouts tab
 
-- Pending rewards awaiting your (admin) approval
-- Approved/fulfilled payout history
+- Pending rewards waiting on your admin approval
+- Approved and fulfilled payout history
 - Ambassador tier progress indicator
 
 ---
 
-## 17. Weekly Brief Notifications
+## 17. Weekly Brief notifications
 
-The system sends automated weekly push notifications to users with Autopilot enabled.
+The system sends an automated weekly push to every user with Autopilot enabled.
 
-### How It Works
+### How it works
 
-- A Firebase Cloud Function (`sendWeeklyBrief`) fires every Sunday at 18:30 UTC
+- A scheduled Cloud Function (`sendWeeklyBrief`) fires every Sunday at 18:30 UTC
 - For each user with `autopilot_enabled` and `weekly_schedule_preview_enabled` set to `true`:
-  1. Queries their upcoming `autopilot_events` for the next week
-  2. Calls Claude Haiku to generate a personalized 1-2 sentence notification body
-  3. Sends an FCM push with title **"Your Week in Lights"** and a deep-link to the autopilot schedule
+  1. Pulls their upcoming `autopilot_events` for the next week
+  2. Calls Claude Haiku to generate a personalized 1–2 sentence body
+  3. Sends an FCM push titled **"Your Week in Lights"** with a deep-link to the autopilot schedule
 
 ### Requirements
 
 - `ANTHROPIC_API_KEY` must be set as an environment variable in the Cloud Functions runtime
 - Users must have a valid `fcmToken` in their Firestore user document
-- The function automatically cleans up stale FCM tokens
+- The function cleans up stale FCM tokens automatically
 
-### Deployment
+### Deploying
 
 ```bash
 cd functions
@@ -571,150 +569,147 @@ npm run build
 firebase deploy --only functions:sendWeeklyBrief
 ```
 
-### Android Notification Channel
+### Android notification channel
 
-The notification channel ID is `autopilot_weekly`, registered in the app as **"Weekly Schedule Preview"**. Users can disable this channel in their Android notification settings without affecting other Lumina notifications.
+Channel ID: `autopilot_weekly`. Registered in the app as **"Weekly Schedule Preview"**. Users can disable the channel in Android settings without affecting other Lumina notifications.
 
 ### Monitoring
 
-- Function logs show: eligible user count, sent/skipped/error counts
-- Check Firebase Console → Functions → `sendWeeklyBrief` for execution logs
-- If no notifications are being sent, verify the `ANTHROPIC_API_KEY` is set and that users have valid FCM tokens
+- Function logs show eligible user count, sent/skipped/error counts
+- Firebase Console → Functions → `sendWeeklyBrief` for execution logs
+- If nothing's being sent: verify `ANTHROPIC_API_KEY` is set and that users have valid FCM tokens
 
 ---
 
-## 18. Firestore Security Rules Summary
+## 18. Firestore security rules — quick summary
 
-Your security rules enforce this access model:
+Your rules enforce this access model:
 
-| Who | Can Do |
+| Who | Can do |
 |-----|--------|
-| **Regular users** | Read/write only their own data (profile, controllers, properties, schedules, geofences) |
-| **Media/dealer/admin users** | Read any user's data including properties (for customer lookup and content) |
+| **Regular users** | Read/write their own data only — profile, controllers, properties, schedules, geofences |
+| **Media / dealer / admin users** | Read any user's data including properties (for customer lookup and content) |
 | **Installers** | Create installation records (with required fields) |
 | **Admins** | Full CRUD on dealers, installers, installations |
 
-The `user_role` field on each user's profile (`residential`, `media`, `dealer`, `admin`) determines their access level.
+The `user_role` field on each profile (`residential`, `media`, `dealer`, `admin`) decides access level.
 
-**Subcollections under `/users/{uid}`** with owner-only write access and media/dealer/admin read access:
+Subcollections under `/users/{uid}` — owner-only write, media/dealer/admin read:
 - `controllers` — registered WLED controllers
-- `properties` — user's properties/locations with linked controller IDs
-- `commands` — cloud relay commands (bridge can also read/write)
+- `properties` — properties/locations with linked controller IDs
+- `commands` — cloud relay commands (ESP32 bridge can read/write too)
 - `bridge_status` — ESP32 bridge heartbeat
 - `geofences` — location-based automation triggers
 
 ---
 
-## 19. Onboarding a New Dealer — Complete Checklist
+## 19. Onboarding a new dealer — complete checklist
 
-Here's the full process when you sign up a new dealer:
+When you sign up a new dealer, here's the full sequence:
 
-- [ ] **Get their info**: contact name, company name, email, phone
-- [ ] **Open the Staff PIN screen**: Lumina app login screen → tap Lumina logo 5 times → enter PIN `9999`
-- [ ] **Create the dealer**: Manage Dealers → Add Dealer → fill in info → Save
-- [ ] **Note the dealer code** (e.g., `03`)
-- [ ] **Create their installers**: Manage Installers → select dealer → Add Installer for each tech
-- [ ] **Note each PIN** (e.g., `0301`, `0302`, etc.)
-- [ ] **Send the dealer**:
+- [ ] Collect their info — contact name, company name, email, phone
+- [ ] Open the Staff PIN screen — Lumina login → tap Lumina logo 5 times → enter `9999`
+- [ ] Create the dealer — **Manage Dealers** → **Add Dealer** → fill in info → **Save**
+- [ ] Note the dealer code (e.g., `03`)
+- [ ] Create their installers — **Manage Installers** → select dealer → **Add Installer** for each technician
+- [ ] Note each installer PIN (e.g., `0301`, `0302`)
+- [ ] Send the dealer:
   - Their dealer code
-  - Each installer's 4-digit PIN
+  - Every installer's 4-digit PIN
   - The **Dealer & Installer Setup Guide** PDF
-  - Remind them: access is via the **hidden 5-tap gesture on the Lumina logo** (no visible button)
-- [ ] **Confirm they can log in**: Have one installer test their PIN via the 5-tap gesture → Staff PIN screen
+  - A reminder that access is via the **hidden 5-tap gesture** on the Lumina logo (no visible button)
+- [ ] Confirm they can sign in — have one installer test their PIN via the 5-tap gesture
 
 ---
 
-## 20. Troubleshooting
+## 20. Quick reference
 
-### "I can't find the Admin Access button"
-
-As of v2.2, the visible "Installer Mode" / "Admin Access" button has been removed. Staff access is now hidden:
-
-1. Go to the Lumina login screen
-2. **Tap the Lumina logo 5 times** within 3 seconds
-3. The Staff PIN screen opens — enter your PIN
-
-There is no visual feedback during the taps. If nothing happens, you may be tapping too slowly (the 3-second window resets). Just try again.
-
-### "Maximum dealer limit (99) reached"
-
-You have 99 dealer codes used. You'd need to delete or reclaim unused ones, or expand the code format. This is a code change.
-
-### An installer says their PIN doesn't work
-
-1. Check the Admin Portal — is their account set to **Active**?
-2. Check their parent dealer — is the **dealer** active? (Deactivated dealer = all PINs dead)
-3. Verify they're entering all 4 digits correctly
-4. Make sure they're using the **5-tap gesture on the Lumina logo** to reach the Staff PIN screen (the old "Installer Mode" button no longer exists)
-5. If they've been locked out (5 failed attempts), wait **30 seconds** — the lockout clears automatically with a countdown timer. Alternatively, dismiss and reopen the Staff PIN screen.
-
-### A PIN routes to the wrong mode
-
-The Staff PIN screen checks PINs in priority order: Corporate → Installer → Sales. If a PIN matches at a higher priority level, it will route there. This is by design to prevent collisions. If someone's Sales PIN is routing to Installer mode, their PIN matches an installer PIN in the database — assign them a different Sales PIN.
-
-### A dealer left the program
-
-1. Admin Portal → Manage Dealers → find them → toggle **Active** off
-2. All their installers are automatically deactivated
-3. Existing customer installations are unaffected — those accounts still work
-4. The dealer code is not reused
-
-### Need to transfer an installer to a different dealer
-
-You can't move an installer between dealers — the dealer code is baked into their PIN. Instead:
-1. Deactivate the old installer account
-2. Create a new installer under the new dealer
-3. Give the technician their new PIN
+| Action | Where |
+|--------|-------|
+| Open Staff PIN screen | Login → tap Lumina logo 5 times (within 3 seconds) |
+| Enter Admin Dashboard | Staff PIN → `9999` |
+| Enter Corporate Dashboard | Staff PIN → Corporate PIN |
+| Enter Sales Mode | Staff PIN → Sales PIN |
+| Enter Installer Mode | Staff PIN → Installer PIN (e.g., `0301`) |
+| Create a dealer | Admin Dashboard → **Manage Dealers** → **Add** |
+| Create an installer | Admin Dashboard → **Manage Installers** → **Add** |
+| Deactivate a dealer | **Manage Dealers** → tap dealer → toggle **Active** off |
+| Deactivate an installer | **Manage Installers** → tap installer → toggle **Active** off |
+| View installation stats | Admin Dashboard (top cards) |
+| Add controller by IP | Installer Mode → Controller Setup → **Add Controller** → **Enter IP Address** |
+| Create a media access code | Firebase Console → `dealerDemoCodes` |
+| View all installations | Firebase Console → `installations` |
+| Change sales PIN | Firebase Console → Firestore → `app_config/master_sales_pin` |
+| Change corporate PIN | Firebase Console → Firestore → `app_config/master_corporate_pin` → update `pin_hash` |
+| Approve payouts | Admin Dashboard → **Payout Approval** |
+| View sales pipeline | Admin Dashboard → **Sales Jobs** |
+| View network analytics | Corporate Dashboard → **Network** tab |
+| Deploy Weekly Brief | `firebase deploy --only functions:sendWeeklyBrief` |
+| Manage demo codes | Firebase Console → `dealerDemoCodes` |
+| Reveal App Store review button | Login → tap **POWERED BY NEX-GEN** subtitle 5 times |
 
 ---
 
-## 21. Security Notes
+## 21. Security notes
 
-### What's Improved in v2.2
+### What's solid in v2.2
 
-- **Hidden staff entry** — the visible "Installer / Dealer Access" button is gone. Staff access now requires knowing the 5-tap gesture, which significantly reduces the chance of customers accidentally finding it.
-- **Corporate PIN uses SHA-256 hashing** — the corporate PIN is never stored in plaintext. It's validated against a SHA-256 hash in Firestore (`app_config/master_corporate_pin.pin_hash`). This is the gold standard; other PINs should follow this pattern.
-- **30-second lockout** — after 5 failed PIN attempts, the screen locks for 30 seconds. This rate-limits brute-force attempts.
-- **Priority-based PIN routing** — the validation order (Corporate → Installer → Sales) prevents PIN collisions from routing users to the wrong mode.
+- **Hidden staff entry** — the visible "Installer / Dealer Access" button is gone. Staff access now requires the 5-tap gesture, dramatically lowering the chance customers stumble onto it.
+- **Corporate PIN uses SHA-256** — never stored in plaintext. This is the pattern to replicate for the other admin PINs.
+- **30-second lockout** — 5 failed attempts triggers a screen-local lockout, which rate-limits brute force.
+- **Priority-based PIN routing** — the check order (Corporate → Installer → Sales) prevents PIN collisions from routing to the wrong mode.
 
 <div class="warning">
-<strong>Remaining limitations to address before scaling:</strong>
+<strong>Things to tighten before scaling:</strong>
 
-- **Admin PIN is hardcoded** (`9999` in `admin_providers.dart`). Anyone with the app who guesses it has full admin access. Move to a hashed Firestore value like the corporate PIN.
-- **Master installer PIN is hardcoded** (`8817` in `installer_providers.dart`). Same concern — migrate to hashed Firestore storage.
-- **Demo/media codes** are managed in Firebase Console, not in the app. Consider adding an in-app screen for this.
-- **No audit log** — dealer/installer changes are not tracked. Consider adding a Firestore `audit_log` collection.
-- **Deletes are soft deletes** — deactivation only. Data is preserved.
-- **Lockout is screen-local** — dismissing and reopening the Staff PIN screen resets the lockout counter. Consider persisting lockout state in local storage.
+- <strong>Admin PIN is hardcoded</strong> (<code>9999</code> in <code>admin_providers.dart</code>). Anyone who guesses it gets full admin. Migrate to a hashed Firestore value.
+- <strong>Master Installer PIN is hardcoded</strong> (<code>8817</code> in <code>installer_providers.dart</code>). Same migration path.
+- <strong>Demo/media codes</strong> are managed in Firebase Console today — consider an in-app screen.
+- <strong>No audit log</strong> — dealer/installer changes aren't tracked. A Firestore <code>audit_log</code> collection would fix this.
+- <strong>Deletes are soft</strong> — deactivation only, data is preserved.
+- <strong>Lockout is screen-local</strong> — dismissing and reopening resets the counter. Persisting lockout state in local storage would close that gap.
 </div>
 
 ---
 
-## 22. Quick Reference
+## What success looks like
 
-| Action | Where |
-|--------|-------|
-| Open Staff PIN screen | Login screen → tap Lumina logo 5 times (within 3 seconds) |
-| Enter Admin Dashboard | Staff PIN screen → PIN `9999` |
-| Enter Corporate Dashboard | Staff PIN screen → Corporate PIN |
-| Enter Sales Mode | Staff PIN screen → Sales PIN |
-| Enter Installer Mode | Staff PIN screen → Installer PIN (e.g., `0301`) |
-| Create a dealer | Admin Dashboard → Manage Dealers → Add |
-| Create an installer | Admin Dashboard → Manage Installers → Add |
-| Deactivate a dealer | Manage Dealers → tap dealer → toggle Active off |
-| Deactivate an installer | Manage Installers → tap installer → toggle Active off |
-| View installation stats | Admin Dashboard (top cards) |
-| Add controller by IP | Installer Mode → Controller Setup → Add Controller → Enter IP Address |
-| Create media access code | Firebase Console → `dealerDemoCodes` collection |
-| View all installations | Firebase Console → `installations` collection |
-| Change sales PIN | Firebase Console → Firestore → `app_config/master_sales_pin` |
-| Change corporate PIN | Firebase Console → Firestore → `app_config/master_corporate_pin` → update `pin_hash` |
-| Approve payouts | Admin Dashboard → Payout Approval |
-| View sales pipeline | Admin Dashboard → Sales Jobs |
-| View network analytics | Corporate Dashboard → Network tab |
-| Deploy weekly brief | `firebase deploy --only functions:sendWeeklyBrief` |
-| Manage demo codes | Firebase Console → `dealerDemoCodes` |
-| Reveal App Store review button | Login screen → tap "POWERED BY NEX-GEN" subtitle 5 times |
+- Every active dealer has at least one active installer with a working 4-digit PIN
+- New installs appear in `/installations` with dealer code, installer code, warranty date, and controller serials filled in
+- Sales pipeline moves jobs through `Draft` → `EstimateSent` → … → `InstallComplete` without stalling beyond 14 days
+- Corporate Dashboard's Network tab shows "active" dealer classifications across the network
+- Weekly Brief function logs show a healthy eligible-user count and near-zero error rate every Sunday evening
+- Payout approvals clear within your SLA and no dealer is unknowingly blocked by the $599 gift card cap
+
+## If something isn't working
+
+**"I can't find the Admin Access button."**
+It's gone — that's by design in v2.2. Go to the Lumina login screen and tap the **Lumina logo** 5 times within 3 seconds. No visual feedback during the taps. The Staff PIN screen opens on tap 5.
+
+**"Maximum dealer limit (99) reached."**
+You've used all 99 dealer codes. You'd need to reclaim deactivated codes (a code change) or expand the code format.
+
+**"An installer says their PIN doesn't work."**
+1. Check the installer's **Active** status.
+2. Check their parent dealer — a deactivated dealer kills every installer PIN underneath.
+3. Verify all 4 digits.
+4. Confirm they're using the 5-tap gesture on the Lumina logo, not looking for an old button.
+5. If locked out after 5 failed attempts, the screen clears after 30 seconds — or dismiss and reopen.
+
+**"A PIN is routing to the wrong mode."**
+The Staff PIN screen checks in priority order — Corporate → Installer → Sales. If a Sales PIN is routing to Installer Mode, the number matches an installer PIN. Assign a different Sales PIN.
+
+**"A dealer left the program."**
+1. **Manage Dealers** → find them → toggle **Active** off.
+2. All their installers are deactivated automatically.
+3. Existing customer installations are untouched — those accounts keep working.
+4. The dealer code is not reused.
+
+**"I need to transfer an installer to a different dealer."**
+You can't — the dealer code is baked into the PIN. Instead: deactivate the old installer record, create a new one under the new dealer, hand the tech their new PIN.
+
+**"Weekly Brief didn't send."**
+Check Firebase Console → Functions → `sendWeeklyBrief` logs. Most common causes: `ANTHROPIC_API_KEY` missing from the runtime environment, or stale `fcmToken` values in user docs. The function logs show both.
 
 ---
 

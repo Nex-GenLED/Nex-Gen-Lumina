@@ -1,244 +1,235 @@
 ---
-title: "Nex-Gen Lumina — Audio Mode Guide"
-subtitle: "Make your lights react to music, speech, and ambient sound in real time"
-author: "Nex-Gen LED"
+title: "Nex-Gen Lumina — Audio Mode"
+subtitle: "Make your lights move with your music"
+author: "Nex-Gen LED LLC"
 date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
-  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Nex-Gen Lumina — Audio Mode Guide</div>'
-  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
+  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Nex-Gen Lumina — Audio Mode</div>'
+  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
 stylesheet: []
 body_class: guide
 ---
 
 <style>
-  body { font-family: 'Segoe UI', Arial, sans-serif; color: #222; line-height: 1.6; }
-  h1 { color: #00B8D4; border-bottom: 2px solid #00B8D4; padding-bottom: 8px; }
-  h2 { color: #00E5FF; margin-top: 28px; }
-  h3 { color: #333; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
-  th { background: #00B8D4; color: white; }
-  .tip { background: #E0F7FA; border-left: 4px solid #00B8D4; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .warning { background: #FFF3E0; border-left: 4px solid #FF9800; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .step-box { background: #F5F5F5; border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; color: #DCF0FF; background: #07091A; line-height: 1.6; }
+  h1, h2, h3 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+  h1 { background: linear-gradient(90deg, #6E2FFF, #00D4FF); -webkit-background-clip: text; background-clip: text; color: transparent; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; }
+  h2 { color: #00D4FF; margin-top: 28px; }
+  h3 { color: #DCF0FF; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #111527; }
+  th, td { border: 1px solid #1F2542; padding: 8px 12px; text-align: left; }
+  th { background: #6E2FFF; color: #DCF0FF; }
+  .tip { background: rgba(0, 212, 255, 0.12); border-left: 4px solid #00D4FF; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .warning { background: rgba(255, 170, 60, 0.12); border-left: 4px solid #FFAA3C; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .step-box { background: #111527; border: 1px solid #1F2542; border-radius: 8px; padding: 14px; margin: 10px 0; }
 </style>
 
-# Nex-Gen Lumina — Audio Mode Guide
+# Nex-Gen Lumina — Audio Mode
 
-Audio Mode turns your permanent LED lighting system into a real-time sound-reactive display. Music, speech, or any ambient sound picked up by your controller's onboard microphone drives the colors, brightness, and movement of your lights — no extra hardware or wiring required.
+Turn your lights into the best part of the party. Audio Mode listens to whatever's playing in the room and makes your Nex-Gen lights dance along — bass hits, melody sweeps, gentle pulses for quieter moments. It's all happening in real time, and no setup is required if you have a Nex-Gen controller.
 
----
+## What you'll need
 
-## 1. What Is Audio Mode?
-
-Audio Mode uses a microphone built into your Nex-Gen controller to listen to nearby sound. The controller analyzes the audio signal on-device and translates it into lighting effects — bass hits trigger flashes, melodies drive color sweeps, and ambient noise creates gentle pulses.
-
-Everything happens locally on the controller. No audio is recorded, streamed, or stored.
-
----
-
-## 2. Requirements
-
-Before using Audio Mode, make sure your system meets these requirements:
-
-| Requirement | Detail |
-|-------------|--------|
-| **Controller firmware** | SR WLED (Sound Reactive WLED) with the AudioReactive usermod installed |
-| **Microphone** | Onboard MEMS microphone or external I2S mic (INMP441, SPH0645) |
-| **Compatible hardware** | Nex-Gen NGL-CTRL-P1 comes pre-installed with AudioReactive firmware and an onboard microphone |
-| **App version** | Nex-Gen Lumina v2.1 or later |
+- The Lumina app on your phone (version 2.1 or newer)
+- A Nex-Gen controller that's listening to your lights today — most homes only have one
+- Music playing in the same room as the controller (a speaker, TV, phone — anything)
 
 <div class="tip">
-<strong>Tip:</strong> If you have a Nex-Gen NGL-CTRL-P1 controller, Audio Mode is ready to go out of the box. No additional setup is needed.
+<strong>Already have a Nex-Gen controller?</strong> Audio Mode is built in. You don't need to buy or install anything extra.
 </div>
-
-The app automatically detects whether your controller supports Audio Mode when you connect. If the firmware or microphone is missing, the Audio Mode screen will display a clear message explaining what is needed.
 
 ---
 
-## 3. Opening Audio Mode
+## What Audio Mode is
 
-There are three ways to access Audio Mode:
+Your Nex-Gen controller has a tiny microphone built in. When you turn Audio Mode on, the controller listens to the sound in the room and translates what it hears into movement on your lights — fast flashes on the drop, gentle color sweeps in the bridge, quiet ripples when the room is calm.
 
-### From the Dashboard
+Nothing is recorded, streamed, or saved. The audio never leaves the controller.
 
-1. Open the Nex-Gen Lumina app
-2. On the **Home** dashboard, locate the **Audio Mode** button (speaker/equalizer icon)
-3. Tap it to open the Audio Mode screen
+---
 
-### Using Lumina AI (Voice or Text)
+## Turn it on
 
-Say or type any of these to activate Audio Mode through the AI assistant:
+There are three ways to get the party started.
+
+### From the Home screen
+
+<div class="step-box">
+
+1. Open the Lumina app
+2. On the **Home** dashboard, tap the **Audio Mode** button (the speaker/equalizer icon)
+3. The Audio Mode screen opens
+
+</div>
+
+### Ask Lumina AI
+
+Say or type any of these into Lumina:
 
 - "Turn on audio mode"
 - "Make the lights react to music"
 - "Pulse to the beat"
-- "Start sound reactive mode"
 - "Sync to music"
 
-Lumina AI will automatically select the best available audio effect and activate it.
+Lumina picks the best effect for the moment and kicks it off.
 
-### Direct Navigation
+### Any time, any screen
 
-Navigate to **Audio Mode** from any screen using the app's navigation.
-
----
-
-## 4. The Audio Mode Screen
-
-When you open Audio Mode with a compatible controller connected, you will see four main controls:
-
-### Status Header
-
-At the top of the screen, a status indicator shows whether audio is active:
-
-| State | Indicator | Message |
-|-------|-----------|---------|
-| **Standby** | Grey mic icon | "Select an audio effect to begin" |
-| **Listening** | Pulsing cyan mic icon with animated waveform bars | "LEDs are reacting to sound" |
-
-When active, the mic icon pulses with a glowing cyan animation and a waveform visualizer shows real-time audio activity.
+You can also tap your way to **Audio Mode** from the main navigation whenever you want.
 
 ---
 
-### Microphone Sensitivity
+## What you'll see
 
-A slider labeled **Mic Sensitivity** controls how responsive the system is to sound.
+When Audio Mode is on and your controller is listening, four things are front and center.
 
-| Setting | Range | Use when |
-|---------|-------|----------|
-| **Quiet** (left) | 0 | The room is very quiet — increases sensitivity to pick up soft sounds |
-| **Middle** (default) | 128 | Normal volume — a good starting point for most environments |
-| **Loud** (right) | 255 | The room is very loud — reduces sensitivity to prevent constant triggering |
+### The mic indicator
+
+A pulsing cyan microphone at the top tells you your lights are listening. Next to it, a bouncing waveform shows you the sound coming in. If the mic is grey and still, tap an effect below to start.
+
+### Mic Sensitivity
+
+A slider that decides how quickly your lights react to sound.
+
+| Setting | Try it when |
+|---------|-------------|
+| **Quiet** (left) | The room is soft — conversation, acoustic music. Picks up more detail. |
+| **Middle** (default) | Normal music volume. A good starting point. |
+| **Loud** (right) | Loud party or outdoor speakers. Keeps the lights from flickering on background noise. |
 
 <div class="tip">
-<strong>Tip:</strong> Start with the slider in the middle. If the lights are reacting to background noise (air conditioning, conversations) when you want them to respond only to music, slide toward "Loud." If the lights are barely reacting, slide toward "Quiet."
+<strong>Tip:</strong> Start in the middle. If the lights are barely moving, slide toward <strong>Quiet</strong>. If they're flashing on footsteps or air conditioning, slide toward <strong>Loud</strong>.
 </div>
 
-Adjustments take effect immediately — no need to tap a save button.
+The slider updates your lights instantly — no save button.
 
----
+### Effects grid
 
-### Audio Effects Grid
+Below the slider, you'll see a grid of effect cards. Tap any one to put your lights into that style right away.
 
-Below the sensitivity slider, a grid of effect cards shows all available audio-reactive effects on your controller. Each card displays:
+Some favorites to try:
 
-- The **effect name**
-- An animated **waveform** visualizer
-- A **cyan highlight** when the effect is active
-
-Tap any card to apply that effect immediately. Your lights will begin reacting to sound using the selected pattern.
-
-**Popular effects include:**
-
-| Effect | Description |
-|--------|-------------|
-| **GEQ** | Graphic equalizer — frequency bands displayed as colored columns |
-| **Gravimeter** | Gravity-based volume meter — a ball bounces with the beat |
-| **Waverly** | Smooth rolling waves driven by audio amplitude |
-| **DJ Light** | Color-shifting spotlight that follows bass and treble |
-| **Ripple Peak** | Ripples emanate from peak audio moments |
-| **Freqwave** | Frequency spectrum displayed as a moving wave |
-| **Puddles** | Color puddles expand and contract with the beat |
-| **Rocktaves** | Octave-based color mapping — each note gets its own hue |
+| Effect | Best for |
+|--------|----------|
+| **GEQ** | Almost anything — a classic music visualizer |
+| **Gravimeter** | Tracks the bass with a bouncing ball feel |
+| **Waverly** | Chill, rolling waves — great for dinner music |
+| **DJ Light** | Dance parties and anything with a strong beat |
+| **Ripple Peak** | Explosive ripples on the big moments |
+| **Freqwave** | A smooth spectrum wave across the lights |
+| **Puddles** | Colors bloom on the beat — fun and playful |
+| **Rocktaves** | Each musical note gets its own color |
 
 <div class="tip">
-<strong>Tip:</strong> The available effects depend on your controller's firmware version. If you do not see many options, updating to the latest SR WLED firmware will add more audio-reactive effects.
+<strong>Tip:</strong> The exact list of effects on your system depends on your lights' firmware. If you don't see many options, your installer can add more in a quick update.
 </div>
-
----
 
 ### Brightness
 
-A **Brightness** slider at the bottom sets the overall LED brightness level (0 to 255). This works the same as the brightness control on the main dashboard — it affects the maximum brightness of the audio-reactive effect.
-
----
+A second slider at the bottom sets how bright your lights go at their peak. Works like the brightness on the main dashboard.
 
 ### Stop Audio Mode
 
-A red **Stop Audio Mode** button appears at the bottom of the screen when an audio effect is active. Tapping it:
-
-1. Switches the lights back to a solid warm white
-2. Returns the status indicator to **Standby**
-3. Your lights resume normal (non-audio) operation
-
-If no audio effect is currently active, this button is greyed out.
+A red **Stop Audio Mode** button sits at the bottom whenever Audio Mode is active. Tap it and your lights drop back to solid warm white and resume normal behavior.
 
 ---
 
-## 5. Using Audio Mode with Lumina AI
+## Outcomes worth trying
 
-Lumina AI understands audio-related commands in natural language. Here are examples of what you can say:
+**Setting the mood for dinner**
+Pick **Waverly**, slide the sensitivity to **Quiet** so soft music still moves the lights, and drop brightness a bit. Calm, ambient, alive without being loud.
+
+**Hosting a movie night**
+Use **Ripple Peak** and leave sensitivity in the middle. Big scenes land on the walls too — subtle most of the time, dramatic when the soundtrack swells.
+
+**Party mode**
+Turn on **DJ Light** or **Puddles**, sensitivity all the way up, brightness full. Your house becomes the venue.
+
+---
+
+## Talk to Lumina AI
+
+Lumina understands music-related phrases. A few examples:
 
 | What you say | What happens |
 |--------------|--------------|
-| "Turn on audio mode" | Activates the best available audio effect (prefers GEQ or Gravimeter) |
+| "Turn on audio mode" | Picks a good all-around effect and starts it |
 | "Make my lights pulse to music" | Same as above |
-| "React to the bass" | Activates an audio-reactive effect |
-| "Stop audio mode" | Returns lights to normal |
-| "Switch to DJ Light effect" | Activates the specific named effect (if available) |
+| "React to the bass" | Starts an audio-reactive effect |
+| "Stop audio mode" | Returns to normal |
+| "Switch to DJ Light" | Switches to that specific effect (if it's available) |
 
 <div class="warning">
-<strong>Note:</strong> Audio Mode requires an active controller connection. If your system is offline, Lumina AI will let you know that a connected controller is needed.
+<strong>Note:</strong> Audio Mode needs your controller online. If Lumina tells you it can't reach your lights, check that the controller has power and is on your Wi-Fi.
 </div>
 
 ---
 
-## 6. Tips for Best Results
+## A few tips for the best result
 
-### Speaker Placement
+**Speaker placement**
+The closer your music source is to the controller, the stronger the signal. You don't need the speaker touching it — anywhere in the same room works — but closer means richer movement.
 
-- Place your music source **near the controller** for the strongest signal
-- The onboard microphone picks up sound within the room — it does not need to be right next to the speaker, but closer is better
-- Bass-heavy music produces the most dramatic effects
+**Bass is your friend**
+Music with a strong low end drives the most dramatic reactions. Try a bass-forward track and then pick an effect you love.
 
-### Environment
+**If the lights are twitchy**
+That usually means background noise is triggering the mic. Slide **Mic Sensitivity** toward **Loud** until the lights only move with what you want them to move to.
 
-- Audio Mode works best in rooms with a single dominant sound source (your music)
-- In noisy environments with lots of background sound, increase the sensitivity slider toward "Loud" to filter out ambient noise
-- Outdoor installations work well when the speaker is aimed toward the controller
+**Outdoors**
+Audio Mode works outside too. Point your speaker toward the controller for a stronger signal. Windy or noisy environments? Sensitivity → **Loud**.
 
-### Effect Selection
-
-- **GEQ** and **Gravimeter** are great all-around choices for most music
-- **DJ Light** works well for dance music and parties
-- **Waverly** creates a calmer, more ambient experience
-- Try different effects to find what works best for your music style and space
-
-### Performance
-
-- Audio processing happens entirely on the controller — there is no lag between sound and light response
-- The app does not need to stay open for Audio Mode to continue working once activated
-- Audio Mode will stay active until you stop it manually, switch to a different effect, or a schedule event overrides it
+**Audio Mode runs on its own**
+Once it's on, you can close the app. The controller keeps listening and reacting until you stop it, pick a different effect, or a schedule takes over.
 
 ---
 
-## 7. Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| **"Audio Mode Not Available" message** | Your controller does not have AudioReactive firmware or a microphone. The Nex-Gen NGL-CTRL-P1 supports Audio Mode out of the box. Contact support if you believe your controller should be compatible. |
-| **No audio effects listed** | The firmware has AudioReactive support but no audio effects were detected. Update your controller to the latest SR WLED firmware. |
-| **Lights not reacting to sound** | Check the Mic Sensitivity slider — it may be set too far toward "Loud." Move it toward "Quiet" and test again. Also verify the music source is near the controller. |
-| **Lights constantly flickering** | The sensitivity is too high for your environment. Move the slider toward "Loud" to reduce responsiveness to background noise. |
-| **Effect looks different than expected** | Different effects respond to different audio frequencies. Try a few effects to find one that matches your music. Bass-heavy tracks work best with GEQ and Gravimeter. |
-| **Audio Mode stopped unexpectedly** | A scheduled event may have overridden the manual audio effect. Check your schedule for any events that trigger around this time. |
-
----
-
-## 8. Quick Reference
+## Quick reference
 
 | Action | How |
 |--------|-----|
-| **Open Audio Mode** | Dashboard → **Audio Mode** button |
-| **Activate via voice** | Say "Turn on audio mode" or "Pulse to the beat" to Lumina AI |
-| **Select an effect** | Tap any effect card in the grid |
-| **Adjust sensitivity** | Drag the **Mic Sensitivity** slider (Quiet ← → Loud) |
-| **Adjust brightness** | Drag the **Brightness** slider |
-| **Stop Audio Mode** | Tap the red **Stop Audio Mode** button |
+| Open Audio Mode | Dashboard → **Audio Mode** button |
+| Activate by voice | "Turn on audio mode" to Lumina |
+| Pick an effect | Tap any effect card |
+| Adjust how reactive it is | Drag **Mic Sensitivity** (Quiet ← → Loud) |
+| Adjust brightness | Drag **Brightness** |
+| Stop | Tap the red **Stop Audio Mode** button |
 
 ---
 
-*Nex-Gen Lumina v2.1 — Audio Mode Guide — April 2026*
+## What success looks like
+
+- The mic icon at the top is glowing cyan and pulsing
+- The waveform under the mic is bouncing with the music
+- Your lights are moving in time with what's playing in the room
+- When the music stops, the lights go still (or drop to a gentle baseline) and pick back up when it returns
+
+## If something isn't working
+
+**"Audio Mode isn't available on this system."**
+Your controller doesn't have the right setup for Audio Mode. Nex-Gen controllers support it out of the box — if yours doesn't, contact Nex-Gen LED LLC support and they'll sort it.
+
+**"No effects are showing up."**
+Your controller supports Audio Mode but doesn't have any effects loaded. A firmware update from your installer will add them.
+
+**"The lights aren't reacting to my music."**
+1. Check that music is playing in the same room as the controller.
+2. Drag **Mic Sensitivity** toward **Quiet** and try again.
+3. Make sure **Brightness** isn't set all the way down.
+
+**"The lights are flashing constantly on background noise."**
+Slide **Mic Sensitivity** toward **Loud** until the lights only move with the music you care about.
+
+**"The effect looks different than I expected."**
+Different effects listen for different things — bass, melody, volume peaks. Tap through a few to find the one that fits. **GEQ** and **Gravimeter** are great for most music.
+
+**"Audio Mode stopped on its own."**
+A scheduled event probably took over. Check your schedule to see if something is set to trigger around the same time.
+
+Still stuck? Tell Lumina "I'm having trouble with Audio Mode" — the AI can walk you through it, or route you to support.
+
+---
+
+*Nex-Gen Lumina v2.1 — Audio Mode — April 2026*

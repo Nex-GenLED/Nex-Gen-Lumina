@@ -1,234 +1,260 @@
 # Day 1 Electrician — Field Guide
 
-**Audience:** Electricians performing Day 1 wiring prep on a Lumina installation
+**Audience:** Electricians running Day 1 wiring prep on a Lumina installation.
 
-This guide covers everything you need to know on Day 1: getting into the app, reading the blueprint, doing the work, and checking out cleanly so the Day 2 install team can finish the job.
+Log in, read the blueprint, do the work, check out clean so Day 2 can finish. That's the job.
+
+## What you'll need
+
+- Your 4-digit **Installer PIN** (dealer code + installer code)
+- The Lumina app on your phone
+- Your materials — wire, power supplies, injection connectors, brackets (exactly what's on the blueprint materials list)
+- Your standard electrical tools
+- Phone signal or Wi-Fi at the job site (for checking off tasks)
 
 ---
 
-## 1. Logging In
+## 1. Log in
 
-Day 1 work happens inside **Installer Mode**, which is gated behind a 4-digit PIN.
+Day 1 happens inside **Installer Mode**, gated by a 4-digit PIN.
 
 ### PIN format
-- **Digits 1–2:** Your dealer code (e.g., `42`)
-- **Digits 3–4:** Your personal installer code (e.g., `07`)
+
+- Digits 1–2: your **dealer code** (e.g., `42`)
+- Digits 3–4: your **installer code** (e.g., `07`)
 - Together: `4207`
 
-You'll get this PIN from your dealer admin during onboarding.
+You got this from your dealer admin at onboarding.
 
-### How to log in
-1. Open the Lumina app.
-2. From the main launch screen, tap **Installer Mode**.
-3. Tap **Enter Installer PIN**.
-4. Type your 4-digit PIN on the keypad.
-5. The app verifies the PIN against your dealer's records and lets you in.
+### Steps
+
+1. Open the Lumina app
+2. Tap the **Lumina logo** 5 times on the login screen — the Staff PIN screen opens
+3. Type your 4-digit PIN
+4. The app verifies against your dealer's records and drops you into Installer Mode
 
 ### Session timeout
-- Your session stays active for **30 minutes** of activity.
-- A warning will pop up **5 minutes before** the session ends so you can extend it.
-- Tap any button or scroll to reset the timer.
-- If you get logged out, just sign back in — your work is always saved.
+
+- Sessions run **30 minutes** of activity
+- Warning pops **5 minutes before** it ends — tap anything to extend
+- If you get logged out, sign back in. Your work is saved.
 
 ---
 
-## 2. The Day 1 Queue
+## 2. Open the Day 1 Queue
 
-After you log in, the **Installer Landing** screen shows your action tiles. Tap **Day 1 Queue**.
+From the Installer Landing screen, tap **Day 1 Queue**.
 
-### What the Day 1 Queue shows
+### What's in the queue
 
-The queue lists every job for your dealer that's ready for pre-wire — specifically, jobs in one of these statuses:
+Every job for your dealer that's ready for pre-wire:
 
-- **Signed** (cyan badge) — Customer has signed but Day 1 isn't scheduled yet
-- **Pre-wire scheduled** (amber badge) — Day 1 has a date locked in
+- **Signed** (cyan badge) — customer signed, Day 1 not yet scheduled
+- **Pre-wire scheduled** (amber badge) — Day 1 date locked in
 
-Newest jobs appear at the top.
+Newest jobs at the top.
 
-### What each card shows
+### Card fields
 
-| Card element | Meaning |
+| Element | Meaning |
 |---|---|
-| **Customer name** (top, bold) | Who the job is for |
-| **Address** (below name) | Full street, city, state, zip |
-| **Status badge** (top-right) | Color-coded — cyan = Signed, amber = Pre-wire scheduled |
-| **Day 1: {date}** (cyan calendar icon) | Shown only if Day 1 is scheduled |
-| **Reschedule** | Inline text button next to the date |
-| **Schedule Day 1** button | Shown only if Day 1 hasn't been scheduled yet |
+| **Customer name** | Who the job is for |
+| **Address** | Full street, city, state, zip |
+| **Status badge** | Cyan = Signed, amber = Pre-wire scheduled |
+| **Day 1: {date}** | Shown only if Day 1 is scheduled |
+| **Reschedule** | Inline button next to the date |
+| **Schedule Day 1** | Shown only if Day 1 hasn't been scheduled yet |
 
 ---
 
-## 3. Scheduling Day 1
+## 3. Schedule Day 1
 
-For any job that's **Signed** but not yet scheduled, tap the **Schedule Day 1** button on the card.
+For any **Signed** job that's not yet scheduled:
 
-1. A dark date picker opens.
-2. Pick the date you'll be on-site (today through 365 days out).
-3. Tap **OK**.
-4. A confirmation snackbar appears: **"Day 1 scheduled for {date}"**.
+1. Tap **Schedule Day 1** on the card
+2. Pick the date you'll be on-site (today → 365 days out)
+3. Tap **OK**
+4. Snackbar confirms: **"Day 1 scheduled for {date}"**
 
-The job's status moves from **Signed** to **Pre-wire scheduled**, and the customer immediately receives an SMS confirming the date. The night before the visit, they'll automatically receive a reminder SMS.
+Job moves from **Signed** to **Pre-wire scheduled**. Customer gets an SMS confirming the date immediately, plus a reminder SMS the night before.
 
-To change a date, tap **Reschedule** next to the existing date and pick a new one.
+To change a date: tap **Reschedule** next to the existing date, pick a new one.
 
 ---
 
-## 4. The Day 1 Blueprint Screen
+## 4. The Day 1 Blueprint screen
 
-Tap any job card to open its **Day 1 Blueprint**. This is the main work screen — everything you need to do the job is on one scroll.
+Tap any job card to open its **Day 1 Blueprint**. Everything you need is on one scroll.
 
-### Section 1: Home Photo with Channel Overlays
+### Section 1 — Home photo with channel overlays
 
-At the top you'll see the **front-of-home photo** the salesperson captured. Drawn on top of the photo are colored polylines showing each channel run.
+- Front-of-home photo with colored polylines for each channel run
+- Tap the photo to expand full-screen
+- **Channel chips** below — tap to highlight that run on the overlay
 
-- **Tap the photo** to expand it full-screen for a closer look.
-- Below the photo is a row of **channel chips**. Each chip shows the channel number and label (e.g., "1 — Front Roofline"). Tap a chip to highlight that run on the overlay.
+Use this to orient before you start running wire.
 
-This is your map of the entire job. Use it to orient yourself before you start running wire.
+### Section 2 — Controller mount
 
-### Section 2: Controller Mount
+Where the controller goes.
 
-This card tells you where the controller goes:
+- **Location description** — specific text like "Garage left interior wall, 3 feet from breaker panel." This is what the salesperson promised the customer.
+- **Mount photo** — if captured
+- **Mount type** — Interior or exterior
 
-- **Location description** — A specific text description like "Garage left interior wall, 3 feet from breaker panel". This is what the salesperson promised the customer.
-- **Mount photo** — A picture of the spot (if the salesperson captured one).
-- **Mount type** — Interior or exterior.
+All wiring runs back to this point. Mount the controller box first.
 
-This is the single point that all wiring runs back to. Mount the controller box here first.
+### Section 3 — Per-channel detail cards
 
-### Section 3: Per-Channel Detail Cards
-
-For every channel on the job, you'll see a detail card with:
+For every channel:
 
 | Field | What you need to know |
 |---|---|
 | **Channel number + label** | Header — "Channel 1 — Front Roofline" |
 | **Linear footage** | Total length of the run |
-| **Run direction** | Which way the install team will feed the strip on Day 2 (Left → Right, etc.) |
+| **Run direction** | Which way Day 2 will feed the strip (L→R, etc.) |
 | **Start description + photo** | Where the run begins |
 | **End description + photo** | Where the run ends |
 | **Injection points list** | Every power injection point on this run |
 
-#### Reading injection points
-For each injection point, you'll see:
-- **Location description** — where on the run it lives (e.g., "Corner of deck behind downspout")
+#### Injection points
+
+For each one:
+
+- **Location description** — where on the run (e.g., "Corner of deck behind downspout")
 - **Distance from start** — feet from the beginning of the run
-- **Wire gauge** — the recommended wire size based on distance from the controller:
+- **Wire gauge** — recommended size based on distance from controller:
   - **Direct** (0 ft) — connector only
-  - **14/2** (up to 30 ft)
-  - **12/2** (up to 90 ft)
-  - **10/2** (up to 140 ft)
-  - **EXCEEDS 140ft** — flag this immediately, the controller may need to be relocated
-- **Photo** of the location (if captured)
+  - **14/2** — up to 30 ft
+  - **12/2** — up to 90 ft
+  - **10/2** — up to 140 ft
+  - **EXCEEDS 140ft** — stop, call your dealer admin
+- **Photo** — if captured
 
-### Section 4: Materials List
+### Section 4 — Materials list
 
-Below the channels you'll see the **Materials** card. On Day 1, this shows only **Power** and **Hardware** items — wire, power supplies, injection connectors, mounting brackets.
+Power and hardware only on Day 1 — wire, power supplies, injection connectors, mounting brackets.
 
-> **Important:** The LED strip itself is **NOT** delivered on Day 1. The strip arrives with the Day 2 install team. Your job is wiring prep only.
+> **LED strip is NOT delivered on Day 1.** It arrives with the Day 2 install team. Day 1 is wiring prep only.
 
-Each row shows the item name, the category (POWER or HARDWARE), and the quantity needed.
+Each row shows item name, category (POWER or HARDWARE), and quantity needed.
 
-**Bring exactly what's on this list.** If you're short on anything, contact your dealer admin before you arrive.
+**Bring exactly what's on the list.** Short on anything? Call your dealer admin before you arrive.
 
-### Section 5: Task Checklist
+### Section 5 — Task checklist
 
-The bottom section is the **Task Checklist** — an auto-generated list of every action you need to perform. Tasks are grouped by type:
+Auto-generated list of every action you need to perform. Grouped by type:
 
 - **Mount the controller** — one task
 - **Wiring tasks** — one per channel, e.g., "Run wire through left corner of house to right corner above garage — 120ft"
 - **Injection tasks** — one per injection point, e.g., "Cap and label at corner of deck, 60ft"
 - **Verification task** — "Verify all wires are accessible outside wall for Day 2"
 
-Each task is a checkbox. As you complete work, tap the checkbox to mark it done. A green check circle appears.
+Tap a checkbox as you complete work. Green check appears.
 
-The screen shows your progress as **"X of N tasks completed"** with a colored progress bar — cyan while in progress, green when complete.
-
----
-
-## 5. Doing the Work
-
-Here's the typical Day 1 sequence:
-
-1. **Arrive on-site.** Greet the customer. Confirm gate codes, dog warnings, and parking based on the salesperson notes (visible on the Job Detail screen if needed).
-2. **Mount the controller** at the location specified. Check the box on the task list.
-3. **Run wire from the controller out to each channel start point**, then along the channel path to the end. Use the start/end descriptions and the channel polyline overlay as your guide.
-4. **At each injection point**, run a separate dedicated wire from the controller (or from a power supply mount) and **cap and label** it clearly. Labels should match the channel number and injection number.
-5. **Make sure every wire end is accessible from the outside of the wall.** Day 2 needs to grab these wires and connect them to the LED strip — they cannot be inside the wall, behind sheetrock, or hidden behind eaves.
-6. **Check off each task** in the app as you complete it.
-
-> **The most important Day 1 rule:** Every wire — controller wires, channel wires, injection wires — must be **accessible outside the wall** before you check out. If Day 2 has to cut into the wall to find a wire, the install will be delayed and the customer will be unhappy.
+Progress shows as **"X of N tasks completed"** with a progress bar — cyan while working, green at 100%.
 
 ---
 
-## 6. Marking Day 1 Complete
+## 5. Do the work
 
-When you've finished all the wiring and checked off every task, the **Mark Day 1 complete** button at the bottom of the screen will become active (green).
+Standard Day 1 sequence:
+
+1. **Arrive on-site.** Greet the customer. Confirm gate codes, dogs, parking from the salesperson notes (visible on the Job Detail screen).
+2. **Mount the controller** at the specified location. Check the task.
+3. **Run wire from the controller out to each channel start point**, then along the channel path to the end. Use the start/end descriptions and the channel polyline as your guide.
+4. **At each injection point**, run a separate dedicated wire from the controller (or a power supply mount) and **cap and label** it clearly. Labels match channel number + injection number.
+5. **Every wire end must be accessible outside the wall.** Day 2 needs to grab wires and connect them to the LED strip — they can't be inside the wall, behind sheetrock, or hidden behind eaves.
+6. **Check tasks off as you go.**
+
+> **The Day 1 rule:** Every wire — controller, channel, injection — must be accessible outside the wall before you check out. Miss this, and Day 2 has to cut into walls.
+
+---
+
+## 6. Mark Day 1 complete
+
+When every task is checked, **Mark Day 1 complete** turns green.
 
 ### Check-out is blocked until all tasks are checked
-- If any task is unchecked, the button stays disabled and reads **"Complete all tasks to mark complete"**.
-- The "Verify all wires are accessible outside wall for Day 2" task is part of this checklist — you cannot check out without confirming it.
 
-### Tapping Mark Day 1 complete
-1. A confirmation dialog asks for your name (or your installer code).
-2. Type your name and tap **Confirm**.
-3. The app updates the job:
-   - Status moves from **Pre-wire scheduled** to **Pre-wire complete**.
-   - Your name is recorded as the Day 1 technician.
-   - The completion timestamp is saved.
-4. A snackbar confirms: **"Day 1 complete! Job ready for Day 2."**
-5. You're returned to the Day 1 Queue. The job has disappeared from your queue and now lives in the Day 2 team's queue.
+- Any unchecked task → button disabled, reads **"Complete all tasks to mark complete"**
+- The "Verify all wires are accessible outside wall for Day 2" task is in this list. You can't check out without confirming it.
+
+### Check out
+
+1. Tap **Mark Day 1 complete**
+2. Confirmation dialog asks for your name (or installer code)
+3. Type it and tap **Confirm**
+4. The app updates the job:
+   - Status: **Pre-wire scheduled** → **Pre-wire complete**
+   - Your name recorded as Day 1 tech
+   - Completion timestamp saved
+5. Snackbar: **"Day 1 complete! Job ready for Day 2."**
+6. You're back in the Day 1 Queue. The job has moved to the Day 2 team's queue.
 
 ---
 
-## 7. What the Customer Receives After Day 1
+## 7. What the customer gets
 
-The moment you mark Day 1 complete, the customer automatically receives an SMS that reads roughly:
+The instant you mark Day 1 complete, the customer gets an SMS:
 
 > *"Great news, {first name}! Wiring prep is complete at your home. Your light installation day is coming soon — we'll text you the night before. — {dealer sign-off}"*
 
-This is sent automatically by the system. You don't need to send anything manually.
+Sent automatically. Don't send anything manually.
 
-The customer also gets the standard reminder SMS the night before Day 2, once Day 2 is scheduled.
+Standard reminder SMS goes out the night before Day 2, once Day 2 is scheduled.
 
 ---
 
-## 8. Critical Day 1 Rules
+## 8. Critical Day 1 rules
 
-These are the rules that, if broken, will cause Day 2 to fail and the customer to be unhappy:
+Break these and Day 2 fails:
 
-| Rule | Why it matters |
+| Rule | Why |
 |---|---|
-| **Every wire must be accessible outside the wall.** | Day 2 cannot install lights if they have to cut into walls to find wires. |
-| **Label every injection wire** with channel number and position. | Day 2 needs to know which wire goes to which injection point. Unlabeled wires waste hours. |
-| **Mount the controller exactly where the blueprint says.** | The customer agreed to that location. Moving it requires re-quoting. |
-| **Use the wire gauge listed on the blueprint.** | Undersized wire causes voltage drop and the LEDs at the end of the run will be dim or off-color. |
-| **Don't skip the "verify wires accessible" task.** | This is the final check. Walk the entire job and physically touch every wire end before you tap it. |
-| **Bring exactly the materials on the list.** | Day 1 is wiring only. The LED strip arrives on Day 2. |
-| **Check off tasks as you go, not at the end.** | If you get interrupted mid-job, the next person on the project knows where you left off. |
+| **Every wire accessible outside the wall.** | Day 2 can't install if they have to cut walls. |
+| **Label every injection wire** — channel number + position. | Unlabeled wires waste hours. |
+| **Mount the controller exactly where the blueprint says.** | The customer agreed to that location. Moving it means re-quoting. |
+| **Use the wire gauge the blueprint lists.** | Undersized wire = voltage drop, dim or off-color LEDs at the end of the run. |
+| **Don't skip the "verify wires accessible" task.** | Walk the job and physically touch every wire end before you tap it. |
+| **Bring exactly the materials on the list.** | Day 1 is wiring only. LED strip arrives on Day 2. |
+| **Check off tasks as you go, not at the end.** | If you're interrupted, the next person knows where you left off. |
 
 ---
 
-## 9. Troubleshooting
+## What success looks like
 
-**The job isn't in my queue.**
-The customer hasn't signed yet, or the job is assigned to a different dealer. Confirm with your dealer admin.
+- Controller mounted at the exact blueprint location
+- Every channel wire run from controller to start, along the path, to the end
+- Every injection wire capped and labeled with channel number and position
+- Every wire end accessible outside the wall (you physically touched each one)
+- Every task in the checklist checked
+- **Mark Day 1 complete** tapped; job moved to the Day 2 queue
+- Customer received the automatic SMS confirming wiring prep is done
 
-**I can't tap "Mark Day 1 complete".**
-Some tasks are still unchecked. Scroll up and look for any task without a green check.
+## If something isn't working
 
-**The wire gauge says EXCEEDS 140ft.**
-Stop. Call your dealer admin. The controller location may need to move closer to the run, or a supplemental power supply may be needed mid-run. Don't try to install with under-rated wire.
+**"The job isn't in my queue."**
+Customer hasn't signed yet, or the job is assigned to a different dealer. Confirm with your dealer admin.
 
-**The home photo doesn't match what I see on-site.**
-The customer may have done landscaping or repainted. Match the channel start/end descriptions to physical features (corners, downspouts, etc.) rather than relying on the photo alone.
+**"I can't tap Mark Day 1 complete."**
+Some tasks are still unchecked. Scroll up, find the task without a green check, finish it, check it.
 
-**I forgot to schedule Day 1 before showing up.**
-Open the Day 1 Queue, find the job, tap **Schedule Day 1**, and pick today's date. The customer will get the confirmation SMS — don't worry, the system handles it.
+**"Wire gauge says EXCEEDS 140ft."**
+Stop. Call your dealer admin. The controller location may need to move closer to the run, or a supplemental power supply may be needed mid-run. Don't install with under-rated wire.
 
-**I need to leave the job partially done.**
-Check off only the tasks you actually completed. Do NOT mark Day 1 complete. The job will stay in **Pre-wire scheduled** status. You or another electrician can pick it back up tomorrow.
+**"The home photo doesn't match what I see on-site."**
+Landscaping or paint may have changed. Match the channel start/end descriptions to physical features (corners, downspouts) rather than relying only on the photo.
+
+**"I forgot to schedule Day 1 before showing up."**
+Open the Day 1 Queue, find the job, tap **Schedule Day 1**, pick today. The customer gets the SMS automatically.
+
+**"I need to leave the job partially done."**
+Check off only the tasks you actually completed. **Do not** mark Day 1 complete. Job stays in **Pre-wire scheduled**. You or another electrician picks it up next visit.
+
+**"PIN won't work."**
+Confirm all 4 digits. If you've been locked out after 5 failed attempts, wait 30 seconds or dismiss and reopen the Staff PIN screen. If it still won't work, your dealer admin needs to confirm your installer account is active.
 
 ---
 
-**Need help?** Contact your dealer admin or your Nex-Gen LED corporate contact.
+**Need help?** Call your dealer admin or your Nex-Gen LED LLC corporate contact.

@@ -1,78 +1,108 @@
-# Nex-Gen Lumina v2.1 -- ESP32 Bridge Setup Guide
+---
+title: "Nex-Gen Lumina — Lumina Bridge Setup"
+subtitle: "Control your lights from anywhere"
+author: "Nex-Gen LED LLC"
+date: "April 2026"
+pdf_options:
+  format: Letter
+  margin: 20mm
+  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Nex-Gen Lumina — Lumina Bridge Setup</div>'
+  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
+stylesheet: []
+body_class: guide
+---
 
-> **Purpose:** Enable remote control of your WLED lighting system from anywhere, without port forwarding.
-> The Lumina Bridge is a dedicated ESP32 device that sits on your home WiFi and relays commands from Firebase to your WLED controller(s).
+<style>
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; color: #DCF0FF; background: #07091A; line-height: 1.6; }
+  h1, h2, h3 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+  h1 { background: linear-gradient(90deg, #6E2FFF, #00D4FF); -webkit-background-clip: text; background-clip: text; color: transparent; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; }
+  h2 { color: #00D4FF; margin-top: 28px; }
+  h3 { color: #DCF0FF; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #111527; }
+  th, td { border: 1px solid #1F2542; padding: 8px 12px; text-align: left; }
+  th { background: #6E2FFF; color: #DCF0FF; }
+  .tip { background: rgba(0, 212, 255, 0.12); border-left: 4px solid #00D4FF; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .warning { background: rgba(255, 170, 60, 0.12); border-left: 4px solid #FFAA3C; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .step-box { background: #111527; border: 1px solid #1F2542; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  code { background: #1F2542; color: #00D4FF; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+</style>
+
+# Nex-Gen Lumina — Lumina Bridge Setup
+
+The **Lumina Bridge** is a small device that sits on your home Wi-Fi and lets you control your lights from anywhere — the office, a vacation, the driveway. No port forwarding, no tinkering with your router. Once it's set up, remote control just works.
+
+## What you'll need
+
+- Your **Lumina Bridge** (a small plug-in device from Nex-Gen LED LLC)
+- A **USB data cable** for the bridge (it needs data transfer, not just charging)
+- A computer with an internet connection
+- Your **home Wi-Fi name and password**
+- Your Lumina controller already installed and working on your home Wi-Fi
+- Your Lumina app signed in on your phone
+
+<div class="tip">
+<strong>Most Nex-Gen customers have their installer set up the bridge at the end of the installation.</strong> If yours was already configured when you got home, skip to Part 3 — you only need to verify it in the app.
+</div>
 
 ---
 
-## How Remote Access Works in Lumina v2.1
+## How remote access works
 
-Lumina automatically detects whether you are on your home WiFi or away:
+Lumina is smart about where you are:
 
-- **On home WiFi:** The app communicates directly with your WLED controller over HTTP (`WledService`). The bridge is not involved.
-- **Away from home (cellular or another WiFi):** The app writes commands to your Firebase `/users/{uid}/commands` collection. The Lumina Bridge, which is always connected to your home network, picks up those commands and forwards them to the WLED controller.
+- **At home on your Wi-Fi:** the app talks to your lights directly — fast and local. The bridge isn't involved.
+- **Away from home (cell data, a hotel, another Wi-Fi):** the app sends commands through the cloud. The bridge — always online at your house — picks them up and passes them to your lights within a couple of seconds.
 
-On every app startup, Lumina runs a **bridge health check**. It writes a ping document to `/users/{uid}/commands/bridge_health_check` and watches for up to **15 seconds** for the bridge to acknowledge it. The result is exposed via `bridgeHealthProvider` as one of three states:
+Every time you open the app, Lumina runs a quick **bridge health check** — a friendly handshake that makes sure the bridge is awake and listening. The result shows up as a small status dot on your home screen:
 
-| State | Meaning |
-|-------|---------|
-| `BridgeHealth.checking` | Health check is in progress. |
-| `BridgeHealth.alive` | Bridge acknowledged the ping within 15 seconds. |
-| `BridgeHealth.unreachable` | Bridge did not respond in time. |
+| Indicator | What it means |
+|-----------|---------|
+| Checking | Health check is in progress |
+| Online (green) | Bridge responded — remote control is ready |
+| Offline (grey) | Bridge didn't respond — check power and Wi-Fi |
 
-The home screen displays a bridge status indicator reflecting this result.
-
-The bridge also writes a **heartbeat** document to `/users/{uid}/bridge_status/current` every 30 seconds containing uptime, IP address, command counts, and firmware version.
+The bridge also phones home every 30 seconds with a short status update, so you always know how long it's been running and how many commands it's processed.
 
 ---
 
-## What You Need
+## Part 1 — Flash the bridge firmware
 
-| Item | Notes |
-|------|-------|
-| ESP32 dev board (ESP32, ESP32-S3, or ESP32-C3) | Any board with WiFi. A bare ESP32-DevKitC or similar works. |
-| USB data cable | **Must support data transfer** -- charge-only cables will not work. |
-| Computer with PlatformIO (VS Code extension) | For building and flashing the firmware. |
-| Your home WiFi SSID and password | The bridge must join the same network as your WLED controller. |
-| WLED controller already set up | The bridge talks to your existing WLED device (e.g., QuinLED Dig-Octa). |
-| Lumina app signed in with a Firebase account | The bridge pairs to your Firebase user ID. |
-| A Firebase email/password account for the bridge | Used for the bridge to authenticate with Firestore. |
-
----
-
-## Part 1 -- Flash the Lumina Bridge Firmware
+If your bridge already has firmware loaded (most do), you can skip to Part 2.
 
 ### Step 1: Install PlatformIO
 
-Install the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode) in VS Code if you don't already have it.
+Install the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode) in VS Code. It's free, and it handles all the build and flash steps for you.
 
 ### Step 2: Open the firmware project
 
-Open the `lumina-firmware/` directory in VS Code. PlatformIO will detect the `platformio.ini` and set up the build environment automatically.
+Open the `lumina-firmware/` folder in VS Code. PlatformIO detects it automatically.
 
-### Step 3: Connect the ESP32
+### Step 3: Connect the bridge
 
-Plug in the USB data cable. If the board does not appear as a serial port:
-- **Windows:** Install the CP2102 or CH340 USB driver. Check Device Manager > Ports (COM & LPT).
+Plug in the USB cable. If the bridge doesn't show up as a serial port:
+
+- **Windows:** Install the CP2102 or CH340 USB driver. Check Device Manager → Ports (COM & LPT).
 - **Mac/Linux:** Run `ls /dev/tty.*` or `ls /dev/ttyUSB*`.
 
 ### Step 4: Build and flash
 
-Run the following PlatformIO commands (from the VS Code PlatformIO sidebar or terminal):
+Run these PlatformIO commands from the sidebar or terminal:
 
 ```bash
 # Build and upload the firmware
 pio run -t upload
 
-# Upload the web UI files (setup page, dashboard, logo) to LittleFS
+# Upload the web UI (setup page, dashboard, logo)
 pio run -t uploadfs
 ```
 
-> **If the flash hangs at "Connecting...":** Hold the **BOOT** button on the ESP32 for 3-5 seconds while the flasher is trying to connect, then release.
+<div class="tip">
+<strong>If the flash hangs at "Connecting...":</strong> Hold the <strong>BOOT</strong> button on the bridge for 3–5 seconds while the flasher is trying to connect, then let go.
+</div>
 
-### Step 5: Verify the flash
+### Step 5: Confirm the flash worked
 
-Open the Serial Monitor at **115200 baud**. You should see:
+Open the Serial Monitor at **115200 baud**. You should see something like this:
 
 ```
 ╔══════════════════════════════╗
@@ -89,168 +119,166 @@ Open the Serial Monitor at **115200 baud**. You should see:
 [Bridge] Firestore bridge module initialized
 ```
 
+That's the bridge booting up and announcing itself. You're ready for Part 2.
+
 ---
 
-## Part 2 -- Configure the Bridge (3-Step Setup Wizard)
+## Part 2 — Set up the bridge
 
-The bridge runs a branded captive portal with a 3-step setup wizard. No WLED firmware is involved -- the Lumina Bridge firmware handles everything.
+The bridge runs a friendly setup wizard in a web browser. You connect to the bridge's temporary Wi-Fi, walk through three quick steps, and the bridge takes care of the rest.
 
-### Step 1: Connect to the bridge's WiFi AP
+### Step 1: Connect to the bridge's Wi-Fi
 
-1. On your phone or computer, look for a WiFi network named **"Lumina-XXXX"** (the last 4 characters are unique to your device).
-2. Connect to it (no password required).
-3. A captive portal should open automatically. If not, open a browser and navigate to `http://192.168.4.1/setup`.
+1. On your phone or computer, look for a Wi-Fi network called **Lumina-XXXX** (the last 4 characters are unique to your bridge).
+2. Connect to it — no password required.
+3. A setup page should open automatically. If it doesn't, open a browser and go to `http://192.168.4.1/setup`.
 
-### Step 2: Connect the bridge to your home WiFi
+### Step 2: Connect the bridge to your home Wi-Fi
 
-1. The setup page scans for available networks and displays them.
-2. Tap your **home WiFi network** from the list.
-3. Enter the **WiFi password** and tap **Connect**.
-4. Wait for the connection confirmation. The page will show "Connected! IP: x.x.x.x" and advance to the next step.
+1. The setup page scans for available networks and lists them.
+2. Tap your **home Wi-Fi** in the list.
+3. Enter your Wi-Fi password and tap **Connect**.
+4. Wait for the confirmation. You'll see "Connected! IP: x.x.x.x" and the wizard moves to the next step.
 
-> **Important:** The bridge only supports **2.4GHz WiFi**. If your router has separate 2.4GHz and 5GHz networks, select the 2.4GHz one.
+<div class="warning">
+<strong>Heads-up:</strong> The bridge only supports <strong>2.4 GHz Wi-Fi</strong>. If your router has separate 2.4 GHz and 5 GHz networks, pick the 2.4 GHz one. Most routers show them as two separate network names.
+</div>
 
-### Step 3: Enter bridge credentials
+### Step 3: Enter the bridge credentials
 
-1. Enter the **email** and **password** for the bridge's Firebase account. This is a dedicated account the bridge uses to authenticate with Firestore -- create one in the Firebase Console under Authentication > Users if you haven't already.
+1. Enter the **email** and **password** for the bridge's cloud account. (Your installer will have provided these, or you'll create them in your Nex-Gen cloud console under Authentication → Users.)
 2. Tap **Save & Continue**.
 
-### Step 4: Pair with your Lumina user account
+### Step 4: Pair with your Lumina account
 
-1. Enter your **Lumina User ID** (your Firebase UID). You can find this in the Lumina app under System > Account, or in the Firebase Console under Authentication > Users.
-2. Enter the **WLED controller's local IP address** (e.g., `192.168.50.91`).
-3. Enter the **WLED port** (default: `80`).
+1. Enter your **Lumina user ID** — find this in the Lumina app under **System → Account**.
+2. Enter your controller's local IP address (e.g., `192.168.50.91`).
+3. Enter the controller port (default: `80`).
 4. Tap **Pair & Finish**.
 
-The bridge will reboot and begin polling Firestore for commands.
+The bridge reboots and starts listening for commands from the cloud.
 
 ---
 
-## Part 3 -- Register the Bridge in the Lumina App
+## Part 3 — Turn on remote access in the app
 
-### Step 1: Ensure the bridge is on the same network as your WLED controller
+### Step 1: Make sure the bridge and your controller are on the same network
 
-Both the bridge and your WLED controller must be on the **same WiFi network / subnet**. Verify by pinging both IPs from your phone or computer.
+They need to be on the same Wi-Fi network. If you can open both in a browser from a computer on your home Wi-Fi, you're good.
 
-### Step 2: Configure remote access in the app
+### Step 2: Enable remote access
 
-1. Open the Lumina app and sign in.
-2. Go to **System > Remote Access**.
-3. While connected to your home WiFi, tap **Detect Home Network** to save your WiFi SSID.
-4. Toggle **Enable Remote Access** on.
+1. Open the Lumina app and sign in
+2. Tap **System** (gear icon) → **Remote Access**
+3. While connected to your home Wi-Fi, tap **Detect Home Network** to save your Wi-Fi name
+4. Toggle **Enable Remote Access** on
 
-### Step 3: Verify the bridge
+### Step 3: Verify it works
 
-1. Close and reopen the Lumina app.
-2. On startup, the app automatically runs a bridge health check.
-3. Check the home screen bridge status indicator:
-   - **Green** -- bridge responded, remote access is operational.
-   - **Red** -- bridge did not respond. Check that it is powered on and connected to WiFi.
-
----
-
-## Part 4 -- Pairing Verification Checklist
-
-Run through each of these to confirm end-to-end operation:
-
-- [ ] **Bridge powered on** and connected to home WiFi (check via `http://<bridge-ip>/` for the dashboard)
-- [ ] **Bridge dashboard shows all green** -- WiFi connected, Firebase authenticated, user paired
-- [ ] **WLED controller reachable** -- open `http://<controller-ip>` (e.g., `http://192.168.50.91`)
-- [ ] **Lumina app signed in** -- same Firebase account the bridge is paired to
-- [ ] **Home network saved** -- Remote Access status shows your WiFi SSID
-- [ ] **Remote access enabled** -- toggle is ON
-- [ ] **Bridge health check passes** -- home screen indicator shows bridge alive after app restart
-- [ ] **Remote test** -- disconnect from home WiFi (use cellular data), open Lumina, toggle lights. Confirm the command reaches the controller within a few seconds.
+1. Close and reopen the Lumina app
+2. The app automatically runs a bridge health check on startup
+3. Check the bridge status dot on the home screen:
+   - **Green** → bridge is online, remote access is ready
+   - **Grey** → bridge didn't respond; check that it has power and is on your Wi-Fi
 
 ---
 
-## Bridge Dashboard
+## Part 4 — End-to-end check
 
-Once the bridge is connected to your home WiFi, you can access its status dashboard at `http://<bridge-ip>/` from any device on the same network. The dashboard shows:
+Run through this list to confirm everything is really working:
 
-- **WiFi status** -- connected or disconnected
-- **Firebase Auth** -- whether the bridge is authenticated
-- **User Paired** -- whether a user ID is configured
-- **Commands processed** -- total commands relayed to WLED
-- **Errors** -- total failed commands
-- **WLED Target** -- the IP address of the WLED controller
-- **Uptime** -- how long the bridge has been running
+- [ ] **Bridge is powered on** and connected to home Wi-Fi (open `http://<bridge-ip>/` for its dashboard)
+- [ ] **Bridge dashboard is all green** — Wi-Fi connected, cloud authenticated, user paired
+- [ ] **Your controller is reachable** — open `http://<controller-ip>` in a browser
+- [ ] **Lumina is signed in** to the same account the bridge is paired to
+- [ ] **Home network saved** — Remote Access shows your Wi-Fi name
+- [ ] **Remote access toggle is on**
+- [ ] **Bridge status is green** on the home screen after an app restart
+- [ ] **The real test:** turn off your home Wi-Fi on your phone (use cell data), open Lumina, toggle the lights. The command should reach the controller within a few seconds. If it does, you're fully set up.
+
+---
+
+## The bridge dashboard
+
+Any time you want to check on the bridge, open `http://<bridge-ip>/` from a browser on your home Wi-Fi. The dashboard shows:
+
+- **Wi-Fi status** — connected or disconnected
+- **Authentication** — whether the bridge is logged into the cloud
+- **User paired** — whether your Lumina account is connected
+- **Commands processed** — total commands the bridge has relayed
+- **Errors** — total failed commands
+- **Controller target** — the IP of your controller
+- **Uptime** — how long the bridge has been running
 
 From the dashboard you can also:
-- **Re-run Setup** -- go back to the setup wizard
-- **Reboot Bridge** -- restart the device
-- **Factory Reset** -- erase all settings and start over
+
+- **Re-run Setup** — go back to the wizard
+- **Reboot Bridge** — restart the device
+- **Factory Reset** — erase all settings and start fresh
 
 ---
 
-## LED Indicators
+## Bridge LED indicators
 
-| Pattern | Meaning |
+| Pattern | What it means |
 |---------|---------|
-| LED on briefly during boot | Initializing |
-| LED blinks during each poll cycle | Normal operation -- polling Firestore |
-| LED stays off between polls | Idle, waiting for next poll |
+| LED on briefly at boot | Starting up |
+| LED blinks each poll cycle | Normal — checking for new commands |
+| LED off between polls | Idle, waiting for the next poll |
 
 ---
 
-## Quick Reference
+## Quick reference
 
 | Detail | Value |
 |--------|-------|
-| Firmware | Lumina Bridge v1.0.0 (custom, PlatformIO) |
-| Bridge AP name | `Lumina-XXXX` (unique per device) |
-| Setup URL (AP mode) | `http://192.168.4.1/setup` |
-| Dashboard URL (connected) | `http://<bridge-ip>/` |
-| mDNS | `http://lumina-xxxx.local/` |
-| Firebase command path | `/users/{uid}/commands` |
-| Bridge health check doc ID | `bridge_health_check` |
-| Bridge heartbeat path | `/users/{uid}/bridge_status/current` |
-| Bridge health check timeout | 15 seconds |
-| Command timeout (remote relay) | 30 seconds |
-| Firestore poll interval | 500 ms |
-| Heartbeat interval | 30 seconds |
-| Lumina app remote access | System tab > Remote Access |
-| ESP32 WiFi band | **2.4GHz only** (no 5GHz support) |
+| Firmware | Lumina Bridge v1.0.0 |
+| Bridge Wi-Fi name | `Lumina-XXXX` (unique per device) |
+| Setup URL (while connected to the bridge's Wi-Fi) | `http://192.168.4.1/setup` |
+| Dashboard URL (on your home network) | `http://<bridge-ip>/` |
+| Short-name URL | `http://lumina-xxxx.local/` |
+| Health check timeout | 15 seconds |
+| Remote command timeout | 30 seconds |
+| Supported Wi-Fi | **2.4 GHz only** (no 5 GHz) |
+| Remote access in the app | **System → Remote Access** |
 
 ---
 
-## Troubleshooting
+## What success looks like
 
-### Bridge dashboard shows "Not authenticated"
+- The bridge dashboard at `http://<bridge-ip>/` shows green for Wi-Fi, authentication, and user paired
+- Your Lumina home screen shows a green bridge status indicator after an app restart
+- When you turn off home Wi-Fi on your phone and use cell data, the app still controls your lights within a couple of seconds
+- The **Commands processed** counter on the bridge dashboard ticks up each time you change something from away
 
-- Verify the bridge email/password are correct. Go to `http://<bridge-ip>/setup` to re-enter them.
-- Check that the Firebase account exists in your Firebase Console under Authentication > Users.
-- Ensure Firestore security rules allow the bridge user to read/write the commands collection.
+## If something isn't working
 
-### Bridge dashboard shows "Not paired"
+**"The bridge dashboard shows 'Not authenticated'."**
+The bridge credentials are wrong or the account doesn't exist. Open `http://<bridge-ip>/setup` and re-enter the email and password. If you just created the account, confirm it exists in your Nex-Gen cloud console.
 
-- Go to `http://<bridge-ip>/setup` and re-enter your Lumina user ID.
-- Verify the user ID matches your Lumina app's logged-in Firebase UID.
+**"The bridge dashboard shows 'Not paired'."**
+Your Lumina user ID isn't entered. Open `http://<bridge-ip>/setup` and re-enter it. Make sure the user ID matches the one in your Lumina app under **System → Account**.
 
-### Commands not executing
+**"Commands aren't making it to my lights."**
+- Check the error counter on the bridge dashboard — rising errors mean the bridge can't reach your controller.
+- Confirm your controller's IP is correct and the controller itself is powered on.
+- Make sure the bridge and the controller are on the same Wi-Fi network.
+- If you're comfortable, open the serial monitor (115200 baud) for detailed messages.
 
-- Check the bridge dashboard for error counts.
-- Verify the WLED controller IP is correct and reachable from the bridge's network.
-- Check the Serial Monitor (115200 baud) for detailed error messages.
-- Ensure the WLED device is powered on.
+**"My commands time out from the app."**
+- The app waits 30 seconds for a response. If the bridge has weak Wi-Fi, move it closer to your router.
+- Make sure the bridge is connected to 2.4 GHz Wi-Fi, not 5 GHz.
 
-### Commands timing out in the app
+**"The bridge won't connect to my Wi-Fi."**
+- The bridge only supports 2.4 GHz. Select the 2.4 GHz network name on your router.
+- If the password was wrong, the bridge falls back to its setup Wi-Fi after about 15 seconds. Reconnect to the `Lumina-XXXX` network and re-enter credentials.
+- Check your router's connected devices list — if the bridge is there but Lumina says it's offline, power-cycle the bridge and wait 30 seconds.
 
-- The app waits 30 seconds for a response. If the bridge is slow to poll, commands may time out.
-- Check that the bridge has a strong WiFi signal.
-- Try increasing `WLED_HTTP_TIMEOUT_MS` in `config.h` if the WLED device is slow to respond.
+**"I need to start over from scratch."**
+Open `http://<bridge-ip>/` and tap **Factory Reset**. The bridge erases all settings and boots back into its setup Wi-Fi, ready for a fresh walkthrough.
 
-### Bridge not connecting to WiFi
-
-- The bridge only supports 2.4GHz WiFi.
-- If credentials are wrong, the bridge falls back to AP mode after 15 seconds. Reconnect to the `Lumina-XXXX` AP and re-enter credentials.
-- Check your router's connected devices list to confirm the bridge is online.
-
-### How to factory reset
-
-- Access the dashboard at `http://<bridge-ip>/` and tap **Factory Reset**, or
-- Via the Serial Monitor, the bridge logs its AP name on startup -- connect to the AP and re-run setup.
+Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi name (`Lumina-XXXX`) and a quick description of what the dashboard shows.
 
 ---
 
-For additional troubleshooting, see the Lumina Troubleshooting Guide.
+*Nex-Gen Lumina v2.1 — Lumina Bridge Setup — April 2026*

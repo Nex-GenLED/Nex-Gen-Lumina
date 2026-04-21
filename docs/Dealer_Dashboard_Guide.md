@@ -1,117 +1,122 @@
 ---
 title: "Nex-Gen Lumina — Dealer Dashboard Guide"
-subtitle: "How to track your sales pipeline, manage installers, and earn referral rewards"
-author: "Nex-Gen LED"
+subtitle: "Your real-time pipeline, team, and referral rewards in one place"
+author: "Nex-Gen LED LLC"
 date: "April 2026"
 pdf_options:
   format: Letter
   margin: 20mm
-  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Nex-Gen Lumina — Dealer Dashboard Guide</div>'
-  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
+  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Nex-Gen Lumina — Dealer Dashboard Guide</div>'
+  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#DCF0FF;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
 stylesheet: []
 body_class: guide
 ---
 
 <style>
-  body { font-family: 'Segoe UI', Arial, sans-serif; color: #222; line-height: 1.6; }
-  h1 { color: #00B8D4; border-bottom: 2px solid #00B8D4; padding-bottom: 8px; }
-  h2 { color: #00E5FF; margin-top: 28px; }
-  h3 { color: #333; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
-  th { background: #00B8D4; color: white; }
-  .tip { background: #E0F7FA; border-left: 4px solid #00B8D4; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .warning { background: #FFF3E0; border-left: 4px solid #FF9800; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
-  .step-box { background: #F5F5F5; border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin: 10px 0; }
-  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; color: #DCF0FF; background: #07091A; line-height: 1.6; }
+  h1, h2, h3 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+  h1 { background: linear-gradient(90deg, #6E2FFF, #00D4FF); -webkit-background-clip: text; background-clip: text; color: transparent; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; }
+  h2 { color: #00D4FF; margin-top: 28px; }
+  h3 { color: #DCF0FF; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #111527; }
+  th, td { border: 1px solid #1F2542; padding: 8px 12px; text-align: left; }
+  th { background: #6E2FFF; color: #DCF0FF; }
+  .tip { background: rgba(0, 212, 255, 0.12); border-left: 4px solid #00D4FF; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .warning { background: rgba(255, 170, 60, 0.12); border-left: 4px solid #FFAA3C; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+  .step-box { background: #111527; border: 1px solid #1F2542; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  code { background: #1F2542; color: #00D4FF; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
 </style>
 
 # Nex-Gen Lumina — Dealer Dashboard Guide
 
-The Dealer Dashboard is your business command center within the Lumina app. It gives you a real-time view of your entire sales operation — from new prospects to completed installations, installer performance, referral rewards, and payout status. Everything updates live from Firestore, so you always have an accurate picture of where your business stands.
+The Dealer Dashboard is your business at a glance — every live job, every installer's workload, every referral reward that's pending, in one place. It's how you keep follow-ups tight, installers utilized, and referral payouts flowing. Permanent residential and commercial lighting that works as hard as you do, and your dashboard makes sure the money side of that works just as hard.
+
+## What you'll need
+
+- The Lumina app on your phone or tablet
+- Your dealer **Sales PIN** or your personal **Installer PIN** (your 4-digit dealer + installer code)
+- A few minutes at the start of the day to scan the Overview and Pipeline tabs
 
 ---
 
-## 1. Overview
+## 1. What the dashboard gives you
 
-As a Nex-Gen dealer, the Dealer Dashboard lets you:
+Your time compounds when you see the whole business at once. The dashboard lets you:
 
-- **Track sales jobs** from initial prospect visit through completed installation
-- **Monitor your installer team** — see who is active, how many installs they have completed, and what jobs are in progress
-- **Manage referral rewards** — track referral codes, see which referrals have converted, and monitor your ambassador tier
-- **View payout status** — see pending, approved, and fulfilled payouts for referral rewards
+- **Track sales jobs** from first prospect visit through completed installation
+- **Monitor your installers** — who's active, who's booked, who's closing jobs
+- **Manage referral rewards** — which referrals converted, what tier your top ambassadors are in
+- **See payout status** — pending, approved, fulfilled
 
-The dashboard pulls data in real time from the Nex-Gen cloud. Every job update, installer change, and payout approval appears immediately.
+Everything updates live, so when an installer marks a job "Install Complete" out in the field, you see it within seconds — no refresh needed, no waiting on a nightly export.
 
 ---
 
-## 2. Accessing the Dealer Dashboard
+## 2. Getting in
 
-### From a Sales Session
+You can enter the dashboard from any active staff session.
 
-1. Open the Lumina app
-2. Navigate to **Sales Mode** (from the login screen or Settings)
-3. Enter your **sales PIN** on the numeric keypad
-4. The app authenticates your dealer credentials against Firestore
-5. Tap **Dealer Dashboard** to open your business overview
+### From a sales session
 
-### From an Installer Session
+1. Open Lumina
+2. Tap the **Lumina logo** 5 times on the login screen to open the Staff PIN screen
+3. Enter your **Sales PIN**
+4. Tap **Dealer Dashboard**
 
-1. Open the Lumina app
-2. Navigate to **Installer Mode**
+### From an installer session
+
+1. Open Lumina
+2. Open the Staff PIN screen the same way (5 taps on the Lumina logo)
 3. Enter your **4-digit installer PIN** (dealer code + installer code)
 4. Tap **Dealer Dashboard** from the session menu
 
-### From Admin Access
+### From Nex-Gen admin access
 
-Nex-Gen administrators can view any dealer's dashboard:
+Nex-Gen LED LLC admins can view any dealer's dashboard:
 
-1. Open **Installer Mode** and tap **Admin Access**
-2. Enter the admin PIN
-3. Navigate to **Manage Dealers** and tap a dealer
-4. The dashboard opens in **Admin view** mode (indicated by an amber label)
+1. Enter Installer Mode → **Admin Access** → enter the admin PIN
+2. Open **Manage Dealers** → tap a dealer
+3. The dashboard opens in **Admin view** (amber label confirms)
 
 <div class="tip">
-<strong>Tip:</strong> Your dealer code badge (e.g., "Dealer 03") appears in the top-right corner of the dashboard at all times, confirming which dealership you are viewing.
+<strong>Tip:</strong> Your dealer code badge (e.g., "Dealer 03") sits in the top-right corner at all times, so you always know which dealership you're looking at.
 </div>
 
 ---
 
-## 3. Dashboard Tabs
+## 3. The four tabs
 
-The Dealer Dashboard is organized into four tabs:
-
-| Tab | Purpose |
+| Tab | What it's for |
 |-----|---------|
-| **Overview** | At-a-glance stats, pipeline summary bar, and recent activity feed |
-| **Pipeline** | All sales jobs grouped by status — your full sales funnel |
-| **Team** | Installer roster with activity and installation counts |
-| **Payouts** | Referral reward payouts — pending, approved, and fulfilled |
+| **Overview** | Your morning snapshot — stats, pipeline summary, recent activity |
+| **Pipeline** | Every sales job grouped by status — your full funnel |
+| **Team** | Your installers with activity and install counts |
+| **Payouts** | Referral rewards — pending, approved, fulfilled |
 
 ---
 
-## 4. Overview Tab
+## 4. Overview tab
 
-The Overview tab is your daily snapshot. It loads automatically when you open the dashboard.
+This is the tab that earns its keep first thing in the morning. It loads by default when you open the dashboard.
 
-### Stat Cards
+### Stat cards
 
-Four metric cards appear at the top:
+Four metric cards sit at the top:
 
-| Card | What It Shows |
+| Card | What it shows |
 |------|--------------|
-| **Active Jobs** | Number of jobs that have not yet reached "Install Complete" |
-| **Completed** | Total installations completed across your dealership |
-| **Installers** | Number of installers registered under your dealer code |
-| **Pending Payouts** | Number of referral payouts awaiting Nex-Gen approval |
+| **Active Jobs** | Jobs not yet at "Install Complete" |
+| **Completed** | Total installations your dealership has closed |
+| **Installers** | How many installers you have on the roster |
+| **Pending Payouts** | Referral rewards waiting on Nex-Gen LED LLC approval |
 
-### Pipeline Status Bar
+### Pipeline status bar
 
-Below the stat cards, a horizontal bar chart shows the distribution of jobs across each stage of the sales pipeline. This gives you an instant visual of where your jobs are concentrated — for example, a heavy cluster in "Estimate Sent" may signal follow-up is needed.
+Below the stats, a horizontal bar chart shows how your jobs are distributed across the pipeline stages. A heavy cluster in **Estimate Sent** tells you exactly where your follow-up time should go today — that's where money is sitting still.
 
-### Recent Activity Feed
+### Recent activity feed
 
-The bottom of the Overview tab displays a chronological feed of your most recent business events (up to 15 entries), including:
+The bottom of the tab is a chronological feed of your last 15 business events:
 
 - New jobs created
 - Estimates sent and signed
@@ -119,290 +124,303 @@ The bottom of the Overview tab displays a chronological feed of your most recent
 - Installations completed
 - Payout requests and approvals
 
-Each activity entry shows a timestamp badge (e.g., "2h ago", "yesterday", "3d ago") and the associated job number and dollar value.
+Each entry shows a timestamp ("2h ago", "yesterday", "3d ago") plus the job number and dollar value — so you can skim and spot what's moving and what isn't.
 
 <div class="tip">
-<strong>Tip:</strong> Tap <strong>View all</strong> at the bottom of the activity feed to jump directly to the Pipeline tab for the full job list.
+<strong>Tip:</strong> Tap <strong>View all</strong> at the bottom of the feed to jump straight to the Pipeline tab with the full job list.
 </div>
 
 ---
 
-## 5. Pipeline Tab — Sales Jobs
+## 5. Pipeline tab — your sales jobs
 
-The Pipeline tab shows every sales job under your dealership, ordered by most recently updated. Each job displays:
+Every sales job under your dealership, ordered most-recently-updated first. Each row shows:
 
 - **Customer name** and address
 - **Job number** (e.g., `NXG-0847`)
 - **Current status** with a color-coded badge
 - **Total price** of the installation
-- **Progress bar** showing how far through the pipeline the job has advanced
+- **Progress bar** showing how deep into the pipeline the job has advanced
 
-### Sales Job Statuses
+### Sales job statuses
 
-Jobs progress through these stages:
-
-| Status | Description | Progress |
+| Status | What it means | Progress |
 |--------|-------------|----------|
-| **Draft** | Job created, prospect information entered | 10% |
-| **Estimate Sent** | PDF estimate generated and delivered to customer | 30% |
-| **Estimate Signed** | Customer has reviewed and signed the estimate | 50% |
-| **Pre-Wire Scheduled** | Day 1 (pre-wire) appointment is booked | 65% |
-| **Pre-Wire Complete** | Day 1 work is finished — conduit, wiring, and mounting done | 80% |
-| **Install Complete** | Day 2 work is finished — LEDs installed, system tested and handed off | 100% |
+| **Draft** | Job created, prospect info entered | 10% |
+| **Estimate Sent** | PDF estimate generated and delivered | 30% |
+| **Estimate Signed** | Customer has signed | 50% |
+| **Pre-Wire Scheduled** | Day 1 appointment is booked | 65% |
+| **Pre-Wire Complete** | Day 1 done — conduit, wiring, mounting | 80% |
+| **Install Complete** | Day 2 done — system live, customer handed off | 100% |
 
-### The Full Job Lifecycle
+### The full lifecycle
 
 ```
-Prospect Visit  -->  Zone Survey  -->  Estimate Generated  -->  Customer Signs
-   --> Pre-Wire Scheduled  -->  Pre-Wire Complete  -->  Installation Complete
+Prospect Visit  →  Zone Survey  →  Estimate Generated  →  Customer Signs
+   →  Pre-Wire Scheduled  →  Pre-Wire Complete  →  Installation Complete
 ```
 
-Each stage is visible in the dashboard with the date it occurred and the responsible salesperson or installer.
+Each stage carries the date it happened and the salesperson or installer responsible — so you always know whose touch was last on a job.
 
-### Viewing Job Details
+### Job detail
 
-Tap any job in the pipeline list to see the full detail view, including:
+Tap any job to see:
 
-- Prospect contact information (name, email, phone, address)
-- Installation zones with product type, run lengths, and pricing
+- Prospect contact info — name, email, phone, address
+- Installation zones — product type, run lengths, pricing
 - Power mount and injection point details
 - Photos captured during the site visit
 - Salesperson notes
 - Estimate and signature history
 
 <div class="tip">
-<strong>Tip:</strong> Follow up on estimates that have been in "Estimate Sent" for more than a week. The longer an unsigned estimate sits, the less likely it converts.
+<strong>Tip:</strong> Any job sitting in <strong>Estimate Sent</strong> for more than a week is at risk. The longer an unsigned estimate sits, the less likely it converts — that's where a phone call earns its highest return on time.
 </div>
 
 ---
 
-## 6. Team Tab — Managing Your Installers
+## 6. Team tab — your installers
 
-The Team tab shows every installer registered under your dealership.
+Every installer registered under your dealership, at a glance.
 
-### Installer Information
+### What you see for each installer
 
-For each installer, you can see:
-
-| Field | Description |
+| Field | What it shows |
 |-------|-------------|
 | **Name** | Installer's full name |
 | **PIN** | Their 4-digit PIN (dealer code + installer code) |
 | **Status** | Active or inactive |
-| **Installations** | Total number of completed customer setups |
+| **Installations** | Total completed customer setups |
 
-### What You Can Do
+### What you can do here
 
-- **View installer details** — tap any installer to see their full profile
-- **Coordinate job assignments** — see who is available and who has jobs in progress
-- **Monitor performance** — compare installation counts across your team
+- **View an installer's full profile** — tap their row
+- **Coordinate assignments** — see who's booked, who's available
+- **Monitor performance** — install counts by installer side-by-side
 
 <div class="warning">
-<strong>Important:</strong> Only Nex-Gen administrators can add, deactivate, or edit installers. If you need to onboard a new technician or deactivate a departed one, contact your Nex-Gen admin team.
+<strong>Heads-up:</strong> Only Nex-Gen LED LLC administrators can add, deactivate, or edit installers. To onboard a new tech or deactivate someone who's left, contact your Nex-Gen admin.
 </div>
 
-### PIN Format Reminder
+### PIN format refresher
 
-Every installer's PIN is built from your dealer code:
+Every installer PIN is built from your dealer code:
 
 ```
-[Dealer Code (2 digits)] + [Installer Code (2 digits)]
+[Dealer Code — 2 digits] + [Installer Code — 2 digits]
 ```
 
-**Example:** If your dealer code is `03` and the installer's code is `05`, their PIN is **0305**.
+**Example:** Dealer code `03` + installer code `05` = PIN **0305**.
 
 ---
 
-## 7. Payouts Tab — Referral Rewards
+## 7. Payouts tab — your referral rewards
 
-The Payouts tab tracks all referral reward payouts associated with jobs under your dealership.
+Everything payout-related for jobs under your dealership.
 
-### Payout Statuses
+### Payout statuses
 
-| Status | Meaning |
+| Status | What it means |
 |--------|---------|
-| **Pending** | Installation is complete and reward has been calculated, but is awaiting Nex-Gen admin approval |
-| **Approved** | Nex-Gen admin has reviewed and approved the payout |
-| **Fulfilled** | The reward (gift card or credit) has been issued to the referrer |
-| **GC Cap Reached** | The referrer hit their annual Visa gift card limit — credit was issued instead |
+| **Pending** | Installation complete, reward calculated, waiting on Nex-Gen admin approval |
+| **Approved** | Nex-Gen admin reviewed and approved |
+| **Fulfilled** | Gift card or credit has been issued to the referrer |
+| **GC Cap Reached** | Referrer hit their annual Visa gift card limit — credit was issued instead |
 
-### Payout Details
+### Payout details
 
-Each payout entry shows:
+Each entry shows:
 
-- **Prospect name** — the customer whose installation triggered the reward
+- **Prospect name** — whose install triggered the reward
 - **Job number** — links back to the sales job
-- **Install value** — the total dollar value of the installation
-- **Reward amount** — the payout value (based on the reward tier)
+- **Install value** — total installation dollars
+- **Reward amount** — based on the reward tier
 - **Reward type** — Visa Gift Card or Nex-Gen Credit
 - **Date created** and **date approved** (if applicable)
 
-### The Payout Lifecycle
+### The payout lifecycle
 
 1. A referred customer's installation reaches **Install Complete**
-2. The system automatically calculates the reward based on the installation value and the referral reward tier table
+2. The system calculates the reward from install value and referral tier
 3. A payout record is created with **Pending** status
-4. A Nex-Gen administrator reviews and **approves** the payout
-5. The reward is issued (**Fulfilled**) — either as a Visa gift card or Nex-Gen credit
+4. A Nex-Gen admin reviews and approves
+5. The reward is issued — gift card or credit — and marked **Fulfilled**
 
 ---
 
-## 8. Referral Rewards Program
+## 8. Referral rewards — how the program pays
 
-The Lumina referral program rewards customers (and dealers) for bringing in new business. As a dealer, understanding this system helps you promote referrals and answer customer questions.
+The referral program rewards customers and dealers for bringing in new business. Understanding the mechanics helps you promote it and answer customer questions.
 
-### How Referrals Work
+### How referrals work
 
-1. Every Lumina user receives a unique referral code (format: `LUM-XXXX`)
-2. When a new prospect mentions a referral code during the sales process, the salesperson enters it on the prospect information form
-3. The system tracks the referral through the full sales pipeline
-4. When the referred customer's installation is complete, the referrer earns a reward
+1. Every Lumina user gets a unique referral code (format: `LUM-XXXX`)
+2. When a prospect mentions a referral code during the sales process, the rep enters it on the prospect information form
+3. The system tracks the referral through the full pipeline
+4. When the referred customer's installation completes, the referrer earns a reward
 
-### Referral Reward Tiers
+### Reward tiers
 
-Rewards are based on the **total installation value** of the referred job:
+Rewards scale with the total installation value of the referred job.
 
 | Installation Value | Visa Gift Card | Nex-Gen Credit |
 |-------------------|----------------|----------------|
 | Under $1,500 | $50 | $100 |
-| $1,500 -- $2,999 | $100 | $200 |
-| $3,000 -- $4,999 | $150 | $300 |
-| $5,000 -- $7,499 | $200 | $400 |
+| $1,500 – $2,999 | $100 | $200 |
+| $3,000 – $4,999 | $150 | $300 |
+| $5,000 – $7,499 | $200 | $400 |
 | $7,500+ | $250 | $500 |
 
-### Reward Types
+### Reward types
 
-Referrers choose between two reward options:
-
-| Type | Description |
+| Type | Notes |
 |------|-------------|
-| **Visa Gift Card** | A physical or digital Visa gift card — capped at **$599 per calendar year** per participant |
+| **Visa Gift Card** | Physical or digital Visa — capped at **$599 per calendar year** per participant |
 | **Nex-Gen Credit** | Credit toward future Nex-Gen equipment or installation — **no annual limit** |
 
 <div class="warning">
-<strong>Annual gift card cap:</strong> If a referrer's year-to-date Visa gift card payouts reach $599, subsequent rewards are automatically converted to Nex-Gen Credit at the higher credit rate. The app tracks this automatically — no action is needed from you or the customer.
+<strong>Annual gift card cap:</strong> If year-to-date Visa gift card payouts reach $599, the system automatically switches subsequent rewards to Nex-Gen Credit at the higher credit rate. It happens silently — no action from you or the customer — and the customer actually comes out ahead.
 </div>
 
-### Ambassador Tiers
+### Ambassador tiers
 
-Referrers progress through ambassador tiers based on their cumulative number of referred installations:
+Referrers climb tiers as their cumulative referred installs add up:
 
-| Tier | Requirement | Color Badge |
+| Tier | Requirement | Badge |
 |------|------------|-------------|
-| **Bronze** | Starting tier (0+ installs) | Amber |
+| **Bronze** | 0+ installs | Amber |
 | **Silver** | 3+ referred installations | Silver |
 | **Gold** | 8+ referred installations | Gold |
 | **Platinum** | 15+ referred installations | Cyan |
 
-Ambassador tier status is displayed on the **Refer & Earn** screen that customers access from Settings. A progress bar shows how close they are to the next tier.
+Tier status shows on the **Refer & Earn** screen in the customer's settings. A progress bar shows how close they are to the next tier.
 
 <div class="tip">
-<strong>Tip:</strong> Encourage satisfied customers to share their referral code. The more referrals they generate, the higher their ambassador tier climbs — and the more rewarding the program becomes for everyone.
+<strong>Tip:</strong> Your most satisfied customers are also your best salespeople. Remind them of their referral code — and the real rewards — at install handoff and in every seasonal touchpoint.
 </div>
 
 ---
 
-## 9. Understanding Your Sales Data
+## 9. Understanding your sales data
 
-### Firestore Collections
+### Where the data lives
 
-Your dashboard reads from these cloud collections in real time:
+The dashboard reads from the Lumina cloud in real time, filtered to your dealer code:
 
-| Collection | Contents |
-|------------|----------|
-| `sales_jobs` | All sales jobs, filtered by your dealer code |
-| `referral_payouts` | Payout records linked to your jobs |
-| `installers` | Your installer roster |
+- All sales jobs
+- Payout records linked to your jobs
+- Your installer roster
 
-### Job Numbers
+### Job numbers
 
-Every job receives a unique job number (e.g., `NXG-0847`) when created. This number appears throughout the app — on estimates, in the pipeline, on payout records, and in the activity feed. Use it as a universal reference when discussing jobs with your team or with Nex-Gen support.
+Every job gets a unique number (e.g., `NXG-0847`) at creation. That number appears on estimates, in the pipeline, on payout records, and in the activity feed — so use it as the universal reference when talking to your team or Nex-Gen support.
 
-### Currency and Pricing
+### Currency and pricing
 
-All monetary values are displayed in USD. The **total price** on a sales job is the sum of all zone prices within that job. Zone pricing is set during the sales visit based on product type, run length, and installation complexity.
+All figures are USD. **Total price** on a sales job is the sum of its zone prices. Zone pricing is set during the sales visit, based on product type, run length, and install complexity.
 
 ---
 
-## 10. Best Practices
+## 10. Best practices — daily rhythm
 
-### Daily Routine
+### Every morning
 
-- **Check the Overview tab** first thing in the morning for new activity
-- **Review the Pipeline tab** to identify jobs that need follow-up
-- **Monitor the Payouts tab** to stay aware of pending referral rewards
+- **Overview tab** for the overnight picture and fresh activity
+- **Pipeline tab** for jobs that need a follow-up today
+- **Payouts tab** to stay aware of pending rewards for your top referrers
 
-### Pipeline Management
+### Pipeline management
 
-- Follow up on estimates in **Estimate Sent** status within 3--5 days
-- Confirm pre-wire dates are scheduled promptly after signing
-- Ensure installers update job status after each milestone (pre-wire complete, install complete)
+- Follow up on **Estimate Sent** within 3–5 days
+- Lock in the pre-wire date immediately after signing
+- Make sure installers update status after each milestone (pre-wire complete, install complete) — not batched end-of-week
 
-### Team Coordination
+### Team coordination
 
-- Review installer workloads before assigning new jobs
-- Keep installer contact information current — notify Nex-Gen admin of any changes
-- When an installer leaves your company, request deactivation immediately to disable their PIN
+- Review installer workload before assigning new jobs
+- Keep installer contact info current; notify Nex-Gen admin of any changes
+- When an installer leaves, request deactivation immediately — their PIN stays live until Nex-Gen deactivates it
 
-### Referral Promotion
+### Referral promotion
 
-- Share referral program details with every customer at handoff
-- Remind customers that sharing their code earns them real rewards
-- Point customers to the **Refer & Earn** screen in the app (Settings section)
+- Share the referral program at every install handoff — not as a throwaway, but as a one-liner like "You'll earn $200 when a neighbor signs up"
+- Point customers to **Settings → Refer & Earn** in the app
+- Flag your Gold and Platinum ambassadors — they're your top referral engine; a quick thank-you goes a long way
 
 ---
 
-## 11. Quick Reference
+## 11. Quick reference
 
 | Action | Where |
 |--------|-------|
-| View business overview | Dealer Dashboard > Overview tab |
-| See all sales jobs | Dealer Dashboard > Pipeline tab |
-| Check installer roster | Dealer Dashboard > Team tab |
-| View referral payouts | Dealer Dashboard > Payouts tab |
+| View business overview | Dashboard → **Overview** |
+| See all sales jobs | Dashboard → **Pipeline** |
+| Check installer roster | Dashboard → **Team** |
+| View referral payouts | Dashboard → **Payouts** |
 | View job details | Tap any job in the Pipeline list |
-| See recent activity | Overview tab > Recent Activity feed |
-| Check pending payouts count | Overview tab > Pending Payouts stat card |
-| Access Refer & Earn (customer-facing) | Settings > Refer & Earn |
+| See recent activity | Overview → Recent Activity feed |
+| Check pending payouts count | Overview → **Pending Payouts** card |
+| Access Refer & Earn (customer-facing) | Settings → **Refer & Earn** |
 
 ---
 
-## 12. Frequently Asked Questions
+## 12. Frequently asked
 
-### Why does the dashboard show "No active dealer session"?
+### Why does the dashboard say "No active dealer session"?
 
-You must enter the Dealer Dashboard through a valid sales or installer session. If your session has expired (sessions timeout after 30 minutes of inactivity), re-enter your PIN to start a new session.
+You have to enter through a valid sales or installer session. Sessions time out after 30 minutes of inactivity — re-enter your PIN to start a fresh session.
 
 ### Can I edit a sales job from the dashboard?
 
-The dashboard is a read-only view of your pipeline. To update a job's status or details, use the Sales Mode workflow where jobs are created and advanced through each stage.
+The dashboard is read-only for pipeline data. To update a job's status or details, use the Sales Mode workflow where jobs are created and advanced.
 
-### Why was a referral reward issued as Nex-Gen Credit instead of a gift card?
+### Why was a reward issued as Nex-Gen Credit instead of a gift card?
 
-The referrer hit the **$599 annual Visa gift card cap**. When this happens, the system automatically switches to Nex-Gen Credit at the higher credit rate. This benefits the referrer — credit rewards are worth more than gift card rewards at every tier.
+The referrer hit the **$599 annual Visa gift card cap**. The system automatically switches to Nex-Gen Credit at the higher credit rate — the customer actually comes out ahead.
 
 ### How do I get a new installer added?
 
-Contact the Nex-Gen admin team with the installer's name, email, and phone number. They will create the installer under your dealer code and provide the new 4-digit PIN.
+Contact Nex-Gen LED LLC admin with the installer's name, email, and phone. They'll create the installer under your dealer code and give you the new 4-digit PIN.
 
 ### Can I view another dealer's dashboard?
 
-No. Each dealer session is scoped to your dealer code. Only Nex-Gen administrators can view dashboards across dealers using the Admin Portal.
+No. Each session is scoped to your dealer code. Only Nex-Gen LED LLC administrators have cross-dealer visibility.
 
 ---
 
-## 13. Support
+## What success looks like
 
-For questions about your Dealer Dashboard or sales pipeline:
+- You open the dashboard in the morning and know within 60 seconds where your team's time should go
+- Your **Estimate Sent** bucket is short — no job sitting more than 5 days without a touch
+- Every installer shows recent activity; none are listed as inactive without a reason
+- Pending payouts move to **Fulfilled** on a regular cadence, keeping your referrers happy and coming back
+- Your Silver / Gold / Platinum ambassador count grows month over month
+
+## If something isn't working
+
+**"No active dealer session."**
+Your session expired. Re-enter your PIN. Sessions time out after 30 minutes of inactivity.
+
+**"Numbers look stale or don't match what my installer just did."**
+The dashboard updates live, but pull to refresh if something looks off. If the install was marked complete within the last minute, give it a moment — the update will appear.
+
+**"I can't see a job my rep just created."**
+The job is probably still in **Draft** and filtered out of some views. Check the Pipeline tab with no filter applied, or open Sales Mode → **My Estimates** — it will show up there.
+
+**"A payout has been in Pending for a long time."**
+Payouts require Nex-Gen LED LLC admin approval. If one's been sitting for more than a few business days, email **payouts@nexgenled.com** with the job number.
+
+**"I need to add or remove an installer."**
+That's an admin-only action. Contact Nex-Gen admin with the installer's name, email, and phone, or the PIN of the installer to deactivate.
+
+### Where to go for support
 
 - **General support:** support@nexgenled.com
 - **Payout questions:** payouts@nexgenled.com
-- **Technical issues or app bugs:** Contact the Nex-Gen admin team directly
-- **Installer management requests:** Contact your Nex-Gen administrator
+- **Technical issues or app bugs:** contact the Nex-Gen admin team
+- **Installer management:** contact your Nex-Gen administrator
 
-For the full guide on completing customer installations, see the **[Dealer & Installer Setup Guide](Dealer_Installer_Setup_Guide.md)**.
-
-For administrator operations (creating dealers, managing installers, viewing all installations), see the **[Admin Operations Guide](Admin_Operations_Guide.md)**.
+For the full walkthrough on completing customer installations, see the [Dealer & Installer Setup Guide](Dealer_Installer_Setup_Guide.md). For admin operations — creating dealers, managing installers, viewing all installations — see the [Admin Operations Guide](Admin_Operations_Guide.md).
 
 ---
 
