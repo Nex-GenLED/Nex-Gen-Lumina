@@ -226,7 +226,7 @@ class _MediaAccessCodeScreenState extends ConsumerState<MediaAccessCodeScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 24),
                 child: Text(
-                  "Don't have a code? Contact media@nexgenled.com",
+                  "Don't have a code? Contact media@Nex-GenLED.com",
                   style: TextStyle(
                     color: NexGenPalette.textMedium.withValues(alpha: 0.7),
                     fontSize: 12,

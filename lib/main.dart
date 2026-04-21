@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -17,7 +16,6 @@ import 'package:nexgen_command/features/neighborhood/services/sync_notification_
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
-import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -47,10 +45,10 @@ Future<void> main() async {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
 
-  // Seed reviewer account for App Store review (no-op if already exists)
-  ReviewerSeedService.ensureReviewerAccount().catchError((e) {
-    debugPrint('Reviewer seed failed: $e');
-  });
+  // Reviewer seed is now triggered post-login in login_page.dart — writing
+  // the profile under the reviewer's actual Firebase Auth UID. Startup-time
+  // seeding against a hardcoded UID produced an orphan doc the signed-in
+  // reviewer could never read.
 
   // SECURITY: Initialize encryption service for sensitive data
   await EncryptionService.initialize();

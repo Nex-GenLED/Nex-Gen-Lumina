@@ -137,11 +137,12 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     return DemoWledRepository();
   }
 
-  final userId = ref.watch(authStateProvider).maybeWhen(
-    data: (user) => user?.uid,
+  final authUser = ref.watch(authStateProvider).maybeWhen(
+    data: (user) => user,
     orElse: () => null,
   );
-  if (userId == ReviewerSeedService.reviewerUserId) {
+  final userId = authUser?.uid;
+  if (ReviewerSeedService.isReviewer(authUser)) {
     debugPrint('RepositoryInit: selected=DemoWledRepository, network=n/a, hasControllerId=n/a');
     return DemoWledRepository();
   }

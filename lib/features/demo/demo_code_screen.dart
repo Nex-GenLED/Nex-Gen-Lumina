@@ -74,11 +74,7 @@ class _DemoCodeScreenState extends ConsumerState<DemoCodeScreen>
               'Invalid code \u2014 ask your Nex-Gen specialist for a valid code';
         });
       }
-    } catch (e, st) {
-      // ignore: avoid_print
-      print('🔍 DEMO: Exception during validation: $e');
-      // ignore: avoid_print
-      print('🔍 DEMO: Stack trace: $st');
+    } catch (_) {
       if (!mounted) return;
       setState(() => _errorText = 'Could not verify code. Please try again.');
     } finally {
@@ -269,11 +265,11 @@ class _DemoCodeScreenState extends ConsumerState<DemoCodeScreen>
                         ),
                         GestureDetector(
                           onTap: () => launchUrl(
-                            Uri.parse('https://nexgenled.com'),
+                            Uri.parse('https://nex-genled.com'),
                             mode: LaunchMode.externalApplication,
                           ),
                           child: Text(
-                            'nexgenled.com',
+                            'Nex-GenLED.com',
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: NexGenPalette.cyan,

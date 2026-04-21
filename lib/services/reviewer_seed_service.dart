@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
@@ -8,31 +9,44 @@ import 'package:nexgen_command/services/user_service.dart';
 ///
 /// The reviewer account uses [DemoWledRepository] so no real hardware
 /// is required — the reviewer sees a fully functional demo experience.
+///
+/// Seeding is keyed to the reviewer's actual Firebase Auth UID (assigned
+/// when the Firebase Auth user was provisioned). Writing under the Auth
+/// UID — not a hardcoded doc ID — is what lets the signed-in reviewer
+/// read back their pre-configured profile.
 class ReviewerSeedService {
-  static const reviewerEmail = 'reviewer@nexgenled.com';
-  static const reviewerUserId = 'reviewer-demo-account-001';
+  static const reviewerEmail = 'reviewer@Nex-GenLED.com';
+  static const reviewerInstallationId = 'reviewer-installation-001';
 
-  /// Call from main.dart on app startup (debug + release).
-  /// Creates the reviewer Firestore document if it doesn't already exist.
-  static Future<void> ensureReviewerAccount() async {
+  /// Case-insensitive check: is this the reviewer test account?
+  static bool isReviewer(User? user) {
+    final email = user?.email;
+    if (email == null) return false;
+    return email.toLowerCase() == reviewerEmail.toLowerCase();
+  }
+
+  /// Seed the reviewer's Firestore profile + installation docs under the
+  /// signed-in user's actual Auth UID. Called after the reviewer signs in.
+  /// Idempotent — skips if the user doc already exists.
+  static Future<void> seedForUser(User user) async {
     try {
+      final uid = user.uid;
       final doc = await FirebaseFirestore.instance
           .collection('users')
-          .doc(reviewerUserId)
+          .doc(uid)
           .get();
       if (doc.exists) return;
 
-      // Create a fully pre-configured reviewer UserModel
       final reviewerModel = UserModel(
-        id: reviewerUserId,
+        id: uid,
         email: reviewerEmail,
         displayName: 'Demo Home',
-        ownerId: reviewerUserId,
+        ownerId: uid,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
-        installationId: 'reviewer-installation-001',
+        installationId: reviewerInstallationId,
         installationRole: InstallationRole.primary,
-        primaryUserId: reviewerUserId,
+        primaryUserId: uid,
         linkedAt: DateTime.now(),
         welcomeCompleted: true,
         autopilotEnabled: true,
@@ -71,37 +85,42 @@ class ReviewerSeedService {
 
       await FirebaseFirestore.instance
           .collection('users')
-          .doc(reviewerUserId)
+          .doc(uid)
           .set(UserService.sanitizeForFirestore(reviewerModel.toJson()));
 
-      // Create reviewer installation document
-      await FirebaseFirestore.instance
+      // Installation doc stays at a stable ID so the reviewer profile's
+      // installationId field resolves correctly. Seed it if absent; the
+      // primaryUserId now reflects the actual Auth UID.
+      final installationRef = FirebaseFirestore.instance
           .collection('installations')
-          .doc('reviewer-installation-001')
-          .set({
-        'id': 'reviewer-installation-001',
-        'primaryUserId': reviewerUserId,
-        'dealerCode': '00',
-        'installerCode': '00',
-        'installerName': 'Nex-Gen LED',
-        'dealerCompanyName': 'Nex-Gen LED LLC',
-        'installedAt': Timestamp.now(),
-        'warrantyExpires': Timestamp.fromDate(
-            DateTime.now().add(const Duration(days: 365 * 5))),
-        'controllerSerials': ['DEMO-CTRL-001'],
-        'address': '123 Demo Street',
-        'city': 'Kansas City',
-        'state': 'MO',
-        'zipCode': '64108',
-        'maxSubUsers': 5,
-        'siteMode': 'residential',
-        'isActive': true,
-        'systemConfig': {
-          'linkedControllerIds': ['DEMO-CTRL-001'],
-        },
-      });
+          .doc(reviewerInstallationId);
+      final installationDoc = await installationRef.get();
+      if (!installationDoc.exists) {
+        await installationRef.set({
+          'id': reviewerInstallationId,
+          'primaryUserId': uid,
+          'dealerCode': '00',
+          'installerCode': '00',
+          'installerName': 'Nex-Gen LED',
+          'dealerCompanyName': 'Nex-Gen LED LLC',
+          'installedAt': Timestamp.now(),
+          'warrantyExpires': Timestamp.fromDate(
+              DateTime.now().add(const Duration(days: 365 * 5))),
+          'controllerSerials': ['DEMO-CTRL-001'],
+          'address': '123 Demo Street',
+          'city': 'Kansas City',
+          'state': 'MO',
+          'zipCode': '64108',
+          'maxSubUsers': 5,
+          'siteMode': 'residential',
+          'isActive': true,
+          'systemConfig': {
+            'linkedControllerIds': ['DEMO-CTRL-001'],
+          },
+        });
+      }
 
-      debugPrint('ReviewerSeedService: Reviewer account created');
+      debugPrint('ReviewerSeedService: Reviewer account seeded for uid=$uid');
     } catch (e) {
       debugPrint('ReviewerSeedService: Failed to seed reviewer account: $e');
     }

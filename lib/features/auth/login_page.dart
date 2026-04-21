@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -108,6 +109,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _loading = true);
     try {
       await auth.signInWithEmailAndPassword(email, pass);
+      // Reviewer test account: seed the demo profile under the actual Auth
+      // UID so the reviewer lands in a fully configured account. No-op for
+      // any other user, and idempotent on repeat logins.
+      final signedIn = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (ReviewerSeedService.isReviewer(signedIn)) {
+        await ReviewerSeedService.seedForUser(signedIn!);
+      }
       if (!mounted) return;
       context.go(AppRoutes.dashboard);
     } catch (e) {

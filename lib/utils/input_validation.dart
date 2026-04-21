@@ -78,9 +78,10 @@ class InputValidation {
     final email = validateEmail(input);
     if (email == null) return null;
 
-    // List of authorized dealer domains
+    // List of authorized dealer domains (match is case-insensitive — email
+    // is already lowercased upstream in validateEmail()).
     const authorizedDomains = [
-      'nexgenled.com',
+      'nex-genled.com',
       'authorized-dealer.com', // Update with real dealer domains
     ];
 
