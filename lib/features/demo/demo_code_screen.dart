@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/models/dealer_demo_code.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/demo_code_service.dart';
@@ -66,7 +67,30 @@ class _DemoCodeScreenState extends ConsumerState<DemoCodeScreen>
 
       if (result != null) {
         ref.read(validatedDemoCodeProvider.notifier).state = result;
-        context.go(AppRoutes.demoWelcome);
+
+        // Initialize demo session immediately on code validation so
+        // demo-aware providers (currentRooflineConfigProvider,
+        // rooflineMaskProvider, etc.) route to demo state for BOTH
+        // the normal flow and the APPLE-REVIEW bypass. Previously this
+        // only ran when the user tapped "Start Demo" on demoWelcome,
+        // leaving the APPLE-REVIEW path with demoExperienceActive=false
+        // and falling through to production Firestore reads — which
+        // caused the half-moon overlay regression because no
+        // RooflineConfiguration subdoc exists for the reviewer.
+        ref.read(demoSessionProvider.notifier).startDemo();
+
+        // App Store Review bypass: the reviewer code (dealerCode
+        // 'APPLE-REVIEW') skips the lead-capture funnel (welcome →
+        // profile → photo). Gating a demo behind a personal-info
+        // form would violate App Review guideline 5.1.1 and pollute
+        // the CRM with placeholder reviewer leads. The validated
+        // DealerDemoCode is already in validatedDemoCodeProvider, so
+        // downstream screens still have dealer-attribution context.
+        if (result.dealerCode == 'APPLE-REVIEW') {
+          context.go(AppRoutes.demoPhoto);
+        } else {
+          context.go(AppRoutes.demoWelcome);
+        }
       } else {
         _shakeController.forward(from: 0);
         setState(() {

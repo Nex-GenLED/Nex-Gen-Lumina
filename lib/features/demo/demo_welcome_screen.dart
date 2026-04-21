@@ -209,9 +209,12 @@ class DemoWelcomeScreen extends ConsumerWidget {
                         label: 'Start Demo',
                         icon: Icons.play_arrow,
                         onPressed: () {
-                          // Initialize demo session
-                          ref.read(demoSessionProvider.notifier).startDemo();
-                          // Navigate to profile screen
+                          // Demo session was already initialized in
+                          // demo_code_screen.dart post-validation. Re-calling
+                          // startDemo() here would reset demo state (clear
+                          // demoRooflineNotifierProvider, null out
+                          // demoRooflineConfigProvider, etc.) and wipe any
+                          // progress the user made since code entry.
                           ref.read(demoFlowProvider.notifier).goToStep(DemoStep.profile);
                           context.push(AppRoutes.demoProfile);
                         },

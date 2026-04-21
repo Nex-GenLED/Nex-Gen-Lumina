@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
@@ -19,6 +20,11 @@ class AuthStateListenable extends ChangeNotifier {
 
 /// Creates an unlinked user profile for new Firebase Auth users.
 Future<void> createUnlinkedUserProfile(User user) async {
+  // Reviewer account never gets an unlinked skeleton — it gets its full
+  // demo profile written by ReviewerSeedService.seedForUser(). Gating
+  // here closes the race even if a future call site forgets to gate at
+  // the appRedirect layer. Defense in depth.
+  if (ReviewerSeedService.isReviewer(user)) return;
   try {
     await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
       UserService.sanitizeForFirestore({
@@ -131,6 +137,15 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
           return AppRoutes.dashboard;
         }
       } else {
+        // Reviewer account: skip skeleton creation entirely.
+        // ReviewerSeedService.seedForUser() (awaited from _handleSignIn)
+        // is the sole writer for the reviewer's user doc. Creating a
+        // skeleton here races the seed and overwrites installation_role
+        // with 'unlinked', sending the reviewer to /link-account instead
+        // of the populated demo home. See REVIEWER_GATE_DIAGNOSIS.md.
+        if (ReviewerSeedService.isReviewer(user)) {
+          return null; // stay on /login; _handleSignIn will navigate
+        }
         // User exists in Auth but not Firestore - create unlinked profile
         await createUnlinkedUserProfile(user);
         return AppRoutes.linkAccount;
@@ -237,12 +252,29 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
       // Unlinked: redirect to link-account for any protected route
       if (role == null || role == 'unlinked') {
+        // Safety net: if the reviewer somehow lands on a protected
+        // route before seedForUser() commits (rare — _handleSignIn
+        // awaits the seed before navigating — but defensive for any
+        // future code path that navigates to protected routes from
+        // elsewhere), allow through. The seed will land within
+        // milliseconds and the protected page's own stream/provider
+        // queries will re-fetch with correct data.
+        if (ReviewerSeedService.isReviewer(user)) {
+          return null;
+        }
         return AppRoutes.linkAccount;
       }
 
       // primary / subUser with a valid installation: allow access
       return null;
     } else {
+      // Reviewer: skip skeleton write and /link-account redirect — see
+      // auth-route branch and createUnlinkedUserProfile for rationale.
+      // The awaited seedForUser() from _handleSignIn should already have
+      // committed, but this is defensive for any race window.
+      if (ReviewerSeedService.isReviewer(user)) {
+        return null;
+      }
       // User exists in Auth but not Firestore - create unlinked profile
       await createUnlinkedUserProfile(user);
       return AppRoutes.linkAccount;

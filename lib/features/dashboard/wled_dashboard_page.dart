@@ -33,6 +33,7 @@ import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
@@ -166,6 +167,12 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       if (!current.startsWith(AppRoutes.dashboard)) return;
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
+
+      // Reviewer account uses DemoWledRepository (see wled_providers.dart);
+      // its users/{uid}/controllers subcollection is intentionally empty
+      // and must NOT trigger the first-run wifi-connect flow.
+      if (ReviewerSeedService.isReviewer(user)) return;
+
       final col = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('controllers');
       final snap = await col.limit(1).get();
       if (snap.docs.isEmpty && mounted) {
