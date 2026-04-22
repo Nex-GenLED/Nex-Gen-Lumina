@@ -22,6 +22,7 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <Preferences.h>
 
 #include "config.h"
 
@@ -31,6 +32,10 @@
 
 WiFiClientSecure secureClient;
 WebServer server(80);
+// File-scope WiFiManager so handleReset() can call resetSettings() on
+// the same credential store setupWiFi() populates. Constructor is
+// lightweight (no WiFi touches until autoConnect()), safe before setup().
+WiFiManager wm;
 bool firebaseReady = false;
 unsigned long lastPollTime = 0;
 unsigned long lastBlinkTime = 0;
@@ -46,10 +51,61 @@ String firebaseRefreshToken = "";
 unsigned long tokenExpiresAt = 0;  // millis() when token expires
 bool firebaseAuthenticated = false;
 
-// Pairing state (persisted in config, but tracked at runtime too)
+// Pairing state — loaded from NVS at boot, written by /api/bridge/pair.
+// Phase 1: no compile-time defaults. A factory-flashed bridge boots blank
+// and does not poll Firestore until the app calls /api/bridge/pair.
+Preferences prefs;
+static const char* PREFS_NAMESPACE = "lumina";
+static const char* PREFS_KEY_USER_ID = "userId";
+static const char* PREFS_KEY_WLED_IP = "wledIp";
+static const char* PREFS_KEY_PAIRED  = "paired";
+
 bool isPaired = false;
-String pairedUserId = FIREBASE_USER_UID;
-String pairedWledIp = "192.168.50.91";
+String pairedUserId = "";
+String pairedWledIp = "";
+
+void loadPairingFromNvs() {
+  // Open read-only. On first boot the "lumina" namespace may not exist;
+  // on subsequent boots it may exist but have no keys yet. Either case
+  // can fire ESP-IDF [E] NOT_FOUND logs that look like real faults.
+  // Guard with begin() and isKey() to stay quiet.
+  if (!prefs.begin(PREFS_NAMESPACE, true)) {
+    pairedUserId = "";
+    pairedWledIp = "";
+    isPaired = false;
+    return;
+  }
+  // Short-circuit on the isPaired key: savePairingToNvs always writes it,
+  // so absence means no pair has ever happened. Skip all reads cleanly.
+  if (!prefs.isKey(PREFS_KEY_PAIRED)) {
+    pairedUserId = "";
+    pairedWledIp = "";
+    isPaired = false;
+    prefs.end();
+    return;
+  }
+  // Individual key guards protect against partially-written/corrupt NVS.
+  pairedUserId = prefs.isKey(PREFS_KEY_USER_ID)
+      ? prefs.getString(PREFS_KEY_USER_ID, "") : "";
+  pairedWledIp = prefs.isKey(PREFS_KEY_WLED_IP)
+      ? prefs.getString(PREFS_KEY_WLED_IP, "") : "";
+  isPaired = prefs.getBool(PREFS_KEY_PAIRED, false) && pairedUserId.length() > 0;
+  prefs.end();
+}
+
+void savePairingToNvs() {
+  prefs.begin(PREFS_NAMESPACE, false); // read-write
+  prefs.putString(PREFS_KEY_USER_ID, pairedUserId);
+  prefs.putString(PREFS_KEY_WLED_IP, pairedWledIp);
+  prefs.putBool(PREFS_KEY_PAIRED, isPaired);
+  prefs.end();
+}
+
+void clearPairingNvs() {
+  prefs.begin(PREFS_NAMESPACE, false);
+  prefs.clear();
+  prefs.end();
+}
 
 // Device identity
 String deviceName = "Lumina-";
@@ -121,8 +177,20 @@ void setup() {
   Serial.print("Device name: ");
   Serial.println(deviceName);
 
-  // Mark as paired if a user UID is configured
-  isPaired = (strlen(FIREBASE_USER_UID) > 0);
+  // Load pairing state from NVS (written by /api/bridge/pair).
+  // A factory-flashed bridge with no NVS entry will have isPaired=false
+  // and will not poll Firestore until the app pairs it.
+  loadPairingFromNvs();
+  Serial.print("Pairing state: ");
+  if (isPaired) {
+    Serial.print("PAIRED (user=");
+    Serial.print(pairedUserId.substring(0, 8));
+    Serial.print("..., wledIp=");
+    Serial.print(pairedWledIp);
+    Serial.println(")");
+  } else {
+    Serial.println("UNPAIRED — waiting for /api/bridge/pair");
+  }
 
   setupWiFi();
   setupMDNS();
@@ -199,7 +267,7 @@ void setupWiFi() {
     Serial.print("Connect to AP: ");
     Serial.println(deviceName);
 
-    WiFiManager wm;
+    // wm is declared at file scope so handleReset can call resetSettings.
     wm.setConfigPortalTimeout(300); // 5 min timeout, then reboot
     wm.setAPCallback([](WiFiManager* wm) {
       Serial.println("Captive portal started");
@@ -271,7 +339,7 @@ void setupWebServer() {
   server.on("/api/bridge/pair", HTTP_POST, handleBridgePair);
   server.on("/api/bridge/auth", HTTP_POST, handleBridgeAuth);
   server.on("/api/reboot", HTTP_POST, handleReboot);
-  server.on("/api/reset", HTTP_POST, handleReset);
+  server.on("/api/bridge/reset", HTTP_POST, handleReset);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -286,7 +354,6 @@ void handleApiInfo() {
   doc["ip"] = WiFi.localIP().toString();
   doc["mdns"] = deviceName + ".local";
   doc["ap"] = deviceName;
-  doc["savedSSID"] = String(WIFI_SSID);
 
   String body;
   serializeJson(doc, body);
@@ -337,10 +404,14 @@ void handleBridgePair() {
   }
   isPaired = true;
 
+  // Persist to NVS so pairing survives power cycles.
+  savePairingToNvs();
+
   Serial.print("Paired with user: ");
   Serial.println(pairedUserId);
   Serial.print("WLED target: ");
   Serial.println(pairedWledIp);
+  Serial.println("Pairing written to NVS");
 
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -358,12 +429,31 @@ void handleReboot() {
 }
 
 void handleReset() {
+  Serial.println("Factory reset requested — clearing NVS + WiFi creds");
+
+  // Respond to client first; we're about to reboot.
+  server.send(200, "application/json", "{\"ok\":true}");
+  delay(200);
+
+  // Clear pairing state in NVS.
+  clearPairingNvs();
   isPaired = false;
   pairedUserId = "";
   pairedWledIp = "";
   firebaseReady = false;
   firebaseIdToken = "";
-  server.send(200, "application/json", "{\"ok\":true}");
+
+  // Erase stored WiFi credentials so the next boot falls back to the
+  // WiFiManager captive portal. Both calls are required:
+  //  - wm.resetSettings(): wipes WiFiManager's separate credential store.
+  //    Without this, WM's autoConnect() on next boot re-populates native
+  //    creds from its own cache and silently rejoins the old network.
+  //  - WiFi.disconnect(true, true): wipes the ESP32 native WiFi creds.
+  wm.resetSettings();
+  WiFi.disconnect(true, true);
+
+  delay(500);
+  ESP.restart();
 }
 
 void handleNotFound() {

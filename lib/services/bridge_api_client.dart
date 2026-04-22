@@ -181,11 +181,11 @@ class BridgeApiClient {
     }
   }
 
-  /// POST /api/reset — factory reset the bridge (clears NVS).
+  /// POST /api/bridge/reset — factory reset the bridge (clears NVS).
   Future<bool> reset() async {
     try {
       final response =
-          await http.post(Uri.parse('$baseUrl/api/reset')).timeout(_timeout);
+          await http.post(Uri.parse('$baseUrl/api/bridge/reset')).timeout(_timeout);
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('[BridgeApiClient] reset failed: $e');

@@ -20,9 +20,10 @@
 // Your Firebase project ID (e.g., "lumina-12345")
 #define FIREBASE_PROJECT_ID "icrt6menwsv2d8all8oijs021b06s5"
 
-// Firebase Auth - The user ID whose commands this bridge will execute
-// This is the UID from Firebase Authentication for the home owner
-#define FIREBASE_USER_UID "Empwc9bfLKVBTe3VcaHIE1mZw5y1"
+// Firebase Auth - The user ID whose commands this bridge will execute.
+// Phase 1: BLANK at factory. Written to NVS at install time via
+// /api/bridge/pair. The bridge will not poll Firestore until this is set.
+#define FIREBASE_USER_UID ""
 
 // Firebase Auth credentials for the bridge's own Firebase account.
 // The bridge signs in with these to get an ID token for authenticated
@@ -33,11 +34,13 @@
 // ============================================================================
 // WiFi Configuration (optional - can use WiFiManager instead)
 // ============================================================================
-// If you leave these empty, the bridge will start in AP mode
-// and let you configure WiFi via a web portal
+// Phase 1: BLANK at factory. Empty SSID triggers the WiFiManager
+// captive portal at boot ("Lumina-XXXX" AP) so the installer can
+// enter the homeowner's WiFi credentials. Do not hardcode creds
+// before factory flash.
 
-#define WIFI_SSID "Nexgen"
-#define WIFI_PASSWORD "Nexgen365"
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
 
 // ============================================================================
 // Bridge Configuration

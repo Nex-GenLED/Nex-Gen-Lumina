@@ -100,6 +100,45 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
+    // Hijack protection: if this bridge is already paired to a different
+    // Nex-Gen account, require explicit confirmation before continuing.
+    // A null status (bridge unreachable for /status) is non-fatal — the
+    // Verify step will catch it later.
+    final status = await _client!.getStatus();
+    if (!mounted) return;
+
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (status != null &&
+        status.paired &&
+        status.userId.isNotEmpty &&
+        status.userId != currentUid) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Bridge already paired'),
+          content: const Text(
+            'This bridge is currently paired to a different Nex-Gen '
+            'account. Continuing will transfer the bridge to your '
+            'account and stop service for the previous owner.\n\n'
+            'Continue only if you are the authorized installer for '
+            'this bridge.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Transfer to my account'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (confirmed != true) return;
+    }
+
     setState(() {
       _bridgeInfo = info;
       _step = _Step.pair;
@@ -118,7 +157,19 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final controllerIp = ref.read(selectedDeviceIpProvider) ?? '192.168.50.91';
+    final controllerIp = ref.read(selectedDeviceIpProvider);
+    if (controllerIp == null || controllerIp.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No lighting controller selected. Choose a controller in '
+            'Site Setup before pairing a bridge.',
+          ),
+        ),
+      );
+      return;
+    }
 
     setState(() {
       _pairing = true;
@@ -476,7 +527,8 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   // ── Pair step ─────────────────────────────────────────────────────────────
 
   Widget _buildPairStep() {
-    final controllerIp = ref.watch(selectedDeviceIpProvider) ?? '192.168.50.91';
+    final controllerIp = ref.watch(selectedDeviceIpProvider);
+    final hasController = controllerIp != null && controllerIp.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -533,7 +585,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                 const SizedBox(height: 12),
                 _InfoRow(
                   label: 'Controller Target',
-                  value: controllerIp,
+                  value: hasController
+                      ? controllerIp
+                      : 'None selected — set up a controller first',
                 ),
                 const SizedBox(height: 16),
 
@@ -562,7 +616,8 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: _pairing ? null : _doPair,
+                    onPressed:
+                        (_pairing || !hasController) ? null : _doPair,
                     icon: _pairing
                         ? const SizedBox(
                             width: 16,
