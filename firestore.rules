@@ -53,13 +53,6 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'primary';
     }
 
-    // Helper function to check if user is an installer
-    function isInstaller() {
-      return request.auth != null &&
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'installer';
-    }
-
     // Helper function to check if user is an admin
     function isAdmin() {
       return request.auth != null &&

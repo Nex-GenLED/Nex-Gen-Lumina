@@ -659,9 +659,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
-        child: AspectRatio(
-          aspectRatio: 994 / 492,
-          child: Stack(fit: StackFit.expand, children: [
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // The 994:492 ratio matches the Demohomephoto.jpg asset and is
+            // the preferred widescreen framing on tablets. On narrow phones
+            // that ratio collapses the card to ~190px tall — the frosted
+            // Now Playing bar (~90px + 10px offset) then eats half the card
+            // and only a sliver of photo shows. Clamp to a minimum height so
+            // the photo stays ≥ 70% of the card on any device width while
+            // preserving the original ratio wherever width allows it.
+            const double minCardHeight = 300.0;
+            final double naturalHeight = constraints.maxWidth * (492 / 994);
+            final double height =
+                naturalHeight < minCardHeight ? minCardHeight : naturalHeight;
+            return SizedBox(
+              height: height,
+              child: Stack(fit: StackFit.expand, children: [
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
               Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: Alignment.center)
@@ -753,7 +766,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildAddPhotoButton(context, ref),
             // Now Playing bar — owns the full bottom chrome including brightness + tune
             _buildNowPlayingBar(context, ref, state),
-          ]),
+              ]),
+            );
+          },
         ),
       ),
     );
@@ -901,7 +916,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 10, 12),
+              padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -1017,8 +1032,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       GestureDetector(
                         onTap: () => setState(() => _adjustmentPanelExpanded = !_adjustmentPanelExpanded),
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: 28,
+                          height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: _adjustmentPanelExpanded
@@ -1033,7 +1048,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           ),
                           child: Icon(
                             _adjustmentPanelExpanded ? Icons.tune : Icons.tune_outlined,
-                            size: 17,
+                            size: 15,
                             color: _adjustmentPanelExpanded
                                 ? NexGenPalette.cyan
                                 : Colors.white.withValues(alpha: 0.75),
@@ -1068,8 +1083,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                               }
                             : null,
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: 28,
+                          height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: Colors.white.withValues(alpha: 0.06),
@@ -1082,7 +1097,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           ),
                           child: Icon(
                             Icons.power_settings_new,
-                            size: 17,
+                            size: 15,
                             color: isOn
                                 ? Colors.white.withValues(alpha: 0.85)
                                 : Colors.red.withValues(alpha: 0.65),
@@ -1093,7 +1108,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   ),
 
                   // ── Row 2: Brightness slider ──
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Consumer(builder: (context, ref, _) {
                     final st = ref.watch(wledStateProvider);
                     return Row(
@@ -1106,9 +1121,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                         Expanded(
                           child: SliderTheme(
                             data: Theme.of(context).sliderTheme.copyWith(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                              trackHeight: 2,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
                             ),
                             child: Slider(
                               value: st.brightness.toDouble(),

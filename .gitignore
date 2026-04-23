@@ -81,6 +81,9 @@ app.*.map.json
 **/android/key.properties
 *.jks
 
+# Gradle Kotlin daemon cache — per-session artifacts
+android/.kotlin/
+
 # Web related
 lib/generated_plugin_registrant.dart
 

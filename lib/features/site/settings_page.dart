@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/premium_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -197,7 +198,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       child: TextField(
                         controller: _memberCtrl,
                         decoration: const InputDecoration(labelText: 'Add controller IP (e.g. 192.168.1.51)'),
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                          signed: false,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          LengthLimitingTextInputFormatter(15),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 8),
