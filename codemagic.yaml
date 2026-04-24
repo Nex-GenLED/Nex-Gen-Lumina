@@ -37,6 +37,16 @@ workflows:
           VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
           echo "Version: $(grep '^version:' pubspec.yaml)"
+      - name: Create provisioning profile
+        script: |
+          app-store-connect fetch-signing-files \
+            com.nexgenled.command \
+            --type IOS_APP_STORE \
+            --create \
+            --save
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build signed IPA
         script: |
           flutter build ipa --release
