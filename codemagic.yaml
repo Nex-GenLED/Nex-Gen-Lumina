@@ -7,6 +7,10 @@ workflows:
       flutter: stable
       xcode: 16.2
       cocoapods: default
+      vars:
+        BUNDLE_ID: com.nexgenled.command
+      app_store_connect:
+        auth: integration
     scripts:
       - name: Clear CocoaPods cache
         script: |
@@ -14,7 +18,6 @@ workflows:
           rm -rf ios/Pods
           rm -rf ios/.symlinks
           rm -f ios/Podfile.lock
-
       - name: Clear Flutter cache
         script: |
           flutter clean
@@ -25,71 +28,34 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd ios && pod install --repo-update
-      - name: Set build number from Codemagic
+      - name: Set build number
         script: |
-          # Auto-increment build number so iOS treats each IPA as a new version
           BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}
-          echo "Using build number: $BUILD_NUM"
-          # Extract version name (e.g. 2.1.1) and replace build number
           VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
-          echo "Updated to: $(grep '^version:' pubspec.yaml)"
-      - name: Build Unsigned IPA
+          echo "Version: $(grep '^version:' pubspec.yaml)"
+      - name: Initialize keychain
         script: |
-          # 1. Generate Flutter build files without building
-          flutter build ios --release --config-only --no-codesign
-
-          # 2. Build with xcodebuild directly, forcing signing off
-          cd ios
-          xcodebuild \
-            -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath ../build/Runner.xcarchive \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            archive
-          cd ..
-
-          # 3. Locate the .app bundle inside the archive
-          APP_PATH="build/Runner.xcarchive/Products/Applications/Runner.app"
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found in archive"
-            find build/Runner.xcarchive -name "*.app" -type d 2>/dev/null
-            exit 1
-          fi
-
-          # 4. Verify the executable exists
-          if [ ! -f "$APP_PATH/Runner" ]; then
-            echo "ERROR: Runner executable not found inside app bundle"
-            ls -la "$APP_PATH"
-            exit 1
-          fi
-
-          echo "App bundle OK:"
-          ls -la "$APP_PATH/Runner"
-
-          # 5. Ad-hoc sign for AltStore/Sideloadly compatibility
-          echo "Ad-hoc signing..."
-          find "$APP_PATH/Frameworks" -name "*.framework" -type d | while read framework; do
-            /usr/bin/codesign --force --deep --sign - "$framework"
-          done
-          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
-          echo "Ad-hoc signing complete"
-
-          # 6. Package into IPA
-          rm -rf Payload
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -r -y Runner.ipa Payload
-
-          echo "IPA contents:"
-          unzip -l Runner.ipa | head -20
-
-          mv Runner.ipa $CM_BUILD_DIR/Runner.ipa
+          keychain initialize
+      - name: Fetch signing files
+        script: |
+          app-store-connect fetch-signing-files \
+            $BUNDLE_ID \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: |
+          keychain add-certificates
+      - name: Set up code signing settings
+        script: |
+          xcode-project use-profiles
+      - name: Build signed IPA
+        script: |
+          flutter build ipa --release
     artifacts:
-      - Runner.ipa
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        expire_build_submitted_for_review: true
