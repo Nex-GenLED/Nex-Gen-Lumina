@@ -8,11 +8,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
+import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:go_router/go_router.dart';
@@ -184,35 +186,51 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             orElse: () => null,
           );
       final url = profile?.webhookUrl;
+
+      // Set mode for UI regardless — drives which card is shown.
       if (url != null && url.isNotEmpty) {
         _webhookUrlController.text = url;
         _mode = RemoteAccessMode.webhook;
-        _runHealthCheck(url);
       } else {
         _mode = RemoteAccessMode.bridge;
-        _runBridgeCheck();
       }
-      _startPolling();
 
-      // ── Diagnostic: fire an end-to-end bridge ping on screen open ──
-      final userId = ref.read(authStateProvider).maybeWhen(
-            data: (u) => u?.uid,
-            orElse: () => null,
-          );
-      final controllerId = ref.read(selectedControllerIdProvider);
-      final controllerIp = ref.read(selectedDeviceIpProvider) ?? '';
-      debugBridgePing(
-        controllerIp: controllerIp,
-        userId: userId,
-        controllerId: controllerId,
-        webhookUrl: url ?? '',
-      );
+      // Only run network health checks and diagnostics when remote
+      // access is actually enabled. Users on local WiFi with remote
+      // access off shouldn't incur Firestore / webhook traffic.
+      if (profile?.remoteAccessEnabled == true) {
+        if (_mode == RemoteAccessMode.webhook) {
+          _runHealthCheck(url!);
+        } else {
+          _runBridgeCheck();
+        }
+        _startPolling();
+
+        // ── Diagnostic: fire an end-to-end bridge ping on screen open ──
+        final userId = ref.read(authStateProvider).maybeWhen(
+              data: (u) => u?.uid,
+              orElse: () => null,
+            );
+        final controllerId = ref.read(selectedControllerIdProvider);
+        final controllerIp = ref.read(selectedDeviceIpProvider) ?? '';
+        debugBridgePing(
+          controllerIp: controllerIp,
+          userId: userId,
+          controllerId: controllerId,
+          webhookUrl: url ?? '',
+        );
+      }
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      final profile = ref.read(currentUserProfileProvider).maybeWhen(
+        data: (u) => u,
+        orElse: () => null,
+      );
+      if (profile?.remoteAccessEnabled != true) return;
       if (_mode == RemoteAccessMode.webhook) {
         final url = _webhookUrlController.text.trim();
         if (url.isNotEmpty) _runHealthCheck(url);
@@ -233,6 +251,11 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   // ── Polling ────────────────────────────────────────────────────────────────
 
   void _startPolling() {
+    final profile = ref.read(currentUserProfileProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (profile?.remoteAccessEnabled != true) return;
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_mode == RemoteAccessMode.webhook) {
@@ -454,12 +477,26 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
     setState(() => _isDetectingNetwork = true);
 
     try {
+      // Android gates WiFi SSID reads behind location permission. iOS
+      // requires precise location + Local Network entitlement. Request
+      // location up front so getCurrentSsid() has a chance to succeed.
+      final status = await Permission.locationWhenInUse.request();
+      if (!status.isGranted) {
+        _showSnackBar(
+          'Location permission is required to detect your WiFi '
+          'network name. Please grant it in Settings.',
+          isError: true,
+        );
+        return;
+      }
+
       final connectivityService = ref.read(connectivityServiceProvider);
       final currentSsid = await connectivityService.getCurrentSsid();
 
       if (currentSsid == null || currentSsid.isEmpty) {
         _showSnackBar(
-          'Could not detect WiFi network. Make sure WiFi is connected.',
+          'Could not read WiFi name. Make sure WiFi is enabled and '
+          'you are connected to your home network.',
           isError: true,
         );
         return;
@@ -499,6 +536,24 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       }
 
       await userService.setRemoteAccessEnabled(userId, enabled);
+
+      // Start / stop background network activity in lockstep with the flag.
+      if (enabled) {
+        _startPolling();
+        if (_mode == RemoteAccessMode.bridge) {
+          _runBridgeCheck();
+        } else {
+          final url = _webhookUrlController.text.trim();
+          if (url.isNotEmpty) _runHealthCheck(url);
+        }
+      } else {
+        _pollingTimer?.cancel();
+        setState(() {
+          _bridgeCheck = const _WebhookCheckResult(_WebhookStatus.idle);
+          _webhookCheck = const _WebhookCheckResult(_WebhookStatus.idle);
+        });
+      }
+
       _showSnackBar(
           enabled ? 'Remote access enabled' : 'Remote access disabled');
     } catch (e) {
@@ -587,14 +642,19 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
     final isRemote = ref.watch(isRemoteModeProvider);
 
     final isEnabled = userProfile?.remoteAccessEnabled ?? false;
-    final homeSsid = userProfile?.homeSsid;
+    // Prefer the encrypted field (new profiles); fall back to the plaintext
+    // `homeSsid` field for legacy profiles written before Option B landed.
+    // Never used for comparison — that runs off `homeSsidHash`.
+    final String? displaySsid = userProfile?.homeSsidEncrypted != null
+        ? EncryptionService.decryptString(userProfile!.homeSsidEncrypted!)
+        : userProfile?.homeSsid;
     final hasWebhookUrl = userProfile?.webhookUrl?.isNotEmpty ?? false;
 
     return Scaffold(
       appBar: GlassAppBar(
         title: const Text('Remote Access'),
         actions: [
-          if (hasWebhookUrl || homeSsid != null)
+          if (hasWebhookUrl || displaySsid != null)
             IconButton(
               tooltip: 'Clear Configuration',
               icon: const Icon(Icons.delete_outline),
@@ -659,7 +719,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 12),
-                  if (homeSsid != null) ...[
+                  if (displaySsid != null) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 8),
@@ -675,7 +735,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              homeSsid,
+                              displaySsid,
                               style: TextStyle(
                                 color: NexGenPalette.cyan,
                                 fontWeight: FontWeight.w500,
@@ -702,7 +762,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
                                   CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.wifi_find),
-                      label: Text(homeSsid == null
+                      label: Text(displaySsid == null
                           ? 'Detect Home Network'
                           : 'Update Home Network'),
                     ),

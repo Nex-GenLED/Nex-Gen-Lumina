@@ -137,8 +137,13 @@ class UserModel {
   // Remote Access configuration
   /// URL for cloud relay webhook (Dynamic DNS pointing to home network)
   final String? webhookUrl;
-  /// WiFi SSID of the user's home network (decrypted, for display)
+  /// WiFi SSID of the user's home network (decrypted, for display).
+  /// Legacy — kept for backward compatibility with older profiles. New
+  /// writes go to [homeSsidEncrypted] instead.
   final String? homeSsid;
+  /// Encrypted home SSID (AES via EncryptionService). Source of truth for
+  /// display — decrypt at display time only. Never used for comparison.
+  final String? homeSsidEncrypted;
   /// SHA-256 hash of the home SSID (for comparison in ConnectivityService)
   final String? homeSsidHash;
   /// Whether remote access via cloud relay is enabled
@@ -300,6 +305,7 @@ class UserModel {
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
+    this.homeSsidEncrypted,
     this.homeSsidHash,
     this.remoteAccessEnabled = false,
     this.mqttRelayEnabled = false,
@@ -417,6 +423,7 @@ class UserModel {
       dealerEmail: json['dealer_email'] as String?,
       webhookUrl: json['webhook_url'] as String?,
       homeSsid: json['home_ssid'] as String?,
+      homeSsidEncrypted: json['home_ssid_encrypted'] as String?,
       homeSsidHash: json['home_ssid_hash'] as String?,
       remoteAccessEnabled: (json['remote_access_enabled'] as bool?) ?? false,
       mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
@@ -567,6 +574,7 @@ class UserModel {
       'dealer_email': dealerEmail,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
+      'home_ssid_encrypted': homeSsidEncrypted,
       'home_ssid_hash': homeSsidHash,
       'remote_access_enabled': remoteAccessEnabled,
       'mqtt_relay_enabled': mqttRelayEnabled,
@@ -652,6 +660,7 @@ class UserModel {
     String? dealerEmail,
     String? webhookUrl,
     String? homeSsid,
+    String? homeSsidEncrypted,
     String? homeSsidHash,
     bool? remoteAccessEnabled,
     bool? mqttRelayEnabled,
@@ -734,6 +743,7 @@ class UserModel {
       dealerEmail: dealerEmail ?? this.dealerEmail,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       homeSsid: homeSsid ?? this.homeSsid,
+      homeSsidEncrypted: homeSsidEncrypted ?? this.homeSsidEncrypted,
       homeSsidHash: homeSsidHash ?? this.homeSsidHash,
       remoteAccessEnabled: remoteAccessEnabled ?? this.remoteAccessEnabled,
       mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
