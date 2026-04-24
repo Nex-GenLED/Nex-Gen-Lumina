@@ -11,6 +11,9 @@ workflows:
       cocoapods: default
       vars:
         BUNDLE_ID: com.nexgenled.command
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.nexgenled.command
     scripts:
       - name: Clear CocoaPods cache
         script: |
@@ -34,26 +37,6 @@ workflows:
           VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
           echo "Version: $(grep '^version:' pubspec.yaml)"
-      - name: Initialize keychain
-        script: |
-          keychain initialize
-      - name: Create or get certificate
-        script: |
-          app-store-connect create-certificate \
-            --type IOS_DISTRIBUTION \
-            --save
-      - name: Fetch signing files
-        script: |
-          app-store-connect fetch-signing-files \
-            $BUNDLE_ID \
-            --type IOS_APP_STORE \
-            --create
-      - name: Add certificates to keychain
-        script: |
-          keychain add-certificates
-      - name: Set up code signing settings
-        script: |
-          xcode-project use-profiles
       - name: Build signed IPA
         script: |
           flutter build ipa --release
