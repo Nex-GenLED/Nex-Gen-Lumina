@@ -14,6 +14,7 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.nexgenled.command
+        team_id: K337ZPY37S
     scripts:
       - name: Clear CocoaPods cache
         script: |
