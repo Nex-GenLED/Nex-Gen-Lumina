@@ -22,6 +22,7 @@ import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.d
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 // ---------------------------------------------------------------------------
@@ -438,19 +439,18 @@ class _DayRow extends StatelessWidget {
 // _EventChip
 // ---------------------------------------------------------------------------
 
-class _EventChip extends StatelessWidget {
+class _EventChip extends ConsumerWidget {
   final AutopilotEvent event;
   final VoidCallback onTap;
 
   const _EventChip({required this.event, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = event.displayColor ?? event.eventType.accentColor;
-    final startH = event.startTime.hour.toString().padLeft(2, '0');
-    final startM = event.startTime.minute.toString().padLeft(2, '0');
-    final endH = event.endTime.hour.toString().padLeft(2, '0');
-    final endM = event.endTime.minute.toString().padLeft(2, '0');
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final startStr = formatTime(event.startTime, timeFormat: timeFormat);
+    final endStr = formatTime(event.endTime, timeFormat: timeFormat);
 
     return GestureDetector(
       onTap: onTap,
@@ -475,7 +475,7 @@ class _EventChip extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              '$startH:$startM–$endH:$endM',
+              '$startStr–$endStr',
               style: TextStyle(
                   color: color.withValues(alpha: 0.7), fontSize: 10),
             ),
@@ -496,7 +496,7 @@ class _EventChip extends StatelessWidget {
 // _EventDetailOverlay — glass sheet sliding up from bottom
 // ---------------------------------------------------------------------------
 
-class _EventDetailOverlay extends StatelessWidget {
+class _EventDetailOverlay extends ConsumerWidget {
   final AutopilotEvent event;
   final VoidCallback onDismiss;
   final ValueChanged<AutopilotEvent> onEdit;
@@ -508,10 +508,11 @@ class _EventDetailOverlay extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = event.displayColor ?? event.eventType.accentColor;
-    final startFmt = _fmtTime(event.startTime);
-    final endFmt = _fmtTime(event.endTime);
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final startFmt = formatTime(event.startTime, timeFormat: timeFormat);
+    final endFmt = formatTime(event.endTime, timeFormat: timeFormat);
 
     return GestureDetector(
       onTap: onDismiss,
@@ -673,6 +674,4 @@ class _EventDetailOverlay extends StatelessWidget {
     );
   }
 
-  String _fmtTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 }

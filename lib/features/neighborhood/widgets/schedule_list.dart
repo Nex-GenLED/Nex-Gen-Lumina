@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app_colors.dart';
+import '../../../utils/time_format.dart';
 import '../../../widgets/schedule_type_badge.dart';
 import '../../wled/pattern_explore_screen.dart';
 import '../../wled/wled_providers.dart';
@@ -1177,10 +1178,8 @@ class _ScheduleTimeConfigSheetState
   }
 
   String _formatTimeOfDay(TimeOfDay time) {
-    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$hour:$minute $period';
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    return formatTimeOfDay(time, timeFormat: timeFormat);
   }
 
   Future<void> _createSchedule() async {

@@ -12,6 +12,7 @@ import 'package:nexgen_command/widgets/house_photo_uploader.dart';
 import 'package:nexgen_command/widgets/team_autocomplete.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/data/metro_builders.dart';
@@ -238,8 +239,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   String _formatTimeOfDay(TimeOfDay t) {
     final now = DateTime.now();
     final dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-    final local = TimeOfDay.fromDateTime(dt);
-    return local.format(context);
+    return formatTime(dt, timeFormat: _timeFormat);
   }
 
   void _onAddressChanged(String value) {
@@ -270,9 +270,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   void _updateSunInfo(double lat, double lon) {
     final sunset = SunUtils.sunsetLocal(lat, lon, DateTime.now());
     final sunrise = SunUtils.sunriseLocal(lat, lon, DateTime.now().add(const Duration(days: 1)));
+    final timeFormat = ref.read(timeFormatPreferenceProvider);
     String info = '';
-    if (sunset != null) info += 'Sunset: ${TimeOfDay.fromDateTime(sunset).format(context)}';
-    if (sunrise != null) info += (info.isEmpty ? '' : '  •  ') + 'Sunrise: ${TimeOfDay.fromDateTime(sunrise).format(context)}';
+    if (sunset != null) {
+      info += 'Sunset: ${formatTime(sunset, timeFormat: timeFormat)}';
+    }
+    if (sunrise != null) {
+      final sep = info.isEmpty ? '' : '  •  ';
+      info += '${sep}Sunrise: ${formatTime(sunrise, timeFormat: timeFormat)}';
+    }
     if (mounted) setState(() => _sunInfo = info.isEmpty ? null : info);
   }
 

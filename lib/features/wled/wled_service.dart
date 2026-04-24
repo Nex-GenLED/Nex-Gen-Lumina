@@ -525,7 +525,7 @@ class WledService implements WledRepository {
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: false);
+      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final decoded = jsonDecode(body);
@@ -550,6 +550,22 @@ class WledService implements WledRepository {
       debugPrint('WLED fetchPresetNames error: $e');
     }
     return const {};
+  }
+
+  @override
+  void invalidatePresetCache() {
+    _presetNamesCache = null;
+  }
+
+  @override
+  void reset() {
+    // Drop capability + preset caches so the next reconnect re-queries
+    // the device. HttpClient instances are created per-request and already
+    // closed with force:true, so there is no shared connection pool owned
+    // by this service to tear down.
+    _supportsRgbwCache = null;
+    _presetNamesCache = null;
+    debugPrint('🔄 WledService.reset(): caches cleared for $baseUrl');
   }
 
   @override
@@ -594,6 +610,9 @@ class WledService implements WledRepository {
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         debugPrint('✅ WLED preset $presetId saved successfully');
+        // Drop the cached preset-name map so the next Now Playing lookup
+        // picks up the newly saved name.
+        _presetNamesCache = null;
         return true;
       }
       debugPrint('❌ WLED savePreset error ${response.statusCode}: ${response.body}');

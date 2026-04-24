@@ -554,21 +554,22 @@ class _DayColumn extends StatelessWidget {
 }
 
 /// Amber banner showing active happy hour lock windows.
-class _HappyHourBanner extends StatelessWidget {
+class _HappyHourBanner extends ConsumerWidget {
   final List<Map<String, dynamic>> locks;
 
   const _HappyHourBanner({required this.locks});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     return Column(
       children: locks.map((lock) {
         final startHour = (lock['startHour'] as num?)?.toInt() ?? 0;
         final endHour = (lock['endHour'] as num?)?.toInt() ?? 0;
         final days = (lock['days'] as List?)?.map((e) => e.toString()).toList() ?? [];
         final daysStr = days.join(', ');
-        final startStr = _formatHour(startHour);
-        final endStr = _formatHour(endHour);
+        final startStr = _formatHour(startHour, timeFormat);
+        final endStr = _formatHour(endHour, timeFormat);
 
         return Container(
           width: double.infinity,
@@ -592,12 +593,8 @@ class _HappyHourBanner extends StatelessWidget {
     );
   }
 
-  String _formatHour(int hour) {
-    if (hour == 0) return '12 AM';
-    if (hour < 12) return '$hour AM';
-    if (hour == 12) return '12 PM';
-    return '${hour - 12} PM';
-  }
+  String _formatHour(int hour, String timeFormat) =>
+      formatTimeOfDay(TimeOfDay(hour: hour, minute: 0), timeFormat: timeFormat);
 }
 
 /// Horizontal chip list of game day times for commercial profiles.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme.dart';
+import '../../../utils/time_format.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../models/sync_event.dart';
@@ -528,7 +529,10 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.access_time),
-                  label: Text(_scheduledTimeOfDay.format(context)),
+                  label: Text(formatTimeOfDay(
+                    _scheduledTimeOfDay,
+                    timeFormat: ref.watch(timeFormatPreferenceProvider),
+                  )),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white70,
                     side: const BorderSide(color: Colors.white24),
@@ -905,7 +909,13 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
         _buildReviewRow('Team', _selectedTeamName ?? 'None'),
         _buildReviewRow('Trigger', _triggerType.displayName),
         if (_triggerType == SyncEventTriggerType.scheduledTime)
-          _buildReviewRow('Time', _scheduledTimeOfDay.format(context)),
+          _buildReviewRow(
+            'Time',
+            formatTimeOfDay(
+              _scheduledTimeOfDay,
+              timeFormat: ref.watch(timeFormatPreferenceProvider),
+            ),
+          ),
         _buildReviewRow('Celebration Duration', '${_celebDuration}s'),
         _buildReviewRow('Post-Event', _postEventBehavior.displayName),
         if (_isRecurring)

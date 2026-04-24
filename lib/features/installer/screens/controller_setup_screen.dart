@@ -440,40 +440,48 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: NexGenPalette.gunmetal90,
+        insetPadding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 24,
+          bottom: 24 + MediaQuery.of(ctx).viewInsets.bottom,
+        ),
         title: const Text('Add Controller by IP', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: ipCtrl,
-              autofocus: true,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'IP Address',
-                hintText: '192.168.1.100',
-                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
-                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                filled: true,
-                fillColor: NexGenPalette.matteBlack,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ipCtrl,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'IP Address',
+                  hintText: '192.168.1.100',
+                  labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                  filled: true,
+                  fillColor: NexGenPalette.matteBlack,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: nameCtrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Name (optional)',
-                hintText: 'e.g., Front Roofline',
-                labelStyle: const TextStyle(color: NexGenPalette.textMedium),
-                hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                filled: true,
-                fillColor: NexGenPalette.matteBlack,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Name (optional)',
+                  hintText: 'e.g., Front Roofline',
+                  labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                  filled: true,
+                  fillColor: NexGenPalette.matteBlack,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -494,10 +502,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     final ip = ipCtrl.text.trim();
     if (ip.isEmpty) return;
 
-    // Step 3: Validate controller type against live device info
+    // Step 3: Validate controller type against live device info. The
+    // validation call also returns the parsed /json/info so we can enrich
+    // the Firestore doc without a second network round-trip.
+    WledInfoResponse? info;
     if (mounted) {
-      final proceed = await _validateControllerType(ip, controllerType);
-      if (!proceed || !mounted) return;
+      final validation = await _validateControllerType(ip, controllerType);
+      if (!validation.proceed || !mounted) return;
+      info = validation.info;
     }
 
     final user = FirebaseAuth.instance.currentUser;
@@ -510,23 +522,92 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       return;
     }
 
+    // Pull enrichment fields from /json/info. Any of these may be null if
+    // the device is unreachable or running older firmware — we include
+    // them in the doc only when present.
+    final rawMac = (info?.raw['mac'] as String?)?.trim();
+    final mac =
+        (rawMac == null || rawMac.isEmpty) ? null : rawMac.toLowerCase();
+    final firmwareVersion =
+        (info == null || info.ver.isEmpty) ? null : info.ver;
+    final arch = (info == null || info.arch.isEmpty) ? null : info.arch;
+    final ledsRaw = info?.raw['leds'];
+    final ledCount = (ledsRaw is Map && ledsRaw['count'] is num)
+        ? (ledsRaw['count'] as num).toInt()
+        : null;
+    final ethRaw = info?.raw['ethernet'];
+    final hasEthernet = ethRaw == true ||
+        (ethRaw is Map && ethRaw.isNotEmpty) ||
+        (ethRaw is num && ethRaw != 0);
+    final connectionType = hasEthernet ? 'ethernet_wifi' : 'wifi';
+
+    final name = nameCtrl.text.trim().isEmpty
+        ? 'Controller ($ip)'
+        : nameCtrl.text.trim();
+
+    final controllersRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('controllers');
+
     try {
-      final docRef = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('controllers')
-          .add({
+      // Duplicate check by MAC: if this physical controller is already
+      // registered under this user, update the existing doc's IP instead
+      // of creating a second record. MAC survives IP changes and router
+      // swaps, so it's the stable identity.
+      if (mac != null) {
+        final dup = await controllersRef
+            .where('mac', isEqualTo: mac)
+            .limit(1)
+            .get();
+        if (dup.docs.isNotEmpty) {
+          final existing = dup.docs.first;
+          await existing.reference.update({
+            'ip': ip,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          _controllerTypes[existing.id] = controllerType;
+          ref.invalidate(controllersStreamProvider);
+          _checkAllControllerStatus();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Controller already registered — updated IP address.'),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      final docData = <String, dynamic>{
         'ip': ip,
-        'name': nameCtrl.text.trim().isEmpty ? 'Controller ($ip)' : nameCtrl.text.trim(),
+        'name': name,
         'wifiConfigured': true,
         'controller_type': controllerType.toFirestore(),
+        'connectionType': connectionType,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _controllerTypes[docRef.id] = controllerType;
-      // Invalidate the controllers stream so it re-evaluates with the
-      // current auth session. The stream was likely cached as empty from
-      // before the anonymous session was established.
+        if (mac != null) 'mac': mac,
+        if (firmwareVersion != null) 'firmwareVersion': firmwareVersion,
+        if (ledCount != null) 'ledCount': ledCount,
+        if (arch != null) 'arch': arch,
+      };
+
+      // Use the MAC as the document ID so records are stable across IP
+      // changes and router swaps. Fall back to an auto-generated ID only
+      // when the device didn't report a MAC (unreachable / old firmware).
+      final String newDocId;
+      if (mac != null) {
+        newDocId = _macToDocId(mac);
+        await controllersRef.doc(newDocId).set(docData);
+      } else {
+        final added = await controllersRef.add(docData);
+        newDocId = added.id;
+      }
+
+      _controllerTypes[newDocId] = controllerType;
       ref.invalidate(controllersStreamProvider);
       _checkAllControllerStatus();
     } catch (e) {
@@ -538,10 +619,32 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     }
   }
 
+  /// Formats a MAC address for use as a Firestore document ID: lowercase
+  /// hex with underscores between each octet (e.g. `80_f3_da_b3_95_4c`).
+  /// Tolerates input with or without colon separators — WLED firmware
+  /// varies by version.
+  String _macToDocId(String mac) {
+    final clean =
+        mac.toLowerCase().replaceAll(RegExp(r'[^0-9a-f]'), '');
+    if (clean.length != 12) {
+      // Not a standard 48-bit MAC — fall back to a sanitized form so we
+      // still produce a legal doc ID.
+      return clean.isEmpty ? mac.replaceAll(':', '_') : clean;
+    }
+    final buf = StringBuffer();
+    for (int i = 0; i < 12; i += 2) {
+      if (i > 0) buf.write('_');
+      buf.write(clean.substring(i, i + 2));
+    }
+    return buf.toString();
+  }
+
   /// Fetches /json/info from [ip], validates against [expected], and shows a
-  /// warning dialog if the channel count doesn't match. Returns `true` if the
-  /// caller should proceed with saving, `false` to abort.
-  Future<bool> _validateControllerType(
+  /// warning dialog if the channel count doesn't match. Returns a record with
+  /// `proceed` (true if the caller should continue with saving) and `info`
+  /// (the parsed response, when the device was reachable — so the caller can
+  /// enrich the Firestore doc without a second fetch).
+  Future<({bool proceed, WledInfoResponse? info})> _validateControllerType(
     String ip,
     ControllerType expected,
   ) async {
@@ -553,12 +656,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
 
     // If we can't reach the device at all, let the existing status-check
     // flow surface the problem — don't block the add.
-    if (info == null) return true;
+    if (info == null) return (proceed: true, info: null);
 
     final result = validateControllerMatch(info, expected);
-    if (result.isMatch || result.warningMessage == null) return true;
+    if (result.isMatch || result.warningMessage == null) {
+      return (proceed: true, info: info);
+    }
 
-    if (!mounted) return false;
+    if (!mounted) return (proceed: false, info: info);
 
     final continueAnyway = await showDialog<bool>(
       context: context,
@@ -621,7 +726,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       ),
     );
 
-    return continueAnyway == true;
+    return (proceed: continueAnyway == true, info: info);
   }
 
   Future<void> _capturePhoto(ImageSource source) async {

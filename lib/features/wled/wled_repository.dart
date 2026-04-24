@@ -63,6 +63,18 @@ abstract class WledRepository {
   /// Returns a map of preset ID → preset name.
   /// Implementations should cache the result to avoid repeated fetches.
   Future<Map<int, String>> fetchPresetNames() async => const {};
+
+  /// Clears any cached preset-name map so the next [fetchPresetNames] call
+  /// refetches from the device. Call this after saving a new preset or when
+  /// the user manually refreshes. Default is a no-op for implementations
+  /// that don't cache.
+  void invalidatePresetCache() {}
+
+  /// Drops all cached device state (capability flags, preset names) and any
+  /// stale connection-level resources so the next request re-establishes
+  /// fresh state. Called on app resume to recover from sockets that iOS
+  /// invalidated during suspend. Default is a no-op.
+  void reset() {}
 }
 
 /// A single LED output bus (hardware channel) on the WLED controller.

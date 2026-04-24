@@ -388,6 +388,30 @@ class WledNotifier extends Notifier<WledStateModel> {
     });
   }
 
+  /// Single immediate state fetch — used right after a command completes so
+  /// the UI reflects device-confirmed state without waiting for the next
+  /// 1.5s periodic tick. Respects the same `_polling` guard as the periodic
+  /// poller to avoid overlapping requests.
+  Future<void> _pollOnce() async {
+    if (_polling) return;
+    final service = ref.read(wledRepositoryProvider);
+    if (service == null) return;
+    _polling = true;
+    try {
+      final data = await service.getState();
+      if (data == null) return;
+      try {
+        _applyStateData(data);
+      } catch (e) {
+        debugPrint('WLED parse state error (pollOnce): $e');
+      }
+    } catch (e) {
+      debugPrint('WLED pollOnce failed: $e');
+    } finally {
+      _polling = false;
+    }
+  }
+
   /// Parse a full /json/state response and update all state fields.
   /// Used by both polling and refreshConnection to avoid duplication.
   void _applyStateData(Map<String, dynamic> data) {
@@ -501,6 +525,22 @@ class WledNotifier extends Notifier<WledStateModel> {
       _resolvePresetName(ps);
     }
 
+    // Preset was cleared on-device (ps went from >0 to 0). Drop the stale
+    // preset label so the display falls back to the effect name / custom
+    // pattern name, rather than showing the old preset name indefinitely.
+    if (ps <= 0 && prevPresetId > 0) {
+      try {
+        final customName = state.customEffectName;
+        if (customName != null && customName.isNotEmpty) {
+          ref.read(activePresetLabelProvider.notifier).state = customName;
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
+      } catch (e) {
+        debugPrint('Error in WledNotifier clearing preset label: $e');
+      }
+    }
+
     // When the live effect diverges from what was cached AND no WLED preset
     // is active: if the user applied a custom pattern (e.g. "Kansas City
     // Royals Twinkle") keep that label; only clear a stale generic label.
@@ -520,13 +560,20 @@ class WledNotifier extends Notifier<WledStateModel> {
   }
 
   /// Fetches preset names from the WLED controller and sets the active label.
+  /// If the requested preset isn't in the cached map (e.g. it was added
+  /// after we first fetched), drop the cache and retry once.
   Future<void> _resolvePresetName(int presetId) async {
     final service = ref.read(wledRepositoryProvider);
     if (service == null) return;
 
     try {
-      final presetNames = await service.fetchPresetNames();
-      final name = presetNames[presetId];
+      var presetNames = await service.fetchPresetNames();
+      var name = presetNames[presetId];
+      if (name == null || name.isEmpty) {
+        service.invalidatePresetCache();
+        presetNames = await service.fetchPresetNames();
+        name = presetNames[presetId];
+      }
       if (name != null && name.isNotEmpty) {
         ref.read(activePresetLabelProvider.notifier).state = name;
         debugPrint('🏷️ Resolved WLED preset $presetId → "$name"');
@@ -564,6 +611,11 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Force refresh connection state - call when app resumes from background
   Future<void> refreshConnection() async {
     debugPrint('🔄 WledNotifier: Refreshing connection...');
+    // Unblock the poller/poster in case a Future hung across the suspend.
+    // Without this, a stuck flag would cause every subsequent 1.5s tick to
+    // return early and the connection would appear permanently lost.
+    _polling = false;
+    _posting = false;
     // Mark state as stale until fresh data arrives
     ref.read(wledStateFreshProvider.notifier).state = false;
     final service = ref.read(wledRepositoryProvider);
@@ -571,6 +623,11 @@ class WledNotifier extends Notifier<WledStateModel> {
       debugPrint('🔄 WledNotifier: No repository available');
       return;
     }
+
+    // Purge cached device capabilities + preset names and drop any stale
+    // connection-level resources so the first request after resume doesn't
+    // sit on an iOS-invalidated socket.
+    service.reset();
 
     try {
       final data = await service.getState();
@@ -748,11 +805,11 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
 
     _posting = true;
+    bool ok = false;
     try {
       // Check if a channel filter is active (user selected specific channels).
       final effectiveChannels = ref.read(effectiveChannelIdsProvider);
 
-      bool ok;
       if (effectiveChannels.isEmpty) {
         // No segment info available yet — fall back to legacy single-segment.
         ok = await service.setState(
@@ -810,9 +867,15 @@ class WledNotifier extends Notifier<WledStateModel> {
       // In remote mode the bridge processes commands sequentially, so give it
       // extra time to finish before we queue another getState poll.
       final isRemote = ref.read(isRemoteModeProvider);
-      await Future.delayed(Duration(milliseconds: isRemote ? 5000 : 500));
+      await Future.delayed(Duration(milliseconds: isRemote ? 3000 : 150));
     } finally {
       _posting = false;
+    }
+
+    // Trigger an immediate single poll so the UI reflects device-confirmed
+    // state without waiting for the next 1.5s periodic tick.
+    if (ok) {
+      unawaited(_pollOnce());
     }
   }
 

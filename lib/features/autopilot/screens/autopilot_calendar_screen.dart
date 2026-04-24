@@ -25,6 +25,7 @@ import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/user_event.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 
 // ---------------------------------------------------------------------------
@@ -473,17 +474,18 @@ List<Color> _colorsFromPayload(Map<String, dynamic>? payload, Color fallback) {
   return [fallback];
 }
 
-class _AutopilotEventTile extends StatelessWidget {
+class _AutopilotEventTile extends ConsumerWidget {
   final AutopilotEvent event;
   final VoidCallback onTap;
 
   const _AutopilotEventTile({required this.event, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = event.displayColor ?? event.eventType.accentColor;
-    final start = _fmtTime(event.startTime);
-    final end = _fmtTime(event.endTime);
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final start = formatTime(event.startTime, timeFormat: timeFormat);
+    final end = formatTime(event.endTime, timeFormat: timeFormat);
 
     return GestureDetector(
       onTap: onTap,
@@ -538,17 +540,18 @@ class _AutopilotEventTile extends StatelessWidget {
   }
 }
 
-class _UserEventTile extends StatelessWidget {
+class _UserEventTile extends ConsumerWidget {
   final UserEvent event;
   final VoidCallback onTap;
 
   const _UserEventTile({required this.event, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     const color = NexGenPalette.cyan;
-    final start = _fmtTime(event.startTime);
-    final end = _fmtTime(event.endTime);
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final start = formatTime(event.startTime, timeFormat: timeFormat);
+    final end = formatTime(event.endTime, timeFormat: timeFormat);
 
     return GestureDetector(
       onTap: onTap,
@@ -693,7 +696,7 @@ class _DetailSheet extends StatelessWidget {
   }
 }
 
-class _AutopilotDetail extends StatelessWidget {
+class _AutopilotDetail extends ConsumerWidget {
   final AutopilotEvent event;
   final VoidCallback onDismiss;
   final VoidCallback onEdit;
@@ -704,8 +707,9 @@ class _AutopilotDetail extends StatelessWidget {
       required this.onEdit});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = event.displayColor ?? event.eventType.accentColor;
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -736,7 +740,8 @@ class _AutopilotDetail extends StatelessWidget {
         ],
         const SizedBox(height: 6),
         Text(
-          '${_fmtTime(event.startTime)} → ${_fmtTime(event.endTime)}',
+          '${formatTime(event.startTime, timeFormat: timeFormat)} → '
+          '${formatTime(event.endTime, timeFormat: timeFormat)}',
           style: const TextStyle(
               color: NexGenPalette.textMedium, fontSize: 13),
         ),
@@ -772,7 +777,7 @@ class _AutopilotDetail extends StatelessWidget {
   }
 }
 
-class _UserDetail extends StatelessWidget {
+class _UserDetail extends ConsumerWidget {
   final UserEvent event;
   final VoidCallback onDismiss;
   final VoidCallback onRemoveProtection;
@@ -783,7 +788,8 @@ class _UserDetail extends StatelessWidget {
       required this.onRemoveProtection});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -815,7 +821,8 @@ class _UserDetail extends StatelessWidget {
         ],
         const SizedBox(height: 6),
         Text(
-          '${_fmtTime(event.startTime)} → ${_fmtTime(event.endTime)}',
+          '${formatTime(event.startTime, timeFormat: timeFormat)} → '
+          '${formatTime(event.endTime, timeFormat: timeFormat)}',
           style: const TextStyle(
               color: NexGenPalette.textMedium, fontSize: 13),
         ),
@@ -874,9 +881,6 @@ Widget _sheetHandle() => Center(
         ),
       ),
     );
-
-String _fmtTime(DateTime dt) =>
-    '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
 class _LegendDot extends StatelessWidget {
   final Color color;

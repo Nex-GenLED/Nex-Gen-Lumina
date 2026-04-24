@@ -96,6 +96,20 @@ final favoritesPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
           snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
 });
 
+/// Streams every favorite the user has saved (no ordering or limit).
+/// Used for name-match lookups against the active WLED preset so the
+/// Now Playing bar can prefer the Lumina-side name.
+final allFavoritesProvider = StreamProvider<List<FavoritePattern>>((ref) {
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) return Stream.value(const []);
+
+  return FirebaseFirestore.instance
+      .collection('users/${user.uid}/favorites')
+      .snapshots()
+      .map((snap) =>
+          snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
+});
+
 /// Provider for recently used patterns (last 5)
 final recentPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
   final user = ref.watch(authStateProvider).value;
