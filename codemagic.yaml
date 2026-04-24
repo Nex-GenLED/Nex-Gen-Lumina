@@ -3,14 +3,14 @@ workflows:
     name: iOS Release
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: NexGen
     environment:
       flutter: stable
       xcode: 16.2
       cocoapods: default
       vars:
         BUNDLE_ID: com.nexgenled.command
-      app_store_connect:
-        auth: integration
     scripts:
       - name: Clear CocoaPods cache
         script: |
@@ -56,6 +56,5 @@ workflows:
       - build/ios/ipa/*.ipa
     publishing:
       app_store_connect:
-        auth: integration
         submit_to_testflight: true
         expire_build_submitted_for_review: true
