@@ -370,4 +370,10 @@ class CloudRelayRepository implements WledRepository {
     if (presetId < 1 || presetId > 250) return false;
     return _executeBool('loadPreset', {'ps': presetId});
   }
+
+  @override
+  void invalidatePresetCache() {}
+
+  @override
+  void reset() {}
 }

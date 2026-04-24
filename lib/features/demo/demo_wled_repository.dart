@@ -279,4 +279,10 @@ class DemoWledRepository implements WledRepository {
     debugPrint('DemoWLED loadPreset: Preset $presetId not found');
     return false;
   }
+
+  @override
+  void invalidatePresetCache() {}
+
+  @override
+  void reset() {}
 }

@@ -293,4 +293,10 @@ class MqttRelayRepository implements WledRepository {
     _cachedState!.addAll(sentPayload);
     _cacheTime = DateTime.now();
   }
+
+  @override
+  void invalidatePresetCache() {}
+
+  @override
+  void reset() {}
 }
