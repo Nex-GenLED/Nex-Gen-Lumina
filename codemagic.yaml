@@ -11,9 +11,6 @@ workflows:
       cocoapods: default
       vars:
         BUNDLE_ID: com.nexgenled.command
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.nexgenled.command
     scripts:
       - name: Clear CocoaPods cache
         script: |
