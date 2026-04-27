@@ -47,8 +47,18 @@ workflows:
       - name: Build signed IPA
         script: |
           flutter build ipa --release
+      - name: Find IPA location
+        script: |
+          echo "Searching for IPA files..."
+          find . -name "*.ipa" -type f 2>/dev/null
+          echo "build/ios contents:"
+          ls -la build/ios/ 2>/dev/null || echo "build/ios not found"
+          echo "build/ios/ipa contents:"
+          ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa not found"
     artifacts:
       - build/ios/ipa/*.ipa
+      - build/ios/**/*.ipa
+      - "**/*.ipa"
     publishing:
       app_store_connect:
         auth: integration
