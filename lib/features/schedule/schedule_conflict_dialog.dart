@@ -5,9 +5,11 @@
 // Replace Existing / Run Both / Cancel options.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 
 // ─── Data types ──────────────────────────────────────────────────────────────
 
@@ -217,16 +219,18 @@ class _ConflictSheet extends StatelessWidget {
 
 // ─── Conflict list tiles ─────────────────────────────────────────────────────
 
-class _ItemConflictTile extends StatelessWidget {
+class _ItemConflictTile extends ConsumerWidget {
   final ScheduleItem item;
   const _ItemConflictTile({required this.item});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final days = item.repeatDays.join(', ');
     final timeRange = item.hasOffTime
-        ? '${item.timeLabel} \u2013 ${item.offTimeLabel}'
-        : item.timeLabel;
+        ? '${formatTimeLabel(item.timeLabel, timeFormat: timeFormat)} \u2013 '
+            '${formatTimeLabel(item.offTimeLabel, timeFormat: timeFormat)}'
+        : formatTimeLabel(item.timeLabel, timeFormat: timeFormat);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -264,18 +268,20 @@ class _ItemConflictTile extends StatelessWidget {
   }
 }
 
-class _EntryConflictTile extends StatelessWidget {
+class _EntryConflictTile extends ConsumerWidget {
   final String dateKey;
   final CalendarEntry? entry;
   const _EntryConflictTile({required this.dateKey, this.entry});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final label = entry?.patternName ?? dateKey;
     final date = DateTime.tryParse(dateKey);
     final dateStr = date != null ? _formatDate(date) : dateKey;
     final timeRange = entry != null && entry!.onTime != null
-        ? '${_to12hr(entry!.onTime!)} \u2013 ${_to12hr(entry!.offTime)}'
+        ? '${formatTimeLabel(entry!.onTime, timeFormat: timeFormat)} \u2013 '
+            '${formatTimeLabel(entry!.offTime, timeFormat: timeFormat)}'
         : '';
 
     return Padding(
@@ -324,16 +330,4 @@ class _EntryConflictTile extends StatelessWidget {
     return '${weekdays[date.weekday - 1]} ${months[date.month - 1]} ${date.day}';
   }
 
-  static String _to12hr(String? time24) {
-    if (time24 == null) return '\u2014';
-    final parts = time24.split(':');
-    if (parts.length != 2) return time24;
-    final hour = int.tryParse(parts[0]);
-    final minute = parts[1];
-    if (hour == null) return time24;
-    if (hour == 0) return '12:$minute AM';
-    if (hour < 12) return '$hour:$minute AM';
-    if (hour == 12) return '12:$minute PM';
-    return '${hour - 12}:$minute PM';
-  }
 }

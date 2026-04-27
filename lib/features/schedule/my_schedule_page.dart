@@ -768,12 +768,13 @@ class _PendingPreviewSheet extends StatelessWidget {
 }
 
 /// A single preview tile for a pending calendar entry.
-class _PendingEntryTile extends StatelessWidget {
+class _PendingEntryTile extends ConsumerWidget {
   final CalendarEntry entry;
   const _PendingEntryTile({required this.entry});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final date = DateTime.tryParse(entry.dateKey);
     final dayLabel = date != null
         ? '${_kDayFull[date.weekday % 7]}, ${_kMonthShort[date.month]} ${date.day}'
@@ -846,8 +847,9 @@ class _PendingEntryTile extends StatelessWidget {
               if (entry.onTime != null)
                 Text(
                   entry.offTime != null
-                      ? '${entry.onTime} → ${entry.offTime}'
-                      : entry.onTime!,
+                      ? '${formatTimeLabel(entry.onTime, timeFormat: timeFormat)} → '
+                          '${formatTimeLabel(entry.offTime, timeFormat: timeFormat)}'
+                      : formatTimeLabel(entry.onTime, timeFormat: timeFormat),
                   style: TextStyle(
                     color: NexGenPalette.textMedium,
                     fontSize: 10,
@@ -873,7 +875,7 @@ class _PendingEntryTile extends StatelessWidget {
 
 // ─── Day Hero Card ─────────────────────────────────────────────────────────────
 
-class _DayHeroCard extends StatelessWidget {
+class _DayHeroCard extends ConsumerWidget {
   final String dateKey;
   final CalendarEntry? calEntry;
   final List<ScheduleItem> scheduleItems;
@@ -887,7 +889,8 @@ class _DayHeroCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final today = DateTime.now();
     final selDate = DateTime.parse(dateKey);
     final isToday = _fmt(today) == dateKey;
@@ -965,6 +968,7 @@ class _DayHeroCard extends StatelessWidget {
                 offTime: offTime,
                 brightnessPercent: brightness,
                 source: sourceLabel,
+                timeFormat: timeFormat,
               )
           : null,
       child: ClipRRect(
@@ -1179,14 +1183,18 @@ class _DayHeroCard extends StatelessWidget {
                         _StatChip(
                           icon: Icons.wb_sunny_rounded,
                           label: 'On',
-                          value: onTime ?? '—',
+                          value: onTime != null
+                              ? formatTimeLabel(onTime, timeFormat: timeFormat)
+                              : '—',
                           color: NexGenPalette.cyan,
                         ),
                         const SizedBox(width: 8),
                         _StatChip(
                           icon: Icons.nightlight_round,
                           label: 'Off',
-                          value: offTime ?? '—',
+                          value: offTime != null
+                              ? formatTimeLabel(offTime, timeFormat: timeFormat)
+                              : '—',
                           color: NexGenPalette.violet,
                         ),
                         const SizedBox(width: 8),
@@ -1357,6 +1365,7 @@ void _showScheduleDetailSheet(
   required String? offTime,
   required int? brightnessPercent,
   required String source,
+  String timeFormat = '12h',
 }) {
   showModalBottomSheet(
     context: context,
@@ -1426,14 +1435,18 @@ void _showScheduleDetailSheet(
           _DetailRow(
             icon: Icons.wb_sunny_rounded,
             label: 'On',
-            value: onTime ?? '—',
+            value: onTime != null
+                ? formatTimeLabel(onTime, timeFormat: timeFormat)
+                : '—',
             color: NexGenPalette.cyan,
           ),
           const SizedBox(height: 8),
           _DetailRow(
             icon: Icons.nightlight_round,
             label: 'Off',
-            value: offTime ?? '—',
+            value: offTime != null
+                ? formatTimeLabel(offTime, timeFormat: timeFormat)
+                : '—',
             color: NexGenPalette.violet,
           ),
           const SizedBox(height: 8),
@@ -3162,10 +3175,12 @@ class _ScheduleCard extends ConsumerWidget {
   const _ScheduleCard({required this.item});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     // Build time display string
     final timeDisplay = item.hasOffTime
-        ? '${item.timeLabel} → ${item.offTimeLabel}'
-        : item.timeLabel;
+        ? '${formatTimeLabel(item.timeLabel, timeFormat: timeFormat)} → '
+            '${formatTimeLabel(item.offTimeLabel, timeFormat: timeFormat)}'
+        : formatTimeLabel(item.timeLabel, timeFormat: timeFormat);
 
     // Extract preview colors from WLED payload
     final previewColors = _extractStripColors(null, item.wledPayload);
@@ -3208,6 +3223,7 @@ class _ScheduleCard extends ConsumerWidget {
         offTime: item.offTimeLabel,
         brightnessPercent: briPercent,
         source: 'Recurring Schedule',
+        timeFormat: timeFormat,
       ),
       child: Column(
         children: [

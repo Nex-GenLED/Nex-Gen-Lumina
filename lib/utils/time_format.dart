@@ -43,6 +43,60 @@ String formatTimeOfDay(TimeOfDay t, {String timeFormat = kTimeFormatDefault}) {
   return '$h:$minute $period';
 }
 
+/// Format a heterogeneous time label string in the user's preferred format.
+///
+/// Accepts any of:
+///   * 24-hour `"HH:mm"` (e.g. `"19:30"`) — wire format used by CalendarEntry
+///   * 12-hour `"h:mm AM/PM"` (e.g. `"7:30 PM"`) — display label format used
+///     by ScheduleItem.timeLabel
+///   * Tokens such as `"Sunset"` / `"Sunrise"` — passed through normalized to
+///     title-case
+///
+/// Unparseable input is returned unchanged. `null`/empty returns the empty
+/// string. Use this at display sites where the source label could be in any
+/// of the above forms (e.g. CalendarEntry.onTime falling back to
+/// ScheduleItem.timeLabel).
+String formatTimeLabel(String? label, {String timeFormat = kTimeFormatDefault}) {
+  if (label == null) return '';
+  final trimmed = label.trim();
+  if (trimmed.isEmpty) return '';
+
+  // Solar tokens — return title-cased pass-through.
+  final lower = trimmed.toLowerCase();
+  if (lower == 'sunset' || lower == 'sunrise') {
+    return '${trimmed[0].toUpperCase()}${lower.substring(1)}';
+  }
+
+  // 12-hour with AM/PM suffix — parse and re-format.
+  final twelve = RegExp(
+    r'^(\d{1,2}):(\d{2})\s*(am|pm)$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  if (twelve != null) {
+    var h = int.parse(twelve.group(1)!);
+    final m = int.parse(twelve.group(2)!);
+    final isPm = twelve.group(3)!.toUpperCase() == 'PM';
+    if (h == 12) h = 0;
+    if (isPm) h += 12;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return formatTimeOfDay(TimeOfDay(hour: h, minute: m), timeFormat: timeFormat);
+    }
+  }
+
+  // 24-hour HH:mm — parse and re-format.
+  final twentyFour = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(trimmed);
+  if (twentyFour != null) {
+    final h = int.parse(twentyFour.group(1)!);
+    final m = int.parse(twentyFour.group(2)!);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return formatTimeOfDay(TimeOfDay(hour: h, minute: m), timeFormat: timeFormat);
+    }
+  }
+
+  // Unrecognized — pass through.
+  return label;
+}
+
 /// Exposes the current user's [UserModel.timeFormat] preference.
 /// Falls back to 12-hour when the profile is unloaded or unset.
 final timeFormatPreferenceProvider = Provider<String>((ref) {
