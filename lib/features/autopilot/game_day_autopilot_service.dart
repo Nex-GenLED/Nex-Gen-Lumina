@@ -294,8 +294,13 @@ class GameDayAutopilotService {
     int gameIndex = 0;
 
     for (final game in games) {
-      // Only future games within lookahead window
-      if (game.scheduledDate.isBefore(now)) continue;
+      // Only future games within lookahead window.
+      // Include today's game if the activation window
+      // (game start minus lead time) hasn't passed yet.
+      final activationTime = game.scheduledDate.subtract(
+        Duration(minutes: config.effectiveLeadTimeMinutes),
+      );
+      if (activationTime.isBefore(now)) continue;
       if (game.scheduledDate.isAfter(cutoff)) continue;
 
       // Apply daylight filter if enabled

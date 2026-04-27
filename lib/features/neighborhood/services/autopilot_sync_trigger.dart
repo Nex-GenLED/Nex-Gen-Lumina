@@ -190,9 +190,14 @@ class AutopilotSyncTrigger {
   /// Calculate next occurrence for recurring events.
   DateTime? _nextOccurrence(DateTime baseTime, List<int> repeatDays) {
     final now = DateTime.now();
+    // 10-min grace window so a sync event whose scheduled time has
+    // just barely passed (e.g. user enabled it at 8:03 PM for an 8 PM
+    // start) isn't silently dropped. Matches sync_event_background_worker.
+    final cutoff = now.subtract(const Duration(minutes: 10));
+
     // For one-time events
     if (repeatDays.isEmpty) {
-      return baseTime.isAfter(now) ? baseTime : null;
+      return baseTime.isAfter(cutoff) ? baseTime : null;
     }
 
     // For recurring: find next matching day
@@ -206,7 +211,7 @@ class AutopilotSyncTrigger {
       );
       // DateTime.weekday: 1=Monday..7=Sunday
       if (repeatDays.contains(candidate.weekday) &&
-          candidate.isAfter(now)) {
+          candidate.isAfter(cutoff)) {
         return candidate;
       }
     }
