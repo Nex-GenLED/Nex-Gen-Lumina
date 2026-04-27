@@ -50,6 +50,20 @@ workflows:
       - name: Build signed IPA
         script: |
           flutter build ipa --release
+      - name: Verify and stage IPA
+        script: |
+          echo "Looking for IPA..."
+          find build/ios -name "*.ipa" 2>/dev/null
+          # Copy to root if found elsewhere
+          IPA_PATH=$(find build/ios -name "*.ipa" -type f 2>/dev/null | head -1)
+          if [ -n "$IPA_PATH" ]; then
+            echo "Found IPA at: $IPA_PATH"
+            mkdir -p build/ios/ipa
+            cp "$IPA_PATH" build/ios/ipa/Runner.ipa
+            echo "Staged to build/ios/ipa/Runner.ipa"
+          else
+            echo "No IPA found"
+          fi
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
@@ -59,8 +73,7 @@ workflows:
           echo "build/ios/ipa contents:"
           ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa not found"
     artifacts:
-      - build/ios/ipa/*.ipa
-      - build/ios/archive/*.xcarchive
+      - build/ios/ipa/Runner.ipa
     publishing:
       app_store_connect:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
