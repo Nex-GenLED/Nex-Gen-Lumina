@@ -182,14 +182,25 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
               final result = await ref
                   .read(scheduleSyncServiceProvider)
                   .syncAll(ref, schedules);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(result.success
-                      ? 'Schedules synced to controller'
-                      : 'Could not sync (schedules saved to cloud)'),
-                  backgroundColor: result.success
-                      ? Colors.green.shade700
-                      : Colors.orange.shade700,
+              if (!context.mounted) return;
+              final messenger = ScaffoldMessenger.of(context);
+              if (!result.success) {
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.error ?? 'Schedule sync failed'),
+                  backgroundColor: Colors.red.shade700,
+                  duration: const Duration(seconds: 4),
+                ));
+              } else if (result.hasPresetErrors) {
+                messenger.showSnackBar(SnackBar(
+                  content: const Text('Schedule saved with warnings'),
+                  backgroundColor: Colors.orange.shade700,
+                  duration: const Duration(seconds: 3),
+                ));
+              } else {
+                messenger.showSnackBar(SnackBar(
+                  content: const Text('Schedules synced to controller'),
+                  backgroundColor: Colors.green.shade700,
+                  duration: const Duration(seconds: 2),
                 ));
               }
             },
@@ -204,6 +215,9 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           // ── Pending changes banner ──────────────────────────────────────
           if (pending != null)
             _PendingChangesBanner(pending: pending),
+
+          // ── Last sync status ────────────────────────────────────────────
+          const _SyncStatusRow(),
 
           // ── Schedule overload warning ──────────────────────────────────
           const ScheduleOverloadBanner(),
@@ -552,6 +566,64 @@ Future<void> _showPendingPreviewSheet(
     );
   }
   // null or false → user cancelled, keep pending state for banner
+}
+
+/// Compact status strip shown beneath the AppBar reflecting the most
+/// recent schedule sync attempt. Renders nothing until the user has
+/// triggered at least one sync this session.
+class _SyncStatusRow extends ConsumerWidget {
+  const _SyncStatusRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final last = ref.watch(lastScheduleSyncResultProvider);
+    if (last == null) return const SizedBox.shrink();
+
+    final IconData icon;
+    final Color color;
+    final String label;
+    if (!last.success) {
+      icon = Icons.cloud_off_rounded;
+      color = Colors.red.shade400;
+      label = last.error ?? 'Not synced — controller offline';
+    } else if (last.hasPresetErrors) {
+      icon = Icons.warning_amber_rounded;
+      color = Colors.orange.shade400;
+      label =
+          'Synced with ${last.presetErrors.length} warning${last.presetErrors.length == 1 ? '' : 's'} '
+          '· ${_formatRelative(last.syncedAt)}';
+    } else {
+      icon = Icons.check_circle_rounded;
+      color = Colors.green.shade400;
+      label = 'Synced · ${_formatRelative(last.syncedAt)}';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: color),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatRelative(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
 }
 
 class _PendingPreviewSheet extends StatelessWidget {

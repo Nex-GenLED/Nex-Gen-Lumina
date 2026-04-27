@@ -131,12 +131,31 @@ class ScheduleSyncService {
   ///
   /// Returns a [ScheduleSyncResult] with details about the sync operation.
   Future<ScheduleSyncResult> syncAll(WidgetRef ref, List<ScheduleItem> schedules) async {
-    final repo = ref.read(wledRepositoryProvider);
+    // Records the result so the schedule screen can show a status row.
+    ScheduleSyncResult finish(ScheduleSyncResult result) {
+      ref.read(lastScheduleSyncResultProvider.notifier).state = result;
+      return result;
+    }
+
+    // Attempt one connection refresh before giving up — covers the case
+    // where the app just resumed and the connectivity stream hasn't
+    // re-evaluated yet.
+    var repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
-      return ScheduleSyncResult(
+      try {
+        await ref.read(wledStateProvider.notifier).refreshConnection();
+        await Future.delayed(const Duration(milliseconds: 800));
+        repo = ref.read(wledRepositoryProvider);
+      } catch (e) {
+        debugPrint('ScheduleSync: Connection refresh failed: $e');
+      }
+    }
+    if (repo == null) {
+      return finish(ScheduleSyncResult(
         success: false,
-        error: 'No controller selected',
-      );
+        error: 'Controller not reachable. Make sure you are on '
+            'the same WiFi as your controller.',
+      ));
     }
 
     final enabled = schedules.where((s) => s.enabled).toList();
@@ -205,27 +224,27 @@ class ScheduleSyncService {
     try {
       final ok = await repo.applyConfig(payload);
       if (!ok) {
-        return ScheduleSyncResult(
+        return finish(ScheduleSyncResult(
           success: false,
           error: 'Failed to save timer configuration',
           presetErrors: presetErrors,
           schedulesWithPresets: updatedSchedules,
-        );
+        ));
       }
 
-      return ScheduleSyncResult(
+      return finish(ScheduleSyncResult(
         success: true,
         presetErrors: presetErrors,
         schedulesWithPresets: updatedSchedules,
-      );
+      ));
     } catch (e) {
       debugPrint('ScheduleSync: Exception during sync: $e');
-      return ScheduleSyncResult(
+      return finish(ScheduleSyncResult(
         success: false,
         error: 'Exception: $e',
         presetErrors: presetErrors,
         schedulesWithPresets: updatedSchedules,
-      );
+      ));
     }
   }
 
@@ -366,6 +385,12 @@ class _ParsedTime {
 
 final scheduleSyncServiceProvider = Provider<ScheduleSyncService>((ref) => const ScheduleSyncService());
 
+/// Most recent result from [ScheduleSyncService.syncAll]. The schedule UI
+/// reads this to render a sync status row (success/warning/offline).
+/// `null` until the first sync attempt of this app session.
+final lastScheduleSyncResultProvider =
+    StateProvider<ScheduleSyncResult?>((ref) => null);
+
 /// Result of a schedule sync operation.
 class ScheduleSyncResult {
   /// Whether the overall sync was successful.
@@ -381,12 +406,17 @@ class ScheduleSyncResult {
   /// Can be used to update the stored schedules with their preset assignments.
   final List<ScheduleItem> schedulesWithPresets;
 
-  const ScheduleSyncResult({
+  /// Wall-clock time the sync attempt completed.
+  /// Used by the schedule UI to show "last synced X ago".
+  final DateTime syncedAt;
+
+  ScheduleSyncResult({
     required this.success,
     this.error,
     this.presetErrors = const [],
     this.schedulesWithPresets = const [],
-  });
+    DateTime? syncedAt,
+  }) : syncedAt = syncedAt ?? DateTime.now();
 
   /// Returns true if there were any preset-related errors.
   bool get hasPresetErrors => presetErrors.isNotEmpty;

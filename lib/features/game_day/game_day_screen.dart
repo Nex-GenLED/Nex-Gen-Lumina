@@ -12,6 +12,7 @@ import '../autopilot/game_day_autopilot_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
+import '../wled/wled_providers.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
 
@@ -332,6 +333,22 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                   const SizedBox(height: 4),
                   _buildSettingsExpander(context, ref, config),
                 ],
+
+                // ── Light Up Now (immediate, manual one-off) ──
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => _activateNow(context, ref, config),
+                    icon: const Icon(Icons.bolt_rounded, color: Colors.black),
+                    label: const Text('Light Up Now'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _lightUpButtonColor(config),
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -358,6 +375,71 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       BuildContext context, WidgetRef ref, GameDayAutopilotConfig config) {
     final nodeId = 'team_${config.teamSlug}';
     context.push('/explore/library/$nodeId');
+  }
+
+  /// Falls back to cyan if the team's primary color is too dark to read
+  /// the black foregrounded button label/icon against.
+  Color _lightUpButtonColor(GameDayAutopilotConfig config) {
+    final primary = Color(config.primaryColorValue);
+    return primary.computeLuminance() < 0.2 ? NexGenPalette.cyan : primary;
+  }
+
+  Future<void> _activateNow(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) async {
+    // Build the WLED payload directly from team colors
+    final primary = Color(config.primaryColorValue);
+    final secondary = Color(config.secondaryColorValue);
+    final payload = {
+      'on': true,
+      'bri': config.brightness.clamp(0, 255),
+      'seg': [
+        {
+          'fx': config.effectId,
+          'sx': config.speed,
+          'ix': config.intensity,
+          'pal': 0,
+          'col': [
+            [primary.red, primary.green, primary.blue, 0],
+            [secondary.red, secondary.green, secondary.blue, 0],
+          ],
+        }
+      ],
+    };
+
+    // Use savedDesignPayload if available (user's custom design wins)
+    final effectivePayload = config.savedDesignPayload ?? payload;
+
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Controller not connected. Make sure you are on the '
+            'same WiFi as your controller.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final ok = await repo.applyJson(effectivePayload);
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? '${config.teamName} lights activated!'
+              : 'Failed to activate lights. Check controller connection.',
+        ),
+        backgroundColor: ok ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _confirmRemove(
