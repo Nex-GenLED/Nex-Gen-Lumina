@@ -55,23 +55,29 @@ workflows:
             <string>app-store</string>
             <key>teamID</key>
             <string>K337ZPY37S</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.nexgenled.command</key>
+              <string>Lumina AppStore 2</string>
+            </dict>
             <key>uploadBitcode</key>
             <false/>
             <key>uploadSymbols</key>
             <true/>
-            <key>signingStyle</key>
-            <string>automatic</string>
           </dict>
           </plist>
           EOF
       - name: Build signed IPA
         script: |
-          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist || true
+          flutter build ipa --release || true
 
-          # If flutter build ipa didn't produce the file,
+          # If flutter build ipa didn't produce the IPA,
           # export manually from the archive
           if [ ! -f "build/ios/ipa/Runner.ipa" ]; then
             echo "Flutter IPA export failed, exporting manually..."
+            keychain add-certificates
             xcodebuild -exportArchive \
               -archivePath build/ios/archive/Runner.xcarchive \
               -exportPath build/ios/ipa \
