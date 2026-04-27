@@ -44,9 +44,40 @@ workflows:
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
+      - name: Create ExportOptions.plist
+        script: |
+          cat > ios/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>K337ZPY37S</string>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          EOF
       - name: Build signed IPA
         script: |
-          flutter build ipa --release
+          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist || true
+
+          # If flutter build ipa didn't produce the file,
+          # export manually from the archive
+          if [ ! -f "build/ios/ipa/Runner.ipa" ]; then
+            echo "Flutter IPA export failed, exporting manually..."
+            xcodebuild -exportArchive \
+              -archivePath build/ios/archive/Runner.xcarchive \
+              -exportPath build/ios/ipa \
+              -exportOptionsPlist ios/ExportOptions.plist \
+              -allowProvisioningUpdates
+          fi
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
@@ -57,8 +88,7 @@ workflows:
           ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa not found"
     artifacts:
       - build/ios/ipa/*.ipa
-      - build/ios/**/*.ipa
-      - "**/*.ipa"
+      - build/ios/archive/*.xcarchive
     publishing:
       app_store_connect:
         auth: integration
