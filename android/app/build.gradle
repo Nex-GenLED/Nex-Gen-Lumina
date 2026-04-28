@@ -32,11 +32,10 @@ android {
 
     signingConfigs {
         release {
-            keyAlias System.getenv("CM_KEY_ALIAS") ?: "lumina"
+            keyAlias "lumina"
             keyPassword System.getenv("CM_KEY_PASSWORD")
-            storeFile System.getenv("CM_KEYSTORE_PATH") != null
-                ? file(System.getenv("CM_KEYSTORE_PATH"))
-                : null
+            storeFile file(System.getenv("CM_KEYSTORE_PATH") ?:
+                "${rootProject.projectDir}/../android/app/nex-gen-lumina.keystore")
             storePassword System.getenv("CM_KEYSTORE_PASSWORD")
         }
     }
