@@ -47,51 +47,9 @@ workflows:
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
-      - name: Create ExportOptions.plist
-        script: |
-          cat > /tmp/ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>teamID</key>
-            <string>K337ZPY37S</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>com.nexgenled.command</key>
-              <string>Lumina AppStore 2</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
       - name: Build signed IPA
         script: |
-          flutter build ios --release --no-codesign
-
-          xcode-project use-profiles
-
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -archivePath build/ios/archive/Runner.xcarchive \
-            archive \
-            CODE_SIGNING_ALLOWED=YES \
-            DEVELOPMENT_TEAM=K337ZPY37S
-
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/ios/archive/Runner.xcarchive \
-            -exportOptionsPlist /tmp/ExportOptions.plist \
-            -exportPath build/ios/ipa \
-            -allowProvisioningUpdates
-
-          echo "IPA search:"
-          find build/ios/ipa -name "*.ipa" 2>/dev/null
+          flutter build ipa --release
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
