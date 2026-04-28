@@ -33,6 +33,7 @@ workflows:
           echo "Version: $(grep '^version:' pubspec.yaml)"
       - name: Install CocoaPods
         script: |
+          flutter pub get
           cd ios && pod install --repo-update
       - name: Build IPA
         script: flutter build ipa --release
