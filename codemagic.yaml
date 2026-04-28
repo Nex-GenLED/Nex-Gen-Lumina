@@ -49,18 +49,20 @@ workflows:
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
-          flutter build ipa --release \
-            --dart-define=TEAM_ID=K337ZPY37S
+          # Install certificates and profiles from ios_signing
+          keychain initialize
+          app-store-connect fetch-signing-files \
+            com.nexgenled.command \
+            --type IOS_APP_STORE \
+            --save
+          keychain add-certificates
+          xcode-project use-profiles
 
-          # If flutter build ipa failed, try with xcodebuild directly
-          if [ ! -f "build/ios/ipa/Runner.ipa" ]; then
-            echo "Attempting manual export..."
-            xcodebuild \
-              -exportArchive \
-              -archivePath build/ios/archive/Runner.xcarchive \
-              -exportPath build/ios/ipa \
-              -exportOptionsPlist ios/ExportOptions.plist
-          fi
+          # Build the IPA
+          flutter build ipa --release
+
+          echo "IPA search:"
+          find build/ios -name "*.ipa" 2>/dev/null || echo "No IPA found"
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
