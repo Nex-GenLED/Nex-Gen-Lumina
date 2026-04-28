@@ -1,4 +1,4 @@
-package com.nexgenled.command
+package com.nexgenled.lumina
 
 import android.content.Context
 import android.content.Intent

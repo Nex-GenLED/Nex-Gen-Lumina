@@ -251,6 +251,22 @@ The **Schedule** tab automates your lighting on a weekly basis. Commercial sched
 3. Tap a day to see details — pattern name, times, zones affected
 4. Use arrows to move between weeks
 
+### Sync status indicator
+
+Below the title bar on the Schedule tab, a small status row shows the result of your last push to the controller:
+
+| Indicator | Meaning |
+|-----------|---------|
+| **Green ✓ "Synced · 3m ago"** | Last sync succeeded — schedules are live on every controller |
+| **Amber ⚠ "Synced with N warnings"** | Schedules saved, but one or more presets didn't write cleanly — usually a brief network blip; tap **Sync** again |
+| **Red ☁ "Controller not reachable…"** | The app can't reach a controller — confirm your phone is on the same Wi-Fi as the lighting system, then tap **Sync** |
+
+The row stays hidden until you tap the **Sync** button at the top right at least once per session.
+
+### Time format
+
+Lumina respects your preferred time format throughout the schedule UI. Set **System → Edit Profile → Display Preferences → Time Format** to **12-hour (7:05 PM)** or **24-hour (19:05)**. The setting applies to schedule rows, conflict-resolution dialogs, sun-time labels, autopilot weekly previews, day-part displays, and the schedule detail sheet.
+
 ### Creating a schedule
 
 1. On the Schedule tab, tap **+**
@@ -665,4 +681,4 @@ For troubleshooting, see the separate Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina v2.1 — Commercial User Guide — April 2026*
+*Nex-Gen Lumina v2.2 — Commercial User Guide — April 2026*

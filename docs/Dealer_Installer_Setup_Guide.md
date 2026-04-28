@@ -608,8 +608,12 @@ On the Remote Access settings screen:
 - **Bridge connection** — confirm the Lumina Bridge is online (health indicator should be green)
 - **Webhook URL** (if applicable) — for advanced/DIY integrations only
 
+<div class="warning">
+<strong>Permissions:</strong> Tapping <strong>Detect Home Network</strong> prompts the customer for <strong>Location permission</strong>. On Android this is required to read the Wi-Fi network name; on iOS it's strongly recommended. If the customer declines, the app shows a friendly message explaining what's needed instead of failing silently. The detected SSID is encrypted before storage — it's never written to Firestore in plain text.
+</div>
+
 <div class="tip">
-<strong>Tip:</strong> The bridge health check runs automatically on every app launch. If the bridge shows unreachable during setup, check the bridge dashboard at <code>http://&lt;bridge-ip&gt;/</code>. Power-cycle the bridge and wait 30 seconds before retrying.
+<strong>Tip:</strong> The bridge health check runs automatically on every app launch <strong>only when remote access is enabled</strong>. Customers on local-only Wi-Fi don't incur Firestore traffic from idle health pings. If the bridge shows unreachable during setup, check the bridge dashboard at <code>http://&lt;bridge-ip&gt;/</code>. Power-cycle the bridge and wait 30 seconds before retrying.
 </div>
 
 ---
@@ -717,4 +721,4 @@ For the full troubleshooting reference, see the Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina v2.1 — Dealer & Installer Setup Guide — April 2026*
+*Nex-Gen Lumina v2.2 — Dealer & Installer Setup Guide — April 2026*

@@ -128,6 +128,6 @@ Run before each release candidate. Owned by Nex-Gen LED LLC engineering.
 
 ---
 
-**Last updated**: 2026-04-21
-**Version**: v2.1.0 Commercial Mode
+**Last updated**: 2026-04-27
+**Version**: v2.2.0 Commercial Mode
 **Owner**: Nex-Gen LED LLC — engineering

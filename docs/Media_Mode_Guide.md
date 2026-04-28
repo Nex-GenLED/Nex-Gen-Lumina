@@ -162,4 +162,4 @@ For troubleshooting beyond this guide, see the separate Lumina Troubleshooting G
 
 ---
 
-*Nex-Gen Lumina v2.1 — Media Mode — April 2026*
+*Nex-Gen Lumina v2.2 — Media Mode — April 2026*

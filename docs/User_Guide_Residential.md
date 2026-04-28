@@ -244,6 +244,22 @@ Type or speak naturally. Lumina understands plain English:
 3. Tap a day for details — pattern name, times, color preview
 4. Arrows move between weeks
 
+### Sync status indicator
+
+Below the title bar on the Schedule tab, a small status row shows the result of your last sync to the controller:
+
+| Indicator | Meaning |
+|-----------|---------|
+| **Green ✓ "Synced · 3m ago"** | Last sync succeeded — schedules are live on the controller |
+| **Amber ⚠ "Synced with N warnings"** | Schedules saved, but one or more presets didn't write cleanly — usually a brief network blip; tap **Sync** again |
+| **Red ☁ "Controller not reachable…"** | The app can't reach your controller — make sure your phone is on the same Wi-Fi as your lighting system, then tap **Sync** |
+
+Until you tap the **Sync** button at the top right at least once per session, the row stays hidden.
+
+### Time format
+
+Lumina respects your preferred time format throughout the schedule UI. Set **System → Edit Profile → Display Preferences → Time Format** to **12-hour (7:05 PM)** or **24-hour (19:05)**. The setting applies to schedule rows, conflict-resolution dialogs, sun-time labels, autopilot weekly previews, and the schedule detail sheet — everywhere a time appears.
+
 ### Creating a schedule
 
 1. On the Schedule tab, tap **+**
@@ -390,6 +406,12 @@ Your installer set up a small **bridge device** that stays on your home network.
 1. **System → Remote Access**
 2. A green indicator means remote access is active and working
 3. Yellow or red means the bridge may need attention — contact your installer
+
+### Saving your home Wi-Fi for switching
+
+If you tap **Detect Home Network** on the Remote Access screen, the app first asks for **Location permission**. This is required on Android (and recommended on iOS) so the app can read your current Wi-Fi network name. Without that permission, the saved-network detection can't work and you'll see a friendly prompt explaining what's needed. Your network name is encrypted before it's stored — Lumina never keeps your SSID in plain text.
+
+Once your home network is saved, the app automatically routes your commands locally when you're connected to it, and through the bridge when you're not. No manual switching.
 
 <div class="tip">
 <strong>Tip:</strong> If remote access wasn't part of your original install, ask your installer — it's a simple upgrade that makes a real difference when you're not home.
@@ -553,6 +575,10 @@ You can get push notifications for Neighborhood Sync events:
 
 Configure in **System → Settings**.
 
+### Same-day events
+
+When you create or join a sync group with a recurring event (e.g., "Friday at 8 PM"), today's first occurrence is included automatically as long as the scheduled time hasn't already passed by more than 10 minutes. So if you join a group at 7:55 PM Friday for an 8 PM event, the sync still fires that night — you don't have to wait until next Friday.
+
 <div class="tip">
 <strong>Tip:</strong> Share your group code at the next block party — the more neighbors who join, the more impressive the display.
 </div>
@@ -604,6 +630,18 @@ Game Day mode transforms your whole system for the big game.
 5. Your lights **return automatically** to your regular schedule when the game ends
 
 Game Day pairs with **Neighborhood Sync** — when the host starts a Game Day session, every house in the group lights up together.
+
+### Light Up Now — instant team colors
+
+Every team card on the Game Day screen has a full-width **Light Up Now** button. Tap it any time to apply your team's primary and secondary colors immediately, regardless of whether autopilot is enabled or whether a game is scheduled. The button uses your saved Game Day design if you've set one; otherwise it falls back to a clean two-color blend of the team's official colors.
+
+<div class="tip">
+<strong>Tip:</strong> Use Light Up Now for tailgates, draft parties, watch nights with friends — any time you want the house in team colors without scheduling anything.
+</div>
+
+### Same-day activation
+
+If you enable Game Day for a team and there's still a game today whose start time is in the future (minus your lead time), today's game is included automatically. Previously the system only looked at tomorrow forward — now you can switch on Game Day at 1 PM and have the house ready for a 7 PM kickoff that same evening.
 
 <div class="tip">
 <strong>Tip:</strong> If you set up Sports Alerts for a team, Game Day can activate automatically when that team plays. Check your team's settings to enable it.
@@ -843,4 +881,4 @@ For troubleshooting beyond this guide, see the separate Lumina Troubleshooting G
 
 ---
 
-*Nex-Gen Lumina v2.1 — Residential User Guide — April 2026*
+*Nex-Gen Lumina v2.2 — Residential User Guide — April 2026*

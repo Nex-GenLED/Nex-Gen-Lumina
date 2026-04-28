@@ -53,7 +53,7 @@ Lumina is smart about where you are:
 - **At home on your Wi-Fi:** the app talks to your lights directly — fast and local. The bridge isn't involved.
 - **Away from home (cell data, a hotel, another Wi-Fi):** the app sends commands through the cloud. The bridge — always online at your house — picks them up and passes them to your lights within a couple of seconds.
 
-Every time you open the app, Lumina runs a quick **bridge health check** — a friendly handshake that makes sure the bridge is awake and listening. The result shows up as a small status dot on your home screen:
+Every time you open the app, Lumina runs a quick **bridge health check** — a friendly handshake that makes sure the bridge is awake and listening. The check only runs when **Remote Access is enabled** in your settings; if you only use Lumina on your home Wi-Fi, no idle pings are sent. The result shows up as a small status dot on your home screen:
 
 | Indicator | What it means |
 |-----------|---------|
@@ -171,6 +171,8 @@ They need to be on the same Wi-Fi network. If you can open both in a browser fro
 1. Open the Lumina app and sign in
 2. Tap **System** (gear icon) → **Remote Access**
 3. While connected to your home Wi-Fi, tap **Detect Home Network** to save your Wi-Fi name
+   - The first time you tap this, the app asks for **Location permission**. Required on Android (Android gates Wi-Fi network names behind location), recommended on iOS. If you decline, the app will tell you what's needed instead of failing silently.
+   - Your network name is encrypted before it's saved — it never sits in plain text on the server.
 4. Toggle **Enable Remote Access** on
 
 ### Step 3: Verify it works
@@ -281,4 +283,4 @@ Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi nam
 
 ---
 
-*Nex-Gen Lumina v2.1 — Lumina Bridge Setup — April 2026*
+*Nex-Gen Lumina v2.2 — Lumina Bridge Setup — April 2026*

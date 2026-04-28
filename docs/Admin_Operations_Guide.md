@@ -112,7 +112,9 @@ Type `9999` on the Staff PIN screen. You land on the **Admin Dashboard**, which 
 
 ### App Store reviewer reveal
 
-There's a second hidden gesture: **5 taps on the "POWERED BY NEX-GEN" subtitle** (under the logo). That reveals an "App Store Review" button that autofills the reviewer test credentials. No time window on this one — taps can be spaced out. Only relevant during App Store review submissions.
+There's a second hidden gesture: **5 taps on the version text** (e.g., `v2.2.0`) at the bottom of the login form. That reveals an "App Store Review" button that autofills the reviewer test credentials. No time window on this one — taps can be spaced out. Only relevant during App Store review submissions.
+
+The reviewer-reveal gesture used to live on the "POWERED BY NEX-GEN" subtitle, but on iOS its hit-rect could overlap the LUMINA wordmark above and steal taps intended for the staff PIN gesture. It now lives on a dedicated version-text line at the bottom of the form, well clear of the logo.
 
 ---
 
@@ -646,7 +648,7 @@ When you sign up a new dealer, here's the full sequence:
 | View network analytics | Corporate Dashboard → **Network** tab |
 | Deploy Weekly Brief | `firebase deploy --only functions:sendWeeklyBrief` |
 | Manage demo codes | Firebase Console → `dealerDemoCodes` |
-| Reveal App Store review button | Login → tap **POWERED BY NEX-GEN** subtitle 5 times |
+| Reveal App Store review button | Login → tap version text (e.g. **v2.2.0**) at bottom of form 5 times |
 
 ---
 

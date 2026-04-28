@@ -424,4 +424,4 @@ For the full walkthrough on completing customer installations, see the [Dealer &
 
 ---
 
-*Nex-Gen Lumina v2.1 — Dealer Dashboard Guide — April 2026*
+*Nex-Gen Lumina v2.2 — Dealer Dashboard Guide — April 2026*

@@ -232,4 +232,4 @@ Still stuck? Tell Lumina "I'm having trouble with Audio Mode" — the AI can wal
 
 ---
 
-*Nex-Gen Lumina v2.1 — Audio Mode — April 2026*
+*Nex-Gen Lumina v2.2 — Audio Mode — April 2026*
