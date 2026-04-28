@@ -9,74 +9,35 @@ workflows:
       flutter: stable
       xcode: 16.2
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.nexgenled.command
       vars:
         BUNDLE_ID: com.nexgenled.command
     scripts:
-      - name: Clear CocoaPods cache
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch signing files
         script: |
-          rm -rf ~/Library/Caches/CocoaPods
-          rm -rf ios/Pods
-          rm -rf ios/.symlinks
-          rm -f ios/Podfile.lock
-      - name: Clear Flutter cache
-        script: |
-          flutter clean
-          rm -rf .dart_tool
-          rm -rf build
-          flutter pub cache repair
-          flutter pub get
-      - name: Install CocoaPods
-        script: |
-          cd ios && pod install --repo-update
+          app-store-connect fetch-signing-files $BUNDLE_ID \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+      - name: Set up code signing settings
+        script: xcode-project use-profiles
       - name: Set build number
         script: |
           BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}
           VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
           echo "Version: $(grep '^version:' pubspec.yaml)"
-      - name: Create provisioning profile
+      - name: Install CocoaPods
         script: |
-          app-store-connect fetch-signing-files \
-            com.nexgenled.command \
-            --type IOS_APP_STORE \
-            --create \
-            --save
-          keychain initialize
-          keychain add-certificates
-          xcode-project use-profiles
-      - name: Build signed IPA
-        script: |
-          # Install certificates and profiles from ios_signing
-          keychain initialize
-          app-store-connect fetch-signing-files \
-            com.nexgenled.command \
-            --type IOS_APP_STORE \
-            --save
-          keychain add-certificates
-          xcode-project use-profiles
-
-          # Build the IPA
-          flutter build ipa --release
-
-          echo "IPA search:"
-          find build/ios -name "*.ipa" 2>/dev/null || echo "No IPA found"
-      - name: Find IPA location
-        script: |
-          echo "Searching for IPA files..."
-          find . -name "*.ipa" -type f 2>/dev/null
-          echo "build/ios contents:"
-          ls -la build/ios/ 2>/dev/null || echo "build/ios not found"
-          echo "build/ios/ipa contents:"
-          ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa not found"
+          cd ios && pod install --repo-update
+      - name: Build IPA
+        script: flutter build ipa --release
     artifacts:
-      - build/ios/ipa/Runner.ipa
+      - build/ios/ipa/*.ipa
     publishing:
       app_store_connect:
-        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        auth: integration
         submit_to_testflight: true
         expire_build_submitted_for_review: true
