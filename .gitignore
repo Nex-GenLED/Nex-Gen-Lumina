@@ -130,3 +130,4 @@ functions/.env.production
 # Node modules (for Firebase functions)
 **/node_modules/
 functions/.runtimeconfig.json
+android/app/*.keystore
