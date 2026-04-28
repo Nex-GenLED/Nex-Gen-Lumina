@@ -47,9 +47,8 @@ workflows:
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
-      - name: Build signed IPA
+      - name: Create ExportOptions.plist
         script: |
-          # Create export options
           cat > /tmp/ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,34 +59,39 @@ workflows:
             <key>teamID</key>
             <string>K337ZPY37S</string>
             <key>signingStyle</key>
-            <string>automatic</string>
-            <key>uploadSymbols</key>
-            <true/>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.nexgenled.command</key>
+              <string>Lumina AppStore 2</string>
+            </dict>
           </dict>
           </plist>
           EOF
-
-          flutter build ipa --release \
-            --export-options-plist=/tmp/ExportOptions.plist \
-            --verbose
-
-          echo "Flutter build exit code: $?"
-          echo "Searching for IPA:"
-          find build/ios -name "*.ipa" 2>/dev/null || echo "No IPA found"
-      - name: Verify and stage IPA
+      - name: Build signed IPA
         script: |
-          echo "Looking for IPA..."
-          find build/ios -name "*.ipa" 2>/dev/null
-          # Copy to root if found elsewhere
-          IPA_PATH=$(find build/ios -name "*.ipa" -type f 2>/dev/null | head -1)
-          if [ -n "$IPA_PATH" ]; then
-            echo "Found IPA at: $IPA_PATH"
-            mkdir -p build/ios/ipa
-            cp "$IPA_PATH" build/ios/ipa/Runner.ipa
-            echo "Staged to build/ios/ipa/Runner.ipa"
-          else
-            echo "No IPA found"
-          fi
+          flutter build ios --release --no-codesign
+
+          xcode-project use-profiles
+
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=K337ZPY37S
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            -exportOptionsPlist /tmp/ExportOptions.plist \
+            -exportPath build/ios/ipa \
+            -allowProvisioningUpdates
+
+          echo "IPA search:"
+          find build/ios/ipa -name "*.ipa" 2>/dev/null
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
