@@ -82,6 +82,8 @@
 	<string>Camera access is required for AR spatial mapping of your lights.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access enables voice-to-text control and audio-reactive lighting in Nex-Gen.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lumina uses speech recognition to enable voice control of your lighting system.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Lumina needs access to your photo library to select a photo of your home for your lighting dashboard.</string>
 	<key>NSPhotoLibraryAddOnlyUsageDescription</key>
