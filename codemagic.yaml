@@ -9,6 +9,8 @@ workflows:
       flutter: stable
       xcode: 16.2
       cocoapods: default
+      groups:
+        - ios-workflow
       vars:
         BUNDLE_ID: com.nexgenled.command
     scripts:
