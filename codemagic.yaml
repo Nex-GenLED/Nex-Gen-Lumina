@@ -49,7 +49,18 @@ workflows:
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
-          flutter build ipa --release
+          flutter build ipa --release \
+            --dart-define=TEAM_ID=K337ZPY37S
+
+          # If flutter build ipa failed, try with xcodebuild directly
+          if [ ! -f "build/ios/ipa/Runner.ipa" ]; then
+            echo "Attempting manual export..."
+            xcodebuild \
+              -exportArchive \
+              -archivePath build/ios/archive/Runner.xcarchive \
+              -exportPath build/ios/ipa \
+              -exportOptionsPlist ios/ExportOptions.plist
+          fi
       - name: Find IPA location
         script: |
           echo "Searching for IPA files..."
