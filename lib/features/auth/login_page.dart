@@ -341,22 +341,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  // "POWERED BY NEX-GEN" subtitle — separate hidden 5-tap
-                  // gesture that reveals the App Store reviewer button.
-                  // Same Listener pattern as the logo above to avoid the
-                  // SingleChildScrollView gesture arena swallowing taps.
-                  Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerDown: (_) => _onSubtitleTap(),
-                    child: Text(
-                      'POWERED BY NEX-GEN',
-                      style: GoogleFonts.montserrat(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.cyanAccent,
-                        letterSpacing: 2.0,
-                      ),
+                  // Spacer bumped from 4 → 24 so the subtitle doesn't sit
+                  // inside the logo's tap target on iOS, where slight
+                  // safe-area shifts pushed taps intended for the LUMINA
+                  // wordmark into the subtitle's hit-rect.
+                  const SizedBox(height: 24),
+                  // "POWERED BY NEX-GEN" subtitle. The hidden 5-tap reviewer
+                  // reveal gesture used to live here but stole iOS taps from
+                  // the logo above; it now lives on the version line at the
+                  // bottom of the form.
+                  Text(
+                    'POWERED BY NEX-GEN',
+                    style: GoogleFonts.montserrat(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.cyanAccent,
+                      letterSpacing: 2.0,
                     ),
                   ),
                   const SizedBox(height: 40),
@@ -526,6 +526,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             ),
                           ),
+                        // Version line — also hosts the hidden 5-tap App Store
+                        // reviewer reveal gesture (relocated from the LUMINA
+                        // subtitle to keep it well clear of the logo's
+                        // staff-PIN gesture). Listener sits below the gesture
+                        // arena, same pattern as the logo above. Non-tappable
+                        // text so no onPressed fights with the counter.
+                        const SizedBox(height: 8),
+                        Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (_) => _onSubtitleTap(),
+                          child: Center(
+                            child: Text(
+                              'v2.2.0',
+                              style: GoogleFonts.montserrat(
+                                color: Colors.white.withValues(alpha: 0.4),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w400,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
                       ]),
                     ),
                   ),
