@@ -131,3 +131,5 @@ functions/.env.production
 **/node_modules/
 functions/.runtimeconfig.json
 android/app/*.keystore
+android/build/
+android/.gradle/
