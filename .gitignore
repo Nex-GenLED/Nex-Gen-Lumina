@@ -109,6 +109,10 @@ coverage/
 *.keystore
 *service-account*.json
 *firebase-adminsdk*.json
+**/key.properties
+
+# One-off destructive admin scripts — never commit
+scripts/wipe_controllers.js
 
 # Claude Code temp files
 tmpclaude-*
