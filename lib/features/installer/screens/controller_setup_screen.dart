@@ -105,7 +105,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     try {
       final service = WledService('http://${controller.ip}');
       final state = await service.getState().timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 10),
         onTimeout: () => null,
       );
       if (mounted) {
@@ -438,62 +438,110 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        insetPadding: EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 24,
-          bottom: 24 + MediaQuery.of(ctx).viewInsets.bottom,
-        ),
-        title: const Text('Add Controller by IP', style: TextStyle(color: Colors.white)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ipCtrl,
-                autofocus: true,
-                keyboardType: TextInputType.url,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'IP Address',
-                  hintText: '192.168.1.100',
-                  labelStyle: const TextStyle(color: NexGenPalette.textMedium),
-                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                  filled: true,
-                  fillColor: NexGenPalette.matteBlack,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          return AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            insetPadding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: 24 + bottomInset,
+            ),
+            title: const Text('Add Controller by IP',
+                style: TextStyle(color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // static IP warning banner
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.amber.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: Colors.amber, size: 18),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Set a static IP in WLED first: '
+                            'Config → WiFi Setup → Static IP. '
+                            'DHCP addresses change and will break the connection.',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.amber),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // IP field
+                  TextField(
+                    controller: ipCtrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'IP Address',
+                      hintText: '192.168.50.200',
+                      labelStyle:
+                          const TextStyle(color: NexGenPalette.textMedium),
+                      hintStyle: TextStyle(
+                          color: NexGenPalette.textMedium
+                              .withValues(alpha: 0.5)),
+                      filled: true,
+                      fillColor: NexGenPalette.matteBlack,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Name field (keep existing)
+                  TextField(
+                    controller: nameCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Name (optional)',
+                      hintText: 'e.g., Front Roofline',
+                      labelStyle:
+                          const TextStyle(color: NexGenPalette.textMedium),
+                      hintStyle: TextStyle(
+                          color: NexGenPalette.textMedium
+                              .withValues(alpha: 0.5)),
+                      filled: true,
+                      fillColor: NexGenPalette.matteBlack,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nameCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Name (optional)',
-                  hintText: 'e.g., Front Roofline',
-                  labelStyle: const TextStyle(color: NexGenPalette.textMedium),
-                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                  filled: true,
-                  fillColor: NexGenPalette.matteBlack,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel',
+                    style: TextStyle(color: NexGenPalette.textMedium)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan),
+                child: const Text('Add',
+                    style: TextStyle(color: Colors.black)),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
-            child: const Text('Add', style: TextStyle(color: Colors.black)),
-          ),
-        ],
+          );
+        },
       ),
     );
 
@@ -577,6 +625,24 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
               ),
             );
           }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  '✓ Controller added. If the red dot persists, open '
+                  'WLED in a browser at this IP → Config → WiFi Setup '
+                  '→ set a Static IP → Save & Reboot.',
+                ),
+                duration: const Duration(seconds: 8),
+                backgroundColor: Colors.amber.shade800,
+                action: SnackBarAction(
+                  label: 'Got it',
+                  textColor: Colors.white,
+                  onPressed: () {},
+                ),
+              ),
+            );
+          }
           return;
         }
       }
@@ -610,6 +676,24 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       _controllerTypes[newDocId] = controllerType;
       ref.invalidate(controllersStreamProvider);
       _checkAllControllerStatus();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              '✓ Controller added. If the red dot persists, open '
+              'WLED in a browser at this IP → Config → WiFi Setup '
+              '→ set a Static IP → Save & Reboot.',
+            ),
+            duration: const Duration(seconds: 8),
+            backgroundColor: Colors.amber.shade800,
+            action: SnackBarAction(
+              label: 'Got it',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
