@@ -16,7 +16,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_providers.dart';
+import '../schedule/calendar_entry.dart';
 import '../schedule/calendar_providers.dart';
+import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/services/espn_api_service.dart';
@@ -79,7 +81,29 @@ final gameDayAutopilotServiceProvider =
   svc.onWriteCalendarEntries = (entries) async {
     try {
       final notifier = ref.read(calendarScheduleProvider.notifier);
-      return await notifier.applyEntries(entries);
+      final existing = ref.read(calendarScheduleProvider);
+
+      // Phase 1 priority resolver: silently drop incoming Game Day
+      // entries that would overwrite a strictly higher-priority entry
+      // already on that date (user-set or holiday). Equal-priority
+      // overwrites (Game Day re-running for an existing date) and
+      // strictly lower-priority overwrites are kept. See
+      // SchedulePriorityResolver for the 5-tier hierarchy and the
+      // Phase 2 segment-composition handoff.
+      final filtered = SchedulePriorityResolver.filterIncoming(
+        incoming: entries,
+        existing: existing,
+      );
+      if (filtered.dropped.isNotEmpty) {
+        debugPrint('[GameDayAutopilot] Priority resolver dropped '
+            '${filtered.dropped.length} entries:');
+        for (final d in filtered.dropped) {
+          debugPrint('  - ${d.entry.dateKey}: ${d.reason}');
+        }
+      }
+      if (filtered.kept.isEmpty) return true;
+
+      return await notifier.applyEntries(filtered.kept);
     } catch (e) {
       debugPrint('[GameDayAutopilot] Failed to write calendar entries: $e');
       return false;
@@ -402,7 +426,10 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     }
 
     // If enabling, populate the calendar with upcoming games.
-    _populateCalendarInBackground(teamSlug);
+    // Force-bypass the 7-day gate — the user just opted in for this team,
+    // they expect to see calendar entries appear, even if some other team
+    // regenerated within the last week.
+    _populateCalendarInBackground(teamSlug, force: true);
   }
 
   /// Append [teamName] to the user's profile `sports_team_priority` and
@@ -508,20 +535,28 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   }
 
   /// Fire-and-forget calendar population for a team. Errors are logged
-  /// but don't surface to the caller.
-  void _populateCalendarInBackground(String teamSlug) {
+  /// but don't surface to the caller. Pass `force: true` to bypass the
+  /// 7-day refresh gate (e.g. when the user just toggled autopilot on
+  /// for a brand new team and there's no history yet).
+  void _populateCalendarInBackground(String teamSlug, {bool force = false}) {
     Future(() async {
       try {
+        if (!_shouldRegenerateGameDay(force: force)) return;
+
         final configs =
             ref.read(gameDayAutopilotConfigsProvider).valueOrNull ?? [];
         final config =
             configs.where((c) => c.teamSlug == teamSlug).firstOrNull;
         if (config == null) return;
 
+        await _clearFutureGameDayCalendarEntries();
+
         final service = ref.read(gameDayAutopilotServiceProvider);
         final count = await service.populateCalendarForTeam(config);
         debugPrint('[GameDayAutopilot] Background calendar populate: '
             '$count entries for $teamSlug');
+
+        await _writeGameDayLastGenerated();
       } catch (e) {
         debugPrint('[GameDayAutopilot] Background populate failed: $e');
       }
@@ -529,10 +564,18 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   }
 
   /// Refresh the calendar entries for all enabled autopilot teams.
-  /// Called automatically every 24 hours by the refresh timer.
-  /// Can also be called manually from the Game Day screen.
-  Future<void> refreshAllCalendars() async {
+  /// Called automatically every 24 hours by the refresh timer (the timer
+  /// keeps firing daily, but the 7-day gate inside this method ensures the
+  /// heavy regen only runs weekly). Can also be called manually from the
+  /// Game Day screen — pass `force: true` to bypass the gate.
+  Future<void> refreshAllCalendars({bool force = false}) async {
+    if (!_shouldRegenerateGameDay(force: force)) return;
+
     final configs = ref.read(enabledAutopilotConfigsProvider);
+    if (configs.isEmpty) return;
+
+    await _clearFutureGameDayCalendarEntries();
+
     final service = ref.read(gameDayAutopilotServiceProvider);
     for (final config in configs) {
       try {
@@ -541,6 +584,77 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         debugPrint('[GameDayAutopilot] refreshAllCalendars failed for '
             '${config.teamSlug}: $e');
       }
+    }
+
+    await _writeGameDayLastGenerated();
+  }
+
+  /// Honors the weekly refresh cadence. Returns true if a regeneration
+  /// should proceed (force=true OR no last-generated timestamp OR ≥ 7 days
+  /// since the last successful run).
+  bool _shouldRegenerateGameDay({required bool force}) {
+    if (force) return true;
+    final lastGen = ref.read(gameDayLastGeneratedProvider);
+    if (lastGen == null) return true;
+    final daysSince = DateTime.now().difference(lastGen).inDays;
+    if (daysSince < 7) {
+      debugPrint('[GameDayAutopilot] refresh gate not met '
+          '($daysSince days since last generation), skipping');
+      return false;
+    }
+    return true;
+  }
+
+  /// Removes future calendar entries with type=autopilot. Preserves past
+  /// entries (history), user entries, holiday entries, and auto-typed
+  /// baseline entries (warm-white daily, etc.). Game Day is the only
+  /// system writing CalendarEntryType.autopilot today, so this is
+  /// effectively "clear the next 7 days of game-day rows" — which lets
+  /// the regenerate write fresh entries without leaving stale rows for
+  /// rescheduled/cancelled games.
+  Future<void> _clearFutureGameDayCalendarEntries() async {
+    try {
+      final notifier = ref.read(calendarScheduleProvider.notifier);
+      final entries = ref.read(calendarScheduleProvider);
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+
+      final keysToRemove = <String>[];
+      entries.forEach((dateKey, entry) {
+        if (entry.type != CalendarEntryType.autopilot) return;
+        final date = DateTime.tryParse(dateKey);
+        if (date == null) return;
+        if (date.isBefore(todayStart)) return; // Preserve history
+        keysToRemove.add(dateKey);
+      });
+
+      for (final key in keysToRemove) {
+        await notifier.removeEntry(key);
+      }
+
+      if (keysToRemove.isNotEmpty) {
+        debugPrint('[GameDayAutopilot] Cleared ${keysToRemove.length} '
+            'future autopilot calendar entries before regeneration');
+      }
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Clear future entries failed: $e');
+    }
+  }
+
+  /// Writes `game_day_last_generated` to the user's profile so the 7-day
+  /// refresh gate can be honored on subsequent calls. Direct Firestore
+  /// update — same pattern as the per-team config writes elsewhere in
+  /// this controller.
+  Future<void> _writeGameDayLastGenerated() async {
+    try {
+      final profile = ref.read(currentUserProfileProvider).valueOrNull;
+      final uid = profile?.id;
+      if (uid == null) return;
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'game_day_last_generated': Timestamp.fromDate(DateTime.now()),
+      });
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Write gameDayLastGenerated failed: $e');
     }
   }
 
@@ -584,8 +698,11 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
     await docRef.update(updates);
 
-    // Re-populate calendar with new settings
-    _populateCalendarInBackground(teamSlug);
+    // Re-populate calendar with new settings.
+    // Force-bypass the 7-day gate — the user just changed settings (lead
+    // time, design variety, on/off override) and expects to see the
+    // calendar reflect them immediately.
+    _populateCalendarInBackground(teamSlug, force: true);
   }
 
   /// Save a custom design for a team's autopilot.

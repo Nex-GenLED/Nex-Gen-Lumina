@@ -241,17 +241,20 @@ class GameDayAutopilotService {
     _notifySessionChanged(config.teamSlug);
   }
 
-  /// Populate the calendar with entries for all upcoming games for a team.
-  /// Fetches the full season schedule from ESPN, applies the daylight
-  /// filter, generates a design per game based on variety mode, and
-  /// writes CalendarEntry records via onWriteCalendarEntries.
+  /// Populate the calendar with entries for all upcoming games for a team
+  /// **within a rolling 7-day window** from today. Fetches the full season
+  /// schedule from ESPN, filters down to the next week, applies the
+  /// daylight filter, generates a design per game based on variety mode,
+  /// and writes CalendarEntry records via onWriteCalendarEntries.
   ///
-  /// Safe to call repeatedly — writes are idempotent (same dateKey
-  /// overwrites previous autopilot entry). Returns the number of entries
-  /// written, or 0 on failure.
+  /// The 7-day cap exists so first-time enable doesn't dump 140+ MLB games
+  /// into the calendar at once. Re-runs weekly via the refresh-cadence gate
+  /// in [GameDayAutopilotController]. Safe to call repeatedly — writes are
+  /// idempotent (same dateKey overwrites previous autopilot entry).
+  /// Returns the number of entries written, or 0 on failure.
   Future<int> populateCalendarForTeam(
     GameDayAutopilotConfig config, {
-    int lookaheadDays = 180,
+    int lookaheadDays = 7,
   }) async {
     if (onWriteCalendarEntries == null) {
       debugPrint('[GameDayAutopilot] populateCalendar: no write callback');
@@ -290,18 +293,19 @@ class GameDayAutopilotService {
 
     final location = onGetUserLocation?.call();
     final entries = <CalendarEntry>[];
-    final cutoff = now.add(Duration(days: lookaheadDays));
+    final windowEnd = now.add(Duration(days: lookaheadDays));
     int gameIndex = 0;
 
     for (final game in games) {
-      // Only future games within lookahead window.
-      // Include today's game if the activation window
-      // (game start minus lead time) hasn't passed yet.
+      // Rolling 7-day window from today. Include today's game if the
+      // activation window (game start minus lead time) hasn't passed yet.
+      // Anything outside the next [lookaheadDays] is skipped — it'll be
+      // picked up by the next weekly refresh.
       final activationTime = game.scheduledDate.subtract(
         Duration(minutes: config.effectiveLeadTimeMinutes),
       );
       if (activationTime.isBefore(now)) continue;
-      if (game.scheduledDate.isAfter(cutoff)) continue;
+      if (game.scheduledDate.isAfter(windowEnd)) continue;
 
       // Apply daylight filter if enabled
       if (config.skipDayGames &&

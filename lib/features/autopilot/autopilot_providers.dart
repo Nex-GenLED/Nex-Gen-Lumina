@@ -152,6 +152,16 @@ final autopilotLastGeneratedProvider = Provider<DateTime?>((ref) {
   );
 });
 
+/// Provider for when the Game Day autopilot calendar was last regenerated.
+/// Tracks its own weekly cadence separately from [autopilotLastGeneratedProvider].
+final gameDayLastGeneratedProvider = Provider<DateTime?>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.gameDayLastGenerated,
+    orElse: () => null,
+  );
+});
+
 /// Computed provider to check if schedule regeneration is needed.
 final needsScheduleRegenerationProvider = Provider<bool>((ref) {
   final enabled = ref.watch(autopilotEnabledProvider);
@@ -539,14 +549,29 @@ class AutopilotSettingsService {
   }
 
   /// Convert a UTC time to the user's IANA timezone, falling back to device local.
+  ///
+  /// Defensively re-flags the input as UTC when it isn't already — protects
+  /// against upstream code that strips the `isUtc` flag during JSON
+  /// serialization or model copyWith. Without this guard, a non-UTC input
+  /// would either pass through `.toLocal()` as a no-op (showing UTC time
+  /// labelled as local) or get a wrong offset applied by `tz.TZDateTime.from`.
   DateTime _toLocalTime(DateTime utcTime, String? ianaTimezone) {
-    if (ianaTimezone == null || ianaTimezone.isEmpty) return utcTime.toLocal();
+    // Ensure the time is treated as UTC before converting
+    final asUtc = utcTime.isUtc
+        ? utcTime
+        : DateTime.utc(
+            utcTime.year, utcTime.month, utcTime.day,
+            utcTime.hour, utcTime.minute, utcTime.second,
+          );
+
+    if (ianaTimezone == null || ianaTimezone.isEmpty) {
+      return asUtc.toLocal();
+    }
     try {
       final location = tz.getLocation(ianaTimezone);
-      return tz.TZDateTime.from(utcTime, location);
+      return tz.TZDateTime.from(asUtc, location);
     } catch (_) {
-      // Invalid IANA identifier — fall back to device local
-      return utcTime.toLocal();
+      return asUtc.toLocal();
     }
   }
 

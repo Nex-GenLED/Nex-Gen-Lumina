@@ -182,6 +182,10 @@ class UserModel {
   final List<String> preferredEffectStyles;
   /// When the autopilot schedule was last generated
   final DateTime? autopilotLastGenerated;
+  /// When the Game Day autopilot calendar was last regenerated. Tracks its
+  /// own weekly cadence separately from [autopilotLastGenerated] so general
+  /// schedule generation and Game Day population don't gate each other.
+  final DateTime? gameDayLastGenerated;
   /// User-added custom holidays (birthdays, anniversaries, etc.)
   final List<CustomHoliday> customHolidays;
   /// Ordered list of sports teams by preference (first = highest priority)
@@ -321,6 +325,7 @@ class UserModel {
     int changeToleranceLevel = 2,
     List<String>? preferredEffectStyles,
     this.autopilotLastGenerated,
+    this.gameDayLastGenerated,
     this.customHolidays = const [],
     List<String>? sportsTeamPriority,
     this.weeklySchedulePreviewEnabled = true,
@@ -443,6 +448,9 @@ class UserModel {
           const ['static', 'animated'],
       autopilotLastGenerated: json['autopilot_last_generated'] != null
           ? (json['autopilot_last_generated'] as Timestamp).toDate()
+          : null,
+      gameDayLastGenerated: json['game_day_last_generated'] != null
+          ? (json['game_day_last_generated'] as Timestamp).toDate()
           : null,
       customHolidays: (json['custom_holidays'] as List?)
               ?.whereType<Map<String, dynamic>>()
@@ -591,6 +599,8 @@ class UserModel {
       'preferred_effect_styles': preferredEffectStyles,
       if (autopilotLastGenerated != null)
         'autopilot_last_generated': Timestamp.fromDate(autopilotLastGenerated!),
+      if (gameDayLastGenerated != null)
+        'game_day_last_generated': Timestamp.fromDate(gameDayLastGenerated!),
       'custom_holidays': customHolidays.map((e) => e.toJson()).toList(),
       'sports_team_priority': sportsTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
@@ -676,6 +686,7 @@ class UserModel {
     int? changeToleranceLevel,
     List<String>? preferredEffectStyles,
     DateTime? autopilotLastGenerated,
+    DateTime? gameDayLastGenerated,
     List<CustomHoliday>? customHolidays,
     List<String>? sportsTeamPriority,
     bool? weeklySchedulePreviewEnabled,
@@ -759,6 +770,7 @@ class UserModel {
       changeToleranceLevel: changeToleranceLevel ?? this.changeToleranceLevel,
       preferredEffectStyles: preferredEffectStyles ?? this.preferredEffectStyles,
       autopilotLastGenerated: autopilotLastGenerated ?? this.autopilotLastGenerated,
+      gameDayLastGenerated: gameDayLastGenerated ?? this.gameDayLastGenerated,
       customHolidays: customHolidays ?? this.customHolidays,
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,

@@ -79,8 +79,17 @@ class GameScheduleService {
         final dateStr = (event as Map<String, dynamic>)['date']?.toString();
         if (dateStr == null) continue;
 
-        final gameDate = DateTime.tryParse(dateStr);
+        // ESPN returns ISO 8601 UTC ("…Z"). Defensively re-flag as UTC if a
+        // response variant ever omits the trailing Z so downstream display
+        // converts to the user's local time correctly.
+        var gameDate = DateTime.tryParse(dateStr);
         if (gameDate == null) continue;
+        if (!gameDate.isUtc) {
+          gameDate = DateTime.utc(
+            gameDate.year, gameDate.month, gameDate.day,
+            gameDate.hour, gameDate.minute, gameDate.second,
+          );
+        }
 
         // Only consider future games within 14-day window.
         if (gameDate.isAfter(now) && gameDate.isBefore(cutoff)) {
@@ -295,8 +304,17 @@ class GameScheduleService {
       final gameId = event['id']?.toString() ?? '';
       final dateStr = event['date']?.toString();
       if (dateStr == null) return null;
-      final scheduledDate = DateTime.tryParse(dateStr);
+      // ESPN returns ISO 8601 UTC ("…Z"). Defensively re-flag as UTC if a
+      // response variant ever omits the trailing Z so downstream display
+      // (autopilot weekly preview, schedule rows) converts correctly.
+      var scheduledDate = DateTime.tryParse(dateStr);
       if (scheduledDate == null) return null;
+      if (!scheduledDate.isUtc) {
+        scheduledDate = DateTime.utc(
+          scheduledDate.year, scheduledDate.month, scheduledDate.day,
+          scheduledDate.hour, scheduledDate.minute, scheduledDate.second,
+        );
+      }
 
       final competitions = event['competitions'] as List<dynamic>?;
       if (competitions == null || competitions.isEmpty) return null;
