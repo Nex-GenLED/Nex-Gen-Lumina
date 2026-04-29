@@ -264,7 +264,7 @@ class LuminaCommandRouter {
 
     return LuminaCommandResult(
       responseText:
-          'I\'m not sure what you meant. Could you try one of these?',
+          "I didn't quite catch that — try describing the lighting effect or color you have in mind.",
       clarificationOptions: suggestions,
       tier: ProcessingTier.local,
     );

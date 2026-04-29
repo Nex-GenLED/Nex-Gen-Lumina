@@ -51,7 +51,8 @@ class CloudAIProcessor {
     } catch (e) {
       debugPrint('CloudAIProcessor error: $e');
       return LuminaCommandResult(
-        responseText: 'I had trouble processing that. Try saying it differently.',
+        responseText:
+            "I'm having trouble connecting right now. Check your connection and try again.",
         clarificationOptions: [
           'Turn on the lights',
           'Set to warm white',
@@ -71,7 +72,11 @@ class CloudAIProcessor {
     final parsed = _extractJson(response);
 
     if (parsed == null) {
-      // No JSON — pure conversational response
+      // No JSON in the response — surface the prose as-is so the user sees
+      // what Claude actually said (e.g. an unknown-entity color guess, a
+      // brainstorm of ideas, a clarifying question). wledPayload stays null
+      // and previewColors defaults to const [], so _AssistantBubble renders
+      // a plain conversational bubble with no apply card.
       return LuminaCommandResult(
         responseText: response.trim(),
         tier: ProcessingTier.cloud,
@@ -95,6 +100,8 @@ class CloudAIProcessor {
           'speed': obj['speed'],
         if (obj['intensity'] != null && !candidate.containsKey('intensity'))
           'intensity': obj['intensity'],
+        if (obj['schedulingIntent'] != null)
+          'schedulingIntent': obj['schedulingIntent'],
       };
     } else if (obj.containsKey('seg') ||
         obj.containsKey('on') ||
