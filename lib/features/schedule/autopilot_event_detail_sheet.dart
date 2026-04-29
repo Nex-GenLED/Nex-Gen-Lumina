@@ -545,6 +545,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
       type: CalendarEntryType.autopilot,
       autopilot: true,
       note: event.sourceDetail,
+      sourceTag: CalendarEntrySourceTag.autopilot,
     );
 
     // Try to find matching team config for scope-choice

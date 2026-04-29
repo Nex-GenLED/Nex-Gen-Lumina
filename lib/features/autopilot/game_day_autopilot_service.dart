@@ -723,6 +723,7 @@ class GameDayAutopilotService {
       type: CalendarEntryType.autopilot,
       autopilot: true,
       note: note,
+      sourceTag: CalendarEntrySourceTag.gameDay,
     );
   }
 

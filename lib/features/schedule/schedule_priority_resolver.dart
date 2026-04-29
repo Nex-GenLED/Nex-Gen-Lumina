@@ -10,6 +10,7 @@
 // that path.
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 
 /// 5-tier priority hierarchy for schedule entry conflicts.
 ///
@@ -190,4 +191,323 @@ class DroppedEntry {
     required this.existingEntry,
     required this.reason,
   });
+}
+
+// ─── Phase 2: Night-segment composition ─────────────────────────────────────
+//
+// Pure derived view: at sync/render time, take the recurring baseline rule
+// for a date plus any CalendarEntries on that date, and produce an ordered
+// list of non-overlapping segments per the priority hierarchy. Higher tiers
+// carve their window out of lower-tier segments; tiers 1 & 2 (user, holiday)
+// short-circuit composition and own the night entirely.
+
+/// Seven-tier hierarchy used by [composeNightSegments]. Lower numeric
+/// index = higher priority. Tiers 1 and 2 short-circuit composition;
+/// tiers 3–7 participate in sandwich composition.
+enum SegmentTier {
+  /// 1 — Manually-created CalendarEntry (`type=user`). Owns the full day.
+  user,
+
+  /// 2 — Holiday CalendarEntry (`type=holiday`). Owns the full day.
+  holiday,
+
+  /// 3 — Game Day individual (`sourceTag='game_day'`). Highest priority
+  ///     among composing tiers.
+  gameDay,
+
+  /// 4 — Game Day Group (`sourceTag='game_day_group'`).
+  gameDayGroup,
+
+  /// 5 — Neighborhood Sync (`sourceTag='neighborhood_sync'`).
+  neighborhoodSync,
+
+  /// 6 — Personal Autopilot (autopilot CalendarEntry without a more
+  ///     specific source tag).
+  personalAutopilot,
+
+  /// 7 — Recurring baseline ScheduleItem (e.g. Warm White sunset→sunrise).
+  baselineRecurring;
+
+  bool isHigherThan(SegmentTier other) => index < other.index;
+}
+
+/// One segment of a composed night. Non-overlapping with its siblings.
+class NightSegment {
+  /// Inclusive start of this segment.
+  final DateTime start;
+
+  /// Exclusive end of this segment.
+  final DateTime end;
+
+  /// Tier this segment came from.
+  final SegmentTier tier;
+
+  /// Source CalendarEntry, if this segment came from a calendar entry
+  /// (tiers 1–6). Null for baseline (tier 7) segments.
+  final CalendarEntry? entry;
+
+  /// Source baseline ScheduleItem, if this segment came from the
+  /// recurring baseline (tier 7). Null for entry-sourced segments.
+  final ScheduleItem? baseline;
+
+  const NightSegment({
+    required this.start,
+    required this.end,
+    required this.tier,
+    this.entry,
+    this.baseline,
+  });
+
+  /// Display-friendly label suitable for debug logs.
+  String get label => entry?.patternName ?? baseline?.actionLabel ?? '—';
+
+  @override
+  String toString() =>
+      'NightSegment(${tier.name}, $start → $end, $label)';
+}
+
+/// Map a CalendarEntry to its [SegmentTier]. Used by [composeNightSegments].
+///
+/// Tier resolution rules:
+/// 1. `type == user` → [SegmentTier.user] (regardless of sourceTag).
+/// 2. `type == holiday` → [SegmentTier.holiday].
+/// 3. Otherwise the `sourceTag` field disambiguates among the autopilot tiers.
+/// 4. An autopilot-typed entry with a null/unknown sourceTag is treated as
+///    [SegmentTier.personalAutopilot].
+SegmentTier tierForEntry(CalendarEntry entry) {
+  switch (entry.type) {
+    case CalendarEntryType.user:
+      return SegmentTier.user;
+    case CalendarEntryType.holiday:
+      return SegmentTier.holiday;
+    case CalendarEntryType.auto:
+    case CalendarEntryType.autopilot:
+      switch (entry.sourceTag) {
+        case CalendarEntrySourceTag.gameDay:
+          return SegmentTier.gameDay;
+        case CalendarEntrySourceTag.gameDayGroup:
+          return SegmentTier.gameDayGroup;
+        case CalendarEntrySourceTag.neighborhoodSync:
+          return SegmentTier.neighborhoodSync;
+        case CalendarEntrySourceTag.autopilot:
+        default:
+          return SegmentTier.personalAutopilot;
+      }
+  }
+}
+
+/// Compose a night of lighting segments for [date] from a recurring
+/// [baseline] schedule item plus any [entries] for that date.
+///
+/// The function is pure — no IO, no provider reads, no time-of-day "now"
+/// dependency. Sunrise/sunset times must be supplied by the caller (via
+/// [sunrise] / [sunset]) for baselines that use solar time labels; if a
+/// baseline uses solar labels and the corresponding parameter is null,
+/// the baseline is dropped from composition.
+///
+/// ## Behavior summary
+///
+/// * If any entry in [entries] is tier 1 (user) or tier 2 (holiday), a
+///   single segment is returned for that entry and composition stops.
+///   These tiers own the full day and are never split.
+/// * Otherwise entries are placed into the timeline in priority order
+///   (highest first), each carving its window out of any already-placed
+///   lower-priority gaps. Lower-priority entries only fill spaces left
+///   uncovered by higher-priority ones.
+/// * The baseline (if present) fills the remaining gaps within its own
+///   window — typically sunset→sunrise, but governed by its
+///   `timeLabel` / `offTimeLabel`.
+/// * Entries with no parseable `onTime` are skipped (can't place
+///   something without a start). Entries with a null `offTime` are
+///   treated as zero-length and dropped.
+///
+/// Returned segments are non-overlapping and sorted by start ascending.
+/// Single-entry nights (where the user has only one autopilot entry and
+/// no baseline) collapse to a single segment, preserving prior behavior.
+List<NightSegment> composeNightSegments({
+  required DateTime date,
+  required List<CalendarEntry> entries,
+  ScheduleItem? baseline,
+  DateTime? sunrise,
+  DateTime? sunset,
+}) {
+  // ── Step 1: Tier 1 / Tier 2 short-circuit ─────────────────────────
+  for (final entry in entries) {
+    final tier = tierForEntry(entry);
+    if (tier == SegmentTier.user || tier == SegmentTier.holiday) {
+      final window = _entryWindow(entry, date);
+      if (window == null) return const [];
+      return [
+        NightSegment(
+          start: window.$1,
+          end: window.$2,
+          tier: tier,
+          entry: entry,
+        ),
+      ];
+    }
+  }
+
+  // ── Step 2: Resolve composing entries to (start, end, tier) ───────
+  final placed = <NightSegment>[];
+  final composing = <(SegmentTier, CalendarEntry, DateTime, DateTime)>[];
+  for (final entry in entries) {
+    final tier = tierForEntry(entry);
+    // Tiers 1/2 already handled; tier 7 isn't an entry tier.
+    if (tier == SegmentTier.user ||
+        tier == SegmentTier.holiday ||
+        tier == SegmentTier.baselineRecurring) {
+      continue;
+    }
+    final window = _entryWindow(entry, date);
+    if (window == null) continue;
+    composing.add((tier, entry, window.$1, window.$2));
+  }
+
+  // Sort highest priority first (tier ascending = priority descending).
+  composing.sort((a, b) => a.$1.index.compareTo(b.$1.index));
+
+  // ── Step 3: Carve each entry into the timeline ────────────────────
+  for (final (tier, entry, start, end) in composing) {
+    for (final piece in _subtract(start, end, placed)) {
+      placed.add(NightSegment(
+        start: piece.$1,
+        end: piece.$2,
+        tier: tier,
+        entry: entry,
+      ));
+    }
+  }
+
+  // ── Step 4: Fill remaining gaps within the baseline window ────────
+  if (baseline != null) {
+    final baseWindow =
+        _baselineWindow(baseline, date, sunrise: sunrise, sunset: sunset);
+    if (baseWindow != null) {
+      for (final gap in _subtract(baseWindow.$1, baseWindow.$2, placed)) {
+        placed.add(NightSegment(
+          start: gap.$1,
+          end: gap.$2,
+          tier: SegmentTier.baselineRecurring,
+          baseline: baseline,
+        ));
+      }
+    }
+  }
+
+  placed.sort((a, b) => a.start.compareTo(b.start));
+  return placed;
+}
+
+// ─── Internal helpers ───────────────────────────────────────────────────
+
+/// Compute `[start, end)` for an entry on [date]. Returns null if the
+/// entry can't be placed (missing onTime, unparseable, or zero-length).
+/// Overnight wraps (offTime <= onTime) carry the end into the next day.
+(DateTime, DateTime)? _entryWindow(CalendarEntry entry, DateTime date) {
+  final onTime = entry.onTime;
+  if (onTime == null) return null;
+  final start = _parseHHMM(onTime, date);
+  if (start == null) return null;
+  final off = entry.offTime;
+  if (off == null) return null;
+  var end = _parseHHMM(off, date);
+  if (end == null) return null;
+  if (!end.isAfter(start)) {
+    end = end.add(const Duration(days: 1));
+  }
+  return (start, end);
+}
+
+/// Compute `[start, end)` for a baseline ScheduleItem on [date]. Returns
+/// null if the baseline uses solar labels and the matching DateTime
+/// wasn't supplied, or if the labels can't be parsed.
+(DateTime, DateTime)? _baselineWindow(
+  ScheduleItem baseline,
+  DateTime date, {
+  DateTime? sunrise,
+  DateTime? sunset,
+}) {
+  final start = _parseScheduleLabel(baseline.timeLabel, date,
+      sunrise: sunrise, sunset: sunset);
+  if (start == null) return null;
+  if (!baseline.hasOffTime) return null;
+  var end = _parseScheduleLabel(baseline.offTimeLabel!, date,
+      sunrise: sunrise, sunset: sunset);
+  if (end == null) return null;
+  if (!end.isAfter(start)) {
+    end = end.add(const Duration(days: 1));
+  }
+  return (start, end);
+}
+
+/// Parse 'HH:mm' (24h) into a DateTime anchored on [date].
+DateTime? _parseHHMM(String label, DateTime date) {
+  final parts = label.trim().split(':');
+  if (parts.length != 2) return null;
+  final h = int.tryParse(parts[0]);
+  final m = int.tryParse(parts[1]);
+  if (h == null || m == null) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return DateTime(date.year, date.month, date.day, h, m);
+}
+
+/// Parse a ScheduleItem time label — accepts 'Sunrise', 'Sunset',
+/// 'h:mm AM/PM' (12h), and 'HH:mm' (24h).
+DateTime? _parseScheduleLabel(
+  String label,
+  DateTime date, {
+  DateTime? sunrise,
+  DateTime? sunset,
+}) {
+  final l = label.trim().toLowerCase();
+  if (l == 'sunrise') return sunrise;
+  if (l == 'sunset') return sunset;
+
+  final ampm = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false)
+      .firstMatch(label.trim());
+  if (ampm != null) {
+    var h = int.tryParse(ampm.group(1)!) ?? -1;
+    final m = int.tryParse(ampm.group(2)!) ?? -1;
+    final ap = ampm.group(3)!.toLowerCase();
+    if (h < 0 || m < 0 || m > 59) return null;
+    if (ap == 'pm' && h != 12) h += 12;
+    if (ap == 'am' && h == 12) h = 0;
+    if (h > 23) return null;
+    return DateTime(date.year, date.month, date.day, h, m);
+  }
+
+  return _parseHHMM(label, date);
+}
+
+/// Subtract a list of already-placed segments from `[start, end)`,
+/// returning the remaining `(start, end)` pieces in order.
+List<(DateTime, DateTime)> _subtract(
+  DateTime start,
+  DateTime end,
+  List<NightSegment> existing,
+) {
+  // Sort blockers by start so the iteration is deterministic.
+  final blockers = [...existing]
+    ..sort((a, b) => a.start.compareTo(b.start));
+
+  var pieces = <(DateTime, DateTime)>[(start, end)];
+  for (final seg in blockers) {
+    final next = <(DateTime, DateTime)>[];
+    for (final (a, b) in pieces) {
+      if (!b.isAfter(seg.start) || !a.isBefore(seg.end)) {
+        next.add((a, b)); // No overlap.
+        continue;
+      }
+      if (a.isBefore(seg.start)) {
+        next.add((a, seg.start));
+      }
+      if (b.isAfter(seg.end)) {
+        next.add((seg.end, b));
+      }
+    }
+    pieces = next;
+    if (pieces.isEmpty) break;
+  }
+  return pieces;
 }

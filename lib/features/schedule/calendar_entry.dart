@@ -8,6 +8,19 @@ import 'package:flutter/material.dart';
 
 enum CalendarEntryType { auto, user, holiday, autopilot }
 
+/// Provenance labels for [CalendarEntry.sourceTag]. Additive — does not
+/// change the priority/type system, just carries a hint that the night
+/// composer uses to map an entry to one of the lower (3-6) tiers.
+///
+/// `null` means user-created (the entry was authored directly via the
+/// calendar editor, not by an autopilot source).
+class CalendarEntrySourceTag {
+  static const gameDay = 'game_day';
+  static const gameDayGroup = 'game_day_group';
+  static const neighborhoodSync = 'neighborhood_sync';
+  static const autopilot = 'autopilot';
+}
+
 class CalendarEntry {
   final String dateKey;       // 'YYYY-MM-DD'
   final String patternName;
@@ -19,6 +32,11 @@ class CalendarEntry {
   final bool autopilot;
   final String? note;
 
+  /// Provenance hint used by the night composer to disambiguate entries
+  /// that share the same [CalendarEntryType.autopilot] type. Null for
+  /// user-authored entries. See [CalendarEntrySourceTag] for valid values.
+  final String? sourceTag;
+
   const CalendarEntry({
     required this.dateKey,
     required this.patternName,
@@ -29,6 +47,7 @@ class CalendarEntry {
     this.type = CalendarEntryType.auto,
     this.autopilot = true,
     this.note,
+    this.sourceTag,
   });
 
   CalendarEntry copyWith({
@@ -40,6 +59,7 @@ class CalendarEntry {
     CalendarEntryType? type,
     bool? autopilot,
     String? note,
+    String? sourceTag,
   }) =>
       CalendarEntry(
         dateKey: dateKey,
@@ -51,6 +71,7 @@ class CalendarEntry {
         type: type ?? this.type,
         autopilot: autopilot ?? this.autopilot,
         note: note ?? this.note,
+        sourceTag: sourceTag ?? this.sourceTag,
       );
 
   /// Parse one change entry from Lumina AI JSON.
@@ -83,6 +104,7 @@ class CalendarEntry {
       type: CalendarEntryType.user,
       autopilot: false,
       note: json['note'] as String?,
+      sourceTag: json['sourceTag'] as String?,
     );
   }
 
@@ -99,6 +121,7 @@ class CalendarEntry {
         'type': type.name,
         'autopilot': autopilot,
         'note': note,
+        'sourceTag': sourceTag,
       };
 
   /// Deserialize from Firestore map.
@@ -126,6 +149,7 @@ class CalendarEntry {
       ),
       autopilot: json['autopilot'] as bool? ?? false,
       note: json['note'] as String?,
+      sourceTag: json['sourceTag'] as String?,
     );
   }
 
