@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/widgets/team_autocomplete.dart';
 
 /// Customer handoff screen for installer setup wizard.
 /// Allows installer to configure user preferences before handing off.
@@ -31,19 +32,7 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   int _autonomyLevel = 1;
 
   final _managerEmailController = TextEditingController();
-
-  static const _sportsTeams = [
-    'Chiefs',
-    'Royals',
-    'Sporting KC',
-    'Kansas City Current',
-    'Mavericks (STL)',
-    'Cardinals (STL)',
-    'Blues (STL)',
-    'Seahawks',
-    'Sounders',
-    'Mariners',
-  ];
+  final _teamInputCtrl = TextEditingController();
 
   static const _holidays = [
     'Christmas',
@@ -59,6 +48,7 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   @override
   void dispose() {
     _managerEmailController.dispose();
+    _teamInputCtrl.dispose();
     super.dispose();
   }
 
@@ -149,30 +139,34 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
 
                 // ── SECTION 2: Sports Teams ──
                 _buildSectionLabel('Favorite Teams'),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ..._sportsTeams.map((team) => _buildSelectableChip(
-                          label: team,
-                          selected: _selectedSportsTeams.contains(team),
-                          onTap: () => setState(() {
-                            _selectedSportsTeams.contains(team)
-                                ? _selectedSportsTeams.remove(team)
-                                : _selectedSportsTeams.add(team);
-                          }),
-                        )),
-                    _buildAddOtherChip(
-                      onAdd: (value) => setState(() {
-                        if (value.isNotEmpty && !_selectedSportsTeams.contains(value)) {
-                          _selectedSportsTeams.add(value);
-                        }
-                      }),
-                    ),
-                  ],
+                const SizedBox(height: 8),
+                const Text(
+                  'Search for your customer’s favorite teams. They '
+                  'can add more later from their profile.',
+                  style: TextStyle(
+                      color: NexGenPalette.textMedium, fontSize: 13),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 12),
+                TeamSelector(
+                  controller: _teamInputCtrl,
+                  selectedTeams: _selectedSportsTeams,
+                  onAddTeam: (name) =>
+                      setState(() => _selectedSportsTeams.add(name)),
+                  onRemoveTeam: (name) =>
+                      setState(() => _selectedSportsTeams.remove(name)),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () {},
+                    child: const Text(
+                      'Skip — customer will add later',
+                      style: TextStyle(
+                          color: NexGenPalette.textMedium, fontSize: 13),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // ── SECTION 3: Favorite Holidays ──
                 _buildSectionLabel('Favorite Holidays'),
@@ -474,56 +468,6 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   }
 
   // ── "+ Add Other" Chip ──
-
-  Widget _buildAddOtherChip({required ValueChanged<String> onAdd}) {
-    return GestureDetector(
-      onTap: () async {
-        final controller = TextEditingController();
-        final result = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: NexGenPalette.gunmetal,
-            title: const Text('Add Team', style: TextStyle(color: Colors.white)),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Team name',
-                hintStyle: TextStyle(color: NexGenPalette.textMedium),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-                child: const Text('Add', style: TextStyle(color: NexGenPalette.cyan)),
-              ),
-            ],
-          ),
-        );
-        if (result != null && result.isNotEmpty) onAdd(result);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: NexGenPalette.line, style: BorderStyle.solid),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add, size: 16, color: NexGenPalette.textMedium),
-            SizedBox(width: 4),
-            Text('Add Other', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
-          ],
-        ),
-      ),
-    );
-  }
 
   // ── Autonomy Tile ──
 
