@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,12 +19,28 @@ class DeviceEndpoint {
 class DeviceDiscoveryService {
   static const _service = '_wled._tcp.local';
 
-  Future<List<DeviceEndpoint>> discover({Duration timeout = const Duration(seconds: 5)}) async {
+  Future<List<DeviceEndpoint>> discover({Duration timeout = const Duration(seconds: 10)}) async {
     // Simulation mode: instantly return a virtual device and skip network.
     if (kSimulationMode) {
       return [
         DeviceEndpoint(name: 'Virtual Nex-Gen Home', address: InternetAddress.loopbackIPv4),
       ];
+    }
+
+    // Trigger iOS local network permission prompt.
+    // iOS silently blocks mDNS until the user grants
+    // "Allow to find devices on local network". A brief
+    // socket attempt to any local address causes the prompt
+    // to appear. Expected to fail — we only need the side effect.
+    if (!kSimulationMode) {
+      try {
+        final sock = await Socket.connect(
+          '192.168.50.1',
+          80,
+          timeout: const Duration(milliseconds: 200),
+        );
+        sock.destroy();
+      } catch (_) {}
     }
 
     final List<DeviceEndpoint> results = [];
@@ -69,6 +86,15 @@ class DeviceDiscoveryService {
       }
     }
 
+    // Subnet scan fallback when mDNS turns up empty. Common on iOS when the
+    // user has granted local network permission but mDNS multicast is being
+    // dropped by the router or carrier-grade NAT.
+    if (results.isEmpty) {
+      debugPrint('mDNS returned no results — running subnet scan fallback');
+      final subnetResults = await _subnetScan();
+      results.addAll(subnetResults);
+    }
+
     // Deduplicate by IP
     final seen = <String>{};
     final deduped = <DeviceEndpoint>[];
@@ -80,6 +106,72 @@ class DeviceDiscoveryService {
       }
     }
     return deduped;
+  }
+
+  /// Brute-force subnet scan as an mDNS fallback. Reads the device's own
+  /// IPv4 address to derive the /24 subnet, then probes every host on the
+  /// subnet for a `/json/info` response that mentions WLED. Runs in
+  /// batches of 20 to avoid overwhelming the network or the OS socket
+  /// budget. Each probe has an 800 ms ceiling so a full /24 scan caps
+  /// at roughly (254 / 20) × 800 ms ≈ 10 seconds.
+  Future<List<DeviceEndpoint>> _subnetScan() async {
+    try {
+      // Get device IP to determine subnet
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+      );
+      String? subnet;
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          final parts = addr.address.split('.');
+          if (parts.length == 4 && parts[0] != '127') {
+            subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+            break;
+          }
+        }
+        if (subnet != null) break;
+      }
+
+      if (subnet == null) return [];
+
+      debugPrint('Subnet scan on $subnet.x');
+      final results = <DeviceEndpoint>[];
+      final futures = <Future>[];
+
+      // Scan in batches of 20 to avoid overwhelming the network
+      for (int i = 1; i <= 254; i++) {
+        final ip = '$subnet.$i';
+        futures.add(() async {
+          try {
+            final client = HttpClient()
+              ..connectionTimeout = const Duration(milliseconds: 800);
+            final req = await client.getUrl(Uri.parse('http://$ip/json/info'));
+            final res = await req.close()
+                .timeout(const Duration(milliseconds: 800));
+            final body = await res.transform(utf8.decoder).join();
+            client.close(force: true);
+            if (res.statusCode == 200 && body.contains('WLED')) {
+              results.add(DeviceEndpoint(
+                name: 'WLED @ $ip',
+                address: InternetAddress(ip),
+              ));
+              debugPrint('Found WLED device at $ip');
+            }
+          } catch (_) {}
+        }());
+
+        // Process in batches of 20
+        if (futures.length >= 20 || i == 254) {
+          await Future.wait(futures);
+          futures.clear();
+        }
+      }
+
+      return results;
+    } catch (e) {
+      debugPrint('Subnet scan error: $e');
+      return [];
+    }
   }
 }
 
