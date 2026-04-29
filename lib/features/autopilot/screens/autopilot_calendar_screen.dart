@@ -71,6 +71,50 @@ class _AutopilotCalendarScreenState
     extends ConsumerState<AutopilotCalendarScreen> {
   _SelectedItem? _selected;
   bool _regenerating = false;
+  bool _autoRegenAttempted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoRegen());
+  }
+
+  /// On first load, if the autopilot_events collection for the current week
+  /// is empty (e.g. installer/first-run regen never ran or failed), trigger
+  /// a regeneration in the background so the calendar populates.
+  Future<void> _maybeAutoRegen() async {
+    if (_autoRegenAttempted) return;
+    _autoRegenAttempted = true;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final profile = ref.read(currentUserProfileProvider).maybeWhen(
+          data: (p) => p,
+          orElse: () => null,
+        );
+    if (profile == null || !profile.autopilotEnabled) return;
+
+    final repo = ref.read(autopilotEventRepositoryProvider);
+    final weekStart = upcomingWeekStart(DateTime.now());
+
+    try {
+      final existing = await repo.fetchWeekEvents(uid, weekStart);
+      if (existing.isNotEmpty) return;
+
+      if (mounted) setState(() => _regenerating = true);
+      await repo.runWeeklyRegeneration(
+        uid: uid,
+        profile: profile,
+        sportingEvents: const [],
+        holidays: const [],
+      );
+    } catch (e) {
+      debugPrint('AutopilotCalendarScreen: auto-regen failed: $e');
+    } finally {
+      if (mounted) setState(() => _regenerating = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -413,10 +457,42 @@ class _CalendarDayCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 if (!hasEvents)
-                  const Text(
-                    'No events',
-                    style: TextStyle(
-                        color: NexGenPalette.textMedium, fontSize: 12),
+                  Expanded(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_rounded,
+                          color: NexGenPalette.textMedium,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Building your schedule...',
+                                style: TextStyle(
+                                  color: NexGenPalette.textMedium,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Pull down to refresh',
+                                style: TextStyle(
+                                  color: NexGenPalette.textMedium
+                                      .withValues(alpha: 0.6),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),

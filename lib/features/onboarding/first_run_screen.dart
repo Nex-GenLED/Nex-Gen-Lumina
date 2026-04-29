@@ -6,7 +6,6 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
-import 'package:nexgen_command/features/autopilot/autopilot_schedule_generator.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -127,22 +126,13 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           profileAsync.maybeWhen(data: (p) => p, orElse: () => null);
       if (profile == null) return;
 
-      final weekStart = upcomingWeekStart(DateTime.now());
-      final weekEnd = weekEndFor(weekStart);
-
-      final generator = AutopilotScheduleGenerator();
-      final events = await generator.generateWeek(
-        weekStart: weekStart,
-        weekEnd: weekEnd,
-        profile: profile,
-        protectedBlocks: const [], // New user — no protected blocks yet
-        sportingEvents: const [], // Sports events loaded by sports providers
-        holidays: const [],       // Holiday events loaded by calendar providers
-        weekGeneration: 0,
-      );
-
       final repo = ref.read(autopilotEventRepositoryProvider);
-      await repo.saveInitialWeekEvents(uid, events);
+      await repo.runWeeklyRegeneration(
+        uid: uid,
+        profile: profile,
+        sportingEvents: const [],
+        holidays: const [],
+      );
     } catch (e) {
       debugPrint('⚠️ Initial schedule generation failed (non-fatal): $e');
     }

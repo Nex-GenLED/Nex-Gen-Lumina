@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/installer/screens/customer_info_screen.d
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
+import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
@@ -737,6 +738,21 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         UserService.sanitizeForFirestore(userModel.toJson()),
         SetOptions(merge: true),
       );
+
+      // Seed the customer's autopilot_events collection so the calendar isn't
+      // empty on first login. Uses the customer's UID (not the anonymous
+      // installer session). Non-fatal — calendar pull-to-refresh will retry.
+      try {
+        final repo = ref.read(autopilotEventRepositoryProvider);
+        await repo.runWeeklyRegeneration(
+          uid: userId,
+          profile: userModel,
+          sportingEvents: const [],
+          holidays: const [],
+        );
+      } catch (e) {
+        debugPrint('Installer: initial autopilot regen failed (non-fatal): $e');
+      }
 
       // 6. Create installation record for tracking/analytics
       final installationRecord = InstallationRecord(
