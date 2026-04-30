@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
+import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
@@ -230,8 +231,9 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                       effectName: preview.effectName,
                     );
               }
-              final label = preview?.patternName ??
+              final aiName = preview?.patternName ??
                   result.command?.parameters['patternName'] as String?;
+              final label = resolveLuminaDisplayName(aiName, prompt);
               if (label != null) {
                 ref.read(activePresetLabelProvider.notifier).state = label;
               } else {
@@ -589,7 +591,10 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
   // -------------------------------------------------------------------------
 
   Future<void> _applyPattern(
-      Map<String, dynamic> wled, LuminaPatternPreview? preview) async {
+    Map<String, dynamic> wled,
+    LuminaPatternPreview? preview, {
+    String? originalPrompt,
+  }) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return;
 
@@ -603,8 +608,8 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                 effectName: preview.effectName,
               );
         }
-        final label = preview?.patternName ??
-            wled['patternName'] as String?;
+        final aiName = preview?.patternName ?? wled['patternName'] as String?;
+        final label = resolveLuminaDisplayName(aiName, originalPrompt);
         if (label != null) {
           ref.read(activePresetLabelProvider.notifier).state = label;
         } else {
@@ -618,6 +623,18 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     } catch (e) {
       debugPrint('Apply from screen failed: $e');
     }
+  }
+
+  /// Walks back from [assistantIndex] to find the prompt that produced the
+  /// bubble at that index. Used by the bubble-tap apply path.
+  String? _priorUserPrompt(List<LuminaMessage> messages, int assistantIndex) {
+    for (int i = assistantIndex - 1; i >= 0; i--) {
+      final m = messages[i];
+      if (m.role == LuminaMessageRole.user && m.text.trim().isNotEmpty) {
+        return m.text;
+      }
+    }
+    return null;
   }
 
   // -------------------------------------------------------------------------
@@ -785,7 +802,12 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
               preview: msg.preview,
               wledPayload: msg.wledPayload,
               onApply: msg.wledPayload != null
-                  ? () => _applyPattern(msg.wledPayload!, msg.preview)
+                  ? () => _applyPattern(
+                        msg.wledPayload!,
+                        msg.preview,
+                        originalPrompt:
+                            _priorUserPrompt(sheetState.messages, i),
+                      )
                   : null,
             );
           case LuminaMessageRole.thinking:
