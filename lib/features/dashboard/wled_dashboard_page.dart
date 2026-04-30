@@ -40,8 +40,6 @@ import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
-import 'package:nexgen_command/features/autopilot/learning_providers.dart' show favoritePatternsProvider;
-import 'package:nexgen_command/models/usage_analytics_models.dart' show FavoritePattern;
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -762,7 +760,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 ),
               );
             }),
-            _buildPresetChips(context, ref),
             _buildAddPhotoButton(context, ref),
             // Now Playing bar — owns the full bottom chrome including brightness + tune
             _buildNowPlayingBar(context, ref, state),
@@ -775,84 +772,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   }
 
   
-  Widget _buildPresetChips(BuildContext context, WidgetRef ref) {
-    return Positioned(
-      top: 68,
-      right: 12,
-      child: Consumer(builder: (context, ref, _) {
-        final favoritesAsync = ref.watch(favoritePatternsProvider);
-        final activePreset = ref.watch(activePresetLabelProvider);
-        return favoritesAsync.when(
-          data: (favorites) {
-            if (favorites.isEmpty) return const SizedBox.shrink();
-            final chips = favorites.take(4).toList();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (int i = 0; i < chips.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 5),
-                  _PresetChip(
-                    favorite: chips[i],
-                    isActive: activePreset == chips[i].patternName,
-                    onTap: () => _applyPresetChip(context, ref, chips[i]),
-                  ),
-                ],
-              ],
-            );
-          },
-          loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
-        );
-      }),
-    );
-  }
-
-  Future<void> _applyPresetChip(BuildContext context, WidgetRef ref, FavoritePattern favorite) async {
-    try {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
-      var payload = favorite.patternData;
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) {
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      }
-      final success = await repo.applyJson(payload);
-      if (!mounted) return;
-      if (success) {
-        try {
-          final preview = _extractPreviewFromPayload(payload);
-          ref.read(wledStateProvider.notifier).applyLocalPreview(
-            colors: preview.colors,
-            effectId: preview.effectId,
-            speed: preview.speed,
-            intensity: preview.intensity,
-            effectName: favorite.patternName,
-            colorGroupSize: preview.colorGroupSize,
-            spacing: preview.spacing,
-          );
-        } catch (e) {
-          debugPrint('Error in preset chip applyLocalPreview: $e');
-        }
-        try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (e) {
-          debugPrint('Error in preset chip set active label: $e');
-        }
-        try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {
-          debugPrint('Error in preset chip recordFavoriteUsage: $e');
-        }
-        try {
-          if (mounted) {
-            ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
-          }
-        } catch (e) {
-          debugPrint('Error in preset chip trackWledPayload: $e');
-        }
-      }
-    } catch (e) {
-      debugPrint('Preset chip apply error: $e');
-    }
-  }
-
   Widget _buildAddPhotoButton(BuildContext context, WidgetRef ref) {
     return Consumer(builder: (context, ref, _) {
       final hasCustomImage = ref.watch(hasCustomHouseImageProvider);
@@ -1711,95 +1630,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       overlayOpacity: lerpedOpacity,
       label: label,
     );
-  }
-}
-
-/// A single frosted preset chip for the hero overlay.
-class _PresetChip extends StatelessWidget {
-  final FavoritePattern favorite;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _PresetChip({
-    required this.favorite,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primaryColor = _extractPrimaryColor();
-
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF080C18).withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isActive
-                    ? Colors.white.withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: 0.12),
-                width: 0.5,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: primaryColor,
-                    boxShadow: [
-                      BoxShadow(color: primaryColor.withValues(alpha: 0.6), blurRadius: 5),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 7),
-                Text(
-                  favorite.patternName,
-                  style: TextStyle(
-                    color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.75),
-                    fontSize: 11,
-                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _extractPrimaryColor() {
-    try {
-      final seg = favorite.patternData['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final col = (seg[0] as Map)['col'];
-        if (col is List && col.isNotEmpty) {
-          final c = col[0];
-          if (c is List && c.length >= 3) {
-            return Color.fromARGB(
-              255,
-              (c[0] as num).toInt().clamp(0, 255),
-              (c[1] as num).toInt().clamp(0, 255),
-              (c[2] as num).toInt().clamp(0, 255),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error in _extractPrimaryColor: $e');
-    }
-    return NexGenPalette.cyan;
   }
 }
 
