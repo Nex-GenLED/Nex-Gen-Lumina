@@ -1330,6 +1330,8 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       if (originalFx == 0) {
         // Solid + multiple colors → Solid Pattern with explicit band width.
         s['fx'] = 83;
+        // fx=83 ignores grp; band width = 1 + (ix >> 3). Inverse: ix = 8*(N-1).
+        s['ix'] = ((ledsPerColor - 1) * 8).clamp(0, 255);
       }
       // For all other multi-color effects, keep the original fx but force
       // grouping so the device honors the user's ledsPerColor choice.
@@ -1502,7 +1504,7 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
-          'LEDs/color:',
+          'LEDs/color (1–10, 1=alt):',
           style: TextStyle(color: NexGenPalette.textMedium, fontSize: 9),
         ),
         const SizedBox(width: 4),
