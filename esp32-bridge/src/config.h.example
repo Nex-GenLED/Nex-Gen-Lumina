@@ -1,7 +1,7 @@
-// Lumina ESP32 Bridge Configuration
+// Lumina ESP32 Bridge Configuration — TEMPLATE
 //
-// This file contains the configuration for the ESP32 bridge device.
-// You need to update these values with your Firebase project credentials.
+// Copy this file to `config.h` (in the same directory) and fill in your
+// real values. `config.h` is git-ignored — never commit it.
 
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -15,20 +15,20 @@
 // 3. Find the firebaseConfig object
 
 // Your Firebase project's API key
-#define FIREBASE_API_KEY "AIzaSyCWwqffD-ggRh5-IYwR2ldjaztd-Jgz0JY"
+#define FIREBASE_API_KEY "YOUR_API_KEY_HERE"
 
 // Your Firebase project ID (e.g., "lumina-12345")
-#define FIREBASE_PROJECT_ID "icrt6menwsv2d8all8oijs021b06s5"
+#define FIREBASE_PROJECT_ID "YOUR_PROJECT_ID"
 
 // Firebase Auth - The user ID whose commands this bridge will execute
 // This is the UID from Firebase Authentication for the home owner
-#define FIREBASE_USER_UID "Empwc9bfLKVBTe3VcaHIE1mZw5y1"
+#define FIREBASE_USER_UID "USER_UID_HERE"
 
 // Firebase Auth credentials for the bridge's own Firebase account.
 // The bridge signs in with these to get an ID token for authenticated
 // Firestore access. Create this account in Firebase Console > Authentication.
-#define FIREBASE_AUTH_EMAIL    "bridge@lumina.local"
-#define FIREBASE_AUTH_PASSWORD "bridge@lumina.local"
+#define FIREBASE_AUTH_EMAIL    "bridge@example.local"
+#define FIREBASE_AUTH_PASSWORD "PASSWORD_HERE"
 
 // ============================================================================
 // WiFi Configuration (optional - can use WiFiManager instead)
@@ -36,8 +36,8 @@
 // If you leave these empty, the bridge will start in AP mode
 // and let you configure WiFi via a web portal
 
-#define WIFI_SSID "Nexgen"
-#define WIFI_PASSWORD "Nexgen365"
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 // ============================================================================
 // Bridge Configuration

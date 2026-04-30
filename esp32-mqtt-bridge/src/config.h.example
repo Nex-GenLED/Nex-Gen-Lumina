@@ -1,7 +1,7 @@
-// Lumina ESP32 MQTT Bridge Configuration
+// Lumina ESP32 MQTT Bridge Configuration — TEMPLATE
 //
-// This file contains the configuration for the ESP32 MQTT bridge device.
-// Update these values with your HiveMQ Cloud credentials and WLED device info.
+// Copy this file to `config.h` (in the same directory) and fill in your
+// real values. `config.h` is git-ignored — never commit it.
 
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -12,15 +12,15 @@
 // Get these from your Lumina Backend .env file or HiveMQ Cloud console
 
 // HiveMQ Cloud broker hostname (without protocol)
-#define MQTT_BROKER "4429fe3219f64734b912d6bef5d6688b.s1.eu.hivemq.cloud"
+#define MQTT_BROKER "YOUR_HIVEMQ_BROKER_HOST"
 
 // HiveMQ Cloud TLS port
 #define MQTT_PORT 8883
 
 // MQTT credentials (from device provisioning or HiveMQ console)
 // You can use the same credentials as your Lumina Backend, or device-specific ones
-#define MQTT_USERNAME "NexGen"
-#define MQTT_PASSWORD "Grayson8817*"
+#define MQTT_USERNAME "YOUR_MQTT_USERNAME"
+#define MQTT_PASSWORD "YOUR_MQTT_PASSWORD"
 
 // ============================================================================
 // Device Configuration
@@ -28,10 +28,10 @@
 
 // The device ID from your Lumina Backend (from /api/devices/provision)
 // This determines which MQTT topics this bridge listens to
-#define DEVICE_ID "a55fbb4d-ecea-4c66-aaff-278985528588"
+#define DEVICE_ID "YOUR_DEVICE_ID"
 
 // Local IP address of your WLED controller (static IP)
-#define WLED_IP "192.168.50.200"
+#define WLED_IP "192.168.1.50"
 
 // WLED HTTP port (usually 80)
 #define WLED_PORT 80
@@ -42,9 +42,8 @@
 // If you leave these commented out, the bridge will start in AP mode
 // and let you configure WiFi via a web portal
 
-// WiFi credentials for "Nexgen" network (Router mode)
-#define WIFI_SSID "Nexgen"
-#define WIFI_PASSWORD "Nexgen365"
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 // ============================================================================
 // Static IP Configuration (optional - recommended to avoid IP conflicts)
@@ -52,12 +51,11 @@
 // Set a static IP for the bridge so it doesn't conflict with WLED
 // Make sure this IP is outside your router's DHCP range, or reserve it
 
-// Use static IP to avoid conflict with WLED (192.168.50.210)
-#define USE_STATIC_IP true
-#define STATIC_IP "192.168.50.100"       // Bridge gets .100, WLED keeps .210
-#define STATIC_GATEWAY "192.168.50.1"    // Nexgen network gateway
+#define USE_STATIC_IP false
+#define STATIC_IP "192.168.1.100"
+#define STATIC_GATEWAY "192.168.1.1"
 #define STATIC_SUBNET "255.255.255.0"
-#define STATIC_DNS "8.8.8.8"             // Google DNS
+#define STATIC_DNS "8.8.8.8"
 
 // ============================================================================
 // MQTT Topics

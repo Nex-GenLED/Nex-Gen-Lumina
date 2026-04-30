@@ -111,6 +111,12 @@ coverage/
 *firebase-adminsdk*.json
 **/key.properties
 
+# Bridge firmware secrets — config.h files contain real credentials.
+# Use config.h.example as the committed template.
+esp32-bridge/src/config.h
+esp32-mqtt-bridge/src/config.h
+firmware/lumina_bridge/config.h
+
 # One-off destructive admin scripts — never commit
 scripts/wipe_controllers.js
 
