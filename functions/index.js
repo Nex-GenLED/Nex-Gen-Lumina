@@ -26,6 +26,9 @@ exports.initiateSyncSession = initiateSyncSession;
 const { endSyncSession } = require("./lib/endSyncSession");
 exports.endSyncSession = endSyncSession;
 
+const { applySyncPattern } = require("./lib/applySyncPattern");
+exports.applySyncPattern = applySyncPattern;
+
 const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
 exports.triggerSyncFailover = triggerSyncFailover;
 

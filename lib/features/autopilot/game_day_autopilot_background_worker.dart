@@ -40,6 +40,12 @@ const _kPostGameCountdown = Duration(minutes: 30);
 /// How far ahead to look for upcoming games.
 const _kPreGameLeadTimeMinutes = 30;
 
+/// Cloud Functions base URL for the active Firebase project. Mirrors the
+/// constant in lib/features/neighborhood/services/sync_event_background_worker.dart.
+const String _functionsBaseUrl =
+    'https://us-central1-icrt6menwsv2d8all8oijs021b06s5'
+    '.cloudfunctions.net';
+
 class GameDayAutopilotBackgroundWorker {
   final EspnApiService _espnApi;
   final GameScheduleService _scheduleService;
@@ -49,8 +55,12 @@ class GameDayAutopilotBackgroundWorker {
   /// every mutation.
   final Map<String, BackgroundAutopilotSession> _sessions = {};
 
-  /// Controller IPs to push WLED payloads to. Updated externally via
-  /// updateControllerIps.
+  /// Controller IPs received from the UI isolate. No longer read directly
+  /// — fanout now goes through the applySyncPattern Cloud Function, which
+  /// resolves controllers from Firestore. Field retained because the
+  /// cross-isolate updateControllerIps API is still wired in
+  /// sports_background_service.dart.
+  // ignore: unused_field
   List<String> _controllerIps = const [];
 
   bool _disposed = false;
@@ -471,33 +481,40 @@ class GameDayAutopilotBackgroundWorker {
     };
   }
 
-  /// Apply a WLED payload to all known controllers via HTTP POST.
+  /// Dispatch a WLED payload to the user's controllers via the
+  /// applySyncPattern Cloud Function. Server-side fanout enqueues commands
+  /// in the bridge queue, so this works whether the user is on home WiFi
+  /// or remote — no direct HTTP to controller IPs.
   Future<void> _applyToControllers(Map<String, dynamic> payload) async {
-    if (_controllerIps.isEmpty) {
-      debugPrint('[GameDayBg] No controller IPs configured');
+    final hostUid = await loadGameDayUserUid();
+    if (hostUid == null) {
+      debugPrint('[GameDayBg] No user UID — cannot dispatch pattern');
       return;
     }
 
-    final body = jsonEncode(payload);
-    final futures = _controllerIps.map((ip) async {
-      final url = Uri.parse('http://$ip/json/state');
-      try {
-        final response = await http
-            .post(
-              url,
-              headers: {'Content-Type': 'application/json'},
-              body: body,
-            )
-            .timeout(const Duration(seconds: 5));
-        if (response.statusCode != 200) {
-          debugPrint(
-              '[GameDayBg] Controller $ip returned ${response.statusCode}');
-        }
-      } catch (e) {
-        debugPrint('[GameDayBg] Failed to POST to $ip: $e');
+    try {
+      final response = await http.post(
+        Uri.parse('$_functionsBaseUrl/applySyncPattern'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'data': {
+            'groupId': '',
+            'sessionId': '',
+            'payload': payload,
+            'initiatorUid': hostUid,
+            'source': 'game_day',
+          },
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        debugPrint(
+          '[GameDayBg] applySyncPattern failed: ${response.statusCode}',
+        );
       }
-    });
-    await Future.wait(futures);
+    } catch (e) {
+      debugPrint('[GameDayBg] applySyncPattern error: $e');
+    }
   }
 
   // ── Persistence ─────────────────────────────────────────────────────

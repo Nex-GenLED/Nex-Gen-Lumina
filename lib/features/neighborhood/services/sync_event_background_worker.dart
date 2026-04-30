@@ -9,7 +9,6 @@ import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
 import '../../sports_alerts/services/game_schedule_service.dart';
-import '../../wled/wled_service.dart';
 import 'season_schedule_reconciliation.dart';
 import 'sync_event_background_persistence.dart';
 
@@ -30,6 +29,10 @@ import 'sync_event_background_persistence.dart';
 //   6. Monitors active sessions for score celebrations (game day)
 //   7. Communicates session state back to the UI via service.invoke()
 // ═════════════════════════════════════════════════════════════════════════════
+
+const String _functionsBaseUrl =
+    'https://us-central1-icrt6menwsv2d8all8oijs021b06s5'
+    '.cloudfunctions.net';
 
 /// The core background worker for sync event monitoring.
 class SyncEventBackgroundWorker {
@@ -93,7 +96,11 @@ class SyncEventBackgroundWorker {
       debugPrint('[SyncBgWorker] Score alert matches active session team '
           '$teamSlug — firing neighborhood celebration');
 
-      await _fireCelebration(config);
+      await _fireCelebration(
+        config,
+        groupId: session.groupId,
+        sessionId: session.sessionId,
+      );
     } catch (e) {
       debugPrint('[SyncBgWorker] onScoreAlertEvent error: $e');
     }
@@ -433,11 +440,15 @@ class SyncEventBackgroundWorker {
 
       // Apply base pattern to local WLED controllers
       await _applyPatternToControllers(
-        effectId: config.baseEffectId,
-        colors: config.baseColors,
-        speed: config.baseSpeed,
-        intensity: config.baseIntensity,
-        brightness: config.baseBrightness,
+        _buildPatternPayload(
+          effectId: config.baseEffectId,
+          colors: config.baseColors,
+          speed: config.baseSpeed,
+          intensity: config.baseIntensity,
+          brightness: config.baseBrightness,
+        ),
+        groupId: groupId,
+        sessionId: sessionId,
       );
 
       // Notify UI isolate that a session started
@@ -476,7 +487,7 @@ class SyncEventBackgroundWorker {
       try {
         final response = await client.post(
           Uri.parse(
-            'https://us-central1-lumina-app.cloudfunctions.net/initiateSyncSession',
+            '$_functionsBaseUrl/initiateSyncSession',
           ),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
@@ -561,7 +572,11 @@ class SyncEventBackgroundWorker {
 
         if (delta > 0) {
           debugPrint('[SyncBgWorker] Score! +$delta — firing celebration');
-          await _fireCelebration(eventConfig);
+          await _fireCelebration(
+            eventConfig,
+            groupId: session.groupId,
+            sessionId: session.sessionId,
+          );
         }
       }
 
@@ -571,15 +586,23 @@ class SyncEventBackgroundWorker {
     }
   }
 
-  /// Fire a celebration pattern on local WLED controllers.
-  Future<void> _fireCelebration(BackgroundSyncEventConfig config) async {
+  /// Fire a celebration pattern via the bridge command queue.
+  Future<void> _fireCelebration(
+    BackgroundSyncEventConfig config, {
+    required String groupId,
+    required String sessionId,
+  }) async {
     // Apply celebration pattern
     await _applyPatternToControllers(
-      effectId: config.celebrationEffectId,
-      colors: config.celebrationColors,
-      speed: 220,
-      intensity: 255,
-      brightness: 255,
+      _buildPatternPayload(
+        effectId: config.celebrationEffectId,
+        colors: config.celebrationColors,
+        speed: 220,
+        intensity: 255,
+        brightness: 255,
+      ),
+      groupId: groupId,
+      sessionId: sessionId,
     );
 
     _service.invoke('syncCelebration', {
@@ -594,11 +617,15 @@ class SyncEventBackgroundWorker {
       Duration(seconds: config.celebrationDurationSeconds),
       () async {
         await _applyPatternToControllers(
-          effectId: config.baseEffectId,
-          colors: config.baseColors,
-          speed: config.baseSpeed,
-          intensity: config.baseIntensity,
-          brightness: config.baseBrightness,
+          _buildPatternPayload(
+            effectId: config.baseEffectId,
+            colors: config.baseColors,
+            speed: config.baseSpeed,
+            intensity: config.baseIntensity,
+            brightness: config.baseBrightness,
+          ),
+          groupId: groupId,
+          sessionId: sessionId,
         );
         _updateSyncNotification('Sync Active — ${config.name}');
       },
@@ -618,7 +645,7 @@ class SyncEventBackgroundWorker {
       try {
         await client.post(
           Uri.parse(
-            'https://us-central1-lumina-app.cloudfunctions.net/endSyncSession',
+            '$_functionsBaseUrl/endSyncSession',
           ),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
@@ -639,53 +666,83 @@ class SyncEventBackgroundWorker {
 
   // ── WLED Pattern Application ────────────────────────────────────────────
 
-  /// Apply a pattern to all configured WLED controllers.
-  Future<void> _applyPatternToControllers({
+  /// Build a WLED apply-payload from pattern fields. RGBW format with W=0
+  /// (Lumina relies on WLED's hardware gamma for white-channel mixing).
+  Map<String, dynamic> _buildPatternPayload({
     required int effectId,
     required List<int> colors,
     required int speed,
     required int intensity,
     required int brightness,
+  }) {
+    final colorSlots = <List<int>>[];
+    for (var i = 0; i < 3; i++) {
+      if (i < colors.length) {
+        final c = colors[i];
+        colorSlots.add([
+          (c >> 16) & 0xFF, // R
+          (c >> 8) & 0xFF, // G
+          c & 0xFF, // B
+          0, // W
+        ]);
+      } else {
+        colorSlots.add([0, 0, 0, 0]);
+      }
+    }
+    return {
+      'on': true,
+      'bri': brightness,
+      'seg': [
+        {
+          'id': 0,
+          'fx': effectId,
+          'sx': speed,
+          'ix': intensity,
+          'col': colorSlots,
+        },
+      ],
+    };
+  }
+
+  /// Dispatch a pre-built WLED payload to the host's controllers via the
+  /// applySyncPattern Cloud Function. Server-side fanout enqueues commands
+  /// in the bridge queue, so this works whether the host is on home WiFi
+  /// or remote — no direct HTTP to controller IPs.
+  Future<void> _applyPatternToControllers(
+    Map<String, dynamic> payload, {
+    required String groupId,
+    String? sessionId,
   }) async {
-    if (_controllerIps.isEmpty) {
-      _controllerIps = await loadSyncControllerIps();
+    final hostUid = await loadSyncUserUid();
+    if (hostUid == null) {
+      debugPrint('[SyncBgWorker] No host UID — cannot dispatch pattern');
+      return;
     }
 
-    for (final ip in _controllerIps) {
-      try {
-        final svc = WledService('http://$ip');
-        // Build WLED color array (RGBW format)
-        final colorSlots = <List<int>>[];
-        for (var i = 0; i < 3; i++) {
-          if (i < colors.length) {
-            final c = colors[i];
-            colorSlots.add([
-              (c >> 16) & 0xFF, // R
-              (c >> 8) & 0xFF, // G
-              c & 0xFF, // B
-              0, // W
-            ]);
-          } else {
-            colorSlots.add([0, 0, 0, 0]);
-          }
-        }
+    try {
+      final response = await http.post(
+        Uri.parse('$_functionsBaseUrl/applySyncPattern'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'data': {
+            'groupId': groupId,
+            'sessionId': sessionId ?? '',
+            'payload': payload,
+            'initiatorUid': hostUid,
+            'source': 'sync_fanout',
+          },
+        }),
+      ).timeout(const Duration(seconds: 10));
 
-        await svc.applyJson({
-          'on': true,
-          'bri': brightness,
-          'seg': [
-            {
-              'id': 0,
-              'fx': effectId,
-              'sx': speed,
-              'ix': intensity,
-              'col': colorSlots,
-            },
-          ],
-        });
-      } catch (e) {
-        debugPrint('[SyncBgWorker] WLED apply failed for $ip: $e');
+      if (response.statusCode == 200) {
+        debugPrint('[SyncBgWorker] applySyncPattern dispatched successfully');
+      } else {
+        debugPrint(
+          '[SyncBgWorker] applySyncPattern failed: ${response.statusCode}',
+        );
       }
+    } catch (e) {
+      debugPrint('[SyncBgWorker] applySyncPattern error: $e');
     }
   }
 
@@ -871,7 +928,7 @@ Future<void> _quickTrigger(
     try {
       final response = await client.post(
         Uri.parse(
-          'https://us-central1-lumina-app.cloudfunctions.net/initiateSyncSession',
+          '$_functionsBaseUrl/initiateSyncSession',
         ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -907,34 +964,53 @@ Future<void> _quickTrigger(
 }
 
 /// Quick score check during iOS background fetch.
+///
+/// Dispatches a base-pattern refresh through the applySyncPattern Cloud
+/// Function so it works whether the host is on home WiFi or cellular —
+/// the bridge command queue handles routing.
 Future<void> _quickScoreCheck(
   BackgroundSyncEventConfig config,
   GameState currentGame,
   BackgroundActiveSession session,
 ) async {
-  // We can't track deltas without persistent last-known state in quick mode,
-  // but we can apply the WLED pattern if we detect we're in a game.
-  // The full background worker handles proper score diffing.
-  // This is a best-effort pattern refresh for iOS.
-  final ips = await loadSyncControllerIps();
-  for (final ip in ips) {
-    try {
-      final svc = WledService('http://$ip');
-      await svc.applyJson({
-        'on': true,
-        'bri': config.baseBrightness,
-        'seg': [
-          {
-            'id': 0,
-            'fx': config.baseEffectId,
-            'sx': config.baseSpeed,
-            'ix': config.baseIntensity,
-          },
-        ],
-      });
-    } catch (e) {
-      debugPrint('Error in sync background worker applying WLED pattern to $ip: $e');
+  final hostUid = await loadSyncUserUid();
+  if (hostUid == null) return;
+
+  final payload = <String, dynamic>{
+    'on': true,
+    'bri': config.baseBrightness,
+    'seg': [
+      {
+        'id': 0,
+        'fx': config.baseEffectId,
+        'sx': config.baseSpeed,
+        'ix': config.baseIntensity,
+      },
+    ],
+  };
+
+  try {
+    final response = await http.post(
+      Uri.parse('$_functionsBaseUrl/applySyncPattern'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'data': {
+          'groupId': session.groupId,
+          'sessionId': session.sessionId,
+          'payload': payload,
+          'initiatorUid': hostUid,
+          'source': 'sync_fanout',
+        },
+      }),
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      debugPrint(
+        '[SyncBgQuick] applySyncPattern failed: ${response.statusCode}',
+      );
     }
+  } catch (e) {
+    debugPrint('[SyncBgQuick] applySyncPattern error: $e');
   }
 }
 
@@ -948,7 +1024,7 @@ Future<void> _quickEndSession(BackgroundActiveSession session) async {
     try {
       await client.post(
         Uri.parse(
-          'https://us-central1-lumina-app.cloudfunctions.net/endSyncSession',
+          '$_functionsBaseUrl/endSyncSession',
         ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
