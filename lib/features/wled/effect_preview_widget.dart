@@ -2,6 +2,66 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'wled_effects_catalog.dart';
 
+/// Documents the col[] slot roles for a given WLED effect.
+///
+/// The default `WledColorRoles()` maps primary→0, secondary→1, accent→2 —
+/// matching effects like Solid Pattern (fx 83) where col slots are equal.
+/// For effects whose roles diverge from this default (notably the Twinkle
+/// family, which puts the *background* in col[1] and the twinkle color in
+/// col[0]), an explicit entry in [kWledColorRoles] overrides the default.
+class WledColorRoles {
+  /// col[] index for the dominant/foreground/twinkle/moving-element color.
+  final int primary;
+
+  /// col[] index for the background color (when the effect has one).
+  /// Falls back to primary when null or out of range.
+  final int? background;
+
+  /// col[] index for the secondary accent (chases use this for trail tints,
+  /// solid pattern uses it as the second band, etc.).
+  final int? accent;
+
+  const WledColorRoles({this.primary = 0, this.background, this.accent});
+}
+
+/// Per-effect color-slot role overrides. Effects not listed use the default
+/// (primary=col[0], background=col[1], accent=col[2]).
+///
+/// The Twinkle family (fx 17, 18, 49, 51, 74, 80, 81, 87) was previously
+/// rendered with col[0] as background — inverted from WLED's actual
+/// behavior, which made flagship palettes like "Classic Christmas" look
+/// red-dominant in the card while the device rendered green-dominant.
+const Map<int, WledColorRoles> kWledColorRoles = {
+  // Solid Pattern — equal repeating bands of col[0..2]
+  83: WledColorRoles(primary: 0, background: 1, accent: 2),
+  // Twinkle family — col[1] is the strip background, col[0] is the spark
+  17: WledColorRoles(primary: 0, background: 1), // Twinkle
+  18: WledColorRoles(primary: 0, background: 1), // Dissolve
+  49: WledColorRoles(primary: 0, background: 1), // Fairy
+  51: WledColorRoles(primary: 0, background: 1), // Fairytwinkle
+  74: WledColorRoles(primary: 0, background: 1), // Colortwinkles
+  80: WledColorRoles(primary: 0, background: 1), // Twinklefox
+  81: WledColorRoles(primary: 0, background: 1), // Twinklecat
+  87: WledColorRoles(primary: 0, background: 1), // Glitter
+  // Chase family — col[0] moves on col[1] background; col[2] is accent tint
+  28: WledColorRoles(primary: 0, background: 1, accent: 2),
+  41: WledColorRoles(primary: 0, background: 1),
+  // Scanner — col[0] beam, col[1] background
+  13: WledColorRoles(primary: 0, background: 1),
+  40: WledColorRoles(primary: 0, background: 1),
+  // Strobe / Blink — col[0] on, col[1] off
+  1: WledColorRoles(primary: 0, background: 1),
+  23: WledColorRoles(primary: 0, background: 1),
+};
+
+/// Resolves the color at [role]'s slot index, falling back to [fallback]
+/// when the requested slot is out of range (e.g., a single-color pattern
+/// routed to a chase effect).
+Color _roleColor(List<Color> colors, int? slot, Color fallback) {
+  if (slot == null || slot < 0 || slot >= colors.length) return fallback;
+  return colors[slot];
+}
+
 /// Preview animation type derived from WLED effect category
 enum EffectPreviewType {
   solid,
@@ -107,6 +167,18 @@ class _EffectPreviewWidgetState extends State<EffectPreviewWidget>
       : primary.withValues(alpha: 0.6);
 
   Color get tertiary => widget.colors.length > 2 ? widget.colors[2] : secondary;
+
+  // ── Role-aware accessors (WLED-truth color slots) ──────────────────────────
+  // Painters that previously assumed col[0] was always the dominant on-screen
+  // color use these instead. For effects without an override in
+  // [kWledColorRoles] these resolve to the same values as primary/secondary/
+  // tertiary, so unrelated effects are unaffected.
+  WledColorRoles get _roles =>
+      kWledColorRoles[widget.effectId] ?? const WledColorRoles();
+  Color get primaryRole => _roleColor(widget.colors, _roles.primary, primary);
+  Color get backgroundRole =>
+      _roleColor(widget.colors, _roles.background, secondary);
+  Color get accentRole => _roleColor(widget.colors, _roles.accent, tertiary);
 
   @override
   void initState() {
@@ -226,13 +298,16 @@ class _EffectPreviewWidgetState extends State<EffectPreviewWidget>
           ),
         );
       case EffectPreviewType.chase:
+        // WLED chase: col[0] moves on a col[1] background. Pass primaryRole
+        // as the moving color and backgroundRole as the strip background so
+        // the painter no longer derives its bg from a dimmed primary.
         return _AnimatedPreview(
           animation: _controller,
-          painter: _ChasePainter(progress: 0, primary: primary, secondary: secondary),
+          painter: _ChasePainter(progress: 0, primary: primaryRole, secondary: backgroundRole),
           painterBuilder: (progress) => _ChasePainter(
             progress: progress,
-            primary: primary,
-            secondary: secondary,
+            primary: primaryRole,
+            secondary: backgroundRole,
           ),
         );
       case EffectPreviewType.scanner:
@@ -246,16 +321,24 @@ class _EffectPreviewWidgetState extends State<EffectPreviewWidget>
           ),
         );
       case EffectPreviewType.sparkle:
+        // WLED Twinkle/Sparkle family puts the *background* in col[1] and
+        // the spark color in col[0]. The painter takes (bgFill, dotA, dotB).
+        // For unmapped sparkle effects this falls through to col[1]/col[0]/
+        // col[2] which still matches WLED's convention.
         return _AnimatedPreview(
           animation: _controller,
-          painter: _SparklePainter(progress: 0, primary: primary, secondary: secondary, tertiary: tertiary),
+          painter: _SparklePainter(
+              progress: 0,
+              primary: backgroundRole,
+              secondary: primaryRole,
+              tertiary: accentRole),
           painterBuilder: (progress) => _SparklePainter(
             progress: progress,
-            primary: primary,
-            secondary: secondary,
-            tertiary: tertiary,
+            primary: backgroundRole,
+            secondary: primaryRole,
+            tertiary: accentRole,
           ),
-          background: primary.withValues(alpha: 0.5),
+          background: backgroundRole.withValues(alpha: 0.5),
         );
       case EffectPreviewType.meteor:
         return _AnimatedPreview(
@@ -498,7 +581,11 @@ class _WipePainter extends CustomPainter {
   bool shouldRepaint(_WipePainter old) => progress != old.progress;
 }
 
-/// Chase – small lit segments moving across a dim background
+/// Chase – small lit segments of [primary] moving across a [secondary]
+/// background. WLED's chase uses col[1] as a real background (not a dimmed
+/// col[0]), and all moving segments are col[0] — there is no second moving
+/// color. The painter mirrors that by using `secondary` for the strip fill
+/// and `primary` for every chase segment with a fade trail.
 class _ChasePainter extends CustomPainter {
   final double progress;
   final Color primary;
@@ -512,22 +599,22 @@ class _ChasePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Dim background
+    // Background = WLED col[1]. Slight transparency keeps it readable on
+    // the dark card without losing the actual color.
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..color = primary.withValues(alpha: 0.15),
+      Paint()..color = secondary.withValues(alpha: 0.55),
     );
 
     final segmentCount = 7;
     final segmentW = size.width / segmentCount;
-    // 3 lit segments chasing
+    // 3 lit primary segments chasing — all col[0], fading along the trail
     for (var i = 0; i < 3; i++) {
       final offset = (progress * segmentCount + i * 2.3) % segmentCount;
       final x = offset * segmentW;
-      final color = i == 0 ? primary : secondary;
       canvas.drawRect(
         Rect.fromLTWH(x, 0, segmentW * 0.6, size.height),
-        Paint()..color = color.withValues(alpha: 0.9 - (i * 0.2)),
+        Paint()..color = primary.withValues(alpha: 0.95 - (i * 0.25)),
       );
     }
   }
@@ -686,11 +773,22 @@ class _MeteorPainter extends CustomPainter {
   bool shouldRepaint(_MeteorPainter old) => progress != old.progress;
 }
 
-/// Fire – flickering warm gradient from bottom
+/// Fire – flickering warm gradient from bottom. WLED's fire effects
+/// (Fire 2012, Candle, Sunrise, Pacifica) are palette-driven and ignore
+/// the user's col entries entirely, so the preview uses a fixed warm
+/// palette regardless of the pattern's colors. Passing primary/secondary
+/// is retained for signature compatibility but not consumed.
 class _FirePainter extends CustomPainter {
   final double progress;
+  // ignore: unused_element_parameter
   final Color primary;
+  // ignore: unused_element_parameter
   final Color secondary;
+
+  // WLED fire palette: deep ember → orange → yellow → black
+  static const Color _ember = Color(0xFFB31200);
+  static const Color _orange = Color(0xFFFF6A00);
+  static const Color _yellow = Color(0xFFFFC328);
 
   _FirePainter({
     required this.progress,
@@ -707,15 +805,15 @@ class _FirePainter extends CustomPainter {
       begin: Alignment.bottomCenter,
       end: Alignment.topCenter,
       colors: [
-        primary.withValues(alpha: flicker),
-        secondary.withValues(alpha: flicker * 0.6),
+        _ember.withValues(alpha: flicker),
+        _orange.withValues(alpha: flicker * 0.85),
         Colors.black.withValues(alpha: 0.25),
       ],
       stops: const [0.0, 0.55, 1.0],
     );
     canvas.drawRect(rect, Paint()..shader = gradient.createShader(rect));
 
-    // Subtle flame tips
+    // Yellow flame tips for warmth
     final count = 4;
     final w = size.width / count;
     for (var i = 0; i < count; i++) {
@@ -728,7 +826,7 @@ class _FirePainter extends CustomPainter {
       canvas.drawPath(
         path,
         Paint()
-          ..color = primary.withValues(alpha: 0.45)
+          ..color = _yellow.withValues(alpha: 0.5)
           ..style = PaintingStyle.fill,
       );
     }

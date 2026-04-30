@@ -1189,15 +1189,34 @@ class _GlobalMoodChip extends StatelessWidget {
 }
 
 /// Individual pattern card with apply action
-class PatternCard extends ConsumerWidget {
+class PatternCard extends ConsumerStatefulWidget {
   final PatternItem pattern;
 
-  const PatternCard({required this.pattern});
+  const PatternCard({super.key, required this.pattern});
+
+  @override
+  ConsumerState<PatternCard> createState() => _PatternCardState();
+}
+
+class _PatternCardState extends ConsumerState<PatternCard> {
+  /// Indices into the original `_getColors()` list that the user has left
+  /// active. Default: every color active. State is local to this card —
+  /// never persisted, never mutates `widget.pattern.wledPayload`.
+  late Set<int> _activeColorIndices;
+
+  /// Block width for the WLED `grp` field at apply time. Range 1–10.
+  int _ledsPerColor = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeColorIndices = {for (var i = 0; i < _getColors().length; i++) i};
+  }
 
   /// Extract colors from wledPayload
   List<Color> _getColors() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1228,7 +1247,7 @@ class PatternCard extends ConsumerWidget {
   /// Extract effect ID from wledPayload
   int _getEffectId() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1245,7 +1264,7 @@ class PatternCard extends ConsumerWidget {
 
   /// Check if this pattern is a brightness gradient and extract its colors.
   List<Color>? _getGradientColors() {
-    final meta = pattern.wledPayload['_gradientMeta'];
+    final meta = widget.pattern.wledPayload['_gradientMeta'];
     if (meta is! Map || meta['isGradient'] != true) return null;
     // Gradient colors are stored in themeColors on the PatternItem's payload col
     // Reconstruct from the payload col (RGBW) back to display colors — or use
@@ -1255,7 +1274,7 @@ class PatternCard extends ConsumerWidget {
 
   int _getGradientBandWidth() {
     try {
-      final seg = pattern.wledPayload['seg'];
+      final seg = widget.pattern.wledPayload['seg'];
       if (seg is List && seg.isNotEmpty) {
         return (seg.first['grp'] as int?) ?? 1;
       }
@@ -1265,11 +1284,105 @@ class PatternCard extends ConsumerWidget {
     return 1;
   }
 
+  /// Build the active-color subset preserving the user's toggle order
+  /// (lowest index first). Always returns at least one color — single-color
+  /// patterns and any guard rails fall back to col[0].
+  List<Color> _activeColors(List<Color> all) {
+    if (all.isEmpty) return all;
+    final indices = _activeColorIndices.toList()..sort();
+    final filtered = [for (final i in indices) if (i < all.length) all[i]];
+    return filtered.isEmpty ? [all.first] : filtered;
+  }
+
+  /// Build the WLED payload that will actually be sent when the user taps
+  /// Apply. Substitutes fx=83 (Solid Pattern) when the original effect is
+  /// Solid (fx=0) and the user has more than one active color, so the
+  /// device renders the alternating bands the preview implies. For other
+  /// multi-color cases the original fx is kept and `grp`/`spc` are added so
+  /// WLED groups colors into bands of `_ledsPerColor`.
+  ///
+  /// Never mutates `rawPayload` — always returns a deep copy.
+  Map<String, dynamic> _preparePayload(
+    Map<String, dynamic> rawPayload,
+    List<Color> activeColors,
+    int ledsPerColor,
+  ) {
+    // Deep copy so the original PatternItem definition is never touched.
+    final payload = <String, dynamic>{
+      for (final entry in rawPayload.entries)
+        entry.key: _deepCopy(entry.value),
+    };
+
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return payload;
+
+    final s = Map<String, dynamic>.from(seg.first as Map);
+    final originalFx = s['fx'] as int? ?? 0;
+
+    // Build col[] from active colors only. Force W=0 — RGBW strips otherwise
+    // bleed white into saturated branded colors (red→pink, etc.).
+    final col = activeColors
+        .map<List<int>>((c) => [c.red, c.green, c.blue, 0])
+        .toList();
+    s['col'] = col;
+
+    if (activeColors.length > 1) {
+      if (originalFx == 0) {
+        // Solid + multiple colors → Solid Pattern with explicit band width.
+        s['fx'] = 83;
+      }
+      // For all other multi-color effects, keep the original fx but force
+      // grouping so the device honors the user's ledsPerColor choice.
+      s['grp'] = ledsPerColor;
+      s['spc'] = 0;
+    } else {
+      // Single active color: collapse to plain Solid regardless of original.
+      // A multi-color effect with one color produces undefined results on
+      // many WLED effects, so this keeps the apply behavior predictable.
+      s['fx'] = 0;
+      s['grp'] = 1;
+      s['spc'] = 0;
+    }
+
+    seg[0] = s;
+    payload['seg'] = seg;
+    return payload;
+  }
+
+  /// Recursive deep-copy for JSON-shaped maps/lists so `_preparePayload`
+  /// can never mutate `widget.pattern.wledPayload`.
+  Object? _deepCopy(Object? v) {
+    if (v is Map) {
+      return {for (final e in v.entries) e.key: _deepCopy(e.value)};
+    }
+    if (v is List) {
+      return [for (final item in v) _deepCopy(item)];
+    }
+    return v;
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colors = _getColors();
     final effectId = _getEffectId();
     final gradientColors = _getGradientColors();
+    final isGradient = gradientColors != null;
+
+    final activeColors = _activeColors(colors);
+    // Preview should reflect what apply will produce. When the user has
+    // 2+ active colors and the source effect is Solid, the apply path
+    // substitutes fx=83 — the only honest preview for that is equal
+    // repeating bands of `_ledsPerColor` width, which `_GradientDotPreview`
+    // renders directly.
+    final usePreparedBandPreview = !isGradient &&
+        activeColors.length >= 2 &&
+        effectId == 0;
+
+    final showColorToggles = !isGradient && colors.length >= 2;
+    // Per FIX 4 confirmation: stepper visible for every multi-color
+    // non-gradient card, since `_preparePayload` writes `grp` in all those
+    // cases anyway.
+    final showLedStepper = !isGradient && activeColors.length >= 2;
 
     return GestureDetector(
       onTap: () async {
@@ -1287,23 +1400,29 @@ class PatternCard extends ConsumerWidget {
             // Animated effect preview - more prominent for compact cards
             Expanded(
               flex: 3,
-              child: gradientColors != null
+              child: isGradient
                   ? _GradientDotPreview(
                       gradientColors: gradientColors,
                       bandWidth: _getGradientBandWidth(),
                       borderRadius: 10,
                     )
-                  : EffectPreviewWidget(
-                      effectId: effectId,
-                      colors: colors,
-                      borderRadius: 10,
-                    ),
+                  : usePreparedBandPreview
+                      ? _GradientDotPreview(
+                          gradientColors: activeColors,
+                          bandWidth: _ledsPerColor,
+                          borderRadius: 10,
+                        )
+                      : EffectPreviewWidget(
+                          effectId: effectId,
+                          colors: activeColors,
+                          borderRadius: 10,
+                        ),
             ),
             // Pattern info - compact for 4-column layout
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: Text(
-                pattern.name,
+                widget.pattern.name,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 9,
@@ -1314,9 +1433,110 @@ class PatternCard extends ConsumerWidget {
                 textAlign: TextAlign.center,
               ),
             ),
+            if (showColorToggles)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: _buildColorToggles(colors),
+              ),
+            if (showLedStepper)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _buildLedStepper(),
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildColorToggles(List<Color> colors) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (int i = 0; i < colors.length; i++)
+          GestureDetector(
+            // Absorb the tap so the parent card's onTap (apply) does not fire.
+            onTap: () => setState(() {
+              if (_activeColorIndices.contains(i)) {
+                // Don't allow deactivating all colors — keep at least one.
+                if (_activeColorIndices.length > 1) {
+                  _activeColorIndices.remove(i);
+                }
+              } else {
+                _activeColorIndices.add(i);
+              }
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _activeColorIndices.contains(i)
+                    ? colors[i]
+                    : NexGenPalette.gunmetal90,
+                border: Border.all(
+                  color: _activeColorIndices.contains(i)
+                      ? Colors.white.withValues(alpha: 0.4)
+                      : NexGenPalette.line,
+                  width: 1.2,
+                ),
+                boxShadow: _activeColorIndices.contains(i)
+                    ? [
+                        BoxShadow(
+                          color: colors[i].withValues(alpha: 0.5),
+                          blurRadius: 5,
+                        )
+                      ]
+                    : null,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLedStepper() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'LEDs/color:',
+          style: TextStyle(color: NexGenPalette.textMedium, fontSize: 9),
+        ),
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (_ledsPerColor > 1) _ledsPerColor--;
+          }),
+          child: Icon(
+            Icons.remove_circle_outline,
+            color: NexGenPalette.cyan,
+            size: 14,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '$_ledsPerColor',
+          style: TextStyle(
+            color: NexGenPalette.textHigh,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (_ledsPerColor < 10) _ledsPerColor++;
+          }),
+          child: Icon(
+            Icons.add_circle_outline,
+            color: NexGenPalette.cyan,
+            size: 14,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1337,20 +1557,31 @@ class PatternCard extends ConsumerWidget {
 
     try {
       // Extract effect ID and colors from payload to check for custom effects
-      final effectId = _getEffectId();
-      final colorsRgbw = _getColorsRgbw();
+      final originalFx = _getEffectId();
+      final allColors = _getColors();
+      final activeColors = _activeColors(allColors);
+      final colorsRgbw = activeColors
+          .map<List<int>>((c) => [c.red, c.green, c.blue, 0])
+          .toList();
 
-      // Check if this is a custom Lumina effect (ID >= 1000)
+      // Check if this is a custom Lumina effect (ID >= 1000). Custom effects
+      // bypass the fx-substitution path because they're rendered client-side.
       final isCustomEffect = await executeCustomEffectIfNeeded(
-        effectId: effectId,
+        effectId: originalFx,
         colors: colorsRgbw,
         repo: repo,
       );
 
+      // Build the prepared payload up front so both the apply call and the
+      // local-preview state agree on the same fx/grp/spc/col values.
+      final preparedPayload = _preparePayload(
+        widget.pattern.wledPayload,
+        activeColors,
+        _ledsPerColor,
+      );
+
       if (!isCustomEffect) {
-        // Standard WLED effect - apply the pattern's wledPayload directly
-        // Apply channel filter so only selected channels receive the pattern
-        var payload = pattern.wledPayload;
+        var payload = preparedPayload;
         final channels = ref.read(effectiveChannelIdsProvider);
         if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         final success = await repo.applyJson(payload);
@@ -1360,13 +1591,14 @@ class PatternCard extends ConsumerWidget {
         }
       }
 
-      // Extract per-segment fields from the payload once so spacing
-      // patterns (grp/spc) reach the local preview state and the home
-      // dashboard's roofline renders the correct on/off cadence.
-      final segList = pattern.wledPayload['seg'];
+      // Pull per-segment fields from the *prepared* payload (not the raw
+      // pattern definition) so the home dashboard roofline preview renders
+      // the same fx/grp/spc combination that the device received.
+      final segList = preparedPayload['seg'];
       final firstSeg = (segList is List && segList.isNotEmpty && segList.first is Map)
           ? (segList.first as Map)
           : const <dynamic, dynamic>{};
+      final appliedFx = (firstSeg['fx'] as int?) ?? originalFx;
       final patternSpeed = (firstSeg['sx'] as int?) ?? 128;
       final patternIntensity = (firstSeg['ix'] as int?) ?? 128;
       final patternGrp = (firstSeg['grp'] as int?) ?? 1;
@@ -1374,27 +1606,26 @@ class PatternCard extends ConsumerWidget {
 
       // Update preview immediately so home screen roofline matches device
       try {
-        final colors = _getColors();
         ref.read(wledStateProvider.notifier).applyLocalPreview(
-          colors: colors,
-          effectId: effectId,
+          colors: activeColors,
+          effectId: appliedFx,
           speed: patternSpeed,
           intensity: patternIntensity,
-          effectName: pattern.name,
+          effectName: widget.pattern.name,
           colorGroupSize: patternGrp,
           spacing: patternSpc,
         );
       } catch (e) {
         debugPrint('Error in pattern grid applyLocalPreview: $e');
       }
-      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
+      ref.read(activePresetLabelProvider.notifier).state = widget.pattern.name;
       // Update Explore page roofline preview
       ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-        colors: _getColors(),
-        effectId: effectId,
+        colors: activeColors,
+        effectId: appliedFx,
         speed: patternSpeed,
-        brightness: pattern.wledPayload['bri'] as int? ?? 255,
-        name: pattern.name,
+        brightness: preparedPayload['bri'] as int? ?? 255,
+        name: widget.pattern.name,
         colorGroupSize: patternGrp,
         spacing: patternSpc,
       );
@@ -1408,7 +1639,7 @@ class PatternCard extends ConsumerWidget {
         maybePromptLiveScoring(
           context: context,
           ref: ref,
-          patternId: pattern.id,
+          patternId: widget.pattern.id,
         );
 
         // Demo conversion nudge — once per session
@@ -1463,10 +1694,13 @@ class PatternCard extends ConsumerWidget {
     }
   }
 
-  /// Extract colors as RGBW arrays for custom effect execution
+  /// Extract colors as RGBW arrays for custom effect execution.
+  /// Currently unused — `_applyPattern` derives the active-color RGBW list
+  /// inline so toggles are honored. Kept for any external callers.
+  // ignore: unused_element
   List<List<int>> _getColorsRgbw() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1495,15 +1729,17 @@ class PatternCard extends ConsumerWidget {
   }
 
   void _showAdjustmentPanel(BuildContext context, WidgetRef ref) {
-    // Extract pattern values from wledPayload
-    final payload = pattern.wledPayload;
+    // Extract pattern values from wledPayload. Pass the *active* colors and
+    // user-chosen ledsPerColor so the adjustment sheet starts from the same
+    // state the device just received, not the raw catalog definition.
+    final payload = widget.pattern.wledPayload;
     final seg = payload['seg'];
     int effectId = 0;
     int speed = 128;
     int intensity = 128;
-    int grouping = 1;
+    int grouping = _ledsPerColor;
     int spacing = 0;
-    List<Color> colors = _getColors();
+    final activeColors = _activeColors(_getColors());
 
     if (seg is List && seg.isNotEmpty) {
       final firstSeg = seg.first;
@@ -1511,9 +1747,16 @@ class PatternCard extends ConsumerWidget {
         effectId = (firstSeg['fx'] as int?) ?? 0;
         speed = (firstSeg['sx'] as int?) ?? 128;
         intensity = (firstSeg['ix'] as int?) ?? 128;
-        // WLED uses 'grp' and 'spc', but check old keys 'gp'/'sp' as fallback
-        grouping = (firstSeg['grp'] as int?) ?? (firstSeg['gp'] as int?) ?? 1;
-        spacing = (firstSeg['spc'] as int?) ?? (firstSeg['sp'] as int?) ?? 0;
+        // The card-level ledsPerColor stepper takes precedence over any
+        // grp/spc in the catalog payload — those are the pre-toggle defaults.
+        if (activeColors.length < 2) {
+          grouping = (firstSeg['grp'] as int?) ?? (firstSeg['gp'] as int?) ?? 1;
+          spacing = (firstSeg['spc'] as int?) ?? (firstSeg['sp'] as int?) ?? 0;
+        }
+        // Reflect the fx-substitution that _preparePayload would apply.
+        if (effectId == 0 && activeColors.length >= 2) {
+          effectId = 83;
+        }
       }
     }
 
@@ -1525,13 +1768,13 @@ class PatternCard extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) => _PatternAdjustmentBottomSheet(
-        patternName: pattern.name,
+        patternName: widget.pattern.name,
         effectId: effectId,
         speed: speed,
         intensity: intensity,
         grouping: grouping,
         spacing: spacing,
-        colors: colors,
+        colors: activeColors,
         gradientMeta: gradientMeta,
       ),
     );
