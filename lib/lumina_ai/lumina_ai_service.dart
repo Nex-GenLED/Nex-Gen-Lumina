@@ -578,9 +578,14 @@ class LuminaAI {
 
         throw Exception('Claude returned empty content. Keys: ${data.keys.toList()}');
       } on FirebaseFunctionsException catch (e) {
-        debugPrint('$label Firebase error: ${e.code} - ${e.message}');
-        if (attempt >= 3) throw Exception('Lumina AI failed: ${e.message}');
-        await Future.delayed(Duration(milliseconds: 400 * attempt));
+        debugPrint('claudeProxy error: ${e.code} - ${e.message}');
+        // Retry transient errors, surface permanent ones immediately
+        if (e.code == 'internal' || e.code == 'unavailable') {
+          if (attempt >= 3) rethrow;
+          await Future.delayed(Duration(milliseconds: 400 * attempt));
+        } else {
+          rethrow; // resource-exhausted, unauthenticated, etc.
+        }
       } catch (e) {
         debugPrint('$label error (attempt $attempt): $e');
         if (attempt >= 3) rethrow;

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,6 +49,22 @@ class CloudAIProcessor {
       }
 
       return _parseAIResponse(aiResponse, text);
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('LuminaBrain.chat Firebase error: ${e.code} - ${e.message}');
+      final message = switch (e.code) {
+        'resource-exhausted' =>
+            'You\'ve reached the hourly AI limit. Try again in an hour.',
+        'unauthenticated' =>
+            'Please sign out and sign back in to use Lumina AI.',
+        'internal' =>
+            'Lumina AI is temporarily unavailable. Try again shortly.',
+        _ =>
+            'I\'m having trouble connecting right now. Check your connection and try again.',
+      };
+      return LuminaCommandResult(
+        responseText: message,
+        tier: ProcessingTier.cloud,
+      );
     } catch (e) {
       debugPrint('LuminaBrain.chat error type: ${e.runtimeType}');
       debugPrint('LuminaBrain.chat error detail: $e');
