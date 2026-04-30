@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/properties/property_models.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -769,7 +770,7 @@ class _LinkControllersSheet extends ConsumerWidget {
     final controllersAsync = ref.watch(controllersStreamProvider);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, navBarTotalHeight(context) + 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
