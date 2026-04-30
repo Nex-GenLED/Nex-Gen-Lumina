@@ -2726,6 +2726,13 @@ class _AutopilotGeneratingStateState
     if (_autoTriggered) return;
     final genState = ref.read(autopilotGenerationStateProvider);
     if (genState.status != AutopilotGenerationStatus.idle) return;
+
+    // Only auto-trigger if schedule is actually empty. Skipping when items
+    // already exist eliminates the duplicate-generation race where this
+    // force:true auto-trigger ran on top of a successful boot-time regen.
+    final schedules = ref.read(schedulesProvider);
+    if (schedules.isNotEmpty) return;
+
     _autoTriggered = true;
     // Defer past the current build frame so we don't mutate provider state
     // while widgets are still building.
