@@ -49,7 +49,8 @@ class CloudAIProcessor {
 
       return _parseAIResponse(aiResponse, text);
     } catch (e) {
-      debugPrint('CloudAIProcessor error: $e');
+      debugPrint('LuminaBrain.chat error type: ${e.runtimeType}');
+      debugPrint('LuminaBrain.chat error detail: $e');
       return LuminaCommandResult(
         responseText:
             "I'm having trouble connecting right now. Check your connection and try again.",
