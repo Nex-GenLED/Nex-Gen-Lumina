@@ -40,6 +40,26 @@ class LuminaCommandRouter {
     final stopwatch = Stopwatch()..start();
 
     // ------------------------------------------------------------------
+    // TIER 0 — Conversational short-circuit (no AI call, no quota)
+    //
+    // Catches "thanks!", "awesome", "hi lumina", etc. so they don't burn
+    // claudeProxy quota. Refinement mode skips this — those messages must
+    // reach the cloud to update the active pattern.
+    // ------------------------------------------------------------------
+    if (activePatternContext == null) {
+      if (_isConversationalAck(text)) {
+        stopwatch.stop();
+        debugPrint('💬 Tier 0 ack short-circuit [${stopwatch.elapsedMilliseconds}ms]');
+        return _buildAckResult();
+      }
+      if (_isGreeting(text)) {
+        stopwatch.stop();
+        debugPrint('💬 Tier 0 greeting short-circuit [${stopwatch.elapsedMilliseconds}ms]');
+        return _buildGreetingResult();
+      }
+    }
+
+    // ------------------------------------------------------------------
     // CLASSIFY — Determine intent (adjustment vs new scene) before routing
     // ------------------------------------------------------------------
     final classification = CommandIntentClassifier.classify(ref, text);
@@ -266,6 +286,124 @@ class LuminaCommandRouter {
       responseText:
           "I didn't quite catch that — try describing the lighting effect or color you have in mind.",
       clarificationOptions: suggestions,
+      tier: ProcessingTier.local,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tier 0 — Conversational short-circuit
+  // ---------------------------------------------------------------------------
+
+  // Single-word acknowledgements (matched whole-word, not substring, so 'ok'
+  // doesn't hit inside "look", "block", etc.).
+  static const _ackWords = <String>{
+    'thank', 'thanks', 'thx', 'ty',
+    'awesome', 'great', 'perfect', 'cool', 'nice', 'excellent',
+    'amazing', 'wonderful', 'sweet', 'rad', 'lit', 'fire',
+    'okay', 'ok', 'good', 'yes', 'yep', 'yeah', 'yup',
+  };
+
+  // Multi-word acknowledgements (matched as substrings on the punctuation-
+  // stripped lowercase message).
+  static const _ackPhrases = <String>[
+    'got it', 'love it', 'sounds good', 'thank you', 'thanks so much',
+    'appreciate it',
+  ];
+
+  // Filler words that may sit alongside ack words without disqualifying the
+  // message from being a pure acknowledgement.
+  static const _ackFillers = <String>{
+    'you', 'it', 'lumina', 'man', 'dude', 'so', 'much', 'a', 'lot', 'really',
+    'very', 'that', 'this', 'is',
+  };
+
+  // Greeting words (matched whole-word). All other words must be fillers.
+  static const _greetingWords = <String>{
+    'hi', 'hey', 'hello', 'yo', 'sup', 'howdy',
+  };
+
+  // Status-check phrases — short messages where the user is just probing
+  // whether Lumina is listening.
+  static const _statusPhrases = <String>[
+    'are you there', 'you there', 'lumina?', 'hello?', 'still there',
+    'you alive',
+  ];
+
+  static List<String> _tokens(String prompt) {
+    final stripped = prompt.toLowerCase().replaceAll(RegExp(r"[^\w\s']"), ' ');
+    return stripped
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+  }
+
+  static bool _isConversationalAck(String prompt) {
+    final lower = prompt.trim().toLowerCase();
+    if (lower.isEmpty) return false;
+
+    // Multi-word phrase match — short message containing a known phrase.
+    final words = _tokens(lower);
+    if (words.isEmpty || words.length > 6) return false;
+    for (final phrase in _ackPhrases) {
+      if (lower.contains(phrase)) return true;
+    }
+
+    // Whole-word match — every token must be either an ack word or filler,
+    // and at least one must be an ack word.
+    bool hasAck = false;
+    for (final word in words) {
+      if (_ackWords.contains(word)) {
+        hasAck = true;
+      } else if (!_ackFillers.contains(word)) {
+        return false;
+      }
+    }
+    return hasAck;
+  }
+
+  static bool _isGreeting(String prompt) {
+    final lower = prompt.trim().toLowerCase();
+    if (lower.isEmpty) return false;
+
+    final words = _tokens(lower);
+    if (words.isEmpty || words.length > 6) return false;
+
+    // Status probes ("are you there?", "lumina?")
+    for (final phrase in _statusPhrases) {
+      if (lower.contains(phrase)) return true;
+    }
+    if (words.length == 1 && words.first == 'lumina') return true;
+
+    // Whole-word greeting match — every token must be a greeting or filler.
+    bool hasGreeting = false;
+    for (final word in words) {
+      if (_greetingWords.contains(word)) {
+        hasGreeting = true;
+      } else if (!_ackFillers.contains(word)) {
+        return false;
+      }
+    }
+    return hasGreeting;
+  }
+
+  static const _ackResponses = <String>[
+    'Glad you like it! Let me know if you want to adjust anything.',
+    'Happy to help! Your lights are all set.',
+    'Anytime! Let me know when you want to change things up.',
+    'Of course! Enjoy the lighting.',
+  ];
+
+  static LuminaCommandResult _buildAckResult() {
+    final pick = DateTime.now().millisecond % _ackResponses.length;
+    return LuminaCommandResult(
+      responseText: _ackResponses[pick],
+      tier: ProcessingTier.local,
+    );
+  }
+
+  static LuminaCommandResult _buildGreetingResult() {
+    return const LuminaCommandResult(
+      responseText: 'Hey! What would you like to do with your lights?',
       tier: ProcessingTier.local,
     );
   }
