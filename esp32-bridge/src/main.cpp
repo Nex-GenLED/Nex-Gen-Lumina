@@ -389,10 +389,39 @@ void handleBridgePair() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// /api/bridge/auth — confirms the bridge is paired to the requesting UID.
+// Body: {"userId": "<firebase-uid>"}
+//   200 {"ok":true,"uid":...}    → match, this bridge is the caller's
+//   403 {"ok":false,"error":...}  → paired to a different account
+//   400 {"ok":false,"error":...}  → malformed body or missing userId
 void handleBridgeAuth() {
-  // Auth is handled internally from config.h credentials.
-  // This endpoint exists so the app's pairing flow can advance.
-  server.send(200, "application/json", "{\"ok\":true}");
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  String requestedUid = doc["userId"] | "";
+
+  if (requestedUid.isEmpty()) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"userId required\"}");
+    return;
+  }
+
+  if (pairedUserId != requestedUid) {
+    server.send(403, "application/json",
+        "{\"ok\":false,\"error\":\"bridge paired to different account\"}");
+    return;
+  }
+
+  server.send(200, "application/json",
+      "{\"ok\":true,\"uid\":\"" + pairedUserId + "\"}");
 }
 
 void handleReboot() {

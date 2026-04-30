@@ -193,18 +193,18 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
-    // Send auth credentials
-    final authed = await _client!.authenticate(
-      email: 'bridge@lumina.local',
-      password: 'bridge@lumina.local',
-    );
+    // Confirm the bridge stored our UID. The firmware returns 403 if the
+    // bridge is paired to a different account — surface that distinctly so
+    // the installer knows the bridge isn't theirs to claim.
+    final authed = await _client!.authenticate(userId: user.uid);
 
     if (!mounted) return;
 
     if (!authed) {
       setState(() {
         _pairing = false;
-        _pairError = 'Auth request failed. The bridge may need a firmware update.';
+        _pairError = 'Bridge did not confirm pairing to this account. '
+            'It may be paired to another user, or it may need a firmware update.';
       });
       return;
     }

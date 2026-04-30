@@ -146,20 +146,18 @@ class BridgeApiClient {
     }
   }
 
-  /// POST /api/bridge/auth — provide Firebase service account credentials.
-  Future<bool> authenticate({
-    required String email,
-    required String password,
-  }) async {
+  /// POST /api/bridge/auth — confirm this bridge is paired to [userId].
+  ///
+  /// Returns true when the bridge's stored UID matches. The bridge replies
+  /// 403 when the UID mismatches (paired to another account) and 400 when
+  /// the body is missing/malformed.
+  Future<bool> authenticate({required String userId}) async {
     try {
       final response = await http
           .post(
             Uri.parse('$baseUrl/api/bridge/auth'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': email,
-              'password': password,
-            }),
+            body: jsonEncode({'userId': userId}),
           )
           .timeout(_timeout);
       return response.statusCode == 200;
