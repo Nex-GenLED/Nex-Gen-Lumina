@@ -21,6 +21,7 @@
 #include <WiFiManager.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <Preferences.h>
 #include <time.h>
 
 #include "config.h"
@@ -31,6 +32,11 @@
 
 WiFiClientSecure secureClient;
 WebServer server(80);
+Preferences prefs;
+// True when setup() loaded a UID from NVS (i.e. bridge was paired by the app
+// at some point, not just running on compile-time defaults). Surfaced via
+// /api/info so the app can detect whether the bridge needs initial pairing.
+bool nvsUidFound = false;
 bool firebaseReady = false;
 unsigned long lastPollTime = 0;
 unsigned long lastBlinkTime = 0;
@@ -46,10 +52,11 @@ String firebaseRefreshToken = "";
 unsigned long tokenExpiresAt = 0;  // millis() when token expires
 bool firebaseAuthenticated = false;
 
-// Pairing state (persisted in config, but tracked at runtime too)
+// Pairing state — initial values come from compile-time config, then are
+// overwritten in setup() with NVS-saved values if a previous pair occurred.
 bool isPaired = false;
 String pairedUserId = FIREBASE_USER_UID;
-String pairedWledIp = "192.168.50.91";
+String pairedWledIp = DEFAULT_WLED_IP;
 
 // Device identity
 String deviceName = "Lumina-";
@@ -125,6 +132,32 @@ void setup() {
   isPaired = (strlen(FIREBASE_USER_UID) > 0);
 
   setupWiFi();
+
+  // Load NVS-saved pairing values, if any. These override the compile-time
+  // defaults so each customer install can be paired at deploy time without
+  // a custom firmware build per UID.
+  prefs.begin("bridge", false);
+  String savedUid = prefs.getString("uid", String(FIREBASE_USER_UID));
+  String savedIp = prefs.getString("wledIp", String(DEFAULT_WLED_IP));
+  // We consider the UID "from NVS" only when a value was actually stored
+  // (i.e. distinct from the compile-time default). isKey() is the precise
+  // check; getString-with-default can't distinguish the two cases.
+  nvsUidFound = prefs.isKey("uid");
+  prefs.end();
+
+  pairedUserId = savedUid;
+  pairedWledIp = savedIp;
+  isPaired = (pairedUserId.length() > 0);
+
+  if (nvsUidFound) {
+    Serial.println("[Bridge] Loaded UID from NVS: " + pairedUserId);
+    Serial.println("[Bridge] Loaded WLED IP from NVS: " + pairedWledIp);
+  } else {
+    Serial.println("[Bridge] No NVS data, using compile-time defaults");
+    Serial.println("[Bridge] UID: " + pairedUserId);
+    Serial.println("[Bridge] WLED IP: " + pairedWledIp);
+  }
+
   setupMDNS();
   setupWebServer();
   setupFirebase();
@@ -287,6 +320,10 @@ void handleApiInfo() {
   doc["mdns"] = deviceName + ".local";
   doc["ap"] = deviceName;
   doc["savedSSID"] = String(WIFI_SSID);
+  // "nvs" → bridge has been paired by the app and the UID was loaded from
+  // flash; "default" → no pairing on file, running on compile-time defaults.
+  // The setup wizard uses this to decide whether the bridge needs initial pairing.
+  doc["pairingSource"] = nvsUidFound ? "nvs" : "default";
 
   String body;
   serializeJson(doc, body);
@@ -337,10 +374,17 @@ void handleBridgePair() {
   }
   isPaired = true;
 
-  Serial.print("Paired with user: ");
-  Serial.println(pairedUserId);
-  Serial.print("WLED target: ");
-  Serial.println(pairedWledIp);
+  // Persist to NVS so the values survive reboots — without this every
+  // power cycle reverts to the compile-time FIREBASE_USER_UID macro.
+  prefs.begin("bridge", false);
+  prefs.putString("uid", pairedUserId);
+  prefs.putString("wledIp", pairedWledIp);
+  prefs.end();
+  nvsUidFound = true;
+
+  Serial.println("[Bridge] Paired and saved to NVS");
+  Serial.println("[Bridge] UID: " + pairedUserId);
+  Serial.println("[Bridge] WLED IP: " + pairedWledIp);
 
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -358,12 +402,17 @@ void handleReboot() {
 }
 
 void handleReset() {
-  isPaired = false;
-  pairedUserId = "";
-  pairedWledIp = "";
-  firebaseReady = false;
-  firebaseIdToken = "";
-  server.send(200, "application/json", "{\"ok\":true}");
+  // Clear all NVS-stored pairing so the bridge boots fresh on next start.
+  prefs.begin("bridge", false);
+  prefs.clear();
+  prefs.end();
+
+  Serial.println("[Bridge] Factory reset — NVS cleared, rebooting");
+
+  server.send(200, "application/json",
+              "{\"ok\":true,\"message\":\"Resetting...\"}");
+  delay(500);
+  ESP.restart();
 }
 
 void handleNotFound() {

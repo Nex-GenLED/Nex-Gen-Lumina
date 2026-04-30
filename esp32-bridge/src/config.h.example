@@ -40,6 +40,15 @@
 #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 // ============================================================================
+// Default WLED Target
+// ============================================================================
+// Compile-time fallback IP for the local WLED controller. Used only when
+// no NVS-saved pairing exists (i.e. fresh bridge, never paired via the app).
+// After the app calls /api/bridge/pair, the runtime value is loaded from NVS.
+
+#define DEFAULT_WLED_IP "192.168.1.100"
+
+// ============================================================================
 // Bridge Configuration
 // ============================================================================
 
