@@ -119,6 +119,37 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.login; // Block everything else for anonymous users
   }
 
+  // Forced password reset gate. The installer wizard sets
+  // `must_reset_password: true` on the customer's user doc when issuing a
+  // temp password during handoff. The customer must clear it before any
+  // other screen becomes reachable. This check runs before every other
+  // post-auth redirect (welcome, role, commercial mode) so it cannot be
+  // bypassed by deep-linking.
+  final isForcedResetRoute =
+      state.matchedLocation == AppRoutes.forcedPasswordReset;
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (userDoc.exists) {
+      final mustReset =
+          userDoc.data()?['must_reset_password'] as bool? ?? false;
+      if (mustReset && !isForcedResetRoute) {
+        return AppRoutes.forcedPasswordReset;
+      }
+      if (!mustReset && isForcedResetRoute) {
+        // Flag is already cleared — don't strand the user on the reset page.
+        return AppRoutes.dashboard;
+      }
+    } else if (isForcedResetRoute) {
+      // No user doc yet — nothing to reset, send them through normal flow.
+      return AppRoutes.dashboard;
+    }
+  } catch (e) {
+    debugPrint('Redirect: Error checking must_reset_password: $e');
+  }
+
   // If trying to access auth routes, redirect to dashboard (or link-account if unlinked)
   if (isAuthRoute) {
     // Check if user has installation access

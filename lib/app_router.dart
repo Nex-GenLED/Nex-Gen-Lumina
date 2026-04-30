@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/auth/login_page.dart';
 import 'package:nexgen_command/features/auth/signup_page.dart';
 import 'package:nexgen_command/features/auth/forgot_password_page.dart';
+import 'package:nexgen_command/features/auth/forced_password_reset_screen.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
 import 'package:nexgen_command/features/users/sub_users_screen.dart';
@@ -167,6 +168,13 @@ class AppRouter {
         name: 'forgot-password',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: ForgotPasswordPage()),
+      ),
+      GoRoute(
+        path: AppRoutes.forcedPasswordReset,
+        name: 'forced-password-reset',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const NoTransitionPage(child: ForcedPasswordResetScreen()),
       ),
       // ===== INSTALLATION ACCESS CONTROL (root navigator) =====
       GoRoute(
@@ -984,6 +992,7 @@ class AppRoutes {
   static const String login = '/';
   static const String signUp = '/signup';
   static const String forgotPassword = '/forgot-password';
+  static const String forcedPasswordReset = '/forced-password-reset';
   static const String discovery = '/discovery';
   static const String welcome = '/welcome';
   static const String dashboard = '/dashboard';
