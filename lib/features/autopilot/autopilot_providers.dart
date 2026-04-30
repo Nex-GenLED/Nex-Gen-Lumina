@@ -433,12 +433,33 @@ class AutopilotSettingsService {
               ))
           .toList();
 
-      // Add to user's schedules (merge with existing)
+      // Add to user's schedules (merge with existing). Pre-check: if every
+      // generated item already exists by content, skip the addAll entirely.
+      // This is a second line of defence against duplicate writes when two
+      // regen paths fire close together (boot-time regen vs the schedule
+      // page's force:true _maybeAutoTrigger). The data-layer dedup in
+      // SchedulesNotifier.addAll catches duplicates too, but skipping early
+      // avoids burning an AI generation worth of work writing nothing.
       final schedulesNotifier = _ref.read(schedulesProvider.notifier);
-      await schedulesNotifier.addAll(scheduleItems);
+      final currentSchedules = _ref.read(schedulesProvider);
+      bool alreadyPresent(ScheduleItem item) => currentSchedules.any((e) =>
+          e.timeLabel == item.timeLabel &&
+          e.offTimeLabel == item.offTimeLabel &&
+          e.repeatDays.join(',') == item.repeatDays.join(',') &&
+          e.actionLabel == item.actionLabel &&
+          e.enabled == item.enabled);
+      final allAlreadyPresent =
+          scheduleItems.isNotEmpty && scheduleItems.every(alreadyPresent);
+      if (allAlreadyPresent) {
+        debugPrint(
+            'AutopilotSettingsService: ${scheduleItems.length} generated items already present, skipping addAll');
+      } else {
+        await schedulesNotifier.addAll(scheduleItems);
+      }
 
       // Mark schedule as generated (also moves the next-refresh window
-      // forward to seven days from now).
+      // forward to seven days from now). Always run, even on the skip path,
+      // so the 7-day gate advances and we don't keep re-generating.
       await markScheduleGenerated();
 
       // Schedule the weekly brief notification

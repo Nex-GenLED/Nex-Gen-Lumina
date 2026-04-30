@@ -287,7 +287,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     _isMutating = false;
   }
 
-  /// Add multiple schedules at once (used by Autopilot)
+  /// Add multiple schedules at once (used by Autopilot).
+  ///
+  /// Dedups by id AND by content fingerprint (timeLabel, offTimeLabel,
+  /// repeatDays, actionLabel, enabled). Content-fingerprint dedup is the
+  /// load-bearing one for autopilot: AutopilotGenerationService stamps fresh
+  /// UUIDs on every regen, so id-only dedup lets duplicate items slip in
+  /// whenever two regen paths fire close together (e.g. boot-time
+  /// runAutopilotRegenIfNeeded racing with the schedule page's
+  /// _maybeAutoTrigger).
   Future<void> addAll(List<ScheduleItem> items) async {
     final userId = _userId;
     if (userId == null) {
@@ -297,22 +305,34 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     _isMutating = true;
 
-    // Store old state for revert
     final oldState = List<ScheduleItem>.from(state);
 
-    // Merge with existing, avoiding duplicates by ID
-    final existingIds = state.map((s) => s.id).toSet();
-    final newItems = items.where((i) => !existingIds.contains(i.id)).toList();
+    bool isDuplicate(ScheduleItem item) => state.any((e) =>
+        e.id == item.id ||
+        (e.timeLabel == item.timeLabel &&
+            e.offTimeLabel == item.offTimeLabel &&
+            e.repeatDays.join(',') == item.repeatDays.join(',') &&
+            e.actionLabel == item.actionLabel &&
+            e.enabled == item.enabled));
+    final newItems = items.where((i) => !isDuplicate(i)).toList();
+
+    if (newItems.isEmpty) {
+      debugPrint(
+          'SchedulesNotifier: addAll skipped — all ${items.length} items already present');
+      _isMutating = false;
+      return;
+    }
+
     final merged = [...state, ...newItems];
 
-    // Optimistically update local state
     state = merged;
 
-    // Persist to Firestore
-    final success = await _ref.read(userServiceProvider).saveSchedules(userId, merged);
+    final success =
+        await _ref.read(userServiceProvider).saveSchedules(userId, merged);
 
     if (success) {
-      debugPrint('Added ${newItems.length} new schedules, total: ${merged.length}');
+      debugPrint(
+          'Added ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
     } else {
       debugPrint('SchedulesNotifier: Failed to persist addAll — reverting');
       state = oldState;
