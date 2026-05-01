@@ -101,6 +101,22 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
+    // The firmware advertises type="bridge" in /api/info. Reject anything
+    // else — without this, a WLED controller (or any HTTP service) at the
+    // entered IP could slip through and end up persisted as the bridge IP.
+    if (info.type != 'bridge') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That IP responded but isn\'t a Lumina Bridge. '
+            'Make sure you\'re entering the bridge IP, not the controller IP.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     // Hijack protection: if this bridge is already paired to a different
     // Nex-Gen account, require explicit confirmation before continuing.
     // A null status (bridge unreachable for /status) is non-fatal — the
@@ -266,6 +282,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
+    debugPrint(
+        '[BridgeSetup] Pairing to bridge: $_bridgeIp, controller: $controllerIp');
+
     setState(() {
       _pairing = true;
       _pairError = null;
@@ -303,10 +322,17 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
-    // Save bridge IP to user profile
+    // Save bridge IP to user profile. Prefer the bridge's self-reported
+    // IP (from /api/info) over the IP the user typed/we connected to —
+    // the bridge knows its own IP definitively, which avoids drift if the
+    // wizard was reached via mDNS hostname or a stale DHCP lease.
+    final bridgeIpToPersist =
+        (_bridgeInfo != null && _bridgeInfo!.ip.isNotEmpty)
+            ? _bridgeInfo!.ip
+            : _bridgeIp;
     try {
       final userService = ref.read(userServiceProvider);
-      await userService.saveBridgeConfig(user.uid, bridgeIp: _bridgeIp);
+      await userService.saveBridgeConfig(user.uid, bridgeIp: bridgeIpToPersist);
     } catch (e) {
       debugPrint('Failed to save bridge config to Firestore: $e');
     }

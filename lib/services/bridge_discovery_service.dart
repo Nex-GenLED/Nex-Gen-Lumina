@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/bridge_api_client.dart';
 
 /// A Lumina Bridge discovered via mDNS.
 class BridgeEndpoint {
@@ -20,8 +21,12 @@ class BridgeEndpoint {
 
 /// Discovers Lumina Bridge devices on the local network via mDNS.
 ///
-/// Queries for `_lumina._tcp.local` service records, then falls back to
-/// direct hostname lookups for `lumina-*.local`.
+/// Only `_lumina._tcp.local` records are accepted, and each candidate
+/// is verified with an `/api/info` probe that must report
+/// `type == "bridge"`. Earlier loose fallbacks (`_http._tcp.local`
+/// substring filter and a `lumina.local` hostname lookup) were removed
+/// because they could match a WLED controller — leaking the controller's
+/// IP into the bridge IP slot.
 class BridgeDiscoveryService {
   static const _service = '_lumina._tcp.local';
 
@@ -38,13 +43,13 @@ class BridgeDiscoveryService {
       ];
     }
 
-    final List<BridgeEndpoint> results = [];
+    final List<BridgeEndpoint> candidates = [];
     final client = MDnsClient();
 
     try {
       await client.start();
 
-      // Query _lumina._tcp.local PTR → SRV → A records
+      // Query _lumina._tcp.local PTR → SRV → A records.
       await for (final ptr in client
           .lookup<PtrResourceRecord>(
               ResourceRecordQuery.serverPointer(_service))
@@ -53,50 +58,11 @@ class BridgeDiscoveryService {
             ResourceRecordQuery.service(ptr.domainName))) {
           await for (final ip in client.lookup<IPAddressResourceRecord>(
               ResourceRecordQuery.addressIPv4(srv.target))) {
-            results.add(BridgeEndpoint(
+            candidates.add(BridgeEndpoint(
               name: ptr.domainName,
               address: ip.address,
               port: srv.port,
             ));
-          }
-        }
-      }
-
-      // Also try _http._tcp.local and filter for lumina
-      if (results.isEmpty) {
-        await for (final ptr in client
-            .lookup<PtrResourceRecord>(
-                ResourceRecordQuery.serverPointer('_http._tcp.local'))
-            .timeout(const Duration(seconds: 4),
-                onTimeout: (sink) => sink.close())) {
-          if (ptr.domainName.toLowerCase().contains('lumina')) {
-            await for (final srv in client.lookup<SrvResourceRecord>(
-                ResourceRecordQuery.service(ptr.domainName))) {
-              await for (final ip in client.lookup<IPAddressResourceRecord>(
-                  ResourceRecordQuery.addressIPv4(srv.target))) {
-                results.add(BridgeEndpoint(
-                  name: ptr.domainName,
-                  address: ip.address,
-                  port: srv.port,
-                ));
-              }
-            }
-          }
-        }
-      }
-
-      // Fallback: direct hostname lookup
-      if (results.isEmpty) {
-        for (final host in const [
-          'lumina.local',
-        ]) {
-          try {
-            final ips = await InternetAddress.lookup(host);
-            for (final ip in ips) {
-              results.add(BridgeEndpoint(name: host, address: ip));
-            }
-          } catch (e) {
-            debugPrint('[BridgeDiscovery] Host lookup failed for $host: $e');
           }
         }
       }
@@ -110,17 +76,40 @@ class BridgeDiscoveryService {
       }
     }
 
-    // Deduplicate by IP
+    // Deduplicate candidates by IP before probing — avoids hitting the
+    // same device twice when SRV/A records double-resolve.
     final seen = <String>{};
     final deduped = <BridgeEndpoint>[];
-    for (final b in results) {
+    for (final b in candidates) {
       final key = b.address.address;
       if (!seen.contains(key)) {
         seen.add(key);
         deduped.add(b);
       }
     }
-    return deduped;
+
+    // Verify each candidate with /api/info. Only bridges whose firmware
+    // self-reports type=="bridge" are returned. Probes run in parallel
+    // so discovery latency is bounded by the single slowest probe, not
+    // the sum.
+    final verified = await Future.wait(deduped.map((b) async {
+      try {
+        final probe = BridgeApiClient.fromIp(b.address.address, port: b.port);
+        final info = await probe.getInfo();
+        if (info != null && info.type == 'bridge') {
+          return b;
+        }
+        debugPrint(
+            '[BridgeDiscovery] Rejected ${b.address.address}: not a bridge '
+            '(type="${info?.type ?? "?"}")');
+      } catch (e) {
+        debugPrint(
+            '[BridgeDiscovery] Probe failed for ${b.address.address}: $e');
+      }
+      return null;
+    }));
+
+    return verified.whereType<BridgeEndpoint>().toList();
   }
 }
 
