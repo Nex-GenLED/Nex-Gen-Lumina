@@ -119,6 +119,7 @@ firmware/lumina_bridge/config.h
 
 # One-off destructive admin scripts — never commit
 scripts/wipe_controllers.js
+scripts/fix_bridge_email.js
 
 # Claude Code temp files
 tmpclaude-*
