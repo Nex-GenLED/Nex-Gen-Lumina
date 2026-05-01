@@ -202,9 +202,12 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     final allIds = channels.map((c) => c.id).toSet();
 
     if (currentSelection == null) {
-      final newSet = Set<int>.from(allIds)..remove(channelId);
-      if (newSet.isEmpty) return;
-      ref.read(selectedChannelIdsProvider.notifier).state = newSet;
+      // From "All" mode, tapping a channel narrows the selection to JUST
+      // that channel. Previously this removed the tapped channel from a
+      // fresh all-set — which made the OTHER channels light up while the
+      // tapped one stayed off, the opposite of user intent. The "All"
+      // chip remains the way to return to unified control.
+      ref.read(selectedChannelIdsProvider.notifier).state = {channelId};
     } else if (currentSelection.contains(channelId)) {
       final newSet = Set<int>.from(currentSelection)..remove(channelId);
       if (newSet.isEmpty) return;

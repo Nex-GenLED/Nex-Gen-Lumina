@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -76,16 +77,18 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   // ─── Error surfacing ───────────────────────────────────────────
 
   /// Shows a persistent snackbar with a retry action when a schedule
-  /// write fails after all automatic retries.
-  void _showSaveError(String operation, VoidCallback retry) {
+  /// write fails after all automatic retries. Surfaces the underlying
+  /// Firestore error code (permission-denied, not-found, unavailable, …)
+  /// so installers can diagnose without checking logs.
+  void _showSaveError(String operation, Object error, VoidCallback retry) {
     final messenger = AppRouter.scaffoldMessengerKey.currentState;
     if (messenger == null) return;
 
+    final detail = _humanizeWriteError(error);
+
     messenger.showSnackBar(
       SnackBar(
-        content: const Text(
-          "Schedule couldn't be saved — check your connection and try again",
-        ),
+        content: Text("Schedule couldn't be saved — $detail"),
         duration: const Duration(seconds: 10),
         action: SnackBarAction(
           label: 'RETRY',
@@ -93,6 +96,33 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         ),
       ),
     );
+  }
+
+  /// Map a write exception to a short user-facing string. Preserves the
+  /// Firestore error code so it shows up in support reports, but with
+  /// plain-English context for the most common cases.
+  static String _humanizeWriteError(Object error) {
+    if (error is FirebaseException) {
+      switch (error.code) {
+        case 'permission-denied':
+          return 'permission denied. The account may be missing required '
+              'fields or the Firestore rules rejected the write '
+              '(${error.code}).';
+        case 'not-found':
+          return 'your account record was not found in the database '
+              '(${error.code}).';
+        case 'unavailable':
+          return 'the server is unreachable — check your connection '
+              '(${error.code}).';
+        case 'unauthenticated':
+          return 'your session expired — please sign out and back in '
+              '(${error.code}).';
+        default:
+          return 'Firestore error: ${error.code} ${error.message ?? ''}'
+              .trim();
+      }
+    }
+    return 'unexpected error: $error';
   }
 
   // ─── Conflict detection ─────────────────────────────────────────
@@ -137,16 +167,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         if (s.id == id) s.copyWith(enabled: value) else s,
     ];
 
-    // Persist to Firestore (returns false on failure after retries)
+    // Persist to Firestore — throws on failure after retries.
     final schedule = state.firstWhere((s) => s.id == id);
-    final success = await _ref.read(userServiceProvider).updateSchedule(userId, schedule);
-
-    if (success) {
+    try {
+      await _ref.read(userServiceProvider).updateSchedule(userId, schedule);
       debugPrint('Schedule $id toggled to $value and saved');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist toggle — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist toggle — reverting: $e');
       state = oldState;
-      _showSaveError('toggle', () => toggle(id, value));
+      _showSaveError('toggle', e, () => toggle(id, value));
     }
 
     _isMutating = false;
@@ -183,15 +212,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // Optimistically update local state
     state = [...state, item];
 
-    // Persist to Firestore
-    final success = await _ref.read(userServiceProvider).addSchedule(userId, item);
-
-    if (success) {
+    // Persist to Firestore — throws on failure after retries.
+    try {
+      await _ref.read(userServiceProvider).addSchedule(userId, item);
       debugPrint('Schedule added and saved: ${item.id}');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist add — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist add — reverting: $e');
       state = oldState;
-      _showSaveError('add', () => add(item));
+      _showSaveError('add', e, () => add(item));
     }
 
     _isMutating = false;
@@ -213,15 +241,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // Optimistically update local state
     state = state.where((s) => s.id != id).toList();
 
-    // Persist to Firestore
-    final success = await _ref.read(userServiceProvider).removeSchedule(userId, id);
-
-    if (success) {
+    // Persist to Firestore — throws on failure after retries.
+    try {
+      await _ref.read(userServiceProvider).removeSchedule(userId, id);
       debugPrint('Schedule removed and saved: $id');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist remove — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist remove — reverting: $e');
       state = oldState;
-      _showSaveError('remove', () => remove(id));
+      _showSaveError('remove', e, () => remove(id));
     }
 
     _isMutating = false;
@@ -243,15 +270,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // Optimistically update local state
     state = [for (final s in state) if (s.id == item.id) item else s];
 
-    // Persist to Firestore
-    final success = await _ref.read(userServiceProvider).updateSchedule(userId, item);
-
-    if (success) {
+    // Persist to Firestore — throws on failure after retries.
+    try {
+      await _ref.read(userServiceProvider).updateSchedule(userId, item);
       debugPrint('Schedule updated and saved: ${item.id}');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist update — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist update — reverting: $e');
       state = oldState;
-      _showSaveError('update', () => update(item));
+      _showSaveError('update', e, () => update(item));
     }
 
     _isMutating = false;
@@ -273,15 +299,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // Optimistically update local state
     state = schedules;
 
-    // Persist to Firestore
-    final success = await _ref.read(userServiceProvider).saveSchedules(userId, schedules);
-
-    if (success) {
+    // Persist to Firestore — throws on failure after retries.
+    try {
+      await _ref.read(userServiceProvider).saveSchedules(userId, schedules);
       debugPrint('All schedules replaced and saved: ${schedules.length} items');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist replaceAll — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist replaceAll — reverting: $e');
       state = oldState;
-      _showSaveError('replaceAll', () => replaceAll(schedules));
+      _showSaveError('replaceAll', e, () => replaceAll(schedules));
     }
 
     _isMutating = false;
@@ -339,16 +364,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     state = merged;
 
-    final success =
-        await _ref.read(userServiceProvider).saveSchedules(userId, merged);
-
-    if (success) {
+    // Persist to Firestore — throws on failure after retries.
+    try {
+      await _ref.read(userServiceProvider).saveSchedules(userId, merged);
       debugPrint(
           'Added ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
-    } else {
-      debugPrint('SchedulesNotifier: Failed to persist addAll — reverting');
+    } catch (e) {
+      debugPrint('SchedulesNotifier: Failed to persist addAll — reverting: $e');
       state = oldState;
-      _showSaveError('addAll', () => addAll(items));
+      _showSaveError('addAll', e, () => addAll(items));
     }
 
     _isMutating = false;

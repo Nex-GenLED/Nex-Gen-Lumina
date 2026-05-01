@@ -22,6 +22,7 @@ import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
+import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
@@ -3455,9 +3456,24 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
               // by modal sheets opened from the inner navigator, so the
               // last action button (Save/Delete) would otherwise sit
               // behind the dock when the sheet is fully expanded.
-              padding: EdgeInsets.fromLTRB(16, 16, 16, kBottomNavBarPadding + 16),
+              // Use navBarTotalHeight(context) so devices with a home
+              // indicator / gesture nav also clear their safe area —
+              // kBottomNavBarPadding alone misses the bottom inset.
+              padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
               children: [
                 Row(children: [
+                  // Close affordance — DraggableScrollableSheet at 92% height
+                  // makes drag-to-dismiss / tap-outside hard to discover, so
+                  // give the user an explicit way back to the schedule list.
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
+                  const SizedBox(width: 8),
                   Text(widget.editing == null ? 'New Schedule' : 'Edit Schedule', style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   CupertinoSwitch(value: _enabled, activeColor: NexGenPalette.cyan, onChanged: (v) => setState(() => _enabled = v)),
@@ -3948,12 +3964,30 @@ class _PatternPickerRow extends StatelessWidget {
   }
 }
 
-// Full-screen bottom sheet pattern picker
-class _PatternPickerSheet extends ConsumerWidget {
+// Full-screen bottom sheet pattern picker. Mirrors the Explore screen's
+// organization (categorized sections, search bar) so installers and users
+// see the same library here as on the Explore tab — without coupling this
+// picker to Explore's deep-link / apply-on-tap behavior.
+class _PatternPickerSheet extends ConsumerStatefulWidget {
   const _PatternPickerSheet();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PatternPickerSheet> createState() =>
+      _PatternPickerSheetState();
+}
+
+class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       child: BackdropFilter(
@@ -3970,9 +4004,44 @@ class _PatternPickerSheet extends ConsumerWidget {
                 IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded)),
               ]),
             ),
+            // Search bar — instant filter on the flattened library.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+                decoration: InputDecoration(
+                  hintText: 'Search patterns…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: NexGenPalette.matteBlack.withValues(alpha: 0.4),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: NexGenPalette.line),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: NexGenPalette.line),
+                  ),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
+                ),
+              ),
+            ),
             const Divider(height: 1),
             Expanded(
-              child: _AggregatedPatternGrid(onSelect: (sel) => Navigator.of(context).pop(sel)),
+              child: _AggregatedPatternGrid(
+                query: _query,
+                onSelect: (sel) => Navigator.of(context).pop(sel),
+              ),
             ),
           ]),
         ),
@@ -3981,65 +4050,186 @@ class _PatternPickerSheet extends ConsumerWidget {
   }
 }
 
-// Aggregated grid showing all predefined patterns (Architectural + Holidays + Sports)
+// Pattern grid with category sections (matches Explore organization) and
+// optional flat-filter mode driven by [query]. When [query] is empty,
+// renders three sections: Architectural Elegance, Holidays & Events,
+// Sports Teams. When non-empty, flattens and case-insensitive-filters by
+// pattern name + effect name.
 class _AggregatedPatternGrid extends ConsumerWidget {
   final ValueChanged<PatternSelection> onSelect;
-  const _AggregatedPatternGrid({required this.onSelect});
+  final String query;
+  const _AggregatedPatternGrid({required this.onSelect, this.query = ''});
+
+  bool _matches(GradientPattern p, String q) {
+    if (q.isEmpty) return true;
+    final name = p.name.toLowerCase();
+    final effect = (p.effectName ?? '').toLowerCase();
+    return name.contains(q) || effect.contains(q);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lib = ref.watch(publicPatternLibraryProvider);
-    final all = lib.all;
-    if (all.isEmpty) return const Center(child: Text('No patterns'));
-    return GridView.builder(
-      // Bottom padding clears the glass dock nav bar overlay so the
-      // last row of pattern tiles is reachable when this picker sheet
-      // is opened from the schedule editor.
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, kBottomNavBarPadding + 16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.9),
-      itemCount: all.length,
-      itemBuilder: (_, i) {
-        final p = all[i];
-        return InkWell(
-          onTap: () => onSelect(PatternSelection(id: p.name.toLowerCase().replaceAll(' ', '_'), name: p.name, imageUrl: '')),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            child: Stack(children: [
-              // Gradient preview background using the pattern's colors
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: p.colors),
+    if (lib.all.isEmpty) return const Center(child: Text('No patterns'));
+
+    // Bottom padding clears the glass dock nav bar overlay so the last row
+    // of pattern tiles is reachable when this picker sheet is opened from
+    // the schedule editor.
+    final bottomPad = navBarTotalHeight(context) + 16;
+    final gridDelegate = const SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: 3,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      childAspectRatio: 0.9,
+    );
+
+    // ── Search mode: flat grid of matches ────────────────────────────────
+    if (query.isNotEmpty) {
+      final results = lib.all.where((p) => _matches(p, query)).toList();
+      if (results.isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              'No patterns match "$query"',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: NexGenPalette.textMedium,
                   ),
-                ),
-              ),
-              // Readability overlay + border
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        NexGenPalette.matteBlack.withValues(alpha: 0.06),
-                        NexGenPalette.matteBlack.withValues(alpha: 0.60),
-                      ],
-                    ),
-                    border: Border.all(color: NexGenPalette.line),
-                  ),
-                ),
-              ),
-              Align(
-                alignment: Alignment.bottomLeft,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(p.name, style: Theme.of(context).textTheme.labelLarge),
-                ),
-              ),
-            ]),
+              textAlign: TextAlign.center,
+            ),
           ),
         );
-      },
+      }
+      return GridView.builder(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+        gridDelegate: gridDelegate,
+        itemCount: results.length,
+        itemBuilder: (_, i) => _PatternTile(
+          pattern: results[i],
+          onTap: () => onSelect(_selectionFor(results[i])),
+        ),
+      );
+    }
+
+    // ── Browse mode: category-organized sections ─────────────────────────
+    return CustomScrollView(
+      slivers: [
+        ..._categorySection(
+          context: context,
+          title: 'Architectural Elegance',
+          patterns: lib.architecturalElegant,
+          gridDelegate: gridDelegate,
+        ),
+        ..._categorySection(
+          context: context,
+          title: 'Holidays & Events',
+          patterns: lib.holidaysEvents,
+          gridDelegate: gridDelegate,
+        ),
+        ..._categorySection(
+          context: context,
+          title: 'Sports Teams',
+          patterns: lib.sportsTeams,
+          gridDelegate: gridDelegate,
+        ),
+        SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
+      ],
+    );
+  }
+
+  List<Widget> _categorySection({
+    required BuildContext context,
+    required String title,
+    required List<GradientPattern> patterns,
+    required SliverGridDelegate gridDelegate,
+  }) {
+    if (patterns.isEmpty) return const [];
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        sliver: SliverToBoxAdapter(
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: NexGenPalette.textHigh,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ),
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        sliver: SliverGrid(
+          gridDelegate: gridDelegate,
+          delegate: SliverChildBuilderDelegate(
+            (_, i) => _PatternTile(
+              pattern: patterns[i],
+              onTap: () => onSelect(_selectionFor(patterns[i])),
+            ),
+            childCount: patterns.length,
+          ),
+        ),
+      ),
+    ];
+  }
+
+  PatternSelection _selectionFor(GradientPattern p) => PatternSelection(
+        id: p.name.toLowerCase().replaceAll(' ', '_'),
+        name: p.name,
+        imageUrl: '',
+      );
+}
+
+/// Single pattern tile — gradient background + name overlay. Extracted so
+/// both the search-result grid and the category sections render identical
+/// tiles.
+class _PatternTile extends StatelessWidget {
+  final GradientPattern pattern;
+  final VoidCallback onTap;
+  const _PatternTile({required this.pattern, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Stack(children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: pattern.colors,
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    NexGenPalette.matteBlack.withValues(alpha: 0.06),
+                    NexGenPalette.matteBlack.withValues(alpha: 0.60),
+                  ],
+                ),
+                border: Border.all(color: NexGenPalette.line),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomLeft,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(pattern.name, style: Theme.of(context).textTheme.labelLarge),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }

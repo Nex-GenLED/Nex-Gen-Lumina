@@ -483,10 +483,12 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
                       ],
                     ),
                   ),
-                  // IP field
+                  // IP field. autofocus intentionally omitted — auto-popping
+                  // the keyboard before the AlertDialog finishes settling
+                  // pushed the field under the dialog's action row on
+                  // smaller screens. Installer taps the field to focus.
                   TextField(
                     controller: ipCtrl,
-                    autofocus: true,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
                     style: const TextStyle(color: Colors.white),

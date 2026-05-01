@@ -526,16 +526,25 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   }
 
   Future<void> _showLocationPermissionDialog() async {
+    // Platform-specific recovery instructions. iOS surfaces Location at the
+    // top of the app's settings page; Android buries it under Permissions,
+    // and a generic "go enable Location" hint sends installers hunting for
+    // a toggle that isn't visible until they drill in.
+    final navigationSteps = Platform.isIOS
+        ? 'Open Settings and choose "While Using the App" under Location.'
+        : 'Open Settings, tap Permissions → Location, then choose '
+            '"Allow only while using the app".';
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Location Permission Needed'),
-        content: const Text(
-          'iOS requires location permission to read your WiFi network name. '
-          'Lumina uses this to detect when you are on your home network so '
-          'it can connect directly to your lights instead of going through '
+        content: Text(
+          'Lumina needs location permission to read your WiFi network name. '
+          'It uses this to detect when you are on your home network so it '
+          'can connect directly to your lights instead of going through '
           'the cloud.\n\n'
-          'Open Settings and choose "While Using the App" under Location.',
+          '$navigationSteps',
         ),
         actions: [
           TextButton(

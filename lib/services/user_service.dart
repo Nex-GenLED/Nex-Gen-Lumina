@@ -646,28 +646,36 @@ class UserService {
   static const _retryDelays = [Duration(seconds: 2), Duration(seconds: 5)];
 
   /// Attempts a Firestore write with automatic retry on transient failure.
-  /// Returns true if the write eventually succeeded, false otherwise.
-  Future<bool> _writeWithRetry(Future<void> Function() writeOp) async {
-    // First attempt
+  /// Throws the LAST exception if all attempts fail — callers (and the
+  /// schedule notifier) need the real cause to show users a meaningful
+  /// error instead of a generic "check connection" snackbar.
+  Future<void> _writeWithRetry(Future<void> Function() writeOp) async {
+    Object? lastError;
+    StackTrace? lastStack;
+
     try {
       await writeOp();
-      return true;
+      return;
     } catch (e, stack) {
+      lastError = e;
+      lastStack = stack;
       debugPrint('❌ Schedule write failed (attempt 1): $e\n$stack');
     }
 
-    // Retry attempts
     for (int i = 0; i < _retryDelays.length; i++) {
       await Future.delayed(_retryDelays[i]);
       try {
         await writeOp();
         debugPrint('✅ Schedule write succeeded on retry ${i + 2}');
-        return true;
+        return;
       } catch (e, stack) {
+        lastError = e;
+        lastStack = stack;
         debugPrint('❌ Schedule write failed (attempt ${i + 2}): $e\n$stack');
       }
     }
-    return false;
+
+    Error.throwWithStackTrace(lastError!, lastStack!);
   }
 
   /// Verifies a schedule write reached the Firestore server by reading
@@ -702,9 +710,12 @@ class UserService {
   }
 
   /// Save all schedules for a user (replaces existing schedules).
-  /// Returns true if the write was confirmed on the server.
-  Future<bool> saveSchedules(String userId, List<ScheduleItem> schedules) async {
-    final success = await _writeWithRetry(() async {
+  /// Throws on persistent write failure — callers can inspect the
+  /// FirebaseException for permission-denied / not-found / unavailable.
+  /// Server-side verification is best-effort: a verification miss does
+  /// NOT mark the write as failed (the write itself succeeded).
+  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) async {
+    await _writeWithRetry(() async {
       await _firestore.collection('users').doc(userId).update(
         sanitizeForFirestore({
           'schedules': schedules.map((e) => e.toJson()).toList(),
@@ -713,25 +724,20 @@ class UserService {
       );
     });
 
-    if (!success) {
-      debugPrint('❌ saveSchedules failed after all retries');
-      return false;
-    }
-
-    // Verify the write reached the server
+    // Verification is informational only. We log a warning on mismatch but
+    // never fail the call — a stale/offline read shouldn't roll back a
+    // successful Firestore write in the caller's eyes.
     final verified = await verifyServerWrite(userId, schedules.length);
     if (!verified) {
       debugPrint('⚠️ saveSchedules: write accepted but server verification failed');
     } else {
       debugPrint('✅ Schedules saved and verified: ${schedules.length} items');
     }
-    return verified;
   }
 
-  /// Add a single schedule item.
-  /// Returns true if the write was confirmed on the server.
-  Future<bool> addSchedule(String userId, ScheduleItem schedule) async {
-    final success = await _writeWithRetry(() async {
+  /// Add a single schedule item. Throws on persistent write failure.
+  Future<void> addSchedule(String userId, ScheduleItem schedule) async {
+    await _writeWithRetry(() async {
       await _firestore.collection('users').doc(userId).update(
         sanitizeForFirestore({
           'schedules': FieldValue.arrayUnion([sanitizeForFirestore(schedule.toJson())]),
@@ -739,20 +745,13 @@ class UserService {
         }),
       );
     });
-
-    if (!success) {
-      debugPrint('❌ addSchedule failed after all retries');
-      return false;
-    }
     debugPrint('✅ Schedule added: ${schedule.id}');
-    return true;
   }
 
-  /// Remove a schedule item by ID.
-  /// Note: arrayRemove requires exact match, so we fetch and resave.
-  /// Returns true if the write was confirmed on the server.
-  Future<bool> removeSchedule(String userId, String scheduleId) async {
-    final success = await _writeWithRetry(() async {
+  /// Remove a schedule item by ID. Throws on persistent write failure.
+  /// arrayRemove requires exact match, so we fetch and resave.
+  Future<void> removeSchedule(String userId, String scheduleId) async {
+    await _writeWithRetry(() async {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (!doc.exists) return;
 
@@ -771,19 +770,12 @@ class UserService {
         }),
       );
     });
-
-    if (!success) {
-      debugPrint('❌ removeSchedule failed after all retries');
-      return false;
-    }
     debugPrint('✅ Schedule removed: $scheduleId');
-    return true;
   }
 
-  /// Update a single schedule item.
-  /// Returns true if the write was confirmed on the server.
-  Future<bool> updateSchedule(String userId, ScheduleItem schedule) async {
-    final success = await _writeWithRetry(() async {
+  /// Update a single schedule item. Throws on persistent write failure.
+  Future<void> updateSchedule(String userId, ScheduleItem schedule) async {
+    await _writeWithRetry(() async {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (!doc.exists) return;
 
@@ -802,13 +794,7 @@ class UserService {
         }),
       );
     });
-
-    if (!success) {
-      debugPrint('❌ updateSchedule failed after all retries');
-      return false;
-    }
     debugPrint('✅ Schedule updated: ${schedule.id}');
-    return true;
   }
 
   /// Stream user's schedules.
@@ -831,21 +817,21 @@ class UserService {
   /// Returns true if the write was confirmed on the server.
   Future<bool> saveCalendarEntries(
       String userId, Map<String, CalendarEntry> entries) async {
-    final success = await _writeWithRetry(() async {
-      final map = <String, dynamic>{};
-      for (final e in entries.entries) {
-        map[e.key] = sanitizeForFirestore(e.value.toJson());
-      }
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'calendar_entries': map,
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-
-    if (!success) {
-      debugPrint('❌ saveCalendarEntries failed after all retries');
+    try {
+      await _writeWithRetry(() async {
+        final map = <String, dynamic>{};
+        for (final e in entries.entries) {
+          map[e.key] = sanitizeForFirestore(e.value.toJson());
+        }
+        await _firestore.collection('users').doc(userId).update(
+          sanitizeForFirestore({
+            'calendar_entries': map,
+            'updated_at': FieldValue.serverTimestamp(),
+          }),
+        );
+      });
+    } catch (e) {
+      debugPrint('❌ saveCalendarEntries failed after all retries: $e');
       return false;
     }
     debugPrint('✅ Calendar entries saved: ${entries.length} items');

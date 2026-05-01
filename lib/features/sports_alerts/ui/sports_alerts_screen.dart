@@ -65,6 +65,7 @@ class SportsAlertsScreen extends ConsumerWidget {
           SliverPersistentHeader(
             pinned: true,
             delegate: _GlassAppBarDelegate(
+              topInset: MediaQuery.of(context).padding.top,
               child: GlassAppBar(
                 title: const Text('Sports Alerts'),
                 actions: [
@@ -1003,21 +1004,29 @@ class _InfoPill extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
-  _GlassAppBarDelegate({required this.child});
+  _GlassAppBarDelegate({required this.child, required this.topInset});
   final PreferredSizeWidget child;
 
+  /// Status-bar height for the current device. Hardcoding +24 was wrong for
+  /// notched / Dynamic Island iPhones (47–59 px) and gesture-nav Android,
+  /// which pushed the back arrow and title up under the status bar.
+  final double topInset;
+
   @override
-  double get minExtent => kToolbarHeight + 24; // toolbar + status bar approx
+  double get minExtent => child.preferredSize.height + topInset;
   @override
-  double get maxExtent => kToolbarHeight + 24;
+  double get maxExtent => child.preferredSize.height + topInset;
 
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
+    return Padding(
+      padding: EdgeInsets.only(top: topInset),
+      child: child,
+    );
   }
 
   @override
   bool shouldRebuild(covariant _GlassAppBarDelegate oldDelegate) =>
-      child != oldDelegate.child;
+      child != oldDelegate.child || topInset != oldDelegate.topInset;
 }
