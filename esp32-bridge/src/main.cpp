@@ -324,6 +324,10 @@ void handleApiInfo() {
   // flash; "default" → no pairing on file, running on compile-time defaults.
   // The setup wizard uses this to decide whether the bridge needs initial pairing.
   doc["pairingSource"] = nvsUidFound ? "nvs" : "default";
+  // Self-declare the Firebase Auth email this bridge signs in with. The
+  // wizard writes this into the user's bridge_email field so Firestore
+  // rules can grant the bridge read/write on the user's commands.
+  doc["bridgeEmail"] = String(FIREBASE_AUTH_EMAIL);
 
   String body;
   serializeJson(doc, body);

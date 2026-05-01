@@ -330,9 +330,29 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         (_bridgeInfo != null && _bridgeInfo!.ip.isNotEmpty)
             ? _bridgeInfo!.ip
             : _bridgeIp;
+
+    // Firestore rules grant the bridge access via bridge_email matching its
+    // Firebase Auth email. The bridge self-declares this in /api/info so the
+    // wizard never guesses. Older firmware that doesn't return bridgeEmail
+    // would silently get the wrong default and the bridge would be locked
+    // out of Firestore — fail explicitly instead.
+    final bridgeEmail = _bridgeInfo?.bridgeEmail ?? '';
+    if (bridgeEmail.isEmpty) {
+      setState(() {
+        _pairing = false;
+        _pairError = 'This bridge firmware is outdated. Please reflash '
+            'the bridge with the latest firmware and try again.';
+      });
+      return;
+    }
+
     try {
       final userService = ref.read(userServiceProvider);
-      await userService.saveBridgeConfig(user.uid, bridgeIp: bridgeIpToPersist);
+      await userService.saveBridgeConfig(
+        user.uid,
+        bridgeIp: bridgeIpToPersist,
+        bridgeEmail: bridgeEmail,
+      );
     } catch (e) {
       debugPrint('Failed to save bridge config to Firestore: $e');
     }

@@ -591,11 +591,12 @@ class UserService {
   /// Also auto-enables remote access.
   /// [bridgeEmail] is the Firebase email the bridge authenticates with —
   /// stored so Firestore rules can grant the bridge read/write access to
-  /// the user's `commands` and `bridge_status` subcollections.
+  /// the user's `commands` and `bridge_status` subcollections. Required
+  /// because a wrong default silently locks the bridge out of Firestore.
   Future<void> saveBridgeConfig(
     String userId, {
     required String bridgeIp,
-    String bridgeEmail = 'bridge@lumina.local',
+    required String bridgeEmail,
   }) async {
     try {
       await _firestore.collection('users').doc(userId).update(

@@ -12,6 +12,10 @@ class BridgeInfo {
   final String mdns;
   final String ap;
   final String savedSSID;
+  /// Firebase Auth email the bridge signs in with. Empty on firmware older
+  /// than the version that added this field — the wizard treats empty as
+  /// an explicit "outdated firmware" error rather than guessing a default.
+  final String bridgeEmail;
 
   const BridgeInfo({
     required this.name,
@@ -21,6 +25,7 @@ class BridgeInfo {
     required this.mdns,
     required this.ap,
     required this.savedSSID,
+    required this.bridgeEmail,
   });
 
   factory BridgeInfo.fromJson(Map<String, dynamic> json) => BridgeInfo(
@@ -31,6 +36,7 @@ class BridgeInfo {
         mdns: json['mdns'] as String? ?? '',
         ap: json['ap'] as String? ?? '',
         savedSSID: json['savedSSID'] as String? ?? '',
+        bridgeEmail: json['bridgeEmail'] as String? ?? '',
       );
 }
 
