@@ -121,6 +121,7 @@ firmware/lumina_bridge/config.h
 scripts/wipe_controllers.js
 scripts/fix_bridge_email.js
 scripts/cleanup_schedules.js
+scripts/enforce_schedule_limit.js
 
 # Claude Code temp files
 tmpclaude-*

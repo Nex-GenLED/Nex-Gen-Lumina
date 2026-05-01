@@ -323,7 +323,19 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return;
     }
 
-    final merged = [...state, ...newItems];
+    var merged = [...state, ...newItems];
+
+    // Hard cap at 50 schedules. Defends against runaway autopilot regen
+    // loops appending duplicates faster than dedup can catch them — keeps
+    // the user doc bounded so Firestore reads don't bloat. Trimming keeps
+    // the most recently appended entries (last in the array).
+    const maxSchedules = 50;
+    if (merged.length > maxSchedules) {
+      final removed = merged.length - maxSchedules;
+      merged = merged.skip(removed).toList();
+      debugPrint(
+          'Schedule cap enforced — trimmed $removed entries to stay at $maxSchedules');
+    }
 
     state = merged;
 

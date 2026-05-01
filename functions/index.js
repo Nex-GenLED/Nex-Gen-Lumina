@@ -56,6 +56,10 @@ exports.notifyReferrerOfApproval = notifyReferrerOfApproval;
 const { sendWeeklyBrief } = require("./lib/sendWeeklyBrief");
 exports.sendWeeklyBrief = sendWeeklyBrief;
 
+// Import TypeScript-compiled schedule-limit enforcer (Sunday 19:00 UTC)
+const { enforceScheduleLimits } = require("./lib/enforceScheduleLimits");
+exports.enforceScheduleLimits = enforceScheduleLimits;
+
 // ── Messaging ──────────────────────────────────────────────────────────────
 // SMS + email customer messaging pipeline. messaging-helpers.ts is a
 // shared support module imported by both functions below — it has no
