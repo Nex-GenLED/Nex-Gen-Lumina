@@ -59,9 +59,10 @@
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nex-Gen needs this to find your lights</string>
-    <!-- Location usage for geofence monitoring -->
+    <!-- Location usage: required by iOS to read WiFi SSID for home-network
+         detection, and to configure the Welcome Home geofence. -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>We use your location to configure the Welcome Home geofence.</string>
+    <string>Lumina uses your location to detect the WiFi network you are connected to (so it knows when you are on your home network) and to configure the Welcome Home geofence.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Always Allow enables reliable geofence triggers even when the app is closed.</string>
     <key>NSLocationAlwaysUsageDescription</key>

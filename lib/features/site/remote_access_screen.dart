@@ -474,22 +474,25 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   }
 
   Future<void> _detectHomeNetwork() async {
+    // Resolve location permission BEFORE flipping the loading state — iOS
+    // and Android both gate WiFi SSID reads behind location-when-in-use,
+    // and a permanently-denied user cannot recover from a snackbar.
+    var status = await Permission.locationWhenInUse.status;
+
+    // First time on this device: surface the system prompt.
+    if (status.isDenied) {
+      status = await Permission.locationWhenInUse.request();
+    }
+
+    if (!status.isGranted && !status.isLimited) {
+      if (!mounted) return;
+      await _showLocationPermissionDialog();
+      return;
+    }
+
     setState(() => _isDetectingNetwork = true);
 
     try {
-      // Android gates WiFi SSID reads behind location permission. iOS
-      // requires precise location + Local Network entitlement. Request
-      // location up front so getCurrentSsid() has a chance to succeed.
-      final status = await Permission.locationWhenInUse.request();
-      if (!status.isGranted) {
-        _showSnackBar(
-          'Location permission is required to detect your WiFi '
-          'network name. Please grant it in Settings.',
-          isError: true,
-        );
-        return;
-      }
-
       final connectivityService = ref.read(connectivityServiceProvider);
       final currentSsid = await connectivityService.getCurrentSsid();
 
@@ -520,6 +523,35 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
     } finally {
       if (mounted) setState(() => _isDetectingNetwork = false);
     }
+  }
+
+  Future<void> _showLocationPermissionDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Location Permission Needed'),
+        content: const Text(
+          'iOS requires location permission to read your WiFi network name. '
+          'Lumina uses this to detect when you are on your home network so '
+          'it can connect directly to your lights instead of going through '
+          'the cloud.\n\n'
+          'Open Settings and choose "While Using the App" under Location.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _toggleRemoteAccess(bool enabled) async {

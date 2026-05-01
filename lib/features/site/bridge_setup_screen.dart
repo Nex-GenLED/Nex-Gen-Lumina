@@ -146,9 +146,103 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     });
   }
 
-  void _useManualIp() {
-    final ip = _manualIpController.text.trim();
+  Future<void> _promptManualIp() async {
+    final ipCtrl = TextEditingController(text: _manualIpController.text);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          return AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            insetPadding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: 24 + bottomInset,
+            ),
+            title: const Text(
+              'Enter Bridge IP',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Type the bridge\'s IP address as shown in your router '
+                    'or on the bridge\'s status display.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: NexGenPalette.textMedium,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: ipCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: false,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      LengthLimitingTextInputFormatter(15),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: 'Bridge IP Address',
+                      hintText: '192.168.1.100',
+                      prefixIcon: const Icon(Icons.lan,
+                          color: NexGenPalette.textMedium),
+                      labelStyle:
+                          const TextStyle(color: NexGenPalette.textMedium),
+                      hintStyle: TextStyle(
+                        color:
+                            NexGenPalette.textMedium.withValues(alpha: 0.5),
+                      ),
+                      filled: true,
+                      fillColor: NexGenPalette.matteBlack,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onSubmitted: (_) => Navigator.pop(ctx, true),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: NexGenPalette.textMedium),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: NexGenPalette.cyan,
+                ),
+                child: const Text(
+                  'Connect',
+                  style: TextStyle(color: Colors.black),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final ip = ipCtrl.text.trim();
     if (ip.isEmpty) return;
+    _manualIpController.text = ip;
     _selectBridge(ip);
   }
 
@@ -481,7 +575,8 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
 
         const SizedBox(height: 16),
 
-        // Manual IP entry
+        // Manual IP entry — opens a dialog so the field stays above the
+        // bottom nav bar and the on-screen keyboard.
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -496,33 +591,19 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                         style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  'Already know the bridge address? Type it in directly.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _manualIpController,
-                        decoration: const InputDecoration(
-                          labelText: 'Bridge IP Address',
-                          hintText: '192.168.1.100',
-                          prefixIcon: Icon(Icons.lan),
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                          signed: false,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                          LengthLimitingTextInputFormatter(15),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton(
-                      onPressed: _useManualIp,
-                      child: const Text('Connect'),
-                    ),
-                  ],
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _promptManualIp,
+                    icon: const Icon(Icons.lan),
+                    label: const Text('Enter Bridge IP'),
+                  ),
                 ),
               ],
             ),
