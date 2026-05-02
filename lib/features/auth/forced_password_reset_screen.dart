@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -147,10 +148,10 @@ class _ForcedPasswordResetScreenState
                     const Icon(Icons.hub,
                         size: 60, color: NexGenPalette.cyan),
                     const SizedBox(height: 12),
-                    const Text(
+                    Text(
                       'LUMINA',
                       style: TextStyle(
-                        fontFamily: 'Exo2',
+                        fontFamily: GoogleFonts.exo2().fontFamily,
                         fontSize: 40,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -172,21 +173,21 @@ class _ForcedPasswordResetScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
+                            Text(
                               'Welcome to Lumina!',
                               style: TextStyle(
-                                fontFamily: 'Exo2',
+                                fontFamily: GoogleFonts.exo2().fontFamily,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.white,
                               ),
                             ),
                             const SizedBox(height: 8),
-                            const Text(
+                            Text(
                               'For your security, please set a new '
                               'password before continuing.',
                               style: TextStyle(
-                                fontFamily: 'DM Sans',
+                                fontFamily: GoogleFonts.dmSans().fontFamily,
                                 fontSize: 14,
                                 color: NexGenPalette.textMedium,
                                 height: 1.4,
@@ -241,8 +242,9 @@ class _ForcedPasswordResetScreenState
                                     Expanded(
                                       child: Text(
                                         _formError!,
-                                        style: const TextStyle(
-                                          fontFamily: 'DM Sans',
+                                        style: TextStyle(
+                                          fontFamily:
+                                              GoogleFonts.dmSans().fontFamily,
                                           color: Colors.redAccent,
                                           fontSize: 13,
                                         ),
@@ -277,10 +279,11 @@ class _ForcedPasswordResetScreenState
                                             strokeWidth: 2,
                                           ),
                                         )
-                                      : const Text(
+                                      : Text(
                                           'SET NEW PASSWORD',
                                           style: TextStyle(
-                                            fontFamily: 'Exo2',
+                                            fontFamily:
+                                                GoogleFonts.exo2().fontFamily,
                                             fontWeight: FontWeight.w800,
                                             color: Colors.black,
                                             letterSpacing: 1.2,
@@ -314,12 +317,13 @@ class _ForcedPasswordResetScreenState
       controller: controller,
       obscureText: obscure,
       enabled: !_submitting,
-      style: const TextStyle(color: Colors.white, fontFamily: 'DM Sans'),
+      style: TextStyle(
+          color: Colors.white, fontFamily: GoogleFonts.dmSans().fontFamily),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(
           color: Colors.white.withValues(alpha: 0.6),
-          fontFamily: 'DM Sans',
+          fontFamily: GoogleFonts.dmSans().fontFamily,
         ),
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.06),

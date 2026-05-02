@@ -247,23 +247,23 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
   textTheme: _buildPremiumTextTheme(),
 );
 
-/// Premium text theme: Montserrat for headings/labels, Inter for body
+/// Premium text theme: Exo 2 for headings/labels, DM Sans for body — brand spec
 TextTheme _buildPremiumTextTheme() => TextTheme(
-  displayLarge: GoogleFonts.montserrat(fontSize: FontSizes.displayLarge, fontWeight: FontWeight.w700, letterSpacing: -0.25, color: NexGenPalette.textHigh),
-  displayMedium: GoogleFonts.montserrat(fontSize: FontSizes.displayMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  displaySmall: GoogleFonts.montserrat(fontSize: FontSizes.displaySmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  headlineLarge: GoogleFonts.montserrat(fontSize: FontSizes.headlineLarge, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: NexGenPalette.textHigh),
-  headlineMedium: GoogleFonts.montserrat(fontSize: FontSizes.headlineMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  headlineSmall: GoogleFonts.montserrat(fontSize: FontSizes.headlineSmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  titleLarge: GoogleFonts.montserrat(fontSize: FontSizes.titleLarge, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  titleMedium: GoogleFonts.montserrat(fontSize: FontSizes.titleMedium, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  titleSmall: GoogleFonts.montserrat(fontSize: FontSizes.titleSmall, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  labelLarge: GoogleFonts.montserrat(fontSize: FontSizes.labelLarge, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: NexGenPalette.textHigh),
-  labelMedium: GoogleFonts.montserrat(fontSize: FontSizes.labelMedium, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
-  labelSmall: GoogleFonts.montserrat(fontSize: FontSizes.labelSmall, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
-  bodyLarge: GoogleFonts.inter(fontSize: FontSizes.bodyLarge, fontWeight: FontWeight.w400, letterSpacing: 0.15, color: NexGenPalette.textHigh),
-  bodyMedium: GoogleFonts.inter(fontSize: FontSizes.bodyMedium, fontWeight: FontWeight.w400, letterSpacing: 0.25, color: NexGenPalette.textMedium),
-  bodySmall: GoogleFonts.inter(fontSize: FontSizes.bodySmall, fontWeight: FontWeight.w400, letterSpacing: 0.4, color: NexGenPalette.textMedium),
+  displayLarge: GoogleFonts.exo2(fontSize: FontSizes.displayLarge, fontWeight: FontWeight.w700, letterSpacing: -0.25, color: NexGenPalette.textHigh),
+  displayMedium: GoogleFonts.exo2(fontSize: FontSizes.displayMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  displaySmall: GoogleFonts.exo2(fontSize: FontSizes.displaySmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  headlineLarge: GoogleFonts.exo2(fontSize: FontSizes.headlineLarge, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: NexGenPalette.textHigh),
+  headlineMedium: GoogleFonts.exo2(fontSize: FontSizes.headlineMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  headlineSmall: GoogleFonts.exo2(fontSize: FontSizes.headlineSmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  titleLarge: GoogleFonts.exo2(fontSize: FontSizes.titleLarge, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  titleMedium: GoogleFonts.exo2(fontSize: FontSizes.titleMedium, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  titleSmall: GoogleFonts.exo2(fontSize: FontSizes.titleSmall, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  labelLarge: GoogleFonts.exo2(fontSize: FontSizes.labelLarge, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: NexGenPalette.textHigh),
+  labelMedium: GoogleFonts.exo2(fontSize: FontSizes.labelMedium, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
+  labelSmall: GoogleFonts.exo2(fontSize: FontSizes.labelSmall, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
+  bodyLarge: GoogleFonts.dmSans(fontSize: FontSizes.bodyLarge, fontWeight: FontWeight.w400, letterSpacing: 0.15, color: NexGenPalette.textHigh),
+  bodyMedium: GoogleFonts.dmSans(fontSize: FontSizes.bodyMedium, fontWeight: FontWeight.w400, letterSpacing: 0.25, color: NexGenPalette.textMedium),
+  bodySmall: GoogleFonts.dmSans(fontSize: FontSizes.bodySmall, fontWeight: FontWeight.w400, letterSpacing: 0.4, color: NexGenPalette.textMedium),
 );
 
 // =============================================================================
