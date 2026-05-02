@@ -123,6 +123,7 @@ scripts/fix_bridge_email.js
 scripts/cleanup_schedules.js
 scripts/enforce_schedule_limit.js
 scripts/reset_all_bridge_records.js
+scripts/clear_bridge_data.js
 
 # Claude Code temp files
 tmpclaude-*
