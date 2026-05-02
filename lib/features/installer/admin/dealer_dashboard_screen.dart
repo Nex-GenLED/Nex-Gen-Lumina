@@ -239,6 +239,7 @@ class _OverviewTab extends ConsumerWidget {
     final installersAsync = ref.watch(dealerInstallersProvider(dealerCode));
     final pendingAsync = ref.watch(dealerPendingPayoutsProvider(dealerCode));
     final activityAsync = ref.watch(dealerRecentActivityProvider(dealerCode));
+    final revenueStats = ref.watch(dealerRevenueStatsProvider(dealerCode));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -247,6 +248,10 @@ class _OverviewTab extends ConsumerWidget {
         children: [
           // ── Stat cards (2×2) ──
           _buildStatCards(jobsAsync, installersAsync, pendingAsync),
+          const SizedBox(height: 16),
+
+          // ── Revenue stats ──
+          _buildRevenueRow(revenueStats),
           const SizedBox(height: 28),
 
           // ── Pipeline status bar ──
@@ -355,6 +360,53 @@ class _OverviewTab extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRevenueRow(DealerRevenueStats stats) {
+    String fmtMoney(double v) {
+      final raw = v.toStringAsFixed(0);
+      return '\$${raw.replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}';
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: _StatCard(
+            label: 'MTD Revenue',
+            value: fmtMoney(stats.mtdRevenue),
+            icon: Icons.trending_up,
+            color: NexGenPalette.gold,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _StatCard(
+            label: 'YTD Revenue',
+            value: fmtMoney(stats.ytdRevenue),
+            icon: Icons.calendar_today,
+            color: NexGenPalette.gold,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _StatCard(
+            label: 'Avg Ticket',
+            value: fmtMoney(stats.avgTicket),
+            icon: Icons.receipt_long,
+            color: NexGenPalette.cyan,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _StatCard(
+            label: 'Conversion',
+            value: '${(stats.conversionRate * 100).toStringAsFixed(0)}%',
+            icon: Icons.percent,
+            color: NexGenPalette.green,
+          ),
         ),
       ],
     );

@@ -9,6 +9,10 @@ import 'package:nexgen_command/features/sales/models/sales_models.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Jobs for a specific dealer, ordered by most recently updated.
+///
+/// Hard-capped at 50 — drives the visible Jobs tab list. Use
+/// [dealerJobsAllProvider] for revenue/conversion stats so the cap doesn't
+/// silently truncate aggregates as a dealer's job count grows.
 final dealerJobsProvider =
     StreamProvider.family<List<SalesJob>, String>((ref, dealerCode) {
   return FirebaseFirestore.instance
@@ -19,6 +23,80 @@ final dealerJobsProvider =
       .snapshots()
       .map((snap) =>
           snap.docs.map((doc) => SalesJob.fromJson(doc.data())).toList());
+});
+
+/// Unbounded stream of every job for the dealer — used only for the
+/// stats row (MTD/YTD revenue, avg ticket, conversion). Does NOT feed any
+/// list UI — the visible list still pulls from [dealerJobsProvider].
+final dealerJobsAllProvider =
+    StreamProvider.family<List<SalesJob>, String>((ref, dealerCode) {
+  return FirebaseFirestore.instance
+      .collection('sales_jobs')
+      .where('dealerCode', isEqualTo: dealerCode)
+      .snapshots()
+      .map((snap) =>
+          snap.docs.map((doc) => SalesJob.fromJson(doc.data())).toList());
+});
+
+// ─── Revenue + conversion stats ─────────────────────────────────────────────
+
+class DealerRevenueStats {
+  final double mtdRevenue;
+  final double ytdRevenue;
+  final double avgTicket;
+  /// 0.0 — 1.0 fraction of jobs that reached installComplete.
+  final double conversionRate;
+
+  const DealerRevenueStats({
+    required this.mtdRevenue,
+    required this.ytdRevenue,
+    required this.avgTicket,
+    required this.conversionRate,
+  });
+
+  static const empty = DealerRevenueStats(
+    mtdRevenue: 0,
+    ytdRevenue: 0,
+    avgTicket: 0,
+    conversionRate: 0,
+  );
+}
+
+final dealerRevenueStatsProvider =
+    Provider.family<DealerRevenueStats, String>((ref, dealerCode) {
+  final jobs = ref.watch(dealerJobsAllProvider(dealerCode)).valueOrNull;
+  if (jobs == null || jobs.isEmpty) return DealerRevenueStats.empty;
+
+  final now = DateTime.now();
+  final mtdStart = DateTime(now.year, now.month, 1);
+  final ytdStart = DateTime(now.year, 1, 1);
+
+  double mtd = 0;
+  double ytd = 0;
+  int completedTotal = 0;
+  double completedRevenueTotal = 0;
+
+  for (final j in jobs) {
+    if (j.status == SalesJobStatus.installComplete) {
+      completedTotal++;
+      completedRevenueTotal += j.totalPriceUsd;
+      // Use updatedAt as the completion proxy — installComplete is set on
+      // the same write that bumps updatedAt.
+      if (!j.updatedAt.isBefore(mtdStart)) mtd += j.totalPriceUsd;
+      if (!j.updatedAt.isBefore(ytdStart)) ytd += j.totalPriceUsd;
+    }
+  }
+
+  final avgTicket =
+      completedTotal == 0 ? 0.0 : completedRevenueTotal / completedTotal;
+  final conversion = jobs.isEmpty ? 0.0 : completedTotal / jobs.length;
+
+  return DealerRevenueStats(
+    mtdRevenue: mtd,
+    ytdRevenue: ytd,
+    avgTicket: avgTicket,
+    conversionRate: conversion,
+  );
 });
 
 /// Jobs grouped by status for the pipeline view.

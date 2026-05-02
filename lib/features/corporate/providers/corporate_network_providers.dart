@@ -120,12 +120,19 @@ class DealerNetworkSummary {
   final int jobsThisMonth;
   final int activeJobsCount;
   final DateTime? lastJobCreatedAt;
+  final double mtdRevenue;
+  /// Composite health score in [0.0, 1.0] — average of activity recency
+  /// and revenue progress against a $10k/month target. Drives the
+  /// red/amber/green dot on each dealer card in the Corporate Network tab.
+  final double healthScore;
 
   const DealerNetworkSummary({
     required this.dealer,
     required this.jobsThisMonth,
     required this.activeJobsCount,
     required this.lastJobCreatedAt,
+    this.mtdRevenue = 0,
+    this.healthScore = 0,
   });
 
   /// Health classification based on most recent job activity.
@@ -138,6 +145,11 @@ class DealerNetworkSummary {
     return DealerHealth.stalled;
   }
 }
+
+/// Default monthly revenue target used by the dealer health composite.
+/// Tweaking this only changes the color band — the underlying revenue is
+/// still surfaced verbatim alongside the score.
+const double _kDealerMtdRevenueTarget = 10000.0;
 
 enum DealerHealth { active, quiet, stalled }
 
@@ -192,11 +204,34 @@ final corporateDealerSummariesProvider =
       }
     }
 
+    // MTD revenue — installs completed this month.
+    final mtdRevenue = list
+        .where((j) =>
+            j.status == SalesJobStatus.installComplete &&
+            !j.updatedAt.isBefore(monthStart) &&
+            j.updatedAt.isBefore(nextMonthStart))
+        .fold<double>(0, (acc, j) => acc + j.totalPriceUsd);
+
+    // Composite health score: activity recency × revenue-vs-target.
+    final daysSinceLast = mostRecent == null
+        ? 9999
+        : DateTime.now().difference(mostRecent).inDays;
+    final activityScore = daysSinceLast <= 7
+        ? 1.0
+        : daysSinceLast <= 30
+            ? 0.5
+            : 0.0;
+    final revenueScore =
+        (mtdRevenue / _kDealerMtdRevenueTarget).clamp(0.0, 1.0);
+    final healthScore = (activityScore + revenueScore) / 2;
+
     return DealerNetworkSummary(
       dealer: dealer,
       jobsThisMonth: monthly.length,
       activeJobsCount: active.length,
       lastJobCreatedAt: mostRecent,
+      mtdRevenue: mtdRevenue,
+      healthScore: healthScore,
     );
   }).toList();
 
