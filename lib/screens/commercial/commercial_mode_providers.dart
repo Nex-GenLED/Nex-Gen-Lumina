@@ -31,6 +31,12 @@ final commercialModeEnabledProvider = FutureProvider<bool>((ref) async {
     if (!userDoc.exists) return false;
 
     final data = userDoc.data()!;
+
+    // Firestore-side override (synced from setCommercialModeOverride on
+    // another device). Honoured even when profile_type hasn't been set yet.
+    final remoteOverride = data['commercial_mode_override'];
+    if (remoteOverride is bool) return remoteOverride;
+
     final profileType = data['profile_type'] as String?;
     if (profileType != 'commercial') return false;
 
@@ -164,15 +170,41 @@ final primaryCommercialLocationProvider =
 // Mode Switching
 // =============================================================================
 
-/// Switch between commercial and residential mode. Persists to local prefs
-/// only — does not modify Firestore profile data.
+/// Switch between commercial and residential mode. Persists locally AND to
+/// Firestore so the choice follows the user across devices/sessions.
+///
+/// Local prefs are written first so the next launch reads the new mode even
+/// if the Firestore write fails (offline, transient permission issue). The
+/// Firestore mirror is best-effort — failures are logged but not surfaced.
 Future<void> setCommercialModeOverride(bool commercial) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool(_commercialModeOverrideKey, commercial);
+
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'commercial_mode_override': commercial,
+    }, SetOptions(merge: true));
+  } catch (_) {
+    // Local write already succeeded — silently tolerate Firestore failure.
+  }
 }
 
 /// Clear the local mode override so the app uses the Firestore profile value.
+/// Also clears the Firestore mirror so the residential default applies on
+/// other devices.
 Future<void> clearModeOverride() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove(_commercialModeOverrideKey);
+
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'commercial_mode_override': FieldValue.delete(),
+    }, SetOptions(merge: true));
+  } catch (_) {
+    // Local clear already succeeded — silently tolerate Firestore failure.
+  }
 }

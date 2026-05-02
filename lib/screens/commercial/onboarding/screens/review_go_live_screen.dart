@@ -1,8 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/models/commercial/business_hours.dart';
 import 'package:nexgen_command/models/commercial/channel_role.dart';
+import 'package:nexgen_command/screens/commercial/commercial_mode_providers.dart';
 import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_state.dart';
 
 class ReviewGoLiveScreen extends ConsumerStatefulWidget {
@@ -18,25 +23,126 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
   bool _isActivating = false;
 
   Future<void> _goLive() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be signed in to activate Commercial Mode'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isActivating = true);
+    final draft = ref.read(commercialOnboardingProvider);
 
-    // Simulate Firestore batch commit.
-    await Future<void>.delayed(const Duration(seconds: 2));
+    try {
+      final uid = user.uid;
+      final userRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
+      final firestore = FirebaseFirestore.instance;
 
-    if (!mounted) return;
-    setState(() => _isActivating = false);
+      // Build a structured commercial_profile map from the wizard draft.
+      // Stored on the user doc so the residential→commercial mode switcher
+      // and commercialOrgProvider can read settings without re-fetching the
+      // whole locations subcollection.
+      final commercialProfile = <String, dynamic>{
+        'business_type': draft.businessType,
+        'business_name': draft.businessName,
+        'primary_address': draft.primaryAddress,
+        'brand_colors':
+            draft.brandColors.map((c) => c.toJson()).toList(),
+        'apply_brand_to_defaults': draft.applyBrandToDefaults,
+        'weekly_schedule': draft.weeklySchedule
+            .map((day, sched) => MapEntry(day.name, sched.toJson())),
+        'pre_open_buffer_minutes': draft.preOpenBufferMinutes,
+        'post_close_wind_down_minutes':
+            draft.postCloseWindDownMinutes,
+        'hours_vary': draft.hoursVary,
+        'observe_standard_holidays': draft.observeStandardHolidays,
+        'observed_holidays': draft.observedHolidays,
+        'channel_configs':
+            draft.channelConfigs.map((c) => c.toJson()).toList(),
+        'teams': draft.teams.map((t) => t.toJson()).toList(),
+        'use_brand_colors_for_alerts': draft.useBrandColorsForAlerts,
+        'day_parts': draft.dayParts.map((d) => d.toJson()).toList(),
+        'default_ambient_design_id': draft.defaultAmbientDesignId,
+        'org_name': draft.orgName,
+        'has_multiple_locations': draft.hasMultipleLocations,
+        'updated_at': FieldValue.serverTimestamp(),
+      };
 
-    // Success animation.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const _SuccessDialog(),
-    );
-    await Future<void>.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    Navigator.of(context)
-      ..pop() // dismiss dialog
-      ..pop(); // exit wizard
+      // Primary commercial_location doc — minimum required for the route
+      // guard to recognise the user as a configured commercial customer.
+      final locationDoc = <String, dynamic>{
+        'location_id': 'primary',
+        'org_id': '',
+        'location_name': draft.businessName.isEmpty
+            ? 'Primary Location'
+            : draft.businessName,
+        'address': draft.primaryAddress,
+        'lat': 0.0,
+        'lng': 0.0,
+        'controller_id': '',
+        'business_hours_id': '',
+        'schedule_id': '',
+        'teams_config_id': '',
+        'is_using_org_template': false,
+        'channel_configs':
+            draft.channelConfigs.map((c) => c.toJson()).toList(),
+        'managers': [
+          {
+            'user_id': uid,
+            'role': 'corporateAdmin',
+            'assigned_at': DateTime.now().toIso8601String(),
+          }
+        ],
+        'created_at': FieldValue.serverTimestamp(),
+        'active': true,
+      };
+
+      final batch = firestore.batch();
+      batch.set(userRef, {
+        'profile_type': 'commercial',
+        'commercial_mode_enabled': true,
+        'commercial_mode_override': true,
+        'commercial_profile': commercialProfile,
+      }, SetOptions(merge: true));
+      batch.set(
+        userRef.collection('commercial_locations').doc('primary'),
+        locationDoc,
+      );
+      await batch.commit();
+
+      // Mirror to local prefs so the next app launch reads commercial mode
+      // even before Firestore has refreshed.
+      await setCommercialModeOverride(true);
+
+      if (!mounted) return;
+      setState(() => _isActivating = false);
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const _SuccessDialog(),
+      );
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      Navigator.of(context).pop(); // dismiss success dialog
+      if (!mounted) return;
+      context.go(AppRoutes.commercialHome);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isActivating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Setup failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
   }
 
   @override
