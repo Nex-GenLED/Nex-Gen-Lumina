@@ -19,99 +19,6 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
 
-// ─── Diagnostic: end-to-end bridge ping ──────────────────────────────────────
-
-/// Sends a getInfo command through the Firestore relay (the same path
-/// CloudRelayRepository uses) and logs the full round-trip result.
-///
-/// This is a TEMPORARY diagnostic — remove before release.
-Future<void> debugBridgePing({
-  required String controllerIp,
-  required String? userId,
-  required String? controllerId,
-  required String webhookUrl,
-}) async {
-  final sw = Stopwatch()..start();
-  final tag = '🩺 debugBridgePing';
-
-  if (userId == null) {
-    debugPrint('$tag: ABORT — no userId (not signed in)');
-    return;
-  }
-
-  final commandsRef = FirebaseFirestore.instance
-      .collection('users')
-      .doc(userId)
-      .collection('commands');
-
-  final firestorePath = 'users/$userId/commands';
-  debugPrint('$tag: sending getInfo via Firestore relay');
-  debugPrint('$tag: firestorePath=$firestorePath');
-  debugPrint('$tag: controllerIp=$controllerIp, controllerId=$controllerId');
-  debugPrint('$tag: webhookUrl=${webhookUrl.isEmpty ? "(none — bridge mode)" : webhookUrl}');
-
-  try {
-    // Write the command — identical structure to CloudRelayRepository
-    final docRef = await commandsRef.add({
-      'type': 'getInfo',
-      'payload': '{}',
-      'controllerId': controllerId ?? '',
-      'controllerIp': controllerIp,
-      'webhookUrl': webhookUrl,
-      'createdAt': FieldValue.serverTimestamp(),
-      'status': 'pending',
-    });
-
-    final commandId = docRef.id;
-    debugPrint('$tag: command queued — id=$commandId, elapsed=${sw.elapsedMilliseconds}ms');
-
-    // Poll for result (same cadence as CloudRelayRepository: 500ms × 60 = 30s)
-    for (var i = 0; i < 60; i++) {
-      await Future.delayed(const Duration(milliseconds: 500));
-      final snap = await docRef.get();
-      final data = snap.data();
-      final status = data?['status'] as String?;
-
-      if (status == 'completed') {
-        sw.stop();
-        final result = data?['result'];
-        final resultStr = result is Map ? jsonEncode(result) : '$result';
-        // Truncate if huge
-        final preview = resultStr.length > 500
-            ? '${resultStr.substring(0, 500)}…'
-            : resultStr;
-        debugPrint('$tag: ✅ status=completed, roundTrip=${sw.elapsedMilliseconds}ms');
-        debugPrint('$tag: response body=$preview');
-        await docRef.delete(); // clean up
-        return;
-      }
-
-      if (status == 'failed') {
-        sw.stop();
-        final error = data?['error'] as String? ?? 'unknown';
-        debugPrint('$tag: ❌ status=failed, roundTrip=${sw.elapsedMilliseconds}ms');
-        debugPrint('$tag: error=$error');
-        await docRef.delete();
-        return;
-      }
-
-      // Still pending/executing — keep polling
-      if (i % 10 == 9) {
-        debugPrint('$tag: still waiting… status=$status, elapsed=${sw.elapsedMilliseconds}ms');
-      }
-    }
-
-    // Timeout
-    sw.stop();
-    debugPrint('$tag: ⏰ TIMEOUT after ${sw.elapsedMilliseconds}ms — bridge never responded');
-    debugPrint('$tag: command left as timeout in Firestore for inspection (id=$commandId)');
-    await docRef.update({'status': 'timeout'});
-  } catch (e) {
-    sw.stop();
-    debugPrint('$tag: 💥 EXCEPTION after ${sw.elapsedMilliseconds}ms — $e');
-  }
-}
-
 // ─── Remote access mode ──────────────────────────────────────────────────────
 
 /// How remote commands are relayed to the WLED controller.
@@ -204,20 +111,6 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
           _runBridgeCheck();
         }
         _startPolling();
-
-        // ── Diagnostic: fire an end-to-end bridge ping on screen open ──
-        final userId = ref.read(authStateProvider).maybeWhen(
-              data: (u) => u?.uid,
-              orElse: () => null,
-            );
-        final controllerId = ref.read(selectedControllerIdProvider);
-        final controllerIp = ref.read(selectedDeviceIpProvider) ?? '';
-        debugBridgePing(
-          controllerIp: controllerIp,
-          userId: userId,
-          controllerId: controllerId,
-          webhookUrl: url ?? '',
-        );
       }
     });
   }
