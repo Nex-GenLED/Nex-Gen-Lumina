@@ -326,6 +326,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     _startPolling();
     ref.onDispose(() {
       _poller?.cancel();
+      _poller = null;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
     });
     return s;
   }
