@@ -528,6 +528,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     // Preset was cleared on-device (ps went from >0 to 0). Drop the stale
     // preset label so the display falls back to the effect name / custom
     // pattern name, rather than showing the old preset name indefinitely.
+    // This branch is safe to fire on first poll: prevPresetId starts at 0,
+    // so the `prevPresetId > 0` guard only triggers after we've actually
+    // observed a preset being active in a prior poll.
     if (ps <= 0 && prevPresetId > 0) {
       try {
         final customName = state.customEffectName;
@@ -541,22 +544,15 @@ class WledNotifier extends Notifier<WledStateModel> {
       }
     }
 
-    // When the live effect diverges from what was cached AND no WLED preset
-    // is active: if the user applied a custom pattern (e.g. "Kansas City
-    // Royals Twinkle") keep that label; only clear a stale generic label.
-    if (effectId != prevEffectId && ps <= 0) {
-      try {
-        final customName = state.customEffectName;
-        if (customName != null && customName.isNotEmpty) {
-          // Preserve user-set custom name as the active label
-          ref.read(activePresetLabelProvider.notifier).state = customName;
-        } else {
-          ref.read(activePresetLabelProvider.notifier).clear();
-        }
-      } catch (e) {
-        debugPrint('Error in WledNotifier updating preset label: $e');
-      }
-    }
+    // NOTE: We deliberately do NOT auto-clear activePresetLabelProvider
+    // when effectId != prevEffectId on its own. prevEffectId is 0 on the
+    // very first poll after cold-start, so any device that's actually
+    // playing fx > 0 would trigger an "effect changed" branch that
+    // cleared the persisted Lumina label (e.g. "KC Royals Twinkle") and
+    // dropped the dashboard back to the raw WLED effect name. The label
+    // is owned by explicit app actions (AI apply, pattern picker, preset
+    // save, lights off) and by _resolvePresetName for ps > 0 — the
+    // polling path should not second-guess those writes.
   }
 
   /// Fetches preset names from the WLED controller and sets the active label.
