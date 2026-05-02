@@ -401,6 +401,7 @@ enum InstallerWizardStep {
   customerInfo,
   controllerSetup,
   zoneConfiguration,
+  hardwareConfig,
   handoff,
 }
 

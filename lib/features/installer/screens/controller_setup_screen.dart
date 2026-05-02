@@ -1025,11 +1025,10 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     bool? isOnline,
     required bool isChecking,
   }) {
-    final ctrlType = _controllerTypes[controller.id];
-    final showApplyDefaults =
-        ctrlType == ControllerType.skikbily &&
-        isOnline == true &&
-        !isChecking;
+    // Show "Apply NGL Defaults" for any online controller — generic WLED and
+    // Dig-Octa now also accept the SK6812 RGBW / GRBW profile and preserve
+    // existing GPIO assignments via pushDefaultsForControllerType.
+    final showApplyDefaults = isOnline == true && !isChecking;
     final isPushing = _pushingDefaults.contains(controller.id);
 
     return Container(
@@ -1268,7 +1267,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     if (result.success && result.warnings.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('SKIKBILY configured with NGL defaults'),
+          content: Text('Controller configured with NGL defaults'),
           backgroundColor: Colors.green,
         ),
       );

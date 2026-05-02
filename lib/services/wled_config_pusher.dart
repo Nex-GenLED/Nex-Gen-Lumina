@@ -30,15 +30,10 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   String controllerIp,
   ControllerType type,
 ) async {
-  // ── Early returns for types that don't need automated config ──────────
-  if (type == ControllerType.genericWled) {
-    return const WledConfigPushResult(success: true);
-  }
-  if (type == ControllerType.digOcta) {
-    return const WledConfigPushResult(success: true);
-  }
-
-  // ── SKIKBILY defaults ────────────────────────────────────────────────
+  // The SKIKBILY profile (SK6812 RGBW / GRBW / 100 px per channel) is the
+  // Lumina standard — we now apply it across all controller types. Existing
+  // GPIO pin assignments are preserved by reading the device's current
+  // hardware config first.
   final service = WledService('http://$controllerIp');
 
   // 1. Read current hardware config to preserve existing GPIO pin
