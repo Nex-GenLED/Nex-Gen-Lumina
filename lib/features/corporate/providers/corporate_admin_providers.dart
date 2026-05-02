@@ -159,7 +159,23 @@ class CorporateAdminService {
     if (ref == null) {
       throw StateError('Dealer $dealerCode not found');
     }
-    await ref.update({'isActive': isActive});
+
+    // When deactivating, cascade to every installer in the dealer's roster.
+    // Without this an offboarded dealer's installers can still authenticate
+    // with their PIN and write to /sales_jobs and dealer inventory under the
+    // dealer's code — defeating the purpose of the dealer toggle.
+    final batch = _db.batch();
+    batch.update(ref, {'isActive': isActive});
+    if (!isActive) {
+      final installers = await _db
+          .collection('installers')
+          .where('dealerCode', isEqualTo: dealerCode)
+          .get();
+      for (final doc in installers.docs) {
+        batch.update(doc.reference, {'isActive': false});
+      }
+    }
+    await batch.commit();
   }
 
   Future<void> updateDealer(
