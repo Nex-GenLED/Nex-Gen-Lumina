@@ -862,6 +862,13 @@ class WledNotifier extends Notifier<WledStateModel> {
         state = state.copyWith(connected: false);
         _ensureReconnectTimer();
       }
+      if (!ok) {
+        // Surface failure so the dashboard can show a non-blocking snackbar.
+        // Optimistic state updates above are preserved — this only notifies.
+        ref.read(wledCommandFailureProvider.notifier).state =
+            WledCommandFailure(
+                "Couldn't reach your lights — check your connection");
+      }
       // Wait before allowing poller to read back state.
       // In remote mode the bridge processes commands sequentially, so give it
       // extra time to finish before we queue another getState poll.
@@ -887,3 +894,16 @@ final wledStateProvider = NotifierProvider<WledNotifier, WledStateModel>(WledNot
 /// so the dashboard can show a "Last Known State" indicator until fresh data
 /// arrives.
 final wledStateFreshProvider = StateProvider<bool>((ref) => false);
+
+/// Surfaces the most recent failed WLED command so the dashboard can show
+/// a non-blocking snackbar. Each set carries a timestamp so consecutive
+/// failures with identical messages still notify (StateProvider deduplicates
+/// on equality, and the timestamp is part of equality).
+class WledCommandFailure {
+  final String message;
+  final DateTime at;
+  WledCommandFailure(this.message) : at = DateTime.now();
+}
+
+final wledCommandFailureProvider =
+    StateProvider<WledCommandFailure?>((ref) => null);

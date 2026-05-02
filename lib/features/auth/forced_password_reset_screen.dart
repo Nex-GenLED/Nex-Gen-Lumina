@@ -60,6 +60,37 @@ class _ForcedPasswordResetScreenState
     return null;
   }
 
+  Future<void> _sendResetEmail() async {
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No email associated with this account'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset email sent to $email'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to send: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _submit() async {
     setState(() => _formError = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
@@ -203,6 +234,20 @@ class _ForcedPasswordResetScreenState
                               validator: (v) => (v == null || v.isEmpty)
                                   ? 'Current password is required'
                                   : null,
+                            ),
+                            Center(
+                              child: TextButton(
+                                onPressed: _sendResetEmail,
+                                child: Text(
+                                  "Didn't receive a temp password? "
+                                  'Send password reset email',
+                                  style: TextStyle(
+                                    color: NexGenPalette.textMedium,
+                                    fontSize: 12,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                             ),
                             const SizedBox(height: 12),
                             _buildPasswordField(
