@@ -178,15 +178,54 @@ class GameDayAutopilotConfig {
   Color get secondaryColor => Color(secondaryColorValue);
 
   /// Human-readable design label for the UI.
+  ///
+  /// Resolution order:
+  ///   1. If [savedDesignName] is set, use it (user-named design wins).
+  ///   2. If the effect has been customized away from the default Solid
+  ///      (effectId != 0), reflect the live effect: "<team> <Effect>".
+  ///      Without this branch a Theater-Chase-customized team would still
+  ///      show "Team Colors" on the card despite playing fx 12.
+  ///   3. Fall back to a mode-derived label. The fallback no longer
+  ///      includes "(Solid)" — that suffix was misleading once any non-
+  ///      Solid effect was in use, and adds noise even when accurate.
   String get designLabel {
     if (savedDesignName != null && savedDesignName!.isNotEmpty) {
       return savedDesignName!;
     }
+    if (effectId != 0) {
+      return '$teamName ${_effectShortName(effectId)}';
+    }
     return switch (designMode) {
       AutopilotDesignMode.saved => 'Custom Design',
       AutopilotDesignMode.autoSelected => 'Auto-selected',
-      AutopilotDesignMode.fallback => 'Team Colors (Solid)',
+      AutopilotDesignMode.fallback => '$teamName Colors',
     };
+  }
+
+  /// City-stripped team name, e.g. "kansas-city-royals" → "Royals".
+  /// Used for compact UI strings (Now Playing label) where the full
+  /// city + team name would wrap. Falls back to [teamName] if [teamSlug]
+  /// is empty or malformed.
+  String get shortTeamName {
+    if (teamSlug.isEmpty) return teamName;
+    final parts = teamSlug.split('-');
+    final last = parts.last;
+    if (last.isEmpty) return teamName;
+    return last[0].toUpperCase() + last.substring(1);
+  }
+
+  /// Map a WLED effectId to a short display name for [designLabel].
+  /// Curated to game-day-relevant effects; unknown ids fall back to
+  /// "Custom" to avoid leaking raw effect numbers into the UI.
+  static String _effectShortName(int effectId) {
+    const names = {
+      0: 'Solid', 2: 'Breathe', 12: 'Fade',
+      28: 'Chase', 38: 'Fire', 39: 'Fireworks',
+      17: 'Twinkle', 20: 'Sparkle', 41: 'Running',
+      43: 'Chase', 46: 'Lightning', 80: 'Twinklefox',
+      83: 'Pattern', 87: 'Glitter',
+    };
+    return names[effectId] ?? 'Custom';
   }
 
   /// Estimated game duration for this sport.

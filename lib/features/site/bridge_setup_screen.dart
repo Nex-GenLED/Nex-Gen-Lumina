@@ -163,83 +163,60 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   }
 
   Future<void> _promptManualIp() async {
-    final ipCtrl = TextEditingController(text: _manualIpController.text);
-
-    final confirmed = await showDialog<bool>(
+    final ctrl = TextEditingController();
+    final ip = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
           return AlertDialog(
             backgroundColor: NexGenPalette.gunmetal90,
             insetPadding: EdgeInsets.only(
               left: 24,
               right: 24,
               top: 24,
-              bottom: 24 + bottomInset,
+              bottom: 24 + bottom,
             ),
             title: const Text(
               'Enter Bridge IP',
               style: TextStyle(color: Colors.white),
             ),
             content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Type the bridge\'s IP address as shown in your router '
-                    'or on the bridge\'s status display.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: NexGenPalette.textMedium,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: ipCtrl,
-                    autofocus: true,
-                    style: const TextStyle(color: Colors.white),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: false,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      LengthLimitingTextInputFormatter(15),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: 'Bridge IP Address',
-                      hintText: '192.168.1.100',
-                      prefixIcon: const Icon(Icons.lan,
-                          color: NexGenPalette.textMedium),
-                      labelStyle:
-                          const TextStyle(color: NexGenPalette.textMedium),
-                      hintStyle: TextStyle(
-                        color:
-                            NexGenPalette.textMedium.withValues(alpha: 0.5),
-                      ),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onSubmitted: (_) => Navigator.pop(ctx, true),
-                  ),
+              child: TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  LengthLimitingTextInputFormatter(15),
                 ],
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '192.168.1.100',
+                  hintStyle: TextStyle(
+                    color: NexGenPalette.textMedium.withValues(alpha: 0.5),
+                  ),
+                  filled: true,
+                  fillColor: NexGenPalette.matteBlack,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim()),
               ),
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
+                onPressed: () => Navigator.pop(ctx),
                 child: const Text(
                   'Cancel',
                   style: TextStyle(color: NexGenPalette.textMedium),
                 ),
               ),
               ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: NexGenPalette.cyan,
                 ),
@@ -253,13 +230,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         },
       ),
     );
-
-    if (confirmed != true) return;
-
-    final ip = ipCtrl.text.trim();
-    if (ip.isEmpty) return;
-    _manualIpController.text = ip;
-    _selectBridge(ip);
+    if (ip != null && ip.isNotEmpty) {
+      _selectBridge(ip);
+    }
   }
 
   // ── Step 2: Pair ──────────────────────────────────────────────────────────

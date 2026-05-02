@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app_colors.dart';
+import '../../app_providers.dart' show activePresetLabelProvider;
 import '../../theme.dart';
 import '../../widgets/glass_app_bar.dart';
 import '../../widgets/section_header.dart';
@@ -429,6 +430,15 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     final ok = await repo.applyJson(effectivePayload);
     if (!context.mounted) return;
 
+    if (ok) {
+      // Set the Now Playing label so the home dashboard reflects the
+      // game-day apply rather than falling through to the raw WLED
+      // effect name. Uses shortTeamName to avoid wrapping (e.g.
+      // "Royals Game Day" instead of "Kansas City Royals Game Day").
+      ref.read(activePresetLabelProvider.notifier).state =
+          '${config.shortTeamName} Game Day';
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -440,6 +450,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
         duration: const Duration(seconds: 2),
       ),
     );
+
+    // Pop back to whatever pushed this screen so the user immediately
+    // sees the Now Playing change on the home dashboard. No-op when the
+    // screen sits at the root (e.g. opened as a tab destination).
+    if (ok && context.canPop()) {
+      context.pop();
+    }
   }
 
   Future<void> _confirmRemove(
