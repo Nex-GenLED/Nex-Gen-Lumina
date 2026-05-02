@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -925,7 +924,17 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.bridgeSetup),
+                onPressed: () async {
+                  await context.push(AppRoutes.bridgeSetup);
+                  // Wizard returned — bridge_ip / bridge_email may have just
+                  // been written to Firestore. Invalidate the profile stream
+                  // and re-run the bridge check so the status indicator
+                  // reflects the new pairing immediately.
+                  if (!mounted) return;
+                  ref.invalidate(currentUserProfileProvider);
+                  ref.invalidate(bridgeHealthProvider);
+                  _runBridgeCheck();
+                },
                 icon: Icon(
                   userProfile?.bridgePaired == true
                       ? Icons.settings
