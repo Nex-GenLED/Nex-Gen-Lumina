@@ -35,6 +35,7 @@ import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
@@ -1493,8 +1494,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           (first != null
               ? (first.actionLabel.contains(':') ? first.actionLabel.split(':').last.trim() : first.actionLabel)
               : null);
-      final onTime = calEntry?.onTime ?? first?.timeLabel;
-      final offTime = calEntry?.offTime ?? first?.offTimeLabel;
+      // CalendarEntry stores onTime/offTime as 24-hour 'HH:mm' wall-clock
+      // strings; ScheduleItem.timeLabel is already 12-hour 'h:mm AM/PM' or a
+      // 'Sunset'/'Sunrise' token. formatTimeLabel normalises both into the
+      // user's preferred display format (defaults to 12-hour AM/PM) so the
+      // Tonight card no longer surfaces raw "23:10" strings.
+      final timeFormat = ref.watch(timeFormatPreferenceProvider);
+      final rawOnTime = calEntry?.onTime ?? first?.timeLabel;
+      final rawOffTime = calEntry?.offTime ?? first?.offTimeLabel;
+      final onTime = rawOnTime == null
+          ? null
+          : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
+      final offTime = rawOffTime == null
+          ? null
+          : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
       final accentColor = calEntry?.color ?? NexGenPalette.cyan;
 
       final bool hasSchedule = patternName != null || onTime != null;

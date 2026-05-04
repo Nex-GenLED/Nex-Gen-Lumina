@@ -241,72 +241,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   }
 
   Future<void> _promptManualIp() async {
-    final ctrl = TextEditingController();
     final ip = await showDialog<String>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
-          return AlertDialog(
-            backgroundColor: NexGenPalette.gunmetal90,
-            insetPadding: EdgeInsets.only(
-              left: 24,
-              right: 24,
-              top: 24,
-              bottom: 24 + bottom,
-            ),
-            title: const Text(
-              'Enter Bridge IP',
-              style: TextStyle(color: Colors.white),
-            ),
-            content: SingleChildScrollView(
-              child: TextField(
-                controller: ctrl,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                  LengthLimitingTextInputFormatter(15),
-                ],
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '192.168.1.100',
-                  hintStyle: TextStyle(
-                    color: NexGenPalette.textMedium.withValues(alpha: 0.5),
-                  ),
-                  filled: true,
-                  fillColor: NexGenPalette.matteBlack,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim()),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: NexGenPalette.textMedium),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NexGenPalette.cyan,
-                ),
-                child: const Text(
-                  'Connect',
-                  style: TextStyle(color: Colors.black),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+      builder: (_) => const _BridgeIpDialog(),
     );
     if (ip != null && ip.isNotEmpty) {
       _selectBridgeByIp(ip);
@@ -353,6 +290,47 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     bool paired;
 
     if (hasDeviceId) {
+      // Pre-check the registry before writing a pairing request:
+      //   - status=paired + pairedUid==me → re-running the wizard.
+      //     The Firestore rule blocks pendingUid writes on already-paired
+      //     docs, so a normal pair request would 403. Skip to verify and
+      //     re-save bridge config (refreshes any drift in IP / email).
+      //   - status=paired + pairedUid!=me → bridge belongs to another
+      //     account. Show the transfer-required dialog and stop. True
+      //     transfer requires the previous owner to release first; we
+      //     can't unilaterally claim it.
+      //   - status=unpaired (or doc missing) → fall through to the normal
+      //     pair path.
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('bridge_registry')
+            .doc(bridge.deviceId!)
+            .get();
+        final data = doc.data();
+        final status = (data?['status'] as String?) ?? 'unpaired';
+        final pairedUid = (data?['pairedUid'] as String?) ?? '';
+
+        if (status == 'paired' && pairedUid == user.uid) {
+          await _saveBridgeConfig(bridge.deviceId!, data);
+          if (!mounted) return;
+          setState(() {
+            _pairing = false;
+            _step = _Step.verify;
+          });
+          _doVerify();
+          return;
+        }
+
+        if (status == 'paired' && pairedUid != user.uid) {
+          await _showHijackDialog(bridge.deviceId!);
+          return;
+        }
+      } catch (e) {
+        debugPrint('[BridgeSetup] Pre-pair registry check failed: $e');
+        // Fall through — _pairViaFirestore will surface a clearer error
+        // if the registry is genuinely unreachable.
+      }
+
       paired = await _pairViaFirestore(
         deviceId: bridge.deviceId!,
         userId: user.uid,
@@ -496,6 +474,73 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     }
 
     return true;
+  }
+
+  /// Reads `ip` and `bridgeEmail` from a `/bridge_registry/{deviceId}` doc
+  /// and persists them to the user profile via UserService. Used by the
+  /// already-paired-to-self short-circuit so the wizard doesn't need to
+  /// redo a pairing request that would be blocked by the Firestore rule.
+  ///
+  /// Skips silently if `bridgeEmail` is missing — that field is required
+  /// for the bridge's Firestore reads (rules grant access via email match)
+  /// and writing a stale config would just lock the bridge out of its
+  /// command queue.
+  Future<void> _saveBridgeConfig(
+    String deviceId,
+    Map<String, dynamic>? data,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || data == null) return;
+
+    final ip = (data['ip'] as String?) ?? '';
+    final bridgeEmail = (data['bridgeEmail'] as String?) ?? '';
+
+    if (bridgeEmail.isEmpty) {
+      debugPrint('[BridgeSetup] _saveBridgeConfig($deviceId): '
+          'bridgeEmail missing in registry, skipping save');
+      return;
+    }
+
+    try {
+      final userService = ref.read(userServiceProvider);
+      await userService.saveBridgeConfig(
+        user.uid,
+        bridgeIp: ip,
+        bridgeEmail: bridgeEmail,
+      );
+    } catch (e) {
+      debugPrint('[BridgeSetup] _saveBridgeConfig($deviceId) failed: $e');
+    }
+  }
+
+  /// Bridge is paired to another account. The Firestore rule blocks any
+  /// transfer write from this client, so the only honest response is to
+  /// inform the user and stop. Resets the pair-step UI on dismissal.
+  Future<void> _showHijackDialog(String deviceId) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bridge already paired'),
+        content: const Text(
+          'This bridge is paired to a different Nex-Gen account. To use '
+          'it on this account, the previous owner must release it first '
+          '(Settings → Remote Access → Unpair Bridge), or contact '
+          'Nex-Gen support to transfer ownership.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _pairing = false;
+      _pairError = 'Bridge is paired to another account.';
+    });
   }
 
   // ── Step 3: Verify ────────────────────────────────────────────────────────
@@ -1139,6 +1184,89 @@ class _InfoRow extends StatelessWidget {
             child: Text(
               value.isEmpty ? '--' : value,
               style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Manual bridge-IP entry dialog. Lifted out of an inline StatefulBuilder
+/// so the AlertDialog rebuilds against MediaQuery changes — wrapping it in
+/// a Padding tied to viewInsetsOf forces the dialog to lift above the
+/// software keyboard on iOS, which the previous StatefulBuilder version
+/// did not do reliably.
+class _BridgeIpDialog extends StatefulWidget {
+  const _BridgeIpDialog();
+
+  @override
+  State<_BridgeIpDialog> createState() => _BridgeIpDialogState();
+}
+
+class _BridgeIpDialogState extends State<_BridgeIpDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text(
+          'Enter Bridge IP',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SingleChildScrollView(
+          child: TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+              LengthLimitingTextInputFormatter(15),
+            ],
+            onSubmitted: (_) =>
+                Navigator.pop(context, _ctrl.text.trim()),
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: '192.168.1.100',
+              hintStyle: TextStyle(
+                color: NexGenPalette.textMedium.withValues(alpha: 0.5),
+              ),
+              filled: true,
+              fillColor: NexGenPalette.matteBlack,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: NexGenPalette.textMedium),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(context, _ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+            ),
+            child: const Text(
+              'Connect',
+              style: TextStyle(color: Colors.black),
             ),
           ),
         ],

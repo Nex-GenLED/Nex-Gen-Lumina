@@ -1741,7 +1741,7 @@ class _WeekStripSection extends StatelessWidget {
   }
 }
 
-class _WeekDayCell extends StatelessWidget {
+class _WeekDayCell extends ConsumerWidget {
   final String dateKey;
   final CalendarEntry? calEntry;
   final List<ScheduleItem> recurringItems;
@@ -1759,7 +1759,7 @@ class _WeekDayCell extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final today = DateTime.now();
     final d = DateTime.parse(dateKey);
     final isToday = _fmt(today) == dateKey;
@@ -1775,8 +1775,20 @@ class _WeekDayCell extends StatelessWidget {
             ? _labelFromAction(recurringItems.first.actionLabel)
             : null);
 
-    final onTime = calEntry?.onTime ?? recurringItems.firstOrNull?.timeLabel;
-    final offTime = calEntry?.offTime ?? recurringItems.firstOrNull?.offTimeLabel;
+    // Mixed formats: CalendarEntry stores 'HH:mm' 24-hour; ScheduleItem stores
+    // 'h:mm AM/PM' (or 'Sunset'/'Sunrise'). formatTimeLabel normalises both
+    // into the user's preferred display format (12-hour by default).
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final rawOnTime =
+        calEntry?.onTime ?? recurringItems.firstOrNull?.timeLabel;
+    final rawOffTime =
+        calEntry?.offTime ?? recurringItems.firstOrNull?.offTimeLabel;
+    final onTime = rawOnTime == null
+        ? null
+        : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
+    final offTime = rawOffTime == null
+        ? null
+        : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
 
     final borderColor = isSelected
         ? NexGenPalette.cyan
