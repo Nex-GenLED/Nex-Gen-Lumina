@@ -424,7 +424,6 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Parse a full /json/state response and update all state fields.
   /// Used by both polling and refreshConnection to avoid duplication.
   void _applyStateData(Map<String, dynamic> data) {
-    final prevEffectId = state.effectId;
     final prevPresetId = state.presetId;
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
