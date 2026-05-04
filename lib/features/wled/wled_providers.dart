@@ -315,6 +315,12 @@ class WledNotifier extends Notifier<WledStateModel> {
   bool _polling = false;
   bool _infoQueried = false;
 
+  // Monotonically incremented for every _resolvePresetName invocation. The
+  // resolver captures its seq at entry and aborts the write if a newer call
+  // has since started — prevents a stale HTTP response from clobbering a
+  // freshly-written user label.
+  int _resolveSeq = 0;
+
   /// Consecutive remote poll failures. After 3, bridge is marked unreachable
   /// even if it was previously confirmed — prevents stale "Connected" status.
   int _consecutiveRemoteFailures = 0;
@@ -326,6 +332,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     _startPolling();
     ref.onDispose(() {
       _poller?.cancel();
+      _poller = null;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
     });
     return s;
   }
@@ -415,7 +424,6 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Parse a full /json/state response and update all state fields.
   /// Used by both polling and refreshConnection to avoid duplication.
   void _applyStateData(Map<String, dynamic> data) {
-    final prevEffectId = state.effectId;
     final prevPresetId = state.presetId;
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
@@ -518,10 +526,11 @@ class WledNotifier extends Notifier<WledStateModel> {
     // Mark that we have received a live fetch
     ref.read(wledStateFreshProvider.notifier).state = true;
 
-    // Resolve preset name from WLED when ps > 0 and preset changed or label
-    // is empty. This is Priority 1 in the label hierarchy — the authoritative
-    // name straight from the controller.
-    if (ps > 0 && (ps != prevPresetId || ref.read(activePresetLabelProvider) == null)) {
+    // Resolve preset name from WLED only when the preset slot actually
+    // changed. The previous "or label is empty" clause caused stale resolves
+    // to overwrite freshly-set user labels (Now Playing flicker) — the
+    // null-label case is already covered by explicit setters.
+    if (ps > 0 && ps != prevPresetId) {
       _resolvePresetName(ps);
     }
 
@@ -558,9 +567,16 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Fetches preset names from the WLED controller and sets the active label.
   /// If the requested preset isn't in the cached map (e.g. it was added
   /// after we first fetched), drop the cache and retry once.
+  ///
+  /// Concurrency: every call captures its own seq at entry. After the awaited
+  /// HTTP returns, we abort if a newer call has started OR if the label was
+  /// written within the last 3 s — that window covers the case where the user
+  /// taps a pattern card while a stale resolution is still in flight.
   Future<void> _resolvePresetName(int presetId) async {
     final service = ref.read(wledRepositoryProvider);
     if (service == null) return;
+
+    final seq = ++_resolveSeq;
 
     try {
       var presetNames = await service.fetchPresetNames();
@@ -571,7 +587,21 @@ class WledNotifier extends Notifier<WledStateModel> {
         name = presetNames[presetId];
       }
       if (name != null && name.isNotEmpty) {
-        ref.read(activePresetLabelProvider.notifier).state = name;
+        // Guard 1: a newer resolution has started — drop this stale write.
+        if (seq != _resolveSeq) {
+          debugPrint('🏷️ Preset $presetId → "$name" superseded (seq=$seq, latest=$_resolveSeq)');
+          return;
+        }
+        // Guard 2: the label was just set (e.g. user tapped a pattern card)
+        // — don't clobber a fresh user-driven write with a stale device ps.
+        final notifier = ref.read(activePresetLabelProvider.notifier);
+        final lastSet = notifier.labelUserSetAt;
+        if (lastSet != null &&
+            DateTime.now().difference(lastSet).inSeconds < 3) {
+          debugPrint('🏷️ Preset $presetId → "$name" skipped (label set ${DateTime.now().difference(lastSet).inMilliseconds}ms ago)');
+          return;
+        }
+        notifier.state = name;
         debugPrint('🏷️ Resolved WLED preset $presetId → "$name"');
       }
     } catch (e) {
@@ -859,6 +889,13 @@ class WledNotifier extends Notifier<WledStateModel> {
         state = state.copyWith(connected: false);
         _ensureReconnectTimer();
       }
+      if (!ok) {
+        // Surface failure so the dashboard can show a non-blocking snackbar.
+        // Optimistic state updates above are preserved — this only notifies.
+        ref.read(wledCommandFailureProvider.notifier).state =
+            WledCommandFailure(
+                "Couldn't reach your lights — check your connection");
+      }
       // Wait before allowing poller to read back state.
       // In remote mode the bridge processes commands sequentially, so give it
       // extra time to finish before we queue another getState poll.
@@ -884,3 +921,16 @@ final wledStateProvider = NotifierProvider<WledNotifier, WledStateModel>(WledNot
 /// so the dashboard can show a "Last Known State" indicator until fresh data
 /// arrives.
 final wledStateFreshProvider = StateProvider<bool>((ref) => false);
+
+/// Surfaces the most recent failed WLED command so the dashboard can show
+/// a non-blocking snackbar. Each set carries a timestamp so consecutive
+/// failures with identical messages still notify (StateProvider deduplicates
+/// on equality, and the timestamp is part of equality).
+class WledCommandFailure {
+  final String message;
+  final DateTime at;
+  WledCommandFailure(this.message) : at = DateTime.now();
+}
+
+final wledCommandFailureProvider =
+    StateProvider<WledCommandFailure?>((ref) => null);

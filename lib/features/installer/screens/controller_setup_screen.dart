@@ -16,6 +16,7 @@ import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/services/image_upload_service.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Step 2: Controller Setup screen for the installer wizard
 class ControllerSetupScreen extends ConsumerStatefulWidget {
@@ -38,6 +39,12 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
   final Map<String, ControllerType> _controllerTypes = {};
   final Set<String> _pushingDefaults = {};
   final Set<String> _backgroundCheckInFlight = {};
+  // Per-controller firmware version (e.g. "0.14.0"), populated lazily after
+  // a successful /json/info fetch so each card can show what build it's on.
+  final Map<String, String> _firmwareVersions = {};
+  // Set of controllers currently running the Test Lights flash so we can
+  // disable the action button until the flash + restore round-trip completes.
+  final Set<String> _testingLights = {};
   Timer? _statusRefreshTimer;
   bool _isUploading = false;
   String? _validationError;
@@ -1025,12 +1032,21 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     bool? isOnline,
     required bool isChecking,
   }) {
-    final ctrlType = _controllerTypes[controller.id];
-    final showApplyDefaults =
-        ctrlType == ControllerType.skikbily &&
-        isOnline == true &&
-        !isChecking;
+    // Show "Apply NGL Defaults" for any online controller — generic WLED and
+    // Dig-Octa now also accept the SK6812 RGBW / GRBW profile and preserve
+    // existing GPIO assignments via pushDefaultsForControllerType.
+    final showApplyDefaults = isOnline == true && !isChecking;
     final isPushing = _pushingDefaults.contains(controller.id);
+    final isTesting = _testingLights.contains(controller.id);
+    final firmware = _firmwareVersions[controller.id];
+
+    // Lazy-fetch firmware version once the card knows the controller is up.
+    if (isOnline == true && firmware == null && !isChecking) {
+      // Schedule outside the build pass to avoid setState-during-build.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _fetchFirmwareVersion(controller),
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1093,9 +1109,51 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
                             fontSize: 14,
                           ),
                         ),
+                        if (firmware != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'WLED v$firmware',
+                            style: const TextStyle(
+                              color: NexGenPalette.textMedium,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
+
+                  // Test Lights button — flashes white for 3s then restores.
+                  if (isOnline == true && !isChecking)
+                    IconButton(
+                      icon: isTesting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: NexGenPalette.cyan,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.lightbulb_outline,
+                              color: NexGenPalette.cyan,
+                            ),
+                      tooltip: 'Test Lights',
+                      onPressed:
+                          isTesting ? null : () => _testLights(controller),
+                    ),
+
+                  // Open the controller's WLED web UI in the browser.
+                  if (isOnline == true && !isChecking)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.open_in_new,
+                        color: NexGenPalette.textMedium,
+                      ),
+                      tooltip: 'Open WLED',
+                      onPressed: () => _openWledWeb(controller),
+                    ),
 
                   // Status indicator
                   if (isChecking)
@@ -1223,6 +1281,84 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     );
   }
 
+  Future<void> _testLights(ControllerInfo controller) async {
+    if (_testingLights.contains(controller.id)) return;
+    setState(() => _testingLights.add(controller.id));
+    final svc = WledService('http://${controller.ip}');
+
+    Map<String, dynamic>? saved;
+    try {
+      saved = await svc.getState();
+      await svc.applyJson({
+        'on': true,
+        'bri': 255,
+        'seg': [
+          {
+            'fx': 0,
+            'col': [
+              [255, 255, 255, 255],
+            ],
+          }
+        ],
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Testing lights — flashing white for 3 seconds'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (saved != null) {
+        await svc.applyJson(saved);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Test lights failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _testingLights.remove(controller.id));
+    }
+  }
+
+  Future<void> _openWledWeb(ControllerInfo controller) async {
+    final url = Uri.parse('http://${controller.ip}');
+    try {
+      final ok =
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't open ${controller.ip}")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't open ${controller.ip}: $e")),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchFirmwareVersion(ControllerInfo controller) async {
+    if (_firmwareVersions.containsKey(controller.id)) return;
+    try {
+      final svc = WledService('http://${controller.ip}');
+      final info = await svc.getInfo();
+      if (info != null && info.ver.isNotEmpty && mounted) {
+        setState(() => _firmwareVersions[controller.id] = info.ver);
+      }
+    } catch (_) {
+      // Silently ignore — the firmware tag is informational, not load-bearing.
+    }
+  }
+
   Future<void> _applyNglDefaults(ControllerInfo controller) async {
     // Confirmation dialog — this writes persistent config.
     final confirmed = await showDialog<bool>(
@@ -1268,7 +1404,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     if (result.success && result.warnings.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('SKIKBILY configured with NGL defaults'),
+          content: Text('Controller configured with NGL defaults'),
           backgroundColor: Colors.green,
         ),
       );

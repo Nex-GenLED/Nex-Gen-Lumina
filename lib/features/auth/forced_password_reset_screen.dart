@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -57,6 +58,37 @@ class _ForcedPasswordResetScreenState
     if (v == null || v.isEmpty) return 'Please confirm your new password';
     if (v != _newCtrl.text) return 'Passwords do not match';
     return null;
+  }
+
+  Future<void> _sendResetEmail() async {
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No email associated with this account'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset email sent to $email'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to send: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _submit() async {
@@ -147,10 +179,10 @@ class _ForcedPasswordResetScreenState
                     const Icon(Icons.hub,
                         size: 60, color: NexGenPalette.cyan),
                     const SizedBox(height: 12),
-                    const Text(
+                    Text(
                       'LUMINA',
                       style: TextStyle(
-                        fontFamily: 'Exo2',
+                        fontFamily: GoogleFonts.exo2().fontFamily,
                         fontSize: 40,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -172,21 +204,21 @@ class _ForcedPasswordResetScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
+                            Text(
                               'Welcome to Lumina!',
                               style: TextStyle(
-                                fontFamily: 'Exo2',
+                                fontFamily: GoogleFonts.exo2().fontFamily,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.white,
                               ),
                             ),
                             const SizedBox(height: 8),
-                            const Text(
+                            Text(
                               'For your security, please set a new '
                               'password before continuing.',
                               style: TextStyle(
-                                fontFamily: 'DM Sans',
+                                fontFamily: GoogleFonts.dmSans().fontFamily,
                                 fontSize: 14,
                                 color: NexGenPalette.textMedium,
                                 height: 1.4,
@@ -202,6 +234,20 @@ class _ForcedPasswordResetScreenState
                               validator: (v) => (v == null || v.isEmpty)
                                   ? 'Current password is required'
                                   : null,
+                            ),
+                            Center(
+                              child: TextButton(
+                                onPressed: _sendResetEmail,
+                                child: Text(
+                                  "Didn't receive a temp password? "
+                                  'Send password reset email',
+                                  style: TextStyle(
+                                    color: NexGenPalette.textMedium,
+                                    fontSize: 12,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                             ),
                             const SizedBox(height: 12),
                             _buildPasswordField(
@@ -241,8 +287,9 @@ class _ForcedPasswordResetScreenState
                                     Expanded(
                                       child: Text(
                                         _formError!,
-                                        style: const TextStyle(
-                                          fontFamily: 'DM Sans',
+                                        style: TextStyle(
+                                          fontFamily:
+                                              GoogleFonts.dmSans().fontFamily,
                                           color: Colors.redAccent,
                                           fontSize: 13,
                                         ),
@@ -277,10 +324,11 @@ class _ForcedPasswordResetScreenState
                                             strokeWidth: 2,
                                           ),
                                         )
-                                      : const Text(
+                                      : Text(
                                           'SET NEW PASSWORD',
                                           style: TextStyle(
-                                            fontFamily: 'Exo2',
+                                            fontFamily:
+                                                GoogleFonts.exo2().fontFamily,
                                             fontWeight: FontWeight.w800,
                                             color: Colors.black,
                                             letterSpacing: 1.2,
@@ -314,12 +362,13 @@ class _ForcedPasswordResetScreenState
       controller: controller,
       obscureText: obscure,
       enabled: !_submitting,
-      style: const TextStyle(color: Colors.white, fontFamily: 'DM Sans'),
+      style: TextStyle(
+          color: Colors.white, fontFamily: GoogleFonts.dmSans().fontFamily),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(
           color: Colors.white.withValues(alpha: 0.6),
-          fontFamily: 'DM Sans',
+          fontFamily: GoogleFonts.dmSans().fontFamily,
         ),
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.06),

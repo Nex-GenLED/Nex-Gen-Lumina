@@ -87,6 +87,13 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
   late DateTime _weekStart;
   late DateTime _calStart; // first day of the calendar zoom range
 
+  // Last successful schedule sync timestamp — drives the "Synced Xm ago"
+  // label on the AppBar Sync button so users can tell at a glance whether
+  // a recent edit landed on the controller. Updated by both manual Sync
+  // taps and the auto-sync that fires on schedulesProvider changes.
+  DateTime? _lastSyncTime;
+  bool _autoSyncing = false;
+
   @override
   void initState() {
     super.initState();
@@ -131,6 +138,71 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     });
   }
 
+  // ── Auto-sync to controller on schedule changes ──────────────────────────
+  //
+  // Fired from a ref.listen on schedulesProvider whenever the saved schedule
+  // list changes. Runs in the background — never blocks the UI. Failures
+  // surface as a snackbar pointing the user back at the manual Sync button.
+  void _triggerAutoSync(List<ScheduleItem> schedules) {
+    if (_autoSyncing) return;
+    _autoSyncing = true;
+    final svc = ref.read(scheduleSyncServiceProvider);
+    svc.syncAll(ref, schedules).then((result) {
+      if (!mounted) return;
+      if (result.success) {
+        setState(() => _lastSyncTime = DateTime.now());
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Schedule sync failed — tap Sync to retry'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }).catchError((e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Schedule sync failed — tap Sync to retry'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }).whenComplete(() {
+      _autoSyncing = false;
+    });
+  }
+
+  String _formatSyncAge(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  // Detect a meaningful change in the schedules list — id set, enabled state,
+  // or core fields. Used to skip the initial fire-immediately emission of
+  // schedulesProvider so we don't auto-sync on screen open.
+  bool _schedulesChanged(List<ScheduleItem>? prev, List<ScheduleItem> next) {
+    if (prev == null) return false;
+    if (prev.length != next.length) return true;
+    for (var i = 0; i < prev.length; i++) {
+      final a = prev[i];
+      final b = next[i];
+      if (a.id != b.id ||
+          a.enabled != b.enabled ||
+          a.timeLabel != b.timeLabel ||
+          a.offTimeLabel != b.offTimeLabel ||
+          a.actionLabel != b.actionLabel ||
+          a.repeatDays.join(',') != b.repeatDays.join(',')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ── Week range label ──
   String get _weekLabel {
     final end = _weekStart.add(const Duration(days: 6));
@@ -159,6 +231,15 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     final selectedKey= ref.watch(selectedCalendarDateProvider);
     final calEntries = ref.watch(calendarScheduleProvider);
     final pending    = ref.watch(pendingCalendarProvider);
+
+    // Auto-sync to controller whenever schedules actually change.
+    // Skips the initial fire (prev == null) so opening the screen does
+    // not trigger a sync — only real edits do.
+    ref.listen<List<ScheduleItem>>(schedulesProvider, (prev, next) {
+      if (_schedulesChanged(prev, next)) {
+        _triggerAutoSync(next);
+      }
+    });
 
     final userAsync  = ref.watch(currentUserProfileProvider);
     final user       = userAsync.maybeWhen(data: (u) => u, orElse: () => null);
@@ -197,16 +278,22 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   backgroundColor: Colors.orange.shade700,
                   duration: const Duration(seconds: 3),
                 ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
               } else {
                 messenger.showSnackBar(SnackBar(
                   content: const Text('Schedules synced to controller'),
                   backgroundColor: Colors.green.shade700,
                   duration: const Duration(seconds: 2),
                 ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
               }
             },
             icon: const Icon(Icons.cloud_upload_rounded, size: 18, color: Colors.white),
-            label: const Text('Sync'),
+            label: Text(
+              _lastSyncTime == null
+                  ? 'Sync'
+                  : 'Synced ${_formatSyncAge(_lastSyncTime!)}',
+            ),
           ),
         ],
       ),

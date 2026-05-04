@@ -124,7 +124,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
       return Scaffold(
         backgroundColor: const Color(0xFF07091A),
         appBar: GlassAppBar(
-          title: const Text('Audio Mode', style: TextStyle(fontFamily: 'Exo2')),
+          title: const Text('Audio Mode'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(),
@@ -139,7 +139,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     return Scaffold(
       backgroundColor: const Color(0xFF07091A),
       appBar: GlassAppBar(
-        title: const Text('Audio Mode', style: TextStyle(fontFamily: 'Exo2')),
+        title: const Text('Audio Mode'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -179,7 +179,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
             const Text(
               'Audio Mode Not Available',
               style: TextStyle(
-                fontFamily: 'Exo2',
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFDCF0FF),
@@ -192,7 +191,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
               'Audio Mode requires a WLED build with the AudioReactive usermod '
               'and a microphone (onboard or I2S).',
               style: TextStyle(
-                fontFamily: 'DM Sans',
                 fontSize: 14,
                 height: 1.5,
                 color: Color(0xFFB0B0B0),
@@ -215,8 +213,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                     child: Text(
                       'The Nex-Gen NGL-CTRL-P1 comes with AudioReactive firmware and onboard mic pre-installed.',
                       style: TextStyle(
-                        fontFamily: 'DM Sans',
-                        fontSize: 12,
+                                fontSize: 12,
                         color: Color(0xFFB0B0B0),
                         height: 1.4,
                       ),
@@ -317,8 +314,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                     Text(
                       isActive ? 'Listening' : 'Standby',
                       style: TextStyle(
-                        fontFamily: 'Exo2',
-                        fontSize: 18,
+                                fontSize: 18,
                         fontWeight: FontWeight.w600,
                         color: isActive ? const Color(0xFF00D4FF) : const Color(0xFFDCF0FF),
                       ),
@@ -329,8 +325,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                           ? 'LEDs are reacting to sound'
                           : 'Select an audio effect to begin',
                       style: const TextStyle(
-                        fontFamily: 'DM Sans',
-                        fontSize: 13,
+                                fontSize: 13,
                         color: Color(0xFFB0B0B0),
                       ),
                     ),
@@ -374,7 +369,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
         Text(
           title.toUpperCase(),
           style: const TextStyle(
-            fontFamily: 'Exo2',
             fontSize: 11,
             fontWeight: FontWeight.w600,
             color: Color(0xFFB0B0B0),
@@ -391,7 +385,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
           child: Text(
             count,
             style: const TextStyle(
-              fontFamily: 'DM Sans',
               fontSize: 11,
               fontWeight: FontWeight.w600,
               color: Color(0xFF00D4FF),
@@ -422,8 +415,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
               const Text(
                 'Mic Sensitivity',
                 style: TextStyle(
-                  fontFamily: 'DM Sans',
-                  fontSize: 14,
+                    fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFFDCF0FF),
                 ),
@@ -439,8 +431,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                 child: Text(
                   _sensitivity.round().toString(),
                   style: const TextStyle(
-                    fontFamily: 'DM Sans',
-                    fontSize: 12,
+                        fontSize: 12,
                     color: Color(0xFFB0B0B0),
                   ),
                 ),
@@ -468,8 +459,8 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Quiet', style: TextStyle(fontFamily: 'DM Sans', fontSize: 10, color: Color(0xFFB0B0B0))),
-                Text('Loud', style: TextStyle(fontFamily: 'DM Sans', fontSize: 10, color: Color(0xFFB0B0B0))),
+                Text('Quiet', style: TextStyle(fontSize: 10, color: Color(0xFFB0B0B0))),
+                Text('Loud', style: TextStyle(fontSize: 10, color: Color(0xFFB0B0B0))),
               ],
             ),
           ),
@@ -546,8 +537,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
               const Text(
                 'Brightness',
                 style: TextStyle(
-                  fontFamily: 'DM Sans',
-                  fontSize: 14,
+                    fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFFDCF0FF),
                 ),
@@ -563,8 +553,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                 child: Text(
                   state.brightness.toString(),
                   style: const TextStyle(
-                    fontFamily: 'DM Sans',
-                    fontSize: 12,
+                        fontSize: 12,
                     color: Color(0xFFB0B0B0),
                   ),
                 ),
@@ -627,8 +616,7 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
                 Text(
                   'Stop Audio Mode',
                   style: TextStyle(
-                    fontFamily: 'DM Sans',
-                    fontSize: 14,
+                        fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: isActive ? Colors.red.shade300 : const Color(0xFFB0B0B0).withValues(alpha: 0.4),
                   ),
@@ -686,8 +674,7 @@ class _AudioEffectCard extends StatelessWidget {
               Text(
                 name,
                 style: TextStyle(
-                  fontFamily: 'DM Sans',
-                  fontSize: 12,
+                    fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: isActive ? const Color(0xFF00D4FF) : const Color(0xFFDCF0FF),
                   height: 1.2,

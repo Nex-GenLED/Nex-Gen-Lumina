@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -102,6 +103,10 @@ class WledDashboardPage extends ConsumerStatefulWidget {
 class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   bool _checkedFirstRun = false;
   bool _pushedSetup = false;
+  // Set to true when the user has no controllers registered. Drives the
+  // top-of-screen MaterialBanner instead of the previous force-redirect.
+  bool _showControllerBanner = false;
+  bool _bannerDismissed = false;
   ImageProvider? _heroImageProvider;
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
@@ -173,13 +178,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
       final col = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('controllers');
       final snap = await col.limit(1).get();
-      if (snap.docs.isEmpty && mounted) {
-        _pushedSetup = true;
-        context.push(AppRoutes.wifiConnect);
+      if (snap.docs.isEmpty && mounted && !_bannerDismissed) {
+        // Non-blocking banner — replaces the previous force-navigate to
+        // /wifi-connect, which trapped users on a setup screen even when
+        // their controllers were temporarily unreachable for other reasons.
+        setState(() => _showControllerBanner = true);
+      } else if (snap.docs.isNotEmpty && mounted && _showControllerBanner) {
+        setState(() => _showControllerBanner = false);
       }
     } catch (e) {
       debugPrint('First-run controller check failed: $e');
     }
+  }
+
+  Future<void> _retryControllerCheck() async {
+    _checkedFirstRun = false;
+    await _checkControllersAndMaybeLaunchWizard();
   }
 
   void _updateHeroImage(String? url, {String? rooflineMaskVersion}) {
@@ -286,10 +300,35 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     ref.watch(rooflineLegacyMigrationProvider);
 
     final state = ref.watch(wledStateProvider);
-    ref.watch(selectedDeviceIpProvider);
+    final selectedIp = ref.watch(selectedDeviceIpProvider);
     final profileAsync = ref.watch(activeUserProfileProvider);
     ref.watch(isRemoteModeProvider);
     final isViewingAsCustomer = ref.watch(isViewingAsCustomerProvider);
+
+    // Audio capability — drives whether Audio Mode tile is shown. Only checked
+    // when we have a selected controller; fall back to "supported = false"
+    // (hidden) until the probe completes.
+    final audioSupported = selectedIp == null
+        ? false
+        : ref.watch(audioCapabilityProvider(selectedIp)).maybeWhen(
+              data: (c) => c.isSupported,
+              orElse: () => false,
+            );
+
+    // Surface failed WLED commands as a non-blocking snackbar. Listening here
+    // (rather than inside the notifier) keeps the notifier UI-free.
+    ref.listen<WledCommandFailure?>(wledCommandFailureProvider, (prev, next) {
+      if (next == null) return;
+      if (prev?.at == next.at) return; // dedup
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(next.message),
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    });
 
     final userName = profileAsync.maybeWhen(data: (u) => u?.displayName ?? 'User', orElse: () => 'User');
 
@@ -329,6 +368,45 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, navBarTotalHeight(context)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (_showControllerBanner)
+              MaterialBanner(
+                backgroundColor: Colors.orange.shade900,
+                content: const Text(
+                  "We can't find your lights — check your WiFi connection",
+                  style: TextStyle(color: Colors.white),
+                ),
+                leading: const Icon(Icons.wifi_off, color: Colors.white),
+                actions: [
+                  TextButton(
+                    onPressed: _retryControllerCheck,
+                    child: const Text(
+                      'Retry',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _bannerDismissed = true;
+                        _showControllerBanner = false;
+                      });
+                      context.push(AppRoutes.wifiConnect);
+                    },
+                    child: const Text(
+                      'Set Up Controller',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Dismiss',
+                    onPressed: () => setState(() {
+                      _bannerDismissed = true;
+                      _showControllerBanner = false;
+                    }),
+                  ),
+                ],
+              ),
             _buildHeroSection(context, ref, state, profileAsync),
             _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
@@ -345,14 +423,28 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               ),
             ),
             const SizedBox(height: 10),
-            // Game Day + Audio Mode — side by side
+            // Game Day + Audio Mode (or My Designs fallback when controller
+            // doesn't support AudioReactive — installs without the firmware
+            // shouldn't surface a button that always lands on a "not
+            // supported" screen).
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   _FeatureButton(icon: Icons.stadium_rounded, label: 'Game Day', onTap: () => context.push(AppRoutes.gameDay)),
                   const SizedBox(width: 12),
-                  _FeatureButton(icon: Icons.graphic_eq_rounded, label: 'Audio Mode', onTap: () => context.push(AppRoutes.audioReactive)),
+                  if (audioSupported)
+                    _FeatureButton(
+                      icon: Icons.graphic_eq_rounded,
+                      label: 'Audio Mode',
+                      onTap: () => context.push(AppRoutes.audioReactive),
+                    )
+                  else
+                    _FeatureButton(
+                      icon: Icons.palette_outlined,
+                      label: 'My Designs',
+                      onTap: () => context.push(AppRoutes.designStudio),
+                    ),
                 ],
               ),
             ),

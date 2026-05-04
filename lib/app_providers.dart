@@ -65,6 +65,12 @@ String? _activePresetLabelCache;
 /// This ensures the pattern name survives app restarts.
 /// Uses a static cache to avoid race conditions during navigation.
 class ActivePresetLabelNotifier extends Notifier<String?> {
+  // Timestamp of the most recent state write. Read by the WLED polling loop's
+  // _resolvePresetName so a stale in-flight HTTP response cannot overwrite a
+  // label that was set very recently (e.g. by a user tapping a pattern card).
+  DateTime? _labelUserSetAt;
+  DateTime? get labelUserSetAt => _labelUserSetAt;
+
   @override
   String? build() {
     // Return cached value immediately if available (handles navigation scenarios)
@@ -93,6 +99,7 @@ class ActivePresetLabelNotifier extends Notifier<String?> {
   set state(String? value) {
     // Update cache synchronously before updating state
     _activePresetLabelCache = value;
+    _labelUserSetAt = DateTime.now();
     super.state = value;
     _persistValue(value);
   }

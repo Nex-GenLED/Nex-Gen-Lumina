@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
+import 'package:nexgen_command/features/sales/services/inventory_service.dart';
 import 'package:nexgen_command/features/sales/services/sales_job_service.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -362,6 +363,47 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
     );
     await ref.read(salesJobServiceProvider).updateJob(updated);
     if (mounted) setState(() => _job = updated);
+
+    // Push inventory delta to dealer stock. Best-effort: a job may not have
+    // gone through formal material checkout (no /sales_jobs/{id}/materialList
+    // doc) — in that case there's nothing for InventoryService to reconcile,
+    // so we silently skip rather than blocking the install close-out.
+    try {
+      final inv = ref.read(inventoryServiceProvider);
+      final list = await inv.watchJobMaterialList(job.id).first;
+      if (list != null && list.lines.isNotEmpty) {
+        final returnedById = {
+          for (final e in entries) e.itemId: e.returnedQty,
+        };
+        // Update returnedQty on lines that match a wrap-up entry by id.
+        // For lines we recognise, set usedDay2 to whatever the line had
+        // already checked out minus prior day-1 usage minus this returned
+        // quantity (waste falls out as the residual computed inside
+        // InventoryService.checkInFinal).
+        final finalLines = list.lines.map((line) {
+          final returned = returnedById[line.materialId];
+          if (returned == null) return line;
+          final usedDay2 = (line.checkedOutQty - line.usedDay1 - returned)
+              .clamp(0, line.checkedOutQty)
+              .toDouble();
+          return line.copyWith(
+            returnedQty: returned,
+            usedDay2: usedDay2,
+          );
+        }).toList();
+
+        await inv.checkInFinal(
+          jobId: job.id,
+          dealerCode: job.dealerCode,
+          installerId: pin,
+          finalLines: finalLines,
+        );
+      }
+    } catch (e) {
+      // Don't block job completion on inventory write failure — the
+      // SalesJob.actualMaterialUsage write above is the durable record.
+      debugPrint('Day2 inventory check-in failed: $e');
+    }
   }
 
   // ── Step 3 — customer account creation ────────────────────────────────

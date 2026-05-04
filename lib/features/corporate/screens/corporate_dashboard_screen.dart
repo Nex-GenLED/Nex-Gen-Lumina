@@ -402,6 +402,22 @@ class _DealerCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Composite-score health dot. Maps the 0..1 score to
+                    // green/amber/red so the network tab gives an at-a-glance
+                    // sense of which dealers need attention before drilling in.
+                    Container(
+                      width: 10,
+                      height: 10,
+                      margin: const EdgeInsets.only(top: 6, right: 8),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: summary.healthScore >= 0.66
+                            ? Colors.green
+                            : summary.healthScore >= 0.33
+                                ? Colors.amber
+                                : Colors.red,
+                      ),
+                    ),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -439,6 +455,11 @@ class _DealerCard extends StatelessWidget {
                     _MetricPill(
                       label: 'Active',
                       value: '${summary.activeJobsCount}',
+                    ),
+                    const SizedBox(width: 8),
+                    _MetricPill(
+                      label: 'MTD',
+                      value: '\$${summary.mtdRevenue.toStringAsFixed(0)}',
                     ),
                     const SizedBox(width: 8),
                     _MetricPill(

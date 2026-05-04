@@ -16,6 +16,10 @@ class BridgeInfo {
   /// than the version that added this field — the wizard treats empty as
   /// an explicit "outdated firmware" error rather than guessing a default.
   final String bridgeEmail;
+  /// Stable per-chip ID (MAC without colons). Used by the wizard to look
+  /// up this bridge in `/bridge_registry`. Empty on firmware older than
+  /// 1.2.
+  final String deviceId;
 
   const BridgeInfo({
     required this.name,
@@ -26,6 +30,7 @@ class BridgeInfo {
     required this.ap,
     required this.savedSSID,
     required this.bridgeEmail,
+    required this.deviceId,
   });
 
   factory BridgeInfo.fromJson(Map<String, dynamic> json) => BridgeInfo(
@@ -37,6 +42,7 @@ class BridgeInfo {
         ap: json['ap'] as String? ?? '',
         savedSSID: json['savedSSID'] as String? ?? '',
         bridgeEmail: json['bridgeEmail'] as String? ?? '',
+        deviceId: json['deviceId'] as String? ?? '',
       );
 }
 

@@ -41,10 +41,17 @@ bool firebaseReady = false;
 unsigned long lastPollTime = 0;
 unsigned long lastBlinkTime = 0;
 unsigned long lastHeartbeatTime = 0;
+unsigned long lastRegistryUpdateTime = 0;
+unsigned long lastPairingPollTime = 0;
 unsigned long commandsProcessed = 0;
 unsigned long commandErrors = 0;
 unsigned long bootTime = 0;
 unsigned long lastSuccessfulPoll = 0; // millis() of last successful command or heartbeat
+
+// Registry self-registration cadence
+#define REGISTRY_HEARTBEAT_INTERVAL_MS 30000
+#define PAIRING_POLL_INTERVAL_MS 5000
+#define BRIDGE_FIRMWARE_VERSION "1.2"
 
 // Firebase Auth tokens
 String firebaseIdToken = "";
@@ -60,11 +67,24 @@ String pairedWledIp = DEFAULT_WLED_IP;
 
 // Device identity
 String deviceName = "Lumina-";
+// MAC address with colons stripped (e.g. "D4E9F4FA54B8"). Used as the
+// document ID under /bridge_registry — stable across reboots and unique
+// per chip, so the app can find this bridge in Firestore without mDNS
+// or local network scanning.
+String deviceId = "";
 
 // Firestore base URL
 String firestoreBaseUrl() {
   return "https://firestore.googleapis.com/v1/projects/" + String(FIREBASE_PROJECT_ID) +
          "/databases/(default)/documents/users/" + pairedUserId;
+}
+
+// URL of this bridge's document under /bridge_registry/{deviceId}.
+// Top-level path so the bridge can register itself before it knows
+// which user it belongs to.
+String bridgeRegistryUrl() {
+  return "https://firestore.googleapis.com/v1/projects/" + String(FIREBASE_PROJECT_ID) +
+         "/databases/(default)/documents/bridge_registry/" + deviceId;
 }
 
 // ============================================================================
@@ -86,6 +106,9 @@ void updateCommandStatus(const String& commandId, const String& status,
                          const String& error = "",
                          const String& result = "");
 void writeHeartbeat();
+void registerBridgeInRegistry();
+void updateRegistryHeartbeat();
+bool pollPairingRequest();
 void blinkLed(int times, int delayMs);
 void statusBlink();
 String convertFirestorePayloadToJson(JsonObject& fields);
@@ -125,8 +148,16 @@ void setup() {
   snprintf(suffix, sizeof(suffix), "%02X%02X", mac[4], mac[5]);
   deviceName += String(suffix);
 
+  // Stable per-chip ID for /bridge_registry/{deviceId}
+  char idBuf[13];
+  snprintf(idBuf, sizeof(idBuf), "%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  deviceId = String(idBuf);
+
   Serial.print("Device name: ");
   Serial.println(deviceName);
+  Serial.print("Device ID: ");
+  Serial.println(deviceId);
 
   // Mark as paired if a user UID is configured
   isPaired = (strlen(FIREBASE_USER_UID) > 0);
@@ -162,6 +193,15 @@ void setup() {
   setupWebServer();
   setupFirebase();
 
+  // Self-register in /bridge_registry/{deviceId} so the Lumina app can find
+  // this bridge via Firestore — no mDNS or LAN scanning needed. Runs after
+  // Firebase Auth so the bridge already has an ID token. If sign-in failed,
+  // skip — the periodic heartbeat will register on the first cycle that
+  // ensureValidToken() succeeds.
+  if (firebaseReady) {
+    registerBridgeInRegistry();
+  }
+
   bootTime = millis();
 
   Serial.println();
@@ -194,12 +234,32 @@ void loop() {
     }
   }
 
+  // While unpaired, poll the registry doc for an app-initiated pairing
+  // request. Stops automatically once isPaired becomes true.
+  if (!isPaired &&
+      millis() - lastPairingPollTime >= PAIRING_POLL_INTERVAL_MS) {
+    lastPairingPollTime = millis();
+    if (firebaseReady && WiFi.status() == WL_CONNECTED) {
+      pollPairingRequest();
+    }
+  }
+
   // Write heartbeat every 30 seconds
   if (millis() - lastHeartbeatTime >= 30000) {
     lastHeartbeatTime = millis();
     if (firebaseReady && isPaired && WiFi.status() == WL_CONNECTED && !firebaseIdToken.isEmpty()) {
       writeHeartbeat();
       lastSuccessfulPoll = millis();
+    }
+  }
+
+  // Refresh the registry doc on the same cadence — runs whether paired or
+  // not, so the app sees lastSeen ticking even on freshly-flashed bridges
+  // sitting at the install site waiting to be claimed.
+  if (millis() - lastRegistryUpdateTime >= REGISTRY_HEARTBEAT_INTERVAL_MS) {
+    lastRegistryUpdateTime = millis();
+    if (firebaseReady && WiFi.status() == WL_CONNECTED && !firebaseIdToken.isEmpty()) {
+      updateRegistryHeartbeat();
     }
   }
 
@@ -314,11 +374,14 @@ void setupWebServer() {
 void handleApiInfo() {
   JsonDocument doc;
   doc["name"] = deviceName;
-  doc["version"] = "1.2";
+  doc["version"] = BRIDGE_FIRMWARE_VERSION;
   doc["type"] = "bridge";
   doc["ip"] = WiFi.localIP().toString();
   doc["mdns"] = deviceName + ".local";
   doc["ap"] = deviceName;
+  // Stable per-chip ID — the app uses this to look up this bridge in
+  // /bridge_registry without needing to know the IP or hostname.
+  doc["deviceId"] = deviceId;
   doc["savedSSID"] = String(WIFI_SSID);
   // "nvs" → bridge has been paired by the app and the UID was loaded from
   // flash; "default" → no pairing on file, running on compile-time defaults.
@@ -954,6 +1017,263 @@ void writeHeartbeat() {
   }
 
   http.end();
+}
+
+// ============================================================================
+// Bridge Registry — self-registration & pairing handshake
+// ============================================================================
+//
+// The bridge writes its own document at /bridge_registry/{deviceId} so the
+// Lumina app can discover and pair it via Firestore — no mDNS, no manual
+// IP entry, no "phone and bridge on same WiFi" requirement. The pairing
+// handshake is also Firestore-driven: app writes status="pairing" +
+// pendingUid, the bridge sees it on the next pollPairingRequest() and
+// promotes itself to status="paired".
+
+// Build the JSON body containing every field the registry doc supports.
+// Used for the initial full-doc write at boot.
+static String buildRegistryFullPayload() {
+  JsonDocument doc;
+  doc["fields"]["deviceId"]["stringValue"] = deviceId;
+  doc["fields"]["deviceName"]["stringValue"] = deviceName;
+  doc["fields"]["apName"]["stringValue"] = deviceName;
+  doc["fields"]["bridgeEmail"]["stringValue"] = String(FIREBASE_AUTH_EMAIL);
+  doc["fields"]["ip"]["stringValue"] = WiFi.localIP().toString();
+  doc["fields"]["status"]["stringValue"] = isPaired ? "paired" : "unpaired";
+  doc["fields"]["pairedUid"]["stringValue"] = isPaired ? pairedUserId : "";
+  // Empty string means "no pairing request pending" — see Part 7 of the
+  // self-registration design (we deliberately avoid Firestore field
+  // deletion in favor of a simple sentinel value).
+  doc["fields"]["pendingUid"]["stringValue"] = "";
+  doc["fields"]["firmwareVersion"]["stringValue"] = BRIDGE_FIRMWARE_VERSION;
+
+  time_t now = time(nullptr);
+  char ts[30];
+  strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+  doc["fields"]["lastSeen"]["timestampValue"] = ts;
+
+  doc["fields"]["rssi"]["integerValue"] = String(WiFi.RSSI());
+  doc["fields"]["heap"]["integerValue"] = String(ESP.getFreeHeap());
+  doc["fields"]["freeHeap"]["integerValue"] = String(ESP.getFreeHeap());
+  doc["fields"]["flashSize"]["integerValue"] = String(ESP.getFlashChipSize());
+
+  String body;
+  serializeJson(doc, body);
+  return body;
+}
+
+void registerBridgeInRegistry() {
+  if (!ensureValidToken()) {
+    Serial.println("[Registry] Cannot register — no valid token");
+    return;
+  }
+
+  HTTPClient http;
+  // Write every field via updateMask so the PATCH creates the doc on
+  // first run and overwrites stale fields on subsequent boots.
+  String url = bridgeRegistryUrl() +
+               "?updateMask.fieldPaths=deviceId" +
+               "&updateMask.fieldPaths=deviceName" +
+               "&updateMask.fieldPaths=apName" +
+               "&updateMask.fieldPaths=bridgeEmail" +
+               "&updateMask.fieldPaths=ip" +
+               "&updateMask.fieldPaths=status" +
+               "&updateMask.fieldPaths=pairedUid" +
+               "&updateMask.fieldPaths=pendingUid" +
+               "&updateMask.fieldPaths=firmwareVersion" +
+               "&updateMask.fieldPaths=lastSeen" +
+               "&updateMask.fieldPaths=rssi" +
+               "&updateMask.fieldPaths=heap" +
+               "&updateMask.fieldPaths=freeHeap" +
+               "&updateMask.fieldPaths=flashSize";
+
+  String body = buildRegistryFullPayload();
+
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
+
+  int httpCode = http.PATCH(body);
+
+  if (httpCode == 200) {
+    Serial.print("[Registry] Self-registered as ");
+    Serial.print(deviceId);
+    Serial.print(" (status=");
+    Serial.print(isPaired ? "paired" : "unpaired");
+    Serial.println(")");
+    // Counts as "successful Firestore activity" so the watchdog doesn't
+    // reboot a freshly-installed unpaired bridge sitting idle.
+    lastSuccessfulPoll = millis();
+  } else {
+    String response = http.getString();
+    Serial.print("[Registry] Self-registration failed: HTTP ");
+    Serial.print(httpCode);
+    Serial.print(" - ");
+    Serial.println(response.substring(0, 200));
+  }
+
+  http.end();
+}
+
+void updateRegistryHeartbeat() {
+  if (!ensureValidToken()) return;
+
+  HTTPClient http;
+  // Only the dynamic fields — keep deviceId/apName/bridgeEmail/firmwareVersion
+  // immutable across heartbeats so a corrupted payload can't rewrite identity.
+  // Status + pairedUid are included so the doc reflects pairing changes
+  // (e.g. immediately after pollPairingRequest promotes us).
+  String url = bridgeRegistryUrl() +
+               "?updateMask.fieldPaths=lastSeen" +
+               "&updateMask.fieldPaths=ip" +
+               "&updateMask.fieldPaths=rssi" +
+               "&updateMask.fieldPaths=heap" +
+               "&updateMask.fieldPaths=freeHeap" +
+               "&updateMask.fieldPaths=status" +
+               "&updateMask.fieldPaths=pairedUid";
+
+  JsonDocument doc;
+  doc["fields"]["ip"]["stringValue"] = WiFi.localIP().toString();
+  doc["fields"]["status"]["stringValue"] = isPaired ? "paired" : "unpaired";
+  doc["fields"]["pairedUid"]["stringValue"] = isPaired ? pairedUserId : "";
+
+  time_t now = time(nullptr);
+  char ts[30];
+  strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+  doc["fields"]["lastSeen"]["timestampValue"] = ts;
+
+  doc["fields"]["rssi"]["integerValue"] = String(WiFi.RSSI());
+  doc["fields"]["heap"]["integerValue"] = String(ESP.getFreeHeap());
+  doc["fields"]["freeHeap"]["integerValue"] = String(ESP.getFreeHeap());
+
+  String body;
+  serializeJson(doc, body);
+
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
+
+  int httpCode = http.PATCH(body);
+
+  if (httpCode == 200) {
+    DEBUG_PRINTLN("[Registry] Heartbeat OK");
+    lastSuccessfulPoll = millis();
+  } else if (httpCode == 404) {
+    // Registry doc missing — re-create it. Happens if an admin deleted
+    // the doc to force re-pairing, or on a brand-new project.
+    Serial.println("[Registry] Heartbeat 404 — re-registering");
+    http.end();
+    registerBridgeInRegistry();
+    return;
+  } else {
+    DEBUG_PRINT("[Registry] Heartbeat failed: HTTP ");
+    DEBUG_PRINTLN(httpCode);
+  }
+
+  http.end();
+}
+
+bool pollPairingRequest() {
+  if (!ensureValidToken()) return false;
+
+  HTTPClient http;
+  http.begin(secureClient, bridgeRegistryUrl());
+  http.addHeader("Authorization", "Bearer " + firebaseIdToken);
+
+  int httpCode = http.GET();
+
+  if (httpCode == 404) {
+    // Doc doesn't exist yet — the initial registerBridgeInRegistry() call
+    // probably failed (e.g. token wasn't ready). Try again now.
+    http.end();
+    Serial.println("[Registry] Doc missing — re-registering");
+    registerBridgeInRegistry();
+    return false;
+  }
+
+  if (httpCode != 200) {
+    DEBUG_PRINT("[Registry] Pairing poll failed: HTTP ");
+    DEBUG_PRINTLN(httpCode);
+    http.end();
+    return false;
+  }
+
+  String response = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, response)) {
+    DEBUG_PRINTLN("[Registry] Pairing poll JSON parse error");
+    return false;
+  }
+
+  String pendingUid =
+      doc["fields"]["pendingUid"]["stringValue"].as<String>();
+  String currentStatus =
+      doc["fields"]["status"]["stringValue"].as<String>();
+
+  // Empty pendingUid (sentinel) or non-pairing status → nothing to do.
+  if (pendingUid.length() == 0 || currentStatus != "pairing") {
+    lastSuccessfulPoll = millis();
+    return false;
+  }
+
+  Serial.println();
+  Serial.print("[Registry] Pairing request received — UID: ");
+  Serial.println(pendingUid);
+
+  // Persist the new UID to NVS before confirming, so a power loss between
+  // the local commit and the Firestore confirm leaves the bridge in a
+  // recoverable state (next boot will see itself as paired and the app's
+  // pending request will resolve naturally on reconnect).
+  prefs.begin("bridge", false);
+  prefs.putString("uid", pendingUid);
+  prefs.end();
+
+  pairedUserId = pendingUid;
+  isPaired = true;
+  nvsUidFound = true;
+
+  // Confirm the pairing in the registry doc — clears pendingUid and flips
+  // status to "paired" so the app's poll completes.
+  HTTPClient confirmHttp;
+  String confirmUrl = bridgeRegistryUrl() +
+                      "?updateMask.fieldPaths=status" +
+                      "&updateMask.fieldPaths=pairedUid" +
+                      "&updateMask.fieldPaths=pendingUid" +
+                      "&updateMask.fieldPaths=lastSeen";
+
+  JsonDocument confirmDoc;
+  confirmDoc["fields"]["status"]["stringValue"] = "paired";
+  confirmDoc["fields"]["pairedUid"]["stringValue"] = pendingUid;
+  confirmDoc["fields"]["pendingUid"]["stringValue"] = "";
+
+  time_t now = time(nullptr);
+  char ts[30];
+  strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+  confirmDoc["fields"]["lastSeen"]["timestampValue"] = ts;
+
+  String confirmBody;
+  serializeJson(confirmDoc, confirmBody);
+
+  confirmHttp.begin(secureClient, confirmUrl);
+  confirmHttp.addHeader("Content-Type", "application/json");
+  confirmHttp.addHeader("Authorization", "Bearer " + firebaseIdToken);
+
+  int confirmCode = confirmHttp.PATCH(confirmBody);
+  confirmHttp.end();
+
+  if (confirmCode == 200) {
+    Serial.println("[Registry] Pairing confirmed in Firestore");
+    lastSuccessfulPoll = millis();
+    return true;
+  } else {
+    Serial.print("[Registry] Pairing confirmation failed: HTTP ");
+    Serial.println(confirmCode);
+    // Local NVS already updated — the next heartbeat cycle will retry the
+    // status PATCH and the app's pairing poll will eventually see "paired".
+    return false;
+  }
 }
 
 // ============================================================================

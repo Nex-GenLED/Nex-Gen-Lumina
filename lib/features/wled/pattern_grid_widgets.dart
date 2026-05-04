@@ -1295,11 +1295,22 @@ class _PatternCardState extends ConsumerState<PatternCard> {
   }
 
   /// Build the WLED payload that will actually be sent when the user taps
-  /// Apply. Substitutes fx=83 (Solid Pattern) when the original effect is
-  /// Solid (fx=0) and the user has more than one active color, so the
-  /// device renders the alternating bands the preview implies. For other
-  /// multi-color cases the original fx is kept and `grp`/`spc` are added so
-  /// WLED groups colors into bands of `_ledsPerColor`.
+  /// Apply. Substitutes a Solid Pattern variant when the original effect is
+  /// Solid (fx=0) and the user has more than one active color:
+  ///
+  ///   fx=83 (Solid Pattern, 2-color):
+  ///     lit band   = 1 + sx
+  ///     unlit band = 1 + ix
+  ///     equal bands → sx = ix = ledsPerColor - 1 (no upper cap from WLED)
+  ///
+  ///   fx=84 (Solid Pattern Tri, 3-color):
+  ///     band width = 1 + (ix >> 5), max 8 LEDs/band
+  ///     ix = (ledsPerColor - 1) * 32, clamped to 255 (silent cap at 8)
+  ///
+  /// Forces pal=5 ("Colors Only") so the substituted fx reads col[] directly
+  /// instead of pulling from the rainbow palette. For other multi-color
+  /// effects the original fx is kept and grp/spc are added so WLED groups
+  /// colors into bands of `_ledsPerColor`.
   ///
   /// Never mutates `rawPayload` — always returns a deep copy.
   Map<String, dynamic> _preparePayload(
@@ -1328,10 +1339,23 @@ class _PatternCardState extends ConsumerState<PatternCard> {
 
     if (activeColors.length > 1) {
       if (originalFx == 0) {
-        // Solid + multiple colors → Solid Pattern with explicit band width.
-        s['fx'] = 83;
-        // fx=83 ignores grp; band width = 1 + (ix >> 3). Inverse: ix = 8*(N-1).
-        s['ix'] = ((ledsPerColor - 1) * 8).clamp(0, 255);
+        final n = (ledsPerColor - 1).clamp(0, 255);
+        if (activeColors.length == 2) {
+          // fx=83 (Solid Pattern): sx controls lit band width, ix controls
+          // unlit band. Both = n gives equal-width alternating bands.
+          s['fx'] = 83;
+          s['sx'] = n;
+          s['ix'] = n;
+        } else {
+          // fx=84 (Solid Pattern Tri): cycles 3 colors. Band width =
+          // 1 + (ix >> 5), max 8 LEDs/band. Silent cap at 8 is acceptable
+          // behavior — Solid Pattern Tri itself caps there.
+          s['fx'] = 84;
+          s['ix'] = ((ledsPerColor - 1) * 32).clamp(0, 255);
+        }
+        // Force "Colors Only" palette so fx=83/84 reads col[] directly
+        // instead of pulling from the rainbow palette.
+        s['pal'] = 5;
       }
       // For all other multi-color effects, keep the original fx but force
       // grouping so the device honors the user's ledsPerColor choice.
@@ -1411,7 +1435,12 @@ class _PatternCardState extends ConsumerState<PatternCard> {
                   : usePreparedBandPreview
                       ? _GradientDotPreview(
                           gradientColors: activeColors,
-                          bandWidth: _ledsPerColor,
+                          // fx=83 has no band-width cap; fx=84 caps at 8.
+                          // Mirror the apply-path cap so the preview matches
+                          // what WLED will actually render.
+                          bandWidth: activeColors.length == 2
+                              ? _ledsPerColor
+                              : _ledsPerColor.clamp(1, 8),
                           borderRadius: 10,
                         )
                       : EffectPreviewWidget(

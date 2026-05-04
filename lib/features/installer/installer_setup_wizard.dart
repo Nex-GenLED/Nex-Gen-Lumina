@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
+import 'package:nexgen_command/features/installer/screens/hardware_config_step.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
@@ -445,11 +446,16 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       case InstallerWizardStep.zoneConfiguration:
         return ZoneConfigurationScreen(
           onBack: () => _goToStep(InstallerWizardStep.controllerSetup),
+          onNext: () => _goToStep(InstallerWizardStep.hardwareConfig),
+        );
+      case InstallerWizardStep.hardwareConfig:
+        return HardwareConfigStep(
+          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
           onNext: () => _goToStep(InstallerWizardStep.handoff),
         );
       case InstallerWizardStep.handoff:
         return HandoffScreen(
-          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
+          onBack: () => _goToStep(InstallerWizardStep.hardwareConfig),
           onNext: (draft) {
             ref.read(installerPreferenceDraftProvider.notifier).state = draft;
             _completeSetup();
@@ -1079,6 +1085,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return _StepInfo('Controller Setup', 'Controllers');
       case InstallerWizardStep.zoneConfiguration:
         return _StepInfo('Zone Configuration', 'Zones');
+      case InstallerWizardStep.hardwareConfig:
+        return _StepInfo('Hardware Config', 'Hardware');
       case InstallerWizardStep.handoff:
         return _StepInfo('Customer Handoff', 'Handoff');
     }
