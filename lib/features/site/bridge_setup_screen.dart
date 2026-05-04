@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,9 +14,13 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 
 /// Three-step bridge setup wizard:
-///   1. Discover — find the bridge on the local network
-///   2. Pair — send userId + WLED IP to the bridge
-///   3. Verify — confirm the round-trip works
+///   1. Discover — find the bridge via Firestore self-registration
+///   2. Pair    — write a pairing request to Firestore; bridge confirms
+///   3. Verify  — confirm the bridge is heartbeating + round-trip works
+///
+/// The legacy mDNS / manual-IP path remains available under "Advanced"
+/// for installer troubleshooting, but the primary flow no longer requires
+/// the phone and bridge to be on the same WiFi at the same time.
 class BridgeSetupScreen extends ConsumerStatefulWidget {
   const BridgeSetupScreen({super.key});
 
@@ -31,12 +36,17 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   // Discovery
   List<BridgeEndpoint> _bridges = [];
   bool _scanning = false;
-  final _manualIpController = TextEditingController();
 
-  // Selected bridge
+  // Selected bridge — populated either from Firestore discovery (primary)
+  // or from the Advanced manual-IP fallback (legacy path).
+  BridgeEndpoint? _selectedBridge;
+  // Optional fast-path local HTTP client. Populated only when the phone
+  // is on the same WiFi as the bridge and an /api/info probe succeeds.
+  // The pairing flow no longer depends on this — it's purely an
+  // optimization for the verify step.
   BridgeApiClient? _client;
-  BridgeInfo? _bridgeInfo;
-  String _bridgeIp = '';
+  // Legacy /api/info payload, populated only on the manual-IP fallback.
+  BridgeInfo? _legacyBridgeInfo;
 
   // Pair step
   bool _pairing = false;
@@ -51,12 +61,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   void initState() {
     super.initState();
     _startDiscovery();
-  }
-
-  @override
-  void dispose() {
-    _manualIpController.dispose();
-    super.dispose();
   }
 
   // ── Step 1: Discovery ─────────────────────────────────────────────────────
@@ -81,14 +85,78 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     }
   }
 
-  Future<void> _selectBridge(String ip) async {
-    setState(() {
-      _bridgeIp = ip;
-      _client = BridgeApiClient.fromIp(ip);
-    });
+  /// Primary path: select a bridge from the Firestore-discovered list.
+  /// All hijack/identity checks happen against the registry doc — no
+  /// dependence on the phone reaching the bridge over LAN.
+  Future<void> _selectBridge(BridgeEndpoint bridge) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
 
-    // Fetch bridge info to confirm it's a Lumina device
-    final info = await _client!.getInfo();
+    // Hijack protection — read the latest registry state by deviceId so
+    // we don't act on a stale list snapshot. If the bridge is paired to
+    // someone else, require explicit installer confirmation.
+    if (bridge.deviceId != null && bridge.deviceId!.isNotEmpty) {
+      final service = ref.read(bridgeDiscoveryServiceProvider);
+      final fresh = await service.getById(bridge.deviceId!);
+      if (!mounted) return;
+
+      final freshPairedUid = fresh?.pairedUid ?? bridge.pairedUid ?? '';
+      final freshStatus = fresh?.status ?? bridge.status ?? 'unpaired';
+
+      if (freshStatus == 'paired' &&
+          freshPairedUid.isNotEmpty &&
+          freshPairedUid != currentUid) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Bridge already paired'),
+            content: const Text(
+              'This bridge is currently paired to a different Nex-Gen '
+              'account. Continuing will transfer the bridge to your '
+              'account and stop service for the previous owner.\n\n'
+              'Continue only if you are the authorized installer for '
+              'this bridge.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Transfer to my account'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        if (confirmed != true) return;
+      }
+    }
+
+    // Optional fast-path: if we happen to be on the same network, set up
+    // a local HTTP client so the verify step can use the LAN as a fast
+    // path. Failure here is non-fatal — Firestore is the source of truth.
+    BridgeApiClient? client;
+    try {
+      client = BridgeApiClient.fromIp(bridge.address.address);
+    } catch (_) {
+      client = null;
+    }
+
+    setState(() {
+      _selectedBridge = bridge;
+      _client = client;
+      _legacyBridgeInfo = null;
+      _step = _Step.pair;
+    });
+  }
+
+  /// Advanced fallback: user typed an IP. Same /api/info verification as
+  /// before, then synthesize a BridgeEndpoint from the bridge's response.
+  Future<void> _selectBridgeByIp(String ip) async {
+    final client = BridgeApiClient.fromIp(ip);
+
+    final info = await client.getInfo();
     if (!mounted) return;
 
     if (info == null) {
@@ -101,9 +169,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
-    // The firmware advertises type="bridge" in /api/info. Reject anything
-    // else — without this, a WLED controller (or any HTTP service) at the
-    // entered IP could slip through and end up persisted as the bridge IP.
     if (info.type != 'bridge') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -117,11 +182,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
-    // Hijack protection: if this bridge is already paired to a different
-    // Nex-Gen account, require explicit confirmation before continuing.
-    // A null status (bridge unreachable for /status) is non-fatal — the
-    // Verify step will catch it later.
-    final status = await _client!.getStatus();
+    // Hijack-detection via local HTTP — keep for the manual path so the
+    // legacy flow stays self-contained.
+    final status = await client.getStatus();
     if (!mounted) return;
 
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -156,8 +219,23 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       if (confirmed != true) return;
     }
 
+    // Synthesize a BridgeEndpoint so the rest of the wizard can treat
+    // manual-IP and Firestore-discovered bridges uniformly. deviceId
+    // comes from the firmware's /api/info response (added in v1.2);
+    // empty string on older firmware → falls through to the legacy
+    // local-HTTP pairing path.
+    final deviceId = info.deviceId.isNotEmpty ? info.deviceId : null;
     setState(() {
-      _bridgeInfo = info;
+      _selectedBridge = BridgeEndpoint(
+        name: info.name,
+        address: InternetAddress(ip),
+        deviceId: deviceId,
+        status: status?.paired == true ? 'paired' : 'unpaired',
+        pairedUid: status?.userId,
+        bridgeEmail: info.bridgeEmail,
+      );
+      _client = client;
+      _legacyBridgeInfo = info;
       _step = _Step.pair;
     });
   }
@@ -231,7 +309,7 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       ),
     );
     if (ip != null && ip.isNotEmpty) {
-      _selectBridge(ip);
+      _selectBridgeByIp(ip);
     }
   }
 
@@ -255,61 +333,55 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
-    debugPrint(
-        '[BridgeSetup] Pairing to bridge: $_bridgeIp, controller: $controllerIp');
+    final bridge = _selectedBridge;
+    if (bridge == null) return;
 
     setState(() {
       _pairing = true;
       _pairError = null;
     });
 
-    // Send pair request
-    final paired = await _client!.pair(
-      userId: user.uid,
-      wledIp: controllerIp,
-    );
+    // Two pairing strategies:
+    //   - Firestore-driven (primary): write pendingUid to the registry doc
+    //     and poll until the bridge confirms. Works regardless of whether
+    //     the phone is on the same WiFi.
+    //   - Local HTTP fallback (manual IP only): legacy /api/bridge/pair.
+    //     Used when the user typed an IP and we haven't been able to
+    //     find the bridge in Firestore (e.g. registry doc missing).
+    final hasDeviceId =
+        bridge.deviceId != null && bridge.deviceId!.isNotEmpty;
+    bool paired;
+
+    if (hasDeviceId) {
+      paired = await _pairViaFirestore(
+        deviceId: bridge.deviceId!,
+        userId: user.uid,
+      );
+    } else {
+      paired = await _pairViaLocalHttp(
+        userId: user.uid,
+        wledIp: controllerIp,
+      );
+    }
 
     if (!mounted) return;
 
     if (!paired) {
       setState(() {
         _pairing = false;
-        _pairError = 'Pair request failed. Check the bridge is reachable.';
+        _pairError ??= 'Pair request failed. The bridge did not '
+            'confirm pairing within 30 seconds.';
       });
       return;
     }
 
-    // Confirm the bridge stored our UID. The firmware returns 403 if the
-    // bridge is paired to a different account — surface that distinctly so
-    // the installer knows the bridge isn't theirs to claim.
-    final authed = await _client!.authenticate(userId: user.uid);
-
-    if (!mounted) return;
-
-    if (!authed) {
-      setState(() {
-        _pairing = false;
-        _pairError = 'Bridge did not confirm pairing to this account. '
-            'It may be paired to another user, or it may need a firmware update.';
-      });
-      return;
-    }
-
-    // Save bridge IP to user profile. Prefer the bridge's self-reported
-    // IP (from /api/info) over the IP the user typed/we connected to —
-    // the bridge knows its own IP definitively, which avoids drift if the
-    // wizard was reached via mDNS hostname or a stale DHCP lease.
-    final bridgeIpToPersist =
-        (_bridgeInfo != null && _bridgeInfo!.ip.isNotEmpty)
-            ? _bridgeInfo!.ip
-            : _bridgeIp;
-
-    // Firestore rules grant the bridge access via bridge_email matching its
-    // Firebase Auth email. The bridge self-declares this in /api/info so the
-    // wizard never guesses. Older firmware that doesn't return bridgeEmail
-    // would silently get the wrong default and the bridge would be locked
-    // out of Firestore — fail explicitly instead.
-    final bridgeEmail = _bridgeInfo?.bridgeEmail ?? '';
+    // Resolve the bridge email from the registry (preferred) or the
+    // legacy /api/info payload. Firestore rules grant the bridge access
+    // via bridge_email matching its Firebase Auth email — without it the
+    // bridge silently 403s on every Firestore read.
+    final bridgeEmail = bridge.bridgeEmail?.isNotEmpty == true
+        ? bridge.bridgeEmail!
+        : (_legacyBridgeInfo?.bridgeEmail ?? '');
     if (bridgeEmail.isEmpty) {
       setState(() {
         _pairing = false;
@@ -319,6 +391,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       return;
     }
 
+    // Persist the bridge IP and email to the user doc so remote-access
+    // queries can reach the bridge and Firestore rules grant it access.
+    final bridgeIpToPersist = bridge.address.address;
     try {
       final userService = ref.read(userServiceProvider);
       await userService.saveBridgeConfig(
@@ -330,6 +405,17 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       debugPrint('Failed to save bridge config to Firestore: $e');
     }
 
+    // For the manual-IP path, also write the controller IP to the
+    // bridge's NVS via /api/bridge/pair so it knows where to send
+    // commands. The Firestore-driven path doesn't need this — the bridge
+    // will receive controllerIp on each command.
+    if (!hasDeviceId && _client != null) {
+      await _client!.pair(
+        userId: user.uid,
+        wledIp: controllerIp,
+      );
+    }
+
     setState(() {
       _pairing = false;
       _step = _Step.verify;
@@ -338,53 +424,136 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     _doVerify();
   }
 
-  // ── Step 3: Verify ────────────────────────────────────────────────────────
+  /// Firestore-driven pair: write status="pairing" + pendingUid, then poll
+  /// the registry doc until the bridge promotes it to status="paired".
+  Future<bool> _pairViaFirestore({
+    required String deviceId,
+    required String userId,
+  }) async {
+    final docRef = FirebaseFirestore.instance
+        .collection('bridge_registry')
+        .doc(deviceId);
 
-  BridgeStatus? _lastStatus;
+    try {
+      await docRef.update({
+        'status': 'pairing',
+        'pendingUid': userId,
+        'pairingRequestedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      _pairError = 'Could not request pairing: $e';
+      return false;
+    }
+
+    // Poll every 2 s for up to 30 s. The bridge polls the registry every
+    // 5 s, so worst case we see the transition on iteration 3-4.
+    for (var i = 0; i < 15; i++) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return false;
+
+      try {
+        final snap = await docRef.get();
+        final data = snap.data();
+        if (data == null) continue;
+        final status = data['status'] as String? ?? '';
+        final pairedUid = data['pairedUid'] as String? ?? '';
+        if (status == 'paired' && pairedUid == userId) {
+          return true;
+        }
+      } catch (e) {
+        debugPrint('[BridgeSetup] pair poll iteration $i failed: $e');
+      }
+    }
+
+    _pairError = 'The bridge did not respond to the pairing request '
+        'within 30 seconds. Make sure it is powered on and connected '
+        'to WiFi.';
+    return false;
+  }
+
+  /// Legacy local-HTTP pair — used only on the manual-IP fallback.
+  Future<bool> _pairViaLocalHttp({
+    required String userId,
+    required String wledIp,
+  }) async {
+    final client = _client;
+    if (client == null) {
+      _pairError = 'No local connection to the bridge.';
+      return false;
+    }
+
+    final paired = await client.pair(userId: userId, wledIp: wledIp);
+    if (!paired) {
+      _pairError = 'Pair request failed. Check the bridge is reachable.';
+      return false;
+    }
+
+    final authed = await client.authenticate(userId: userId);
+    if (!authed) {
+      _pairError = 'Bridge did not confirm pairing to this account. '
+          'It may be paired to another user, or it may need a firmware update.';
+      return false;
+    }
+
+    return true;
+  }
+
+  // ── Step 3: Verify ────────────────────────────────────────────────────────
 
   Future<void> _doVerify() async {
     setState(() {
       _verifying = true;
       _verifyError = null;
       _verified = false;
-      _lastStatus = null;
     });
 
-    // Check bridge status endpoint first
-    final status = await _client!.getStatus();
-    if (!mounted) return;
-
-    _lastStatus = status;
-
-    if (status == null) {
+    final bridge = _selectedBridge;
+    if (bridge == null) {
       setState(() {
         _verifying = false;
-        _verifyError = 'Could not reach bridge at $_bridgeIp. Is it powered on?';
+        _verifyError = 'No bridge selected.';
       });
       return;
     }
 
-    if (!status.paired) {
-      setState(() {
-        _verifying = false;
-        _verifyError = 'Bridge reports it is not paired. Try going back and re-pairing.';
-      });
-      return;
+    // Primary: Firestore heartbeat — the bridge writes lastSeen every
+    // 30 s. If we see a recent timestamp, the bridge is up and reachable
+    // through the same Firestore path that production commands use.
+    if (bridge.deviceId != null && bridge.deviceId!.isNotEmpty) {
+      final firestoreOk =
+          await _verifyViaFirestoreHeartbeat(bridge.deviceId!);
+      if (!mounted) return;
+      if (!firestoreOk) {
+        setState(() {
+          _verifying = false;
+          _verifyError =
+              'The bridge has not heartbeated to Firestore in the last '
+              '60 seconds. Make sure it is powered on and connected to WiFi.';
+        });
+        return;
+      }
     }
 
-    if (!status.authenticated) {
-      setState(() {
-        _verifying = false;
-        _verifyError =
-            'Bridge is paired but NOT authenticated with Firebase.\n\n'
-            'The bridge@lumina.local account may not exist in Firebase Auth. '
-            'Create it in the Firebase Console → Authentication → Add User, '
-            'then re-run the pairing step.';
-      });
-      return;
+    // Optional fast-path: local HTTP /api/info, only if we have a client
+    // (set up when the phone happens to be on the same network). Failure
+    // is non-fatal — Firestore already proved the bridge is alive.
+    if (_client != null) {
+      try {
+        final info = await _client!
+            .getInfo()
+            .timeout(const Duration(seconds: 5));
+        if (info?.type == 'bridge') {
+          debugPrint(
+              '[BridgeSetup] Local fast-path verified for ${info?.name}');
+        }
+      } catch (_) {
+        // Ignore — Firestore heartbeat is the authoritative check.
+      }
     }
 
-    // Now test the Firestore round-trip
+    // Round-trip test: send a ping command through Firestore, expect
+    // the bridge to mark it completed within 15 s. Same path remote
+    // commands use in production.
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       setState(() {
@@ -410,7 +579,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         'status': 'pending',
       });
 
-      // Poll for up to 15 seconds
       for (var i = 0; i < 30; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
@@ -435,37 +603,38 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         }
       }
 
-      // Timed out — re-fetch bridge status for diagnostics
-      final refreshed = await _client!.getStatus();
-      _lastStatus = refreshed;
       await docRef.update({'status': 'timeout'});
-
-      final diag = StringBuffer(
-        'Bridge did not respond within 15 seconds.\n\n',
-      );
-      if (refreshed != null) {
-        diag.writeln('Bridge diagnostics:');
-        diag.writeln('  WiFi: ${refreshed.wifi ? "connected" : "DISCONNECTED"}');
-        diag.writeln('  Firebase Auth: ${refreshed.authenticated ? "OK" : "FAILED"}');
-        diag.writeln('  Paired: ${refreshed.paired}');
-        diag.writeln('  User ID: ${refreshed.userId.isNotEmpty ? refreshed.userId.substring(0, 8) + "..." : "(empty)"}');
-        diag.writeln('  Controller IP: ${refreshed.wledIp}');
-        diag.writeln('  Commands processed: ${refreshed.commands}');
-        diag.writeln('  Errors: ${refreshed.errors}');
-        diag.writeln('  Uptime: ${refreshed.uptime}s');
-      } else {
-        diag.writeln('Could not reach bridge for diagnostics.');
-      }
-
       setState(() {
         _verifying = false;
-        _verifyError = diag.toString();
+        _verifyError = 'Bridge did not respond to a Firestore ping within '
+            '15 seconds. The registry shows it heartbeating, so it is online '
+            '— but it may be busy or the controller IP is unreachable.';
       });
     } catch (e) {
       setState(() {
         _verifying = false;
         _verifyError = 'Verification error: $e';
       });
+    }
+  }
+
+  /// Firestore-only heartbeat freshness check. The bridge updates
+  /// `lastSeen` every 30 s; we accept up to 60 s old to allow for
+  /// one missed cycle.
+  Future<bool> _verifyViaFirestoreHeartbeat(String deviceId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('bridge_registry')
+          .doc(deviceId)
+          .get();
+      if (!doc.exists) return false;
+      final lastSeen = doc.data()?['lastSeen'] as Timestamp?;
+      if (lastSeen == null) return false;
+      final age = DateTime.now().difference(lastSeen.toDate());
+      return age.inSeconds < 60;
+    } catch (e) {
+      debugPrint('[BridgeSetup] heartbeat check failed: $e');
+      return false;
     }
   }
 
@@ -480,10 +649,8 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
-          // Step indicator
           _buildStepIndicator(),
           const SizedBox(height: 24),
-          // Step content
           if (_step == _Step.discover) _buildDiscoverStep(),
           if (_step == _Step.pair) _buildPairStep(),
           if (_step == _Step.verify) _buildVerifyStep(),
@@ -538,11 +705,10 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Make sure your phone is on the same WiFi network as the bridge.',
+                  'Make sure the bridge is powered on and connected to WiFi.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 16),
-
                 if (_scanning)
                   const Center(
                     child: Padding(
@@ -551,69 +717,81 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                         children: [
                           CircularProgressIndicator(),
                           SizedBox(height: 12),
-                          Text('Scanning for bridges...'),
+                          Text('Looking for bridges...'),
                         ],
                       ),
                     ),
                   ),
-
                 if (!_scanning && _bridges.isEmpty)
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          Icon(Icons.wifi_find, size: 48, color: Colors.grey),
+                          const Icon(Icons.wifi_find,
+                              size: 48, color: Colors.grey),
                           const SizedBox(height: 8),
-                          const Text('No bridges found on this network.'),
+                          const Text('No bridges found nearby.'),
                           const SizedBox(height: 12),
                           OutlinedButton.icon(
                             onPressed: _startDiscovery,
                             icon: const Icon(Icons.refresh),
-                            label: const Text('Scan Again'),
+                            label: const Text('Search Again'),
                           ),
                         ],
                       ),
                     ),
                   ),
-
                 if (!_scanning && _bridges.isNotEmpty)
-                  ..._bridges.map((b) => ListTile(
-                        leading: Icon(Icons.developer_board,
-                            color: NexGenPalette.cyan),
-                        title: Text(b.name),
-                        subtitle: Text(b.address.address),
-                        trailing:
-                            Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: () => _selectBridge(b.address.address),
-                      )),
+                  ..._bridges.map((b) {
+                    final isPaired = b.status == 'paired';
+                    return ListTile(
+                      leading: Icon(Icons.developer_board,
+                          color: NexGenPalette.cyan),
+                      title: Text(b.name),
+                      subtitle: Text(
+                        isPaired ? 'Already paired' : 'Ready to pair',
+                        style: TextStyle(
+                          color: isPaired
+                              ? Colors.orange
+                              : NexGenPalette.cyan,
+                        ),
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                      onTap: () => _selectBridge(b),
+                    );
+                  }),
               ],
             ),
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // Manual IP entry — opens a dialog so the field stays above the
-        // bottom nav bar and the on-screen keyboard.
+        // Manual IP entry — under "Advanced" so non-technical installers
+        // aren't confronted with it. The Firestore-driven primary path
+        // covers >99 % of installs; this is here for diagnostic /
+        // air-gapped scenarios only.
         Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              dividerColor: Colors.transparent,
+            ),
+            child: ExpansionTile(
+              leading: Icon(Icons.tune, color: NexGenPalette.textMedium),
+              title: Text(
+                'Advanced',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              subtitle: Text(
+                'Manual IP entry for troubleshooting',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.edit, color: NexGenPalette.cyan),
-                    const SizedBox(width: 8),
-                    Text('Enter IP Manually',
-                        style: Theme.of(context).textTheme.titleMedium),
-                  ],
-                ),
-                const SizedBox(height: 8),
                 Text(
-                  'Already know the bridge address? Type it in directly.',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  'Enter the bridge IP address directly. Use this only '
+                  'when discovery isn\'t working — for example, on an '
+                  'isolated network or for installer diagnostics.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
                 SizedBox(
@@ -637,12 +815,12 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   Widget _buildPairStep() {
     final controllerIp = ref.watch(selectedDeviceIpProvider);
     final hasController = controllerIp != null && controllerIp.isNotEmpty;
+    final bridge = _selectedBridge;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Bridge info card
-        if (_bridgeInfo != null)
+        if (bridge != null)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -658,18 +836,26 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _InfoRow(label: 'Name', value: _bridgeInfo!.name),
-                  _InfoRow(label: 'Version', value: _bridgeInfo!.version),
-                  _InfoRow(label: 'IP', value: _bridgeInfo!.ip.isNotEmpty ? _bridgeInfo!.ip : _bridgeIp),
-                  _InfoRow(label: 'mDNS', value: _bridgeInfo!.mdns),
+                  // We deliberately don't show the IP — it's an
+                  // implementation detail and confusing to non-technical
+                  // installers. Name + status are enough.
+                  _InfoRow(label: 'Name', value: bridge.name),
+                  _InfoRow(
+                    label: 'Status',
+                    value: bridge.status == 'paired'
+                        ? 'Already paired'
+                        : 'Ready to pair',
+                  ),
+                  if (_legacyBridgeInfo != null)
+                    _InfoRow(
+                      label: 'Version',
+                      value: _legacyBridgeInfo!.version,
+                    ),
                 ],
               ),
             ),
           ),
-
         const SizedBox(height: 16),
-
-        // Pairing config card
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -698,7 +884,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                       : 'None selected — set up a controller first',
                 ),
                 const SizedBox(height: 16),
-
                 if (_pairError != null) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -720,7 +905,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
-
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -737,14 +921,14 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                     label: Text(_pairing ? 'Pairing...' : 'Pair Bridge'),
                   ),
                 ),
-
                 const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: TextButton(
                     onPressed: () => setState(() {
                       _step = _Step.discover;
-                      _bridgeInfo = null;
+                      _selectedBridge = null;
+                      _legacyBridgeInfo = null;
                       _client = null;
                     }),
                     child: const Text('Back'),
@@ -761,6 +945,8 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   // ── Verify step ───────────────────────────────────────────────────────────
 
   Widget _buildVerifyStep() {
+    final bridge = _selectedBridge;
+
     return Column(
       children: [
         Card(
@@ -780,7 +966,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                     textAlign: TextAlign.center,
                   ),
                 ],
-
                 if (_verified) ...[
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -801,8 +986,10 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Your ESP32 bridge at $_bridgeIp is paired and responding '
-                    'to commands through Firestore.',
+                    bridge != null
+                        ? 'Your ${bridge.name} bridge is paired and responding '
+                            'to commands through Firestore.'
+                        : 'Your bridge is paired and responding through Firestore.',
                     style: Theme.of(context).textTheme.bodyMedium,
                     textAlign: TextAlign.center,
                   ),
@@ -816,7 +1003,6 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
                     ),
                   ),
                 ],
-
                 if (!_verifying && !_verified && _verifyError != null) ...[
                   Container(
                     padding: const EdgeInsets.all(16),
