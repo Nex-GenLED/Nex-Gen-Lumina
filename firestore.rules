@@ -239,6 +239,38 @@ service cloud.firestore {
       }
     }
 
+    // ── Bridge Registry (self-registration for Lumina ESP32 bridges) ──
+    // The bridge writes /bridge_registry/{deviceId} on boot so the app
+    // can discover and pair it via Firestore — no mDNS or local IP needed.
+    // The bridge authenticates as bridge@nex-genled.com (single shared
+    // account; per-bridge accounts are tracked as a future improvement).
+    match /bridge_registry/{deviceId} {
+      function isBridge() {
+        return request.auth != null &&
+               request.auth.token.email == 'bridge@nex-genled.com';
+      }
+
+      // Any signed-in user can read so the discovery flow can list
+      // unpaired bridges and look up a specific bridge by deviceId.
+      allow read: if request.auth != null;
+
+      // Only the bridge can create its own registration doc.
+      allow create: if isBridge();
+
+      // Two write paths:
+      //   (a) the bridge updates anything on its own doc, or
+      //   (b) a user requests pairing by writing pendingUid=their uid
+      //       — but only when the bridge is unpaired, so a malicious
+      //       user can't yank a bridge that's already in service.
+      allow update: if isBridge() ||
+        (request.auth != null &&
+         resource.data.status == 'unpaired' &&
+         request.resource.data.pendingUid == request.auth.uid);
+
+      // Registry docs are durable identifiers — never deleted by clients.
+      allow delete: if false;
+    }
+
     // ── Referral Codes (reverse lookup: code → uid) ──
     // Populated by the assignReferralCode Cloud Function on user create,
     // and by client-side fallback in referral_program_screen.dart for
