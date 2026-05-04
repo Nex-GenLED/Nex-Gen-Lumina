@@ -60,6 +60,16 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.installation_role == 'admin';
     }
 
+    // Helper function to check if user has the corporate `user_role == 'admin'`
+    // role. Distinct from isAdmin() above, which checks installation_role.
+    // user_role admin gates corporate-managed catalogs (brand library, dealer
+    // catalog, etc.).
+    function isUserRoleAdmin() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') == 'admin';
+    }
+
     // Helper function to check if user belongs to a specific installation
     function belongsToInstallation(installationId) {
       return request.auth != null &&
@@ -236,6 +246,30 @@ service cloud.firestore {
 
         // Only owner can delete
         allow delete: if isOwner(userId);
+      }
+
+      // Brand Profile subcollection - per-business commercial brand profile
+      // derived from the global /brand_library. Stored as a subcollection
+      // (typically the single doc id `brand`) to avoid colliding with the
+      // existing `commercial_profile` map field on the user doc, which holds
+      // hours, channels, teams, and day-parts from CommercialOnboardingWizard.
+      match /brand_profile/{docId} {
+        // Owner can read; media/dealer/admin roles can read for support and
+        // content creation, mirroring properties/controllers visibility.
+        allow read: if canReadUserData(userId);
+
+        // Owner can write. Corporate user_role admins can also write so
+        // brand-library corrections approved by corporate can be propagated
+        // back into per-customer profiles when needed.
+        allow write: if isOwner(userId) || isUserRoleAdmin();
+      }
+
+      // Commercial Events subcollection - sales/marketing events that
+      // automatically activate a brand-aligned lighting design over a
+      // date range. Owner-only — no media/dealer visibility (treated as
+      // private business calendar data).
+      match /commercial_events/{eventId} {
+        allow read, create, update, delete: if isOwner(userId);
       }
     }
 
@@ -833,6 +867,43 @@ service cloud.firestore {
         allow read: if request.auth != null;
         allow create, update, delete: if request.auth != null;
       }
+    }
+
+    // ── Brand Library ────────────────────────────────────────────
+    // Global, corporate-curated catalog of business brands keyed by
+    // brandId (e.g. "state-farm"). Seeded by Nex-Gen via the
+    // scripts/seed_brand_library.js admin script and refined by
+    // approved installer corrections. Read by every authenticated
+    // user during the brand-search step in CommercialOnboardingWizard;
+    // writes are restricted to corporate user_role admins.
+    match /brand_library/{brandId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isUserRoleAdmin();
+    }
+
+    // ── Brand Library Corrections ────────────────────────────────
+    // Installer/customer-submitted color corrections awaiting corporate
+    // review. Submitter can read their own; corporate admins can read
+    // and update all. Submitted docs are never deleted — corrections
+    // are an audit trail (status field tracks lifecycle: pending →
+    // approved/rejected; approved corrections set appliedToLibrary).
+    match /brand_library_corrections/{correctionId} {
+      allow read: if request.auth != null && (
+        resource.data.submittedBy == request.auth.uid ||
+        isUserRoleAdmin()
+      );
+
+      // Authenticated users can create — but submittedBy must match the
+      // writer's uid to prevent impersonation.
+      allow create: if request.auth != null &&
+                       request.resource.data.submittedBy == request.auth.uid;
+
+      // Only corporate admins can transition status / set reviewedBy /
+      // applyToLibrary on existing correction docs.
+      allow update: if isUserRoleAdmin();
+
+      // Audit trail — never deleted.
+      allow delete: if false;
     }
   }
 }
