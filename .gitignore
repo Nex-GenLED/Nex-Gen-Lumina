@@ -125,6 +125,11 @@ scripts/enforce_schedule_limit.js
 scripts/reset_all_bridge_records.js
 scripts/clear_bridge_data.js
 
+# Brand library seeder secrets (script + JSON are committed; only .env isn't)
+scripts/.env
+# .env.example is a safe template — exempt it from the broader .env.* rule above
+!scripts/.env.example
+
 # Claude Code temp files
 tmpclaude-*
 .claude/

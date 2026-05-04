@@ -1,0 +1,1695 @@
+[
+  {
+    "_section": "Fast food & restaurants (30)"
+  },
+  {
+    "name": "McDonald's",
+    "industry": "restaurant",
+    "domain": "mcdonalds.com",
+    "colors": [
+      {"name": "Red", "hex": "#DA291C", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFC72C", "role": "secondary"}
+    ],
+    "confidence": "high"
+  },
+  {
+    "name": "Subway",
+    "industry": "restaurant",
+    "domain": "subway.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFC600", "role": "primary"},
+      {"name": "Green", "hex": "#008C15", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Chick-fil-A",
+    "industry": "restaurant",
+    "domain": "chick-fil-a.com",
+    "colors": [
+      {"name": "Red", "hex": "#DD0031", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Domino's",
+    "industry": "restaurant",
+    "domain": "dominos.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "Blue", "hex": "#006491", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Pizza Hut",
+    "industry": "restaurant",
+    "domain": "pizzahut.com",
+    "colors": [
+      {"name": "Red", "hex": "#EE3124", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Papa John's",
+    "industry": "restaurant",
+    "domain": "papajohns.com",
+    "colors": [
+      {"name": "Red", "hex": "#CE1126", "role": "primary"},
+      {"name": "Green", "hex": "#006A4D", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Chipotle",
+    "industry": "restaurant",
+    "domain": "chipotle.com",
+    "colors": [
+      {"name": "Red", "hex": "#A81612", "role": "primary"},
+      {"name": "Black", "hex": "#451400", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Panera Bread",
+    "industry": "restaurant",
+    "domain": "panerabread.com",
+    "colors": [
+      {"name": "Green", "hex": "#3C7B3D", "role": "primary"},
+      {"name": "Tan", "hex": "#D6C99B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Applebee's",
+    "industry": "restaurant",
+    "domain": "applebees.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "Green", "hex": "#7AC143", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Chili's",
+    "industry": "restaurant",
+    "domain": "chilis.com",
+    "colors": [
+      {"name": "Red", "hex": "#B12029", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Olive Garden",
+    "industry": "restaurant",
+    "domain": "olivegarden.com",
+    "colors": [
+      {"name": "Green", "hex": "#5B7F35", "role": "primary"},
+      {"name": "Burgundy", "hex": "#7E1416", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Red Lobster",
+    "industry": "restaurant",
+    "domain": "redlobster.com",
+    "colors": [
+      {"name": "Red", "hex": "#B22234", "role": "primary"},
+      {"name": "Cream", "hex": "#F4E9D2", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Buffalo Wild Wings",
+    "industry": "restaurant",
+    "domain": "buffalowildwings.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFC72C", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Dairy Queen",
+    "industry": "restaurant",
+    "domain": "dairyqueen.com",
+    "colors": [
+      {"name": "Red", "hex": "#D11243", "role": "primary"},
+      {"name": "Blue", "hex": "#005DAA", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Burger King",
+    "industry": "restaurant",
+    "domain": "bk.com",
+    "colors": [
+      {"name": "Flame Red", "hex": "#EC1A2D", "role": "primary"},
+      {"name": "Burnt Orange", "hex": "#F26F21", "role": "secondary"},
+      {"name": "Mustard", "hex": "#FFB800", "role": "accent"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Wendy's",
+    "industry": "restaurant",
+    "domain": "wendys.com",
+    "colors": [
+      {"name": "Red", "hex": "#E2231A", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Taco Bell",
+    "industry": "restaurant",
+    "domain": "tacobell.com",
+    "colors": [
+      {"name": "Purple", "hex": "#702082", "role": "primary"},
+      {"name": "Pink", "hex": "#E73895", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "KFC",
+    "industry": "restaurant",
+    "domain": "kfc.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Popeyes",
+    "industry": "restaurant",
+    "domain": "popeyes.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F47B26", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Five Guys",
+    "industry": "restaurant",
+    "domain": "fiveguys.com",
+    "colors": [
+      {"name": "Red", "hex": "#ED1C24", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Shake Shack",
+    "industry": "restaurant",
+    "domain": "shakeshack.com",
+    "colors": [
+      {"name": "Green", "hex": "#00A651", "role": "primary"},
+      {"name": "Cream", "hex": "#FFF8E7", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "In-N-Out",
+    "industry": "restaurant",
+    "domain": "in-n-out.com",
+    "colors": [
+      {"name": "Red", "hex": "#FF0000", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD300", "role": "secondary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "accent"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Whataburger",
+    "industry": "restaurant",
+    "domain": "whataburger.com",
+    "colors": [
+      {"name": "Orange", "hex": "#FF8200", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hardee's",
+    "industry": "restaurant",
+    "domain": "hardees.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD200", "role": "primary"},
+      {"name": "Red", "hex": "#E03B27", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Sonic",
+    "industry": "restaurant",
+    "domain": "sonicdrivein.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD300", "role": "primary"},
+      {"name": "Blue", "hex": "#005DAA", "role": "secondary"},
+      {"name": "Red", "hex": "#E91D24", "role": "accent"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Arby's",
+    "industry": "restaurant",
+    "domain": "arbys.com",
+    "colors": [
+      {"name": "Red", "hex": "#D71920", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Jimmy John's",
+    "industry": "restaurant",
+    "domain": "jimmyjohns.com",
+    "colors": [
+      {"name": "Red", "hex": "#C8102E", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Jersey Mike's",
+    "industry": "restaurant",
+    "domain": "jerseymikes.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0077C0", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Firehouse Subs",
+    "industry": "restaurant",
+    "domain": "firehousesubs.com",
+    "colors": [
+      {"name": "Red", "hex": "#C8102E", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD100", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Wingstop",
+    "industry": "restaurant",
+    "domain": "wingstop.com",
+    "colors": [
+      {"name": "Red", "hex": "#C8102E", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Insurance (15)"
+  },
+  {
+    "name": "State Farm",
+    "industry": "insurance",
+    "domain": "statefarm.com",
+    "colors": [
+      {"name": "Red", "hex": "#ED1D24", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "high"
+  },
+  {
+    "name": "Allstate",
+    "industry": "insurance",
+    "domain": "allstate.com",
+    "colors": [
+      {"name": "Blue", "hex": "#00529B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Farmers Insurance",
+    "industry": "insurance",
+    "domain": "farmers.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Progressive",
+    "industry": "insurance",
+    "domain": "progressive.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0077C8", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Geico",
+    "industry": "insurance",
+    "domain": "geico.com",
+    "colors": [
+      {"name": "Green", "hex": "#056839", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD400", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Liberty Mutual",
+    "industry": "insurance",
+    "domain": "libertymutual.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD200", "role": "primary"},
+      {"name": "Blue", "hex": "#003B71", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Nationwide",
+    "industry": "insurance",
+    "domain": "nationwide.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0047BB", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "USAA",
+    "industry": "insurance",
+    "domain": "usaa.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003366", "role": "primary"},
+      {"name": "Gold", "hex": "#FFB81C", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Travelers",
+    "industry": "insurance",
+    "domain": "travelers.com",
+    "colors": [
+      {"name": "Red", "hex": "#E11B22", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "American Family Insurance",
+    "industry": "insurance",
+    "domain": "amfam.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003595", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Erie Insurance",
+    "industry": "insurance",
+    "domain": "erieinsurance.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005DAA", "role": "primary"},
+      {"name": "Red", "hex": "#E31837", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Aflac",
+    "industry": "insurance",
+    "domain": "aflac.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003DA5", "role": "primary"},
+      {"name": "Orange", "hex": "#FF7A00", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "MetLife",
+    "industry": "insurance",
+    "domain": "metlife.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0090DA", "role": "primary"},
+      {"name": "Green", "hex": "#A4CE4E", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Prudential",
+    "industry": "insurance",
+    "domain": "prudential.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0079C1", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "New York Life",
+    "industry": "insurance",
+    "domain": "newyorklife.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003E7E", "role": "primary"},
+      {"name": "Gold", "hex": "#C9A96E", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Banks & financial (20)"
+  },
+  {
+    "name": "Chase",
+    "industry": "bank",
+    "domain": "chase.com",
+    "colors": [
+      {"name": "Blue", "hex": "#117ACA", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Wells Fargo",
+    "industry": "bank",
+    "domain": "wellsfargo.com",
+    "colors": [
+      {"name": "Red", "hex": "#D71E28", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFCD41", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Bank of America",
+    "industry": "bank",
+    "domain": "bankofamerica.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "Blue", "hex": "#012169", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "US Bank",
+    "industry": "bank",
+    "domain": "usbank.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003DA5", "role": "primary"},
+      {"name": "Red", "hex": "#CC0000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "TD Bank",
+    "industry": "bank",
+    "domain": "td.com",
+    "colors": [
+      {"name": "Green", "hex": "#54B848", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Regions Bank",
+    "industry": "bank",
+    "domain": "regions.com",
+    "colors": [
+      {"name": "Green", "hex": "#3F942B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Truist",
+    "industry": "bank",
+    "domain": "truist.com",
+    "colors": [
+      {"name": "Purple", "hex": "#5B2D8E", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "PNC Bank",
+    "industry": "bank",
+    "domain": "pnc.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F58025", "role": "primary"},
+      {"name": "Blue", "hex": "#005EB8", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "KeyBank",
+    "industry": "bank",
+    "domain": "key.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Huntington Bank",
+    "industry": "bank",
+    "domain": "huntington.com",
+    "colors": [
+      {"name": "Green", "hex": "#005A30", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Fifth Third Bank",
+    "industry": "bank",
+    "domain": "53.com",
+    "colors": [
+      {"name": "Blue", "hex": "#1B3A6B", "role": "primary"},
+      {"name": "Green", "hex": "#39B54A", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Edward Jones",
+    "industry": "bank",
+    "domain": "edwardjones.com",
+    "colors": [
+      {"name": "Blue", "hex": "#00263A", "role": "primary"},
+      {"name": "Gold", "hex": "#C8A856", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Charles Schwab",
+    "industry": "bank",
+    "domain": "schwab.com",
+    "colors": [
+      {"name": "Blue", "hex": "#00A0DF", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Fidelity",
+    "industry": "bank",
+    "domain": "fidelity.com",
+    "colors": [
+      {"name": "Green", "hex": "#368727", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Ameriprise Financial",
+    "industry": "bank",
+    "domain": "ameriprise.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003C71", "role": "primary"},
+      {"name": "Orange", "hex": "#FF6900", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Raymond James",
+    "industry": "bank",
+    "domain": "raymondjames.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003F7F", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "H&R Block",
+    "industry": "bank",
+    "domain": "hrblock.com",
+    "colors": [
+      {"name": "Green", "hex": "#00A651", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Jackson Hewitt",
+    "industry": "bank",
+    "domain": "jacksonhewitt.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005DAA", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFC72C", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "World Finance",
+    "industry": "bank",
+    "domain": "loansbyworld.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0072CE", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Advance America",
+    "industry": "bank",
+    "domain": "advanceamerica.net",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Real estate (15)"
+  },
+  {
+    "name": "RE/MAX",
+    "industry": "realestate",
+    "domain": "remax.com",
+    "colors": [
+      {"name": "Red", "hex": "#DC1C2E", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "accent"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Keller Williams",
+    "industry": "realestate",
+    "domain": "kw.com",
+    "colors": [
+      {"name": "Red", "hex": "#CC0000", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Century 21",
+    "industry": "realestate",
+    "domain": "century21.com",
+    "colors": [
+      {"name": "Gold", "hex": "#BEAF87", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Coldwell Banker",
+    "industry": "realestate",
+    "domain": "coldwellbanker.com",
+    "colors": [
+      {"name": "Blue", "hex": "#012169", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Berkshire Hathaway HomeServices",
+    "industry": "realestate",
+    "domain": "bhhs.com",
+    "colors": [
+      {"name": "Cabernet", "hex": "#552448", "role": "primary"},
+      {"name": "Cream", "hex": "#F4EFE6", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Sotheby's International Realty",
+    "industry": "realestate",
+    "domain": "sothebysrealty.com",
+    "colors": [
+      {"name": "Blue", "hex": "#002349", "role": "primary"},
+      {"name": "Gold", "hex": "#A78A4C", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "ERA Real Estate",
+    "industry": "realestate",
+    "domain": "era.com",
+    "colors": [
+      {"name": "Red", "hex": "#D71920", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Better Homes and Gardens Real Estate",
+    "industry": "realestate",
+    "domain": "bhgre.com",
+    "colors": [
+      {"name": "Green", "hex": "#7AB800", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Weichert Realtors",
+    "industry": "realestate",
+    "domain": "weichert.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFCC00", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "HomeSmart",
+    "industry": "realestate",
+    "domain": "homesmart.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F37021", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "eXp Realty",
+    "industry": "realestate",
+    "domain": "exprealty.com",
+    "colors": [
+      {"name": "Blue", "hex": "#1E4DBC", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Compass",
+    "industry": "realestate",
+    "domain": "compass.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "@properties",
+    "industry": "realestate",
+    "domain": "atproperties.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "NextHome",
+    "industry": "realestate",
+    "domain": "nexthome.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F47B20", "role": "primary"},
+      {"name": "Gray", "hex": "#414042", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Realty ONE Group",
+    "industry": "realestate",
+    "domain": "realtyonegroup.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "Gold", "hex": "#C8A856", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Auto dealerships & parts (20)"
+  },
+  {
+    "name": "Ford",
+    "industry": "auto",
+    "domain": "ford.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003478", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Chevrolet",
+    "industry": "auto",
+    "domain": "chevrolet.com",
+    "colors": [
+      {"name": "Gold", "hex": "#CD9834", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Toyota",
+    "industry": "auto",
+    "domain": "toyota.com",
+    "colors": [
+      {"name": "Red", "hex": "#EB0A1E", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Honda",
+    "industry": "auto",
+    "domain": "honda.com",
+    "colors": [
+      {"name": "Red", "hex": "#CC0000", "role": "primary"},
+      {"name": "Silver", "hex": "#C8C8C8", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Nissan",
+    "industry": "auto",
+    "domain": "nissanusa.com",
+    "colors": [
+      {"name": "Red", "hex": "#C3002F", "role": "primary"},
+      {"name": "Silver", "hex": "#A4A9AD", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hyundai",
+    "industry": "auto",
+    "domain": "hyundaiusa.com",
+    "colors": [
+      {"name": "Blue", "hex": "#002C5F", "role": "primary"},
+      {"name": "Silver", "hex": "#A8B0B5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Kia",
+    "industry": "auto",
+    "domain": "kia.com",
+    "colors": [
+      {"name": "Red", "hex": "#BB162B", "role": "primary"},
+      {"name": "Black", "hex": "#05141F", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Dodge",
+    "industry": "auto",
+    "domain": "dodge.com",
+    "colors": [
+      {"name": "Red", "hex": "#D40028", "role": "primary"},
+      {"name": "Silver", "hex": "#A6A6A6", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Jeep",
+    "industry": "auto",
+    "domain": "jeep.com",
+    "colors": [
+      {"name": "Green", "hex": "#3F4729", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Ram",
+    "industry": "auto",
+    "domain": "ramtrucks.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "Silver", "hex": "#A2AAAD", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "AutoZone",
+    "industry": "auto",
+    "domain": "autozone.com",
+    "colors": [
+      {"name": "Red", "hex": "#D52B1E", "role": "primary"},
+      {"name": "Orange", "hex": "#F26522", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "O'Reilly Auto Parts",
+    "industry": "auto",
+    "domain": "oreillyauto.com",
+    "colors": [
+      {"name": "Green", "hex": "#00853E", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFCD00", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Advance Auto Parts",
+    "industry": "auto",
+    "domain": "advanceautoparts.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "NAPA Auto Parts",
+    "industry": "auto",
+    "domain": "napaonline.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0067A5", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Pep Boys",
+    "industry": "auto",
+    "domain": "pepboys.com",
+    "colors": [
+      {"name": "Red", "hex": "#CC0000", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFCC00", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Midas",
+    "industry": "auto",
+    "domain": "midas.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD100", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Meineke",
+    "industry": "auto",
+    "domain": "meineke.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFCC00", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Jiffy Lube",
+    "industry": "auto",
+    "domain": "jiffylube.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Valvoline",
+    "industry": "auto",
+    "domain": "valvoline.com",
+    "colors": [
+      {"name": "Red", "hex": "#E1251B", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Firestone",
+    "industry": "auto",
+    "domain": "firestonecompleteautocare.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Retail & hardware (20)"
+  },
+  {
+    "name": "Home Depot",
+    "industry": "retail",
+    "domain": "homedepot.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F96302", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "high"
+  },
+  {
+    "name": "Lowe's",
+    "industry": "retail",
+    "domain": "lowes.com",
+    "colors": [
+      {"name": "Blue", "hex": "#004990", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Ace Hardware",
+    "industry": "retail",
+    "domain": "acehardware.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "True Value Hardware",
+    "industry": "retail",
+    "domain": "truevalue.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Menards",
+    "industry": "retail",
+    "domain": "menards.com",
+    "colors": [
+      {"name": "Green", "hex": "#008C45", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFCC00", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Floor & Decor",
+    "industry": "retail",
+    "domain": "flooranddecor.com",
+    "colors": [
+      {"name": "Red", "hex": "#A6192E", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "At Home",
+    "industry": "retail",
+    "domain": "athome.com",
+    "colors": [
+      {"name": "Red", "hex": "#C8102E", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Tuesday Morning",
+    "industry": "retail",
+    "domain": "tuesdaymorning.com",
+    "colors": [
+      {"name": "Burgundy", "hex": "#7B2837", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Dollar General",
+    "industry": "retail",
+    "domain": "dollargeneral.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFCB05", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Dollar Tree",
+    "industry": "retail",
+    "domain": "dollartree.com",
+    "colors": [
+      {"name": "Green", "hex": "#00853E", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Family Dollar",
+    "industry": "retail",
+    "domain": "familydollar.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFCD00", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Five Below",
+    "industry": "retail",
+    "domain": "fivebelow.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0078D4", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Big Lots",
+    "industry": "retail",
+    "domain": "biglots.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFCB05", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Ollie's Bargain Outlet",
+    "industry": "retail",
+    "domain": "ollies.us",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD300", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Burlington",
+    "industry": "retail",
+    "domain": "burlington.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F47A20", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Ross Dress for Less",
+    "industry": "retail",
+    "domain": "rossstores.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0033A0", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "TJ Maxx",
+    "industry": "retail",
+    "domain": "tjmaxx.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Marshalls",
+    "industry": "retail",
+    "domain": "marshalls.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005EB8", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "HomeGoods",
+    "industry": "retail",
+    "domain": "homegoods.com",
+    "colors": [
+      {"name": "Purple", "hex": "#5C2D91", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hobby Lobby",
+    "industry": "retail",
+    "domain": "hobbylobby.com",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFC72C", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Healthcare, dental, pharmacy (15)"
+  },
+  {
+    "name": "CVS Pharmacy",
+    "industry": "healthcare",
+    "domain": "cvs.com",
+    "colors": [
+      {"name": "Red", "hex": "#CC0000", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Walgreens",
+    "industry": "healthcare",
+    "domain": "walgreens.com",
+    "colors": [
+      {"name": "Red", "hex": "#E31837", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Rite Aid",
+    "industry": "healthcare",
+    "domain": "riteaid.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Aspen Dental",
+    "industry": "healthcare",
+    "domain": "aspendental.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005DAA", "role": "primary"},
+      {"name": "Green", "hex": "#7AB800", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Heartland Dental",
+    "industry": "healthcare",
+    "domain": "heartland.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005A9C", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Smile Brands",
+    "industry": "healthcare",
+    "domain": "smilebrands.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0072CE", "role": "primary"},
+      {"name": "Green", "hex": "#7AB800", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "DaVita",
+    "industry": "healthcare",
+    "domain": "davita.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F47B20", "role": "primary"},
+      {"name": "Blue", "hex": "#003DA5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Fresenius Kidney Care",
+    "industry": "healthcare",
+    "domain": "freseniuskidneycare.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0033A0", "role": "primary"},
+      {"name": "Green", "hex": "#7AB800", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "BrightSpring",
+    "industry": "healthcare",
+    "domain": "brightspringhealth.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0072CE", "role": "primary"},
+      {"name": "Green", "hex": "#7AB800", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Concentra",
+    "industry": "healthcare",
+    "domain": "concentra.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0072CE", "role": "primary"},
+      {"name": "Orange", "hex": "#F47B20", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "NextCare Urgent Care",
+    "industry": "healthcare",
+    "domain": "nextcare.com",
+    "colors": [
+      {"name": "Blue", "hex": "#005DAA", "role": "primary"},
+      {"name": "Orange", "hex": "#F47B20", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "CityMD",
+    "industry": "healthcare",
+    "domain": "citymd.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "AFC Urgent Care",
+    "industry": "healthcare",
+    "domain": "afcurgentcare.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0033A0", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "American Vision Partners",
+    "industry": "healthcare",
+    "domain": "americanvisionpartners.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0033A0", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "MyEyeDr",
+    "industry": "healthcare",
+    "domain": "myeyedr.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003DA5", "role": "primary"},
+      {"name": "Green", "hex": "#7AB800", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Fitness & wellness (10)"
+  },
+  {
+    "name": "Planet Fitness",
+    "industry": "fitness",
+    "domain": "planetfitness.com",
+    "colors": [
+      {"name": "Purple", "hex": "#582C83", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Anytime Fitness",
+    "industry": "fitness",
+    "domain": "anytimefitness.com",
+    "colors": [
+      {"name": "Purple", "hex": "#582C83", "role": "primary"},
+      {"name": "Lime", "hex": "#A6CE39", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Orangetheory",
+    "industry": "fitness",
+    "domain": "orangetheory.com",
+    "colors": [
+      {"name": "Orange", "hex": "#F58220", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "LA Fitness",
+    "industry": "fitness",
+    "domain": "lafitness.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Gold's Gym",
+    "industry": "fitness",
+    "domain": "goldsgym.com",
+    "colors": [
+      {"name": "Gold", "hex": "#FFB81C", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Crunch Fitness",
+    "industry": "fitness",
+    "domain": "crunch.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Club Pilates",
+    "industry": "fitness",
+    "domain": "clubpilates.com",
+    "colors": [
+      {"name": "Red", "hex": "#C8102E", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Pure Barre",
+    "industry": "fitness",
+    "domain": "purebarre.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "Pink", "hex": "#F4B6C2", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Massage Envy",
+    "industry": "fitness",
+    "domain": "massageenvy.com",
+    "colors": [
+      {"name": "Green", "hex": "#5B8F22", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hand and Stone Massage",
+    "industry": "fitness",
+    "domain": "handandstone.com",
+    "colors": [
+      {"name": "Brown", "hex": "#7B4F2A", "role": "primary"},
+      {"name": "Cream", "hex": "#F4EAD5", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Hotels (10)"
+  },
+  {
+    "name": "Marriott",
+    "industry": "hotel",
+    "domain": "marriott.com",
+    "colors": [
+      {"name": "Red", "hex": "#A20E2C", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hilton",
+    "industry": "hotel",
+    "domain": "hilton.com",
+    "colors": [
+      {"name": "Blue", "hex": "#1A2C49", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Holiday Inn",
+    "industry": "hotel",
+    "domain": "holidayinn.com",
+    "colors": [
+      {"name": "Green", "hex": "#00833F", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Best Western",
+    "industry": "hotel",
+    "domain": "bestwestern.com",
+    "colors": [
+      {"name": "Blue", "hex": "#003DA5", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hampton Inn",
+    "industry": "hotel",
+    "domain": "hampton.com",
+    "colors": [
+      {"name": "Blue", "hex": "#1A2C49", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Courtyard by Marriott",
+    "industry": "hotel",
+    "domain": "marriott.com/courtyard",
+    "colors": [
+      {"name": "Red", "hex": "#A20E2C", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Comfort Inn",
+    "industry": "hotel",
+    "domain": "choicehotels.com/comfort-inn",
+    "colors": [
+      {"name": "Blue", "hex": "#0072CE", "role": "primary"},
+      {"name": "Orange", "hex": "#F47B20", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "La Quinta",
+    "industry": "hotel",
+    "domain": "wyndhamhotels.com/laquinta",
+    "colors": [
+      {"name": "Blue", "hex": "#003DA5", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Motel 6",
+    "industry": "hotel",
+    "domain": "motel6.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0033A0", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Super 8",
+    "industry": "hotel",
+    "domain": "wyndhamhotels.com/super-8",
+    "colors": [
+      {"name": "Yellow", "hex": "#FFD200", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+
+  {
+    "_section": "Salons & beauty (10)"
+  },
+  {
+    "name": "Great Clips",
+    "industry": "salon",
+    "domain": "greatclips.com",
+    "colors": [
+      {"name": "Blue", "hex": "#0079C1", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Sport Clips",
+    "industry": "salon",
+    "domain": "sportclips.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Supercuts",
+    "industry": "salon",
+    "domain": "supercuts.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Cost Cutters",
+    "industry": "salon",
+    "domain": "costcutters.com",
+    "colors": [
+      {"name": "Red", "hex": "#E4002B", "role": "primary"},
+      {"name": "Yellow", "hex": "#FFD200", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Fantastic Sams",
+    "industry": "salon",
+    "domain": "fantasticsams.com",
+    "colors": [
+      {"name": "Pink", "hex": "#E4006D", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Hair Cuttery",
+    "industry": "salon",
+    "domain": "haircuttery.com",
+    "colors": [
+      {"name": "Pink", "hex": "#E4006D", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Regis Salon",
+    "industry": "salon",
+    "domain": "regissalons.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "SmartStyle",
+    "industry": "salon",
+    "domain": "smartstyle.com",
+    "colors": [
+      {"name": "Pink", "hex": "#E4006D", "role": "primary"},
+      {"name": "Black", "hex": "#000000", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Visible Changes",
+    "industry": "salon",
+    "domain": "visiblechanges.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "White", "hex": "#FFFFFF", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  },
+  {
+    "name": "Rudy's Barbershop",
+    "industry": "salon",
+    "domain": "rudysbarbershop.com",
+    "colors": [
+      {"name": "Black", "hex": "#000000", "role": "primary"},
+      {"name": "Red", "hex": "#E4002B", "role": "secondary"}
+    ],
+    "confidence": "verify"
+  }
+]

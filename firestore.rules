@@ -886,20 +886,20 @@ service cloud.firestore {
     // review. Submitter can read their own; corporate admins can read
     // and update all. Submitted docs are never deleted — corrections
     // are an audit trail (status field tracks lifecycle: pending →
-    // approved/rejected; approved corrections set appliedToLibrary).
+    // approved/rejected; approved corrections set applied_to_library).
     match /brand_library_corrections/{correctionId} {
       allow read: if request.auth != null && (
-        resource.data.submittedBy == request.auth.uid ||
+        resource.data.submitted_by == request.auth.uid ||
         isUserRoleAdmin()
       );
 
-      // Authenticated users can create — but submittedBy must match the
+      // Authenticated users can create — but submitted_by must match the
       // writer's uid to prevent impersonation.
       allow create: if request.auth != null &&
-                       request.resource.data.submittedBy == request.auth.uid;
+                       request.resource.data.submitted_by == request.auth.uid;
 
-      // Only corporate admins can transition status / set reviewedBy /
-      // applyToLibrary on existing correction docs.
+      // Only corporate admins can transition status / set reviewed_by /
+      // applied_to_library on existing correction docs.
       allow update: if isUserRoleAdmin();
 
       // Audit trail — never deleted.
