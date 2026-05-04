@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
+import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/widgets/team_autocomplete.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -1476,7 +1477,14 @@ class _AddHolidaySheetState extends State<_AddHolidaySheet> {
   }
 }
 
-/// Reorderable list for team priority
+/// Reorderable list for team priority. Each row shows the team's gradient
+/// color avatar + full display name (matching the chip styling used in the
+/// Interests card) plus a numbered priority circle and drag handle.
+///
+/// The single styling means users see one consistent representation of each
+/// team across the profile screen — but the priority list keeps the
+/// drag-to-reorder behavior that autopilot/game-day rely on for tie-breaking
+/// when multiple teams play on the same day.
 class _TeamPriorityList extends StatelessWidget {
   final List<String> teams;
   final ValueChanged<List<String>> onReorder;
@@ -1497,20 +1505,29 @@ class _TeamPriorityList extends StatelessWidget {
         onReorder(reordered);
       },
       itemBuilder: (context, index) {
-        final team = teams[index];
+        final teamName = teams[index];
+        final team = SportsTeamsDatabase.getByName(teamName);
+        final colors = team?.colors ?? const [Colors.grey, Colors.grey];
+        final displayName = team?.displayName ?? teamName;
+
         return ListTile(
-          key: ValueKey(team),
+          key: ValueKey(teamName),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
           leading: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.drag_handle, color: Colors.grey),
               const SizedBox(width: 8),
+              // Numbered priority circle — keeps the order index visible
+              // and highlights the primary team in cyan.
               Container(
                 width: 24,
                 height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: index == 0 ? NexGenPalette.cyan : Colors.grey.withValues(alpha: 0.3),
+                  color: index == 0
+                      ? NexGenPalette.cyan
+                      : Colors.grey.withValues(alpha: 0.3),
                   shape: BoxShape.circle,
                 ),
                 child: Text(
@@ -1522,24 +1539,91 @@ class _TeamPriorityList extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: 10),
+              // Team color gradient avatar — matches the TeamChip styling
+              // used in the Interests card so the user sees one consistent
+              // visual representation of the team.
+              _TeamGradientAvatar(colors: colors),
             ],
           ),
-          title: Text(team),
+          title: Text(
+            displayName,
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          subtitle: team?.league != null
+              ? Text(
+                  team!.league,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: NexGenPalette.textMedium,
+                  ),
+                )
+              : null,
           trailing: index == 0
               ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: NexGenPalette.cyan.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     'Primary',
-                    style: TextStyle(fontSize: 11, color: NexGenPalette.cyan),
+                    style: TextStyle(
+                        fontSize: 11, color: NexGenPalette.cyan),
                   ),
                 )
               : null,
         );
       },
+    );
+  }
+}
+
+/// Small circular gradient avatar showing a team's primary/secondary colors —
+/// inline duplicate of `_TeamColorIcon` from team_autocomplete.dart so the
+/// priority list row renders the same visual without exporting the private
+/// widget.
+class _TeamGradientAvatar extends StatelessWidget {
+  static const double _size = 24;
+  final List<Color> colors;
+
+  const _TeamGradientAvatar({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    if (colors.isEmpty) {
+      return Container(
+        width: _size,
+        height: _size,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.grey,
+        ),
+      );
+    }
+    if (colors.length == 1) {
+      return Container(
+        width: _size,
+        height: _size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: colors.first,
+        ),
+      );
+    }
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: colors.take(2).toList(),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.white24, width: 1),
+      ),
     );
   }
 }
