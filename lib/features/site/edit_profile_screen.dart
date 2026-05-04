@@ -66,7 +66,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   int _changeToleranceLevel = 2; // 0-5 scale
   List<String> _preferredEffectStyles = ['static', 'animated'];
   List<CustomHoliday> _customHolidays = [];
-  List<String> _sportsTeamPriority = [];
   bool _weeklySchedulePreviewEnabled = true;
 
   // Display preferences
@@ -118,12 +117,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       _changeToleranceLevel = m.changeToleranceLevel;
       if (m.preferredEffectStyles.isNotEmpty) _preferredEffectStyles = List.from(m.preferredEffectStyles);
       if (_customHolidays.isEmpty && m.customHolidays.isNotEmpty) _customHolidays = List.from(m.customHolidays);
-      if (_sportsTeamPriority.isEmpty && m.sportsTeamPriority.isNotEmpty) {
-        _sportsTeamPriority = List.from(m.sportsTeamPriority);
-      } else if (_sportsTeamPriority.isEmpty && m.sportsTeams.isNotEmpty) {
-        // Initialize priority from teams list if not set
-        _sportsTeamPriority = List.from(m.sportsTeams);
-      }
       _weeklySchedulePreviewEnabled = m.weeklySchedulePreviewEnabled;
       _timeFormat = m.timeFormat;
     }
@@ -177,7 +170,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         changeToleranceLevel: _changeToleranceLevel,
         preferredEffectStyles: _preferredEffectStyles,
         customHolidays: _customHolidays,
-        sportsTeamPriority: _sportsTeamPriority,
+        // Priority is now implicit in the order teams were added — the
+        // separate priority list was removed in favour of a single team
+        // display in the Interests card.
+        sportsTeamPriority: _sportsTeams,
         weeklySchedulePreviewEnabled: _weeklySchedulePreviewEnabled,
         timeFormat: _timeFormat,
       );
@@ -531,8 +527,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 onAddHoliday: (h) => setState(() => _customHolidays = [..._customHolidays, h]),
                 onRemoveHoliday: (id) => setState(() => _customHolidays = _customHolidays.where((h) => h.id != id).toList()),
                 sportsTeams: _sportsTeams,
-                sportsTeamPriority: _sportsTeamPriority,
-                onTeamPriorityChanged: (v) => setState(() => _sportsTeamPriority = v),
                 weeklyPreviewEnabled: _weeklySchedulePreviewEnabled,
                 onWeeklyPreviewChanged: (v) => setState(() => _weeklySchedulePreviewEnabled = v),
               ),
@@ -1094,9 +1088,10 @@ class _AutopilotCard extends StatelessWidget {
   final List<CustomHoliday> customHolidays;
   final void Function(CustomHoliday) onAddHoliday;
   final void Function(String id) onRemoveHoliday;
+  /// Display-only — the team list is owned by [_InterestsCard] (which renders
+  /// the colored chips). Kept here so the Autopilot card knows whether to
+  /// show team-related copy at all.
   final List<String> sportsTeams;
-  final List<String> sportsTeamPriority;
-  final ValueChanged<List<String>> onTeamPriorityChanged;
   final bool weeklyPreviewEnabled;
   final ValueChanged<bool> onWeeklyPreviewChanged;
 
@@ -1111,8 +1106,6 @@ class _AutopilotCard extends StatelessWidget {
     required this.onAddHoliday,
     required this.onRemoveHoliday,
     required this.sportsTeams,
-    required this.sportsTeamPriority,
-    required this.onTeamPriorityChanged,
     required this.weeklyPreviewEnabled,
     required this.onWeeklyPreviewChanged,
   });
@@ -1244,22 +1237,6 @@ class _AutopilotCard extends StatelessWidget {
               icon: const Icon(Icons.add, color: NexGenPalette.cyan),
               label: const Text('+ Add Custom Holiday'),
             ),
-
-            // Team Priority Section (only show if teams are selected)
-            if (sportsTeams.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              Text('Team Priority', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(
-                'Drag to reorder. When multiple teams play on the same day, the top team takes priority.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
-              ),
-              const SizedBox(height: 8),
-              _TeamPriorityList(
-                teams: sportsTeamPriority.isNotEmpty ? sportsTeamPriority : sportsTeams,
-                onReorder: onTeamPriorityChanged,
-              ),
-            ],
 
             // Weekly Schedule Preview notification toggle
             const SizedBox(height: 20),
@@ -1476,70 +1453,3 @@ class _AddHolidaySheetState extends State<_AddHolidaySheet> {
   }
 }
 
-/// Reorderable list for team priority
-class _TeamPriorityList extends StatelessWidget {
-  final List<String> teams;
-  final ValueChanged<List<String>> onReorder;
-
-  const _TeamPriorityList({required this.teams, required this.onReorder});
-
-  @override
-  Widget build(BuildContext context) {
-    return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: teams.length,
-      onReorder: (oldIndex, newIndex) {
-        final reordered = List<String>.from(teams);
-        if (newIndex > oldIndex) newIndex--;
-        final item = reordered.removeAt(oldIndex);
-        reordered.insert(newIndex, item);
-        onReorder(reordered);
-      },
-      itemBuilder: (context, index) {
-        final team = teams[index];
-        return ListTile(
-          key: ValueKey(team),
-          leading: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.drag_handle, color: Colors.grey),
-              const SizedBox(width: 8),
-              Container(
-                width: 24,
-                height: 24,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: index == 0 ? NexGenPalette.cyan : Colors.grey.withValues(alpha: 0.3),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '${index + 1}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: index == 0 ? Colors.black : Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          title: Text(team),
-          trailing: index == 0
-              ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'Primary',
-                    style: TextStyle(fontSize: 11, color: NexGenPalette.cyan),
-                  ),
-                )
-              : null,
-        );
-      },
-    );
-  }
-}
