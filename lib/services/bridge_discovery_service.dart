@@ -1,115 +1,171 @@
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/services/bridge_api_client.dart';
 
-/// A Lumina Bridge discovered via mDNS.
+/// A Lumina Bridge discovered via Firestore self-registration.
+///
+/// Pre-self-registration the app discovered bridges via mDNS and the
+/// `address` was the only way to reach the bridge. With self-registration
+/// the bridge writes its own document at `/bridge_registry/{deviceId}`,
+/// so [deviceId] is the durable identifier and [address] is just an
+/// optimization for same-network local commands.
 class BridgeEndpoint {
+  /// Display name (e.g. "Lumina-54B8"). Sourced from `deviceName` in the
+  /// registry doc, or the mDNS PTR name on the legacy path.
   final String name;
+
+  /// Stable per-chip identifier (MAC without colons). Null only on the
+  /// legacy mDNS code path; populated for every Firestore-discovered bridge.
+  final String? deviceId;
+
+  /// Bridge LAN IP. Used for the optional fast-path local HTTP commands
+  /// when the phone is on the same network. Not shown to the user.
   final InternetAddress address;
+
   final int port;
+
+  /// `unpaired` | `paired` | `pairing`. Used by the wizard to decide
+  /// whether to surface "Ready to pair" or "Already paired" to the user.
+  final String? status;
+
+  /// UID currently paired to this bridge, if any. Empty string when
+  /// unpaired. Used by the wizard's hijack-detection step.
+  final String? pairedUid;
+
+  /// Firebase Auth email the bridge signs in with. Persisted to the
+  /// user's `bridge_email` field on pair so Firestore rules can grant
+  /// the bridge read/write on that user's commands.
+  final String? bridgeEmail;
 
   const BridgeEndpoint({
     required this.name,
     required this.address,
     this.port = 80,
+    this.deviceId,
+    this.status,
+    this.pairedUid,
+    this.bridgeEmail,
   });
 }
 
-/// Discovers Lumina Bridge devices on the local network via mDNS.
+/// Discovers Lumina Bridge devices via Firestore self-registration.
 ///
-/// Only `_lumina._tcp.local` records are accepted, and each candidate
-/// is verified with an `/api/info` probe that must report
-/// `type == "bridge"`. Earlier loose fallbacks (`_http._tcp.local`
-/// substring filter and a `lumina.local` hostname lookup) were removed
-/// because they could match a WLED controller — leaking the controller's
-/// IP into the bridge IP slot.
+/// The bridge writes `/bridge_registry/{deviceId}` on boot (and refreshes
+/// every 30s). Discovery filters for unpaired bridges that have been seen
+/// recently — the LAN scan / mDNS path that this replaces failed on iOS,
+/// required the phone and bridge to be on the same WiFi at the same time,
+/// and surfaced raw IPs to non-technical installers.
 class BridgeDiscoveryService {
-  static const _service = '_lumina._tcp.local';
+  /// Bridges whose `lastSeen` is older than this are treated as offline
+  /// and excluded from discovery results. Matches the bridge's 30 s
+  /// heartbeat with headroom for one missed cycle.
+  static const _staleThreshold = Duration(minutes: 5);
 
   Future<List<BridgeEndpoint>> discover({
     Duration timeout = const Duration(seconds: 8),
   }) async {
-    // Simulation mode: return a mock bridge.
+    // Simulation mode: return a mock bridge so the wizard renders in UI
+    // development without Firestore. Mirrors the legacy mDNS simulator.
     if (kSimulationMode) {
       return [
         BridgeEndpoint(
           name: 'Lumina-MOCK',
+          deviceId: 'MOCK000000',
           address: InternetAddress.loopbackIPv4,
+          status: 'unpaired',
         ),
       ];
     }
 
-    final List<BridgeEndpoint> candidates = [];
-    final client = MDnsClient();
+    final cutoff = Timestamp.fromDate(
+      DateTime.now().subtract(_staleThreshold),
+    );
 
     try {
-      await client.start();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('bridge_registry')
+          .where('status', isEqualTo: 'unpaired')
+          .where('lastSeen', isGreaterThan: cutoff)
+          .get()
+          .timeout(timeout);
 
-      // Query _lumina._tcp.local PTR → SRV → A records.
-      await for (final ptr in client
-          .lookup<PtrResourceRecord>(
-              ResourceRecordQuery.serverPointer(_service))
-          .timeout(timeout, onTimeout: (sink) => sink.close())) {
-        await for (final srv in client.lookup<SrvResourceRecord>(
-            ResourceRecordQuery.service(ptr.domainName))) {
-          await for (final ip in client.lookup<IPAddressResourceRecord>(
-              ResourceRecordQuery.addressIPv4(srv.target))) {
-            candidates.add(BridgeEndpoint(
-              name: ptr.domainName,
-              address: ip.address,
-              port: srv.port,
-            ));
-          }
+      final results = <BridgeEndpoint>[];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final ip = (data['ip'] as String?) ?? '';
+        // Skip docs without a usable IP — the registry write happens
+        // before WiFi.localIP() reports, in rare boot orders. The bridge
+        // self-corrects on the next heartbeat.
+        if (ip.isEmpty) continue;
+
+        InternetAddress? address;
+        try {
+          address = InternetAddress(ip);
+        } catch (_) {
+          // Malformed IP — skip rather than throw. The bridge will
+          // self-correct on the next heartbeat.
+          continue;
         }
+
+        results.add(BridgeEndpoint(
+          name: (data['deviceName'] as String?) ?? doc.id,
+          deviceId: doc.id,
+          address: address,
+          status: (data['status'] as String?) ?? 'unpaired',
+          pairedUid: (data['pairedUid'] as String?) ?? '',
+          bridgeEmail: (data['bridgeEmail'] as String?) ?? '',
+        ));
       }
+      return results;
     } catch (e) {
-      debugPrint('[BridgeDiscovery] mDNS error: $e');
-    } finally {
-      try {
-        client.stop();
-      } catch (e) {
-        debugPrint('Error in BridgeDiscovery stopping mDNS client: $e');
-      }
+      debugPrint('[BridgeDiscovery] Firestore query failed: $e');
+      return [];
+    }
+  }
+
+  /// Look up a single bridge by its `deviceId`. Used by the pairing flow
+  /// when polling for the bridge's response to a pairing request.
+  Future<BridgeEndpoint?> getById(String deviceId) async {
+    if (kSimulationMode) {
+      return BridgeEndpoint(
+        name: 'Lumina-MOCK',
+        deviceId: deviceId,
+        address: InternetAddress.loopbackIPv4,
+        status: 'paired',
+      );
     }
 
-    // Deduplicate candidates by IP before probing — avoids hitting the
-    // same device twice when SRV/A records double-resolve.
-    final seen = <String>{};
-    final deduped = <BridgeEndpoint>[];
-    for (final b in candidates) {
-      final key = b.address.address;
-      if (!seen.contains(key)) {
-        seen.add(key);
-        deduped.add(b);
-      }
-    }
-
-    // Verify each candidate with /api/info. Only bridges whose firmware
-    // self-reports type=="bridge" are returned. Probes run in parallel
-    // so discovery latency is bounded by the single slowest probe, not
-    // the sum.
-    final verified = await Future.wait(deduped.map((b) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('bridge_registry')
+          .doc(deviceId)
+          .get();
+      if (!doc.exists) return null;
+      final data = doc.data()!;
+      final ip = (data['ip'] as String?) ?? '';
+      InternetAddress address;
       try {
-        final probe = BridgeApiClient.fromIp(b.address.address, port: b.port);
-        final info = await probe.getInfo();
-        if (info != null && info.type == 'bridge') {
-          return b;
-        }
-        debugPrint(
-            '[BridgeDiscovery] Rejected ${b.address.address}: not a bridge '
-            '(type="${info?.type ?? "?"}")');
-      } catch (e) {
-        debugPrint(
-            '[BridgeDiscovery] Probe failed for ${b.address.address}: $e');
+        address = InternetAddress(ip);
+      } catch (_) {
+        // Fall back to a placeholder so the caller can still surface
+        // the deviceId/status; same-network fast path won't work.
+        address = InternetAddress.loopbackIPv4;
       }
+      return BridgeEndpoint(
+        name: (data['deviceName'] as String?) ?? doc.id,
+        deviceId: doc.id,
+        address: address,
+        status: (data['status'] as String?) ?? 'unpaired',
+        pairedUid: (data['pairedUid'] as String?) ?? '',
+        bridgeEmail: (data['bridgeEmail'] as String?) ?? '',
+      );
+    } catch (e) {
+      debugPrint('[BridgeDiscovery] getById($deviceId) failed: $e');
       return null;
-    }));
-
-    return verified.whereType<BridgeEndpoint>().toList();
+    }
   }
 }
 
