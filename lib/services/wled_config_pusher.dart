@@ -39,45 +39,50 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   // 1. Read current hardware config to preserve existing GPIO pin
   //    assignments. We only overwrite LED type, order, and pixel count.
   final currentConfig = await service.getConfig();
-  final List<Map<String, dynamic>> buses = [];
-  int startAddress = 0;
+  if (currentConfig != null) {
+    debugPrint(
+        '[WledConfig] Current config: total=${currentConfig.totalLeds} '
+        'maxpwr=${currentConfig.maxPowerMw} '
+        'buses=${currentConfig.buses.length}');
+    for (var i = 0; i < currentConfig.buses.length; i++) {
+      final b = currentConfig.buses[i];
+      debugPrint('[WledConfig]   bus[$i]: pin=${b.pin} start=${b.start} '
+          'len=${b.len} type=${b.type} order=${b.order}');
+    }
+  } else {
+    debugPrint('[WledConfig] Current config: <unreadable>');
+  }
+
   const int pixelsPerChannel = 100;
   const int channelCount = 4;
   const int ledType = 22; // SK6812 RGBW
   const int colorOrder = 6; // GRBW — required for SK6812 RGBW (LED type 22)
+  // SKIKBILY hardware always has 4 channels. A fresh WLED ships with one
+  // default bus, so we can't size the new config from the old one — we
+  // always emit 4 buses. Pin assignments come from the existing config
+  // when present (preserves manual installer overrides) and fall back to
+  // the SKIKBILY default GPIOs for any slot the device hasn't populated.
+  const defaultPins = [16, 3, 1, 4];
 
-  if (currentConfig != null && currentConfig.buses.isNotEmpty) {
-    final busCount =
-        currentConfig.buses.length < channelCount
-            ? currentConfig.buses.length
-            : channelCount;
-    for (int i = 0; i < busCount; i++) {
-      buses.add({
-        'start': startAddress,
-        'len': pixelsPerChannel,
-        'pin': currentConfig.buses[i].pin,
-        'type': ledType,
-        'order': colorOrder,
-        'rev': false,
-        'skip': 0,
-      });
-      startAddress += pixelsPerChannel;
+  final List<Map<String, dynamic>> buses = [];
+  int startAddress = 0;
+  for (int i = 0; i < channelCount; i++) {
+    List<int> pins;
+    if (currentConfig != null && i < currentConfig.buses.length) {
+      pins = currentConfig.buses[i].pin;
+    } else {
+      pins = [defaultPins[i]];
     }
-  } else {
-    // No existing config readable — fall back to common SKIKBILY GPIOs.
-    const defaultPins = [16, 3, 1, 4];
-    for (int i = 0; i < channelCount; i++) {
-      buses.add({
-        'start': startAddress,
-        'len': pixelsPerChannel,
-        'pin': [defaultPins[i]],
-        'type': ledType,
-        'order': colorOrder,
-        'rev': false,
-        'skip': 0,
-      });
-      startAddress += pixelsPerChannel;
-    }
+    buses.add({
+      'start': startAddress,
+      'len': pixelsPerChannel,
+      'pin': pins,
+      'type': ledType,
+      'order': colorOrder,
+      'rev': false,
+      'skip': 0,
+    });
+    startAddress += pixelsPerChannel;
   }
 
   // 2. Derive mDNS name from MAC address (last 4 hex chars).
@@ -88,12 +93,19 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
           ? mac.substring(mac.length - 4).toLowerCase()
           : 'xxxx';
 
-  // 3. Build and POST the /json/cfg payload.
+  // 3. POST the config in two parts. WLED 0.15.x on the ESP32_Ethernet
+  //    build returns HTTP 413 on combined hw + id POSTs because its
+  //    AsyncJsonHandler chokes on chunked transfer encoding (which Dart's
+  //    HttpClient uses by default when Content-Length is unset). Splitting
+  //    the payload, plus setting Content-Length explicitly in _postConfig,
+  //    keeps each request small enough to land in the parser's pre-allocated
+  //    buffer and avoids the chunked path entirely.
+  //
   //    Power limit: 5 000 mA × 4 channels = 20 000 mA → 20 000 mW at ~1 V
   //    but WLED expects milliwatts at the configured voltage. For 5 V strips
-  //    20 000 mW ≈ 4 A (safe for LRS-350-24 supplies).  We specify 20 000 as
+  //    20 000 mW ≈ 4 A (safe for LRS-350-24 supplies). We specify 20 000 as
   //    the per-controller cap — the same value used on existing installs.
-  final cfgPayload = {
+  final hwPayload = {
     'hw': {
       'led': {
         'total': startAddress,
@@ -101,18 +113,24 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
         'ins': buses,
       },
     },
+  };
+  final hwResult = await _postConfig(controllerIp, hwPayload);
+  if (!hwResult.success) return hwResult;
+
+  // mDNS rename is cosmetic — failure is a warning, not a rollback.
+  final warnings = <String>[];
+  final idPayload = {
     'id': {
       'mdns': 'ngl-skikbily-$last4',
     },
   };
-
-  // Direct POST so we can capture the HTTP status code for the dealer.
-  final cfgResult = await _postConfig(controllerIp, cfgPayload);
-  if (!cfgResult.success) return cfgResult;
+  final idResult = await _postConfig(controllerIp, idPayload);
+  if (!idResult.success) {
+    warnings.add('mDNS rename failed: ${idResult.errorMessage}');
+  }
 
   // 4. Apply state-level defaults (brightness cap + sync off).
   //    Each call is isolated so one failure doesn't block the other.
-  final warnings = <String>[];
   try {
     await service.setState(brightness: 212); // 70 % of 255
   } catch (e) {
@@ -133,35 +151,43 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
 
 /// Posts a JSON config payload to `/json/cfg` and returns a
 /// [WledConfigPushResult] that includes the HTTP status code on failure.
+///
+/// Sets `Content-Length` explicitly to keep the request unchunked. WLED
+/// 0.15.x's AsyncJsonHandler returns 413 on Transfer-Encoding: chunked
+/// requests for /json/cfg, even when the payload is small.
 Future<WledConfigPushResult> _postConfig(
   String ip,
   Map<String, dynamic> data,
 ) async {
   try {
     final body = jsonEncode(data);
-    debugPrint('📤 ConfigPusher POST /json/cfg to $ip');
-    debugPrint('   Payload: $body');
+    final bodyBytes = utf8.encode(body);
+    debugPrint('[WledConfig] Sending to /json/cfg: $body');
+    debugPrint(
+        '[WledConfig]   bytes=${bodyBytes.length} target=$ip');
 
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final client =
+        HttpClient()..connectionTimeout = const Duration(seconds: 15);
     final req = await client.postUrl(Uri.parse('http://$ip/json/cfg'));
     req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-    req.add(utf8.encode(body));
+    req.contentLength = bodyBytes.length;
+    req.add(bodyBytes);
     final res = await req.close().timeout(const Duration(seconds: 15));
     final resBody = await res.transform(utf8.decoder).join();
     client.close(force: true);
 
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      debugPrint('✅ ConfigPusher /json/cfg success');
+      debugPrint('[WledConfig] /json/cfg → ${res.statusCode} OK');
       return const WledConfigPushResult(success: true);
     }
 
-    debugPrint('❌ ConfigPusher /json/cfg error ${res.statusCode}: $resBody');
+    debugPrint('[WledConfig] /json/cfg → ${res.statusCode}: $resBody');
     return WledConfigPushResult(
       success: false,
       errorMessage: 'Config push failed — HTTP ${res.statusCode}',
     );
   } catch (e) {
-    debugPrint('❌ ConfigPusher /json/cfg exception: $e');
+    debugPrint('[WledConfig] /json/cfg exception: $e');
     return WledConfigPushResult(
       success: false,
       errorMessage: 'Config push failed — $e',
