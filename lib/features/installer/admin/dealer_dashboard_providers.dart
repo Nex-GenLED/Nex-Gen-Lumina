@@ -113,49 +113,39 @@ final dealerJobsByStatusProvider =
   return map;
 });
 
-/// Pending referral payouts scoped to this dealer's jobs.
+/// Pending referral payouts scoped to this dealer.
+///
+/// Filters by `dealerCode` at the Firestore query level so the rule's
+/// per-doc check (hasStaffClaim / dealer_code match) is satisfiable —
+/// staff sessions can't list-read this collection without the where
+/// clause. Single source of truth is `payout.dealerCode` (added to
+/// the model in commit 3bbb6da); the previous client-side filter via
+/// dealerJobsProvider's jobIds is gone.
 final dealerPendingPayoutsProvider =
     StreamProvider.family<List<ReferralPayout>, String>((ref, dealerCode) {
-  final jobIds = ref
-          .watch(dealerJobsProvider(dealerCode))
-          .valueOrNull
-          ?.map((j) => j.id)
-          .toSet() ??
-      {};
-
   return FirebaseFirestore.instance
       .collection('referral_payouts')
+      .where('dealerCode', isEqualTo: dealerCode)
       .where('status', isEqualTo: 'pending')
       .orderBy('createdAt', descending: true)
       .snapshots()
-      .map((snap) {
-    final all =
-        snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList();
-    if (jobIds.isEmpty) return <ReferralPayout>[];
-    return all.where((p) => jobIds.contains(p.jobId)).toList();
-  });
+      .map((snap) =>
+          snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList());
 });
 
 /// All payouts scoped to this dealer (all statuses). Used by the Payouts tab.
+///
+/// Same scoping pattern as [dealerPendingPayoutsProvider] — query-level
+/// dealerCode filter, no client-side jobId membership join.
 final dealerAllPayoutsProvider =
     StreamProvider.family<List<ReferralPayout>, String>((ref, dealerCode) {
-  final jobIds = ref
-          .watch(dealerJobsProvider(dealerCode))
-          .valueOrNull
-          ?.map((j) => j.id)
-          .toSet() ??
-      {};
-
   return FirebaseFirestore.instance
       .collection('referral_payouts')
+      .where('dealerCode', isEqualTo: dealerCode)
       .orderBy('createdAt', descending: true)
       .snapshots()
-      .map((snap) {
-    final all =
-        snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList();
-    if (jobIds.isEmpty) return <ReferralPayout>[];
-    return all.where((p) => jobIds.contains(p.jobId)).toList();
-  });
+      .map((snap) =>
+          snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList());
 });
 
 /// Active installers under this dealer.
@@ -266,19 +256,23 @@ final dealerRecentActivityProvider =
         (ref, dealerCode) {
   final jobsAsync = ref.watch(dealerJobsProvider(dealerCode));
   final jobs = jobsAsync.valueOrNull ?? [];
-  final jobIds = jobs.map((j) => j.id).toSet();
   final recentJobs = jobs.take(10).toList();
 
+  // Same dealerCode-at-query-level scoping as dealerAllPayoutsProvider —
+  // the unfiltered scan that used to live here would have failed
+  // PERMISSION_DENIED for staff sessions under the new rule. Reuses the
+  // (dealerCode, createdAt DESC) index added in this commit.
   return FirebaseFirestore.instance
       .collection('referral_payouts')
+      .where('dealerCode', isEqualTo: dealerCode)
       .orderBy('createdAt', descending: true)
       .limit(30)
       .snapshots()
       .map((snap) {
-    final allPayouts =
-        snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList();
-    final dealerPayouts =
-        allPayouts.where((p) => jobIds.contains(p.jobId)).take(10).toList();
+    final dealerPayouts = snap.docs
+        .map((doc) => ReferralPayout.fromJson(doc.data()))
+        .take(10)
+        .toList();
 
     final events = <DealerActivityEvent>[
       ...recentJobs.map(_jobToActivity),
