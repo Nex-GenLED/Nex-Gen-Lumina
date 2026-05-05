@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/corporate/providers/corporate_providers.
 import 'package:nexgen_command/features/corporate/screens/corporate_admin_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_pipeline_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_warehouse_screen.dart';
+import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Manual whole-dollar currency formatter — matches NumberFormat
@@ -25,10 +26,15 @@ String _formatUsd(double value) {
 
 /// Top-level corporate dashboard.
 ///
-/// Gated behind [corporateModeActiveProvider] — bounces to
-/// [AppRoutes.corporatePin] if no session is active. Hosts a TabBar with
-/// Network / Pipeline / Warehouse / Admin tabs. The Network tab is live;
-/// the others are stubbed and will be filled in by subsequent steps.
+/// Gated behind owner OR admin session presence. Owner sessions come
+/// from [corporateModeProvider] (mintStaffToken mode='owner'), admin
+/// sessions from [adminModeProvider] (mintStaffToken mode='admin').
+/// Both share the same UI under Option Y — the privilege boundary
+/// (admin can read most things, owner-only writes) is enforced at the
+/// rule layer (firestore.rules `hasOwnerClaim()` checks).
+///
+/// Bounces to [AppRoutes.corporatePin] if NEITHER session is active.
+/// Hosts a TabBar with Network / Pipeline / Warehouse / Admin tabs.
 class CorporateDashboardScreen extends ConsumerStatefulWidget {
   const CorporateDashboardScreen({super.key});
 
@@ -46,12 +52,14 @@ class _CorporateDashboardScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    // Bounce to PIN screen if no session — done after first frame so we
-    // can use GoRouter without breaking the build phase.
+    // Bounce to PIN screen if NEITHER session is active — done after
+    // first frame so we can use GoRouter without breaking the build
+    // phase.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final hasSession = ref.read(corporateModeActiveProvider);
-      if (!hasSession) {
+      final hasOwnerSession = ref.read(corporateModeActiveProvider);
+      final hasAdminSession = ref.read(adminSessionActiveProvider);
+      if (!hasOwnerSession && !hasAdminSession) {
         context.go(AppRoutes.corporatePin);
       }
     });
@@ -65,9 +73,10 @@ class _CorporateDashboardScreenState
 
   @override
   Widget build(BuildContext context) {
-    final session = ref.watch(corporateSessionProvider);
+    final ownerSession = ref.watch(corporateSessionProvider);
+    final adminSession = ref.watch(adminSessionProvider);
 
-    if (session == null) {
+    if (ownerSession == null && adminSession == null) {
       // Render an empty scaffold while the post-frame redirect runs.
       return const Scaffold(
         backgroundColor: NexGenPalette.matteBlack,
@@ -76,6 +85,14 @@ class _CorporateDashboardScreenState
         ),
       );
     }
+
+    // Display info: owner takes precedence if both somehow active. Admin
+    // sessions don't carry a displayName (AdminSession is bare), so fall
+    // back to a generic label. Future work could plumb displayName from
+    // the mintStaffToken response into AdminSession.
+    final isOwner = ownerSession != null;
+    final displayName = ownerSession?.displayName ?? 'Admin Session';
+    final roleLabel = isOwner ? ownerSession.role.label : 'Admin';
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -100,7 +117,7 @@ class _CorporateDashboardScreenState
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(
-              session.displayName,
+              displayName,
               style: TextStyle(
                 color: NexGenPalette.gold,
                 fontSize: 12,
@@ -120,7 +137,7 @@ class _CorporateDashboardScreenState
                   Border.all(color: NexGenPalette.gold.withValues(alpha: 0.5)),
             ),
             child: Text(
-              session.role.label,
+              roleLabel,
               style: const TextStyle(
                 color: NexGenPalette.gold,
                 fontSize: 11,
@@ -132,8 +149,14 @@ class _CorporateDashboardScreenState
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: () {
-              ref.read(corporateModeProvider.notifier).signOut();
-              context.go(AppRoutes.corporatePin);
+              if (isOwner) {
+                ref.read(corporateModeProvider.notifier).signOut();
+              } else {
+                ref.read(adminModeProvider.notifier).signOut();
+              }
+              // Route to root; appRedirect handles the post-signout
+              // landing (login screen for cleared sessions).
+              context.go('/');
             },
           ),
         ],

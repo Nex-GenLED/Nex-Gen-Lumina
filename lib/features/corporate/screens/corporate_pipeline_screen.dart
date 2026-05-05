@@ -239,7 +239,7 @@ class _PipelineStatsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 64,
+      height: 80,
       child: statsAsync.when(
         loading: () => const Center(
           child: SizedBox(
