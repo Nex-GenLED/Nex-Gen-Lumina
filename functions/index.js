@@ -74,6 +74,11 @@ exports.createCustomerAccount = createCustomerAccount;
 const { sendInstallReminders } = require("./lib/sendInstallReminders");
 exports.sendInstallReminders = sendInstallReminders;
 
+// Server-side staff PIN validation — replaces the client-side hash
+// reads in sales_providers.dart / installer_providers.dart.
+const { mintStaffToken } = require("./lib/staffAuth");
+exports.mintStaffToken = mintStaffToken;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)
