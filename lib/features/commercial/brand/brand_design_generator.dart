@@ -97,6 +97,56 @@ class BrandDesignGenerator {
     return names;
   }
 
+  // ─── Public preview/apply API ────────────────────────────────────────────
+  // Used by the Brand tab on CommercialHomeScreen and the Dashboard quick
+  // actions to APPLY a design without writing to favorites. Each method
+  // returns the WLED payload only — the favorite-saving lifecycle is
+  // owned by [generateBrandDesigns].
+  //
+  // Returns null when [brand] has no usable colors (each design needs at
+  // least a primary color; some need two or three).
+
+  Map<String, dynamic>? solidPayloadFor(CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return null;
+    return _buildSolid(brand).payload;
+  }
+
+  Map<String, dynamic>? breathePayloadFor(CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return null;
+    return _buildBreathe(brand).payload;
+  }
+
+  Map<String, dynamic>? chasePayloadFor(CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return null;
+    return _buildChase(brand).payload;
+  }
+
+  Map<String, dynamic>? eventModePayloadFor(CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return null;
+    return _buildEventMode(brand).payload;
+  }
+
+  Map<String, dynamic>? welcomePayloadFor(CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return null;
+    return _buildWelcome(brand).payload;
+  }
+
+  /// Returns all five payloads keyed by display name suffix
+  /// ("Solid", "Breathe", "Chase", "Event Mode", "Welcome"). Used by
+  /// the Brand tab's horizontal design-card scroll so it can iterate
+  /// without hard-coding the five method calls.
+  Map<String, Map<String, dynamic>> allPayloadsFor(
+      CommercialBrandProfile brand) {
+    if (brand.colors.isEmpty) return const {};
+    return {
+      'Solid': _buildSolid(brand).payload,
+      'Breathe': _buildBreathe(brand).payload,
+      'Chase': _buildChase(brand).payload,
+      'Event Mode': _buildEventMode(brand).payload,
+      'Welcome': _buildWelcome(brand).payload,
+    };
+  }
+
   // ─── Design builders ─────────────────────────────────────────────────────
 
   /// Design 1 — Solid pattern alternating brand colors.
