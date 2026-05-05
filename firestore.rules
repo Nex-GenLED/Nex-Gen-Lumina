@@ -70,6 +70,19 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') == 'admin';
     }
 
+    // Helper function for corporate-level access WITHOUT including dealer
+    // role. Distinct from hasMediaAccess() (which includes 'dealer') and
+    // isUserRoleAdmin() (which excludes 'media'). Used by rule branches
+    // that want global read for reporting/audit purposes (corporate +
+    // marketing) but should NOT grant cross-dealer visibility to dealer
+    // accounts. See referral_payouts read rule below for the canonical
+    // use case.
+    function isMediaOrAdmin() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['media', 'admin'];
+    }
+
     // Helper function to check whether the caller is authenticated via a
     // staff custom token minted by the mintStaffToken Cloud Function and
     // has a dealerCode claim matching the supplied value. Custom claims
@@ -648,13 +661,40 @@ service cloud.firestore {
     }
 
     // ── Referral Payouts ──────────────────────────────────────
+    //
+    // Read scoping (post-2026-05-05):
+    //   • referrer reads own payouts (referrerUid match)
+    //   • dealer reads payouts for their own dealerCode (users.dealer_code
+    //     or users.installer_dealer_code match resource.data.dealerCode)
+    //   • staff custom-token sessions read payouts for their dealerCode
+    //     claim (mintStaffToken)
+    //   • media + admin (NOT dealer) read globally for corporate
+    //     reporting / audit
+    //
+    // Closed in this rule revision: the previous rule used
+    // hasMediaAccess() for global read, which includes the 'dealer'
+    // role and let any dealer read every other dealer's payouts.
+    // Replaced with isMediaOrAdmin() which excludes 'dealer'.
+    //
+    // Requires: payout docs MUST have `dealerCode` field. The model
+    // change in commit 3bbb6da adds this for new writes; the backfill
+    // script in 89b9880 populates it for legacy docs. Rule deploy to
+    // production must be sequenced AFTER the backfill runs there.
     match /referral_payouts/{payoutId} {
-      // Readable by the referrer and any dealer/admin
       allow read: if request.auth != null && (
         resource.data.referrerUid == request.auth.uid ||
-        hasMediaAccess()
+        (resource.data.dealerCode != null &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode) ||
+        (resource.data.dealerCode != null &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode) ||
+        hasStaffClaim(resource.data.dealerCode) ||
+        isMediaOrAdmin()
       );
-      // Only dealers/admins can create or update payouts
+      // Only dealers/admins can create or update payouts. Write scoping
+      // intentionally NOT tightened in this commit — the writers today
+      // are dealer/media/admin via in-app flows, and constraining them
+      // to per-dealer scope would require auditing every write site.
+      // Tracked as a follow-up if cross-dealer write becomes a concern.
       allow create: if hasMediaAccess();
       allow update: if hasMediaAccess();
       // Only admins can delete
