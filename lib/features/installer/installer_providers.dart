@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
@@ -158,89 +159,56 @@ class InstallerModeNotifier extends StateNotifier<bool> {
 
   InstallerModeNotifier(this._ref) : super(false);
 
-  /// Attempt to enter installer mode with the given 4-digit PIN
-  /// PIN format: [DD][II] where DD = dealer code, II = installer code
-  /// Also supports a master installer PIN stored in Firestore.
+  /// Attempt to enter installer mode with the given 4-digit PIN.
+  ///
+  /// Validation now runs server-side via the mintStaffToken Cloud
+  /// Function (functions/src/staffAuth.ts). The function returns a
+  /// Firebase Auth custom token whose claims (`role`, `dealerCode`,
+  /// `source`) are honored by firestore.rules `hasStaffClaim(...)`.
+  /// The previous in-process master-hash compare and installers/dealers
+  /// fallback queries are gone; the synthetic-master and real-installer
+  /// session shapes are reconstructed locally from the response.
   Future<bool> enterInstallerMode(String enteredPin) async {
     if (enteredPin.length != 4) {
       debugPrint('InstallerMode: PIN must be 4 digits');
       return false;
     }
 
-    // --- Check master installer PIN from Firestore first ---
     try {
-      final masterDoc = await FirebaseFirestore.instance
-          .collection('app_config')
-          .doc('master_installer')
-          .get();
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('mintStaffToken');
+      final result = await callable.call<Map<String, dynamic>>({
+        'pin': enteredPin,
+        'mode': 'installer',
+      });
 
-      if (masterDoc.exists && masterDoc.data() != null) {
-        final storedHash = masterDoc.data()!['pin_hash'] as String?;
-        if (storedHash != null && storedHash.isNotEmpty) {
-          final enteredHash = sha256.convert(utf8.encode(enteredPin)).toString();
-          if (enteredHash == storedHash) {
-            debugPrint('InstallerMode: Authenticated via master installer PIN');
-            _ref.read(installerSessionProvider.notifier).state = InstallerSession(
-              installer: const InstallerInfo(
-                installerCode: '00',
-                dealerCode: '88',
-                name: 'Nex-Gen Administrator',
-              ),
-              dealer: const DealerInfo(
-                dealerCode: '88',
-                name: 'Nex-Gen Admin',
-                companyName: 'Nex-Gen LED Systems',
-              ),
-              authenticatedAt: DateTime.now(),
-            );
-            state = true;
-            _resetSessionTimer();
-            return true;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('InstallerMode: Could not check master PIN (offline?): $e');
-      // Fall through to dealer/installer PIN check
-    }
+      final data = result.data;
+      final token = data['token'] as String;
+      final dealerCode = data['dealerCode'] as String;
+      final displayName = data['displayName'] as String;
+      final source = data['source'] as String;
 
-    // --- Check dealer/installer PIN from Firestore ---
-    final dealerCode = enteredPin.substring(0, 2);
+      await FirebaseAuth.instance.signInWithCustomToken(token);
 
-    try {
-      // Look up the installer in Firestore
-      final installerDoc = await FirebaseFirestore.instance
-          .collection('installers')
-          .where('fullPin', isEqualTo: enteredPin)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
+      // Reconstruct an InstallerSession with the same shape the rest of
+      // the app already consumes. companyName isn't returned by the
+      // callable, so fall back to a stable label per source — keeps the
+      // existing displayName getter ("name (companyName)") readable.
+      final installer = InstallerInfo.withFullPin(
+        installerCode:
+            enteredPin.length >= 4 ? enteredPin.substring(2, 4) : '00',
+        dealerCode: dealerCode,
+        fullPin: enteredPin,
+        name: displayName,
+      );
+      final dealer = DealerInfo(
+        dealerCode: dealerCode,
+        name: displayName,
+        companyName: source == 'master'
+            ? 'Nex-Gen LED Systems'
+            : 'Dealer $dealerCode',
+      );
 
-      if (installerDoc.docs.isEmpty) {
-        debugPrint('InstallerMode: No active installer found for PIN $enteredPin');
-        return false;
-      }
-
-      final installerData = installerDoc.docs.first.data();
-      final installer = InstallerInfo.fromMap(installerData);
-
-      // Look up the dealer
-      final dealerDoc = await FirebaseFirestore.instance
-          .collection('dealers')
-          .where('dealerCode', isEqualTo: dealerCode)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
-
-      if (dealerDoc.docs.isEmpty) {
-        debugPrint('InstallerMode: No active dealer found for code $dealerCode');
-        return false;
-      }
-
-      final dealerData = dealerDoc.docs.first.data();
-      final dealer = DealerInfo.fromMap(dealerData);
-
-      // Create session
       _ref.read(installerSessionProvider.notifier).state = InstallerSession(
         installer: installer,
         dealer: dealer,
@@ -249,10 +217,21 @@ class InstallerModeNotifier extends StateNotifier<bool> {
 
       state = true;
       _resetSessionTimer();
-      debugPrint('InstallerMode: Activated for ${installer.name} from ${dealer.companyName}');
+      debugPrint(
+          'InstallerMode: Activated for ${installer.name} (source=$source)');
       return true;
+    } on FirebaseFunctionsException catch (e) {
+      // permission-denied is the generic "no PIN match" response.
+      // Other Functions errors collapse to the same UX (Invalid PIN)
+      // but log separately so debug builds can tell them apart.
+      if (e.code == 'permission-denied') {
+        debugPrint('InstallerMode: PIN rejected by mintStaffToken');
+      } else {
+        debugPrint('InstallerMode: callable error ${e.code}: ${e.message}');
+      }
+      return false;
     } catch (e) {
-      debugPrint('InstallerMode: Error validating PIN: $e');
+      debugPrint('InstallerMode: unexpected error: $e');
       return false;
     }
   }
@@ -263,6 +242,19 @@ class InstallerModeNotifier extends StateNotifier<bool> {
     _ref.read(installerSessionProvider.notifier).state = null;
     _cancelSessionTimer();
     debugPrint('InstallerMode: Deactivated');
+
+    // Roll the Firebase Auth session back to anonymous so subsequent
+    // staff-pin entries (or other anonymous-only flows) work. We do
+    // not attempt to restore a customer's prior session — see commit
+    // body for the trade-off.
+    () async {
+      try {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (e) {
+        debugPrint('InstallerMode: auth restore failed on exit: $e');
+      }
+    }();
   }
 
   /// Record activity to reset the session timer

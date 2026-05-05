@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:crypto/crypto.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
@@ -56,7 +56,12 @@ class SalesModeNotifier extends StateNotifier<bool> {
   static const int _maxAttempts = 5;
   int _failedAttempts = 0;
 
-  /// Validate PIN against Firestore app_config/master_sales_pin
+  /// Validate PIN by calling the mintStaffToken Cloud Function. On
+  /// success the function returns a Firebase Auth custom token whose
+  /// claims (`role`, `dealerCode`, `source`) are honored by
+  /// firestore.rules `hasStaffClaim(...)`. The hash compare and
+  /// installers/dealers fallback queries that used to live here are
+  /// now server-side in functions/src/staffAuth.ts.
   Future<bool> enterSalesMode(String enteredPin) async {
     if (_failedAttempts >= _maxAttempts) {
       debugPrint('Sales mode: locked out after $_maxAttempts failed attempts');
@@ -66,79 +71,45 @@ class SalesModeNotifier extends StateNotifier<bool> {
     if (enteredPin.length != 4) return false;
 
     try {
-      // Hash the entered PIN
-      final enteredHash = sha256.convert(utf8.encode(enteredPin)).toString();
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('mintStaffToken');
+      final result = await callable.call<Map<String, dynamic>>({
+        'pin': enteredPin,
+        'mode': 'sales',
+      });
 
-      // Check master sales PIN from Firestore
-      final configDoc = await FirebaseFirestore.instance
-          .collection('app_config')
-          .doc('master_sales_pin')
-          .get();
+      final data = result.data;
+      final token = data['token'] as String;
+      final dealerCode = data['dealerCode'] as String;
 
-      if (configDoc.exists) {
-        final storedHash = configDoc.data()?['pin_hash'] as String?;
-        if (storedHash != null && storedHash == enteredHash) {
-          _failedAttempts = 0;
+      await FirebaseAuth.instance.signInWithCustomToken(token);
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? enteredPin;
 
-          // Extract dealer code from first 2 digits
-          final dealerCode = enteredPin.substring(0, 2);
+      _failedAttempts = 0;
+      _ref.read(currentSalesSessionProvider.notifier).state = SalesSession(
+        salespersonUid: uid,
+        dealerCode: dealerCode,
+        authenticatedAt: DateTime.now(),
+      );
 
-          _ref.read(currentSalesSessionProvider.notifier).state = SalesSession(
-            salespersonUid: enteredPin,
-            dealerCode: dealerCode,
-            authenticatedAt: DateTime.now(),
-          );
-
-          _startSessionTimer();
-          state = true;
-          debugPrint('Sales mode: activated with dealer code $dealerCode');
-          return true;
-        }
+      _startSessionTimer();
+      state = true;
+      debugPrint('Sales mode: activated with dealer code $dealerCode');
+      return true;
+    } on FirebaseFunctionsException catch (e) {
+      // permission-denied is the generic "no PIN match" response from
+      // mintStaffToken — count it as a failed attempt to preserve the
+      // existing lockout UX. Any other Functions error is surfaced
+      // identically to the user (Invalid PIN) but logged separately.
+      if (e.code == 'permission-denied') {
+        _failedAttempts++;
+        debugPrint('Sales mode: failed attempt $_failedAttempts/$_maxAttempts');
+      } else {
+        debugPrint('Sales mode: callable error ${e.code}: ${e.message}');
       }
-
-      // Fallback: check against installers collection with PIN match
-      // (allows reuse of existing dealer/installer PIN infrastructure)
-      final installerQuery = await FirebaseFirestore.instance
-          .collection('installers')
-          .where('fullPin', isEqualTo: enteredPin)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
-
-      if (installerQuery.docs.isNotEmpty) {
-        final installerData = installerQuery.docs.first.data();
-        final dealerCode = installerData['dealerCode'] as String? ?? enteredPin.substring(0, 2);
-
-        // Verify dealer is active
-        final dealerQuery = await FirebaseFirestore.instance
-            .collection('dealers')
-            .where('dealerCode', isEqualTo: dealerCode)
-            .where('isActive', isEqualTo: true)
-            .limit(1)
-            .get();
-
-        if (dealerQuery.docs.isNotEmpty) {
-          _failedAttempts = 0;
-
-          _ref.read(currentSalesSessionProvider.notifier).state = SalesSession(
-            salespersonUid: installerQuery.docs.first.id,
-            dealerCode: dealerCode,
-            authenticatedAt: DateTime.now(),
-          );
-
-          _startSessionTimer();
-          state = true;
-          debugPrint('Sales mode: activated via installer PIN for dealer $dealerCode');
-          return true;
-        }
-      }
-
-      _failedAttempts++;
-      debugPrint('Sales mode: failed attempt $_failedAttempts/$_maxAttempts');
       return false;
     } catch (e) {
-      debugPrint('Sales mode: validation error: $e');
-      _failedAttempts++;
+      debugPrint('Sales mode: unexpected error: $e');
       return false;
     }
   }
@@ -150,6 +121,19 @@ class SalesModeNotifier extends StateNotifier<bool> {
     _ref.read(activeJobProvider.notifier).state = null;
     state = false;
     debugPrint('Sales mode: deactivated');
+
+    // Roll the Firebase Auth session back to anonymous so subsequent
+    // staff-pin entries (or other anonymous-only flows) work. We do
+    // not attempt to restore a customer's prior session — see commit
+    // body for the trade-off.
+    () async {
+      try {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (e) {
+        debugPrint('SalesMode: auth restore failed on exit: $e');
+      }
+    }();
   }
 
   void recordActivity() {
