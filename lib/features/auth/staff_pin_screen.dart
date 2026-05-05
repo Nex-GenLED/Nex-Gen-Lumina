@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
+import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/theme.dart';
@@ -16,11 +17,12 @@ import 'package:nexgen_command/theme.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // StaffPinScreen
 //
-// Unified 4-digit PIN entry that handles all three staff roles:
+// Unified 4-digit PIN entry that handles all four staff roles:
 //
-//   • Corporate (Nex-Gen HQ)
-//   • Sales (master sales PIN OR per-installer PIN reuse)
+//   • Owner (Nex-Gen HQ — corporate cross-dealer god mode)
+//   • Admin (corporate admin — cross-dealer reads, owner-gated writes)
 //   • Installer (master installer PIN OR per-installer PIN)
+//   • Sales (master sales PIN OR per-installer PIN reuse)
 //
 // Reachable only via the hidden 5-tap gesture on the Lumina logo on the
 // login screen. No visible entry point exists. The screen's title is the
@@ -30,34 +32,38 @@ import 'package:nexgen_command/theme.dart';
 // PIN validation is delegated entirely to the existing notifiers. This
 // screen never reads from Firestore directly — it just calls the
 // notifier methods in the right order and routes on the first one that
-// returns true:
+// returns true. After commit 1b45670 / 8-iii migration, every notifier
+// in the pipeline calls `mintStaffToken` server-side; the function's
+// strict mode-role enforcement means each PIN matches at most one
+// branch.
 //
-//   1. CorporateModeNotifier.authenticate(pin)
+//   1. CorporateModeNotifier.authenticate(pin)         (mode: 'owner')
 //        → app_config/master_corporate_pin
 //        → routes to AppRoutes.corporateDashboard
 //
-//   2. InstallerModeNotifier.enterInstallerMode(pin)
+//   2. AdminModeNotifier.authenticate(pin)             (mode: 'admin')
+//        → app_config/master_admin
+//        → installers fallback with role == 'admin'
+//        → routes to AppRoutes.corporateDashboard (Option Y; rules
+//          enforce admin vs owner privilege boundary)
+//
+//   3. InstallerModeNotifier.enterInstallerMode(pin)   (mode: 'installer')
 //        → app_config/master_installer (master installer PIN)
 //        → installers collection by fullPin (per-installer PIN)
 //        → routes to AppRoutes.installerLanding
 //
-//   3. SalesModeNotifier.enterSalesMode(pin)
+//   4. SalesModeNotifier.enterSalesMode(pin)           (mode: 'sales')
 //        → app_config/master_sales_pin (master sales PIN)
 //        → installers collection by fullPin (sales fallback)
 //        → routes to AppRoutes.salesLanding
 //
-// Why this order resolves the per-installer PIN ambiguity: a per-installer
-// PIN like "8801" matches BOTH enterInstallerMode's installer-collection
-// fallback AND enterSalesMode's installer-collection fallback. By calling
-// Installer before Sales, per-installer PINs always claim Installer mode
-// first and Sales never sees them. The master sales PIN is the only
-// thing that should reach Sales — it doesn't match any installer doc, so
-// Installer rejects it and Sales gets the next try.
-//
-// Why Corporate is first: CorporateModeNotifier.authenticate has no
-// installer-collection fallback at all, so it can never accidentally
-// claim a per-installer PIN. Putting it first costs nothing and keeps
-// the master corporate PIN authoritative.
+// Order: descending privilege. Owner before Admin so the owner master
+// PIN authoritatively claims owner role. Admin before Installer so the
+// admin master PIN claims admin (the per-installer fallback for admin
+// mode requires role == 'admin' on the installer doc; no spillover).
+// Installer before Sales so per-installer PINs always claim Installer
+// — the master sales PIN is the only thing that should reach Sales,
+// and it doesn't match any installer doc.
 //
 // Lockout: after 5 failed PIN entries, the screen is locked for 30
 // seconds with a visible countdown. After the timer elapses, the user
@@ -182,28 +188,42 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
   //
   // Delegates entirely to the existing notifiers — no direct Firestore
   // reads, no hashing, no field-name assumptions. Each notifier handles
-  // its own master-PIN + fallback logic internally. We just call them
-  // in the right order and route on the first one that returns true.
+  // its own server-side validation via mintStaffToken (mode-specific)
+  // and returns true on success. We call them in descending-privilege
+  // order and route on the first one that returns true.
   //
-  // Order: Corporate → Installer → Sales. See the header comment for
-  // why this ordering resolves the per-installer PIN ambiguity.
+  // Order: Owner → Admin → Installer → Sales. See the header comment
+  // for why this ordering avoids cross-mode collision.
 
   Future<void> _validatePin() async {
     setState(() => _isValidating = true);
 
     final pin = _enteredPin;
 
-    // ── 1. Corporate ──
-    final corporateOk = await ref
+    // ── 1. Owner (corporate) ──
+    final ownerOk = await ref
         .read(corporateModeProvider.notifier)
         .authenticate(pin);
     if (!mounted) return;
-    if (corporateOk) {
+    if (ownerOk) {
       _onSuccess(AppRoutes.corporateDashboard);
       return;
     }
 
-    // ── 2. Installer ──
+    // ── 2. Admin ──
+    final adminOk = await ref
+        .read(adminModeProvider.notifier)
+        .authenticate(pin);
+    if (!mounted) return;
+    if (adminOk) {
+      // Admin sessions land on the corporate dashboard. Privilege
+      // boundary (e.g. owner-only writes) enforced by firestore.rules
+      // hasOwnerClaim() checks, not by routing to a different screen.
+      _onSuccess(AppRoutes.corporateDashboard);
+      return;
+    }
+
+    // ── 3. Installer ──
     final installerOk = await ref
         .read(installerModeActiveProvider.notifier)
         .enterInstallerMode(pin);
@@ -213,7 +233,7 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
       return;
     }
 
-    // ── 3. Sales ──
+    // ── 4. Sales ──
     final salesOk = await ref
         .read(salesModeProvider.notifier)
         .enterSalesMode(pin);

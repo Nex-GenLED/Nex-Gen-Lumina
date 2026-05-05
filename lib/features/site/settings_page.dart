@@ -829,7 +829,7 @@ class _AdminModeEntryState extends ConsumerState<_AdminModeEntry> {
             style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.amber),
           ),
         ),
-        onTap: () => context.push(AppRoutes.adminDashboard),
+        onTap: () => context.push(AppRoutes.corporateDashboard),
       );
     }
 

@@ -119,18 +119,24 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.login; // Block everything else for anonymous users
   }
 
-  // Staff sessions (sales/installer custom tokens) self-route via Riverpod state.
-  // Skip all customer guard logic — they're not in onboarding flow and shouldn't
-  // trigger createUnlinkedUserProfile() (line 309-310) or any /users/{uid} doc
-  // reads (line 138, 168, 182, 187, 214, 255, 296, 311).
+  // Staff sessions (sales/installer/admin/owner custom tokens) self-
+  // route via Riverpod state. Skip all customer guard logic — they're
+  // not in onboarding flow and shouldn't trigger
+  // createUnlinkedUserProfile() (line 309-310) or any /users/{uid}
+  // doc reads.
   //
-  // Rules at firestore.rules now honor the staff claim (commit 29dee76); this
-  // closes the asymmetry by teaching the router to honor it too.
+  // Rules at firestore.rules honor the staff claim via hasStaffClaim
+  // (sales/installer) and hasAdminOrOwnerClaim (admin/owner). This
+  // short-circuit keeps the router in sync with the rule layer for
+  // all four staff roles.
   if (!user.isAnonymous) {
     try {
       final tokenResult = await user.getIdTokenResult();
       final role = tokenResult.claims?['role'] as String?;
-      if (role == 'salesperson' || role == 'installer') {
+      if (role == 'salesperson' ||
+          role == 'installer' ||
+          role == 'admin' ||
+          role == 'owner') {
         return null;
       }
     } catch (e) {

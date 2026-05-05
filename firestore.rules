@@ -832,13 +832,14 @@ service cloud.firestore {
       allow write: if hasOwnerClaim();
     }
 
-    // master_corporate_pin: TEMPORARILY readable by any authenticated
-    // user. The CorporateModeNotifier still reads this doc client-side
-    // (legacy local validate path; not yet migrated to mintStaffToken's
-    // owner mode). Will tighten to hasAdminOrOwnerClaim() in 8-iii once
-    // the corporate notifier migrates.
+    // master_corporate_pin: tightened to admin/owner read on
+    // 2026-05-05 once the CorporateModeNotifier migrated to
+    // mintStaffToken's owner mode (commit 8-iii). The doc is no longer
+    // read by any client code — only the admin SDK (Cloud Function via
+    // mintStaffToken) and admin/owner staff sessions for the corporate
+    // PIN management UI.
     match /app_config/master_corporate_pin {
-      allow read: if request.auth != null;
+      allow read: if hasAdminOrOwnerClaim();
       allow write: if hasOwnerClaim();
     }
 

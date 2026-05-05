@@ -592,12 +592,6 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminPinScreen()),
       ),
       GoRoute(
-        path: AppRoutes.adminDashboard,
-        name: 'admin-dashboard',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
-      ),
-      GoRoute(
         path: AppRoutes.dealerDashboard,
         name: 'dealer-dashboard',
         parentNavigatorKey: _rootNavigatorKey,
@@ -1167,7 +1161,6 @@ class AppRoutes {
   static const String mediaDashboard = '/media/dashboard';
   // Admin management routes
   static const String adminPin = '/admin/pin';
-  static const String adminDashboard = '/admin/dashboard';
   // Corporate-admin brand library management (Part 9)
   static const String adminBrandLibrary = '/admin/brand-library';
   static const String adminBrandCorrections = '/admin/brand-corrections';
