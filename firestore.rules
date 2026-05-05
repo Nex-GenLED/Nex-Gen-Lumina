@@ -95,6 +95,40 @@ service cloud.firestore {
             || request.auth.token.get('role', '') == 'installer');
     }
 
+    // Caller-only check: the staff custom token has role: 'admin'.
+    // Distinct from isAdmin() above (which checks installation_role on
+    // the user doc) — different identity, different concept. Admin-claim
+    // sessions come from mintStaffToken's admin branch and grant
+    // cross-dealer reads on dealer-scoped collections (the corporate
+    // dashboard's surface area).
+    function hasAdminClaim() {
+      return request.auth != null
+        && request.auth.token.get('role', '') == 'admin';
+    }
+
+    // Caller-only check: the staff custom token has role: 'owner'.
+    // Owner is the cross-dealer god-mode role minted by mintStaffToken's
+    // owner branch (master_corporate_pin). Owner sessions have NO
+    // dealerCode claim — that's how rule helpers distinguish "scoped
+    // staff" from "unscoped owner".
+    //
+    // Distinct from isOwner(userId) above (path-ownership check) — one
+    // takes a userId path arg, this is no-arg and checks the role claim.
+    function hasOwnerClaim() {
+      return request.auth != null
+        && request.auth.token.get('role', '') == 'owner';
+    }
+
+    // Convenience: caller has admin OR owner claim. Used widely for
+    // cross-dealer read access on dealer-scoped collections (admin can
+    // see everything for support / audit; owner can do everything).
+    //
+    // Caller-only check (no resource.data references), so safe for both
+    // get and list queries — no query-shape constraints required.
+    function hasAdminOrOwnerClaim() {
+      return hasAdminClaim() || hasOwnerClaim();
+    }
+
     // Helper function to check if user belongs to a specific installation
     function belongsToInstallation(installationId) {
       return request.auth != null &&
@@ -568,11 +602,28 @@ service cloud.firestore {
     // Dealers collection - managed by admins
     match /dealers/{dealerCode} {
       // Authenticated users can read dealers (for validation during installer login)
-      allow read: if request.auth != null;
+      allow read: if request.auth != null || hasAdminOrOwnerClaim();
 
-      // Only admins can manage dealers
-      allow create, update, delete: if hasMediaAccess() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
+      // Existing user_role admin path — preserved so corporate-admin
+      // dealer management UI keeps working pre-corporate-migration.
+      function isUserRoleAdminWithMedia() {
+        return hasMediaAccess() &&
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
+      }
+
+      // Create + delete: admin-or-owner staff claim, OR existing
+      // user_role admin path
+      allow create: if isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim();
+      allow delete: if isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim();
+
+      // Update: admin-or-owner-staff and existing user_role admins can
+      // update non-isActive fields. isActive flips require owner — a
+      // dealer activation/deactivation is a privilege boundary worth
+      // gating to the highest role.
+      allow update: if (
+        (isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim()) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive'])
+      ) || hasOwnerClaim();
     }
 
     // Installers collection - managed by dealers/admins
@@ -582,19 +633,41 @@ service cloud.firestore {
                exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin'];
       }
-      // Authenticated users can read installers (for PIN validation)
-      allow read: if request.auth != null;
 
-      // Only dealers/admins can create, update, or delete installers
-      allow create, delete: if isDealerAdmin();
-      allow update: if isDealerAdmin();
+      // Detects whether an update is flipping the role TO or FROM 'admin'.
+      // Both directions count as a role flip — promoting an installer to
+      // admin is a privilege escalation (owner-only), and demoting an
+      // existing admin is a privilege downgrade that should also be
+      // owner-gated (auditability + protect against takeover).
+      //
+      // .get('role', '') keeps the rule from erroring on docs created
+      // before the role field existed.
+      function isRoleFlipToFromAdmin() {
+        return request.resource.data.get('role', '') != resource.data.get('role', '') &&
+               (request.resource.data.get('role', '') == 'admin' ||
+                resource.data.get('role', '') == 'admin');
+      }
+
+      // Authenticated users can read installers (for PIN validation)
+      allow read: if request.auth != null || hasAdminOrOwnerClaim();
+
+      // Create/delete: existing dealer-admin path, plus admin/owner claims
+      allow create, delete: if isDealerAdmin() || hasAdminOrOwnerClaim();
+
+      // Update: dealer-admin or admin-claim sessions can update non-role-
+      // flipping changes; role flips to/from 'admin' require owner.
+      allow update: if (
+        (isDealerAdmin() || hasAdminOrOwnerClaim()) &&
+        !isRoleFlipToFromAdmin()
+      ) || hasOwnerClaim();
     }
 
     // Installation records - created during customer setup
     match /installations/{installationId} {
       // Users who belong to this installation can read it, plus media/dealer/admin
       allow read: if belongsToInstallation(installationId) || hasMediaAccess() || isAdmin()
-                    || request.auth != null;
+                    || request.auth != null
+                    || hasAdminOrOwnerClaim();
 
       // Authenticated users with installer PIN validation (app-side) can create installations
       // PIN validation happens in-app before reaching this point
@@ -655,9 +728,9 @@ service cloud.firestore {
       // Authenticated users can create records during installer setup (PIN validated app-side)
       allow create: if request.auth != null;
       // Installers and admins can read records
-      allow read: if request.auth != null;
+      allow read: if request.auth != null || hasAdminOrOwnerClaim();
       // Only admins can update or delete
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdmin() || hasAdminOrOwnerClaim();
     }
 
     // ── Referral Payouts ──────────────────────────────────────
@@ -688,7 +761,8 @@ service cloud.firestore {
         (resource.data.dealerCode != null &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode) ||
         hasStaffClaim(resource.data.dealerCode) ||
-        isMediaOrAdmin()
+        isMediaOrAdmin() ||
+        hasAdminOrOwnerClaim()
       );
       // Only dealers/admins can create or update payouts. Write scoping
       // intentionally NOT tightened in this commit — the writers today
@@ -728,15 +802,72 @@ service cloud.firestore {
     }
 
     // ── App Configuration (PIN hashes, feature flags) ──
-    match /app_config/{docId} {
-      // Any authenticated user (including anonymous) may read app_config
-      // docs. The staff-pin screen signs in anonymously and needs to read
-      // the master PIN docs to validate; the 4-digit PIN is the security
-      // boundary, not the rule. TODO: tighten by moving PIN validation
-      // into a Cloud Function so hashes never leave the server.
+    //
+    // Each doc gets its own rule. The catch-all at the bottom is
+    // default-deny so adding a new app_config doc requires an explicit
+    // rule — preventing accidental loosening by future code that just
+    // writes to a new docId.
+    //
+    // IMPORTANT (Firestore rule semantics): Firestore rules are
+    // permissive — if multiple match blocks match a path, ANY of them
+    // granting access wins. A loose catch-all OR'd over a tight specific
+    // rule = the loose catch-all leaks. The catch-all here is therefore
+    // default-DENY (`allow read, write: if false;`) so the specific
+    // rules above it are the actual gate.
+
+    // Master PIN docs — admin/owner read, owner-only write.
+    // Closes the offline-brute-force vector against PIN hashes:
+    // mintStaffToken (Cloud Function via admin SDK) bypasses these
+    // rules; client code reads only via admin/owner staff sessions.
+    match /app_config/master_sales_pin {
+      allow read: if hasAdminOrOwnerClaim();
+      allow write: if hasOwnerClaim();
+    }
+    match /app_config/master_installer {
+      allow read: if hasAdminOrOwnerClaim();
+      allow write: if hasOwnerClaim();
+    }
+    match /app_config/master_admin {
+      allow read: if hasAdminOrOwnerClaim();
+      allow write: if hasOwnerClaim();
+    }
+
+    // master_corporate_pin: TEMPORARILY readable by any authenticated
+    // user. The CorporateModeNotifier still reads this doc client-side
+    // (legacy local validate path; not yet migrated to mintStaffToken's
+    // owner mode). Will tighten to hasAdminOrOwnerClaim() in 8-iii once
+    // the corporate notifier migrates.
+    match /app_config/master_corporate_pin {
       allow read: if request.auth != null;
-      // Only admins can write
-      allow write: if request.auth != null && isAdmin();
+      allow write: if hasOwnerClaim();
+    }
+
+    // Network announcements — admin/owner read, owner write.
+    // Both the doc itself and its `items` subcollection.
+    match /app_config/announcements {
+      allow read: if hasAdminOrOwnerClaim();
+      allow write: if hasOwnerClaim();
+    }
+    match /app_config/announcements/items/{itemId} {
+      allow read: if hasAdminOrOwnerClaim();
+      allow write: if hasOwnerClaim();
+    }
+
+    // Pricing defaults — broadly readable (clients fall back to this
+    // when a dealer has no per-dealer pricing). Writes are still gated
+    // to legacy installation_role admin pending corporate migration —
+    // tighten to hasOwnerClaim() in 8-iii.
+    match /app_config/pricing_defaults {
+      allow read: if request.auth != null;
+      allow write: if (request.auth != null && isAdmin()) || hasOwnerClaim();
+    }
+
+    // Catch-all: any other app_config doc that doesn't have an explicit
+    // rule above is default-deny. New app_config docs MUST add their own
+    // rule — failing closed prevents future code from accidentally
+    // creating an unprotected configuration surface.
+    match /app_config/{docId} {
+      allow read, write: if false;
     }
 
     // ── Sales Jobs ───────────────────────────────────────────────
@@ -756,9 +887,9 @@ service cloud.firestore {
         );
       }
 
-      allow read: if request.auth != null && (isJobStakeholder() || hasMediaAccess());
+      allow read: if request.auth != null && (isJobStakeholder() || hasMediaAccess() || hasAdminOrOwnerClaim());
       allow create: if request.auth != null;
-      allow update: if request.auth != null && (isJobStakeholder() || hasMediaAccess());
+      allow update: if request.auth != null && (isJobStakeholder() || hasMediaAccess() || hasAdminOrOwnerClaim());
       allow delete: if false;
 
       // Material list — single document per job
@@ -776,9 +907,10 @@ service cloud.firestore {
 
     // ── Dealer Material Catalog ──────────────────────────────────
     match /dealers/{dealerCode}/materialCatalog/{itemId} {
-      allow read: if request.auth != null;
-      allow write: if hasMediaAccess() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
+      allow read: if request.auth != null || hasAdminOrOwnerClaim();
+      allow write: if (hasMediaAccess() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin')
+        || hasAdminOrOwnerClaim();
     }
 
     // ── Dealer Inventory ─────────────────────────────────────────
@@ -788,7 +920,8 @@ service cloud.firestore {
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
           hasMediaAccess() ||
-          hasStaffClaim(dealerCode)
+          hasStaffClaim(dealerCode) ||
+          hasAdminOrOwnerClaim()
         );
       }
       allow read, write: if isDealerMember();
@@ -802,9 +935,10 @@ service cloud.firestore {
           hasMediaAccess()
         );
       }
-      // Staff-claim read access is inlined here (not in isDealerMember)
-      // so the create rule below stays gated by user-doc membership only.
-      allow read: if isDealerMember() || hasStaffClaim(dealerCode);
+      // Staff-claim and admin/owner-claim read access are inlined here
+      // (not in isDealerMember) so the create rule below stays gated by
+      // user-doc membership only.
+      allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
       allow create: if isDealerMember();
       allow update, delete: if false;
     }
@@ -817,9 +951,10 @@ service cloud.firestore {
           hasMediaAccess()
         );
       }
-      // Staff-claim read access is inlined here (not in isDealerMember)
-      // so write stays gated by user-doc membership only.
-      allow read: if isDealerMember() || hasStaffClaim(dealerCode);
+      // Staff-claim and admin/owner-claim read access are inlined here
+      // (not in isDealerMember) so write stays gated by user-doc
+      // membership only.
+      allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
       allow write: if isDealerMember();
     }
 
@@ -831,9 +966,10 @@ service cloud.firestore {
           hasMediaAccess()
         );
       }
-      // Staff-claim read access is inlined here (not in isDealerMember)
-      // so write stays gated by user-doc membership only.
-      allow read: if isDealerMember() || hasStaffClaim(dealerCode);
+      // Staff-claim and admin/owner-claim read access are inlined here
+      // (not in isDealerMember) so write stays gated by user-doc
+      // membership only.
+      allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
       allow write: if isDealerMember();
     }
 
@@ -952,7 +1088,8 @@ service cloud.firestore {
     match /brand_library_corrections/{correctionId} {
       allow read: if request.auth != null && (
         resource.data.submitted_by == request.auth.uid ||
-        isUserRoleAdmin()
+        isUserRoleAdmin() ||
+        hasAdminOrOwnerClaim()
       );
 
       // Authenticated users can create — but submitted_by must match the
@@ -960,12 +1097,34 @@ service cloud.firestore {
       allow create: if request.auth != null &&
                        request.resource.data.submitted_by == request.auth.uid;
 
-      // Only corporate admins can transition status / set reviewed_by /
-      // applied_to_library on existing correction docs.
-      allow update: if isUserRoleAdmin();
+      // Only corporate admins (legacy user_role) or staff admin/owner
+      // claims can transition status / set reviewed_by / applied_to_library
+      // on existing correction docs.
+      allow update: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
 
       // Audit trail — never deleted.
       allow delete: if false;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Collection-group rules — for queries that traverse subcollections
+    // across all dealers. The corporate dashboard's Warehouse tab uses
+    // these to aggregate inventory and material catalog across the
+    // entire dealer network.
+    //
+    // Per-doc rules (above, under /dealers/{dealerCode}/...) gate
+    // single-doc and subcollection reads scoped to one dealer. The
+    // collection-group rules below let admin/owner sessions list
+    // across all dealers — without them, CG queries default-deny
+    // even when the per-dealer rule would have allowed the read.
+    // ──────────────────────────────────────────────────────────────────
+
+    match /{path=**}/inventory/{itemId} {
+      allow read: if hasAdminOrOwnerClaim();
+    }
+
+    match /{path=**}/materialCatalog/{itemId} {
+      allow read: if hasAdminOrOwnerClaim();
     }
   }
 }
