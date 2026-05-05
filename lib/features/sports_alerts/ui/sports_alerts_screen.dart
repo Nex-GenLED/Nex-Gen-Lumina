@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app_colors.dart';
 import '../../../theme.dart';
@@ -67,6 +68,24 @@ class SportsAlertsScreen extends ConsumerWidget {
             delegate: _GlassAppBarDelegate(
               topInset: MediaQuery.of(context).padding.top,
               child: GlassAppBar(
+                // Back button — without this the screen had no way out.
+                // Combined with the route-migration to /settings/sports-alerts
+                // (a proper system-shell child route) so context.pop()
+                // returns to the Settings page rather than dead-ending
+                // when the system bottom-nav branch is restored.
+                leading: BackButton(
+                  color: NexGenPalette.cyan,
+                  onPressed: () {
+                    if (context.canPop()) {
+                      context.pop();
+                    } else {
+                      // Fallback when launched without a route stack
+                      // (e.g. tests, deep-links). Send the user to the
+                      // settings root.
+                      context.go('/settings');
+                    }
+                  },
+                ),
                 title: const Text('Sports Alerts'),
                 actions: [
                   // Pulsing service indicator

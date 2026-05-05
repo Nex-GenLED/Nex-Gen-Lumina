@@ -24,7 +24,6 @@ import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
-import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 
 /// Session-level flag — resets only on full app restart.
 bool _installerUnlocked = false;
@@ -1078,9 +1077,12 @@ class _SportsAlertsCard extends ConsumerWidget {
               ),
             )
           : null,
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SportsAlertsScreen()),
-      ),
+      // Use the system-shell child route so the back stack lives inside
+      // the System branch's navigator. Raw Navigator.push left the screen
+      // unreachable-to-back-out-of when the user switched bottom-nav
+      // tabs and returned. context.push() with a proper route also pairs
+      // with the BackButton added to SportsAlertsScreen's GlassAppBar.
+      onTap: () => context.push(AppRoutes.sportsAlerts),
     );
   }
 }

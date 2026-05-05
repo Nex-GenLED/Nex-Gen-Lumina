@@ -52,6 +52,7 @@ import 'package:nexgen_command/features/installer/media_access_code_screen.dart'
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/brand_library_admin_screen.dart';
+import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_pin_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_dashboard_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/dealer_detail_screen.dart';
@@ -1035,6 +1036,19 @@ class AppRouter {
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: ZoneSetupScreen()),
                   ),
+                  // Sports Alerts — registered as a proper system-shell
+                  // child route (was previously pushed via raw Navigator,
+                  // which left the screen unreachable-to-back-out-of when
+                  // the user switched bottom-nav branches and came back).
+                  // The screen now also has an explicit BackButton in its
+                  // GlassAppBar — see sports_alerts_screen.dart.
+                  GoRoute(
+                    path: 'sports-alerts',
+                    name: 'sports-alerts',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: SportsAlertsScreen()),
+                  ),
                   // /settings/design-studio — Design Studio (system variant).
                   // Registered here so callers from the System branch (e.g.
                   // zone configuration) keep the bottom nav bar visible.
@@ -1108,6 +1122,7 @@ class AppRoutes {
   // inside the same branch with the bottom nav bar still visible.
   static const String myDesigns = '/dashboard/my-designs';
   static const String voiceAssistants = '/settings/voice-assistants';
+  static const String sportsAlerts = '/settings/sports-alerts';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
   static const String segmentSetup = '/segment-setup';
