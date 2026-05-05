@@ -1,30 +1,58 @@
 {
   "indexes": [
     {
-      "collectionGroup": "sites",
+      "collectionGroup": "bridge_registry",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "owner_id",
+          "fieldPath": "status",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "created_at",
-          "order": "DESCENDING"
+          "fieldPath": "lastSeen",
+          "order": "ASCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "users",
+      "collectionGroup": "claude_usage",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "autopilot_enabled",
+          "fieldPath": "status",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "weekly_schedule_preview_enabled",
+          "fieldPath": "timestamp",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "dealer_demo_codes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "code",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sales_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "dealerCode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
         }
       ]
     },
@@ -89,15 +117,29 @@
       ]
     },
     {
-      "collectionGroup": "bridge_registry",
+      "collectionGroup": "sites",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "status",
+          "fieldPath": "owner_id",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "lastSeen",
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "autopilot_enabled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "weekly_schedule_preview_enabled",
           "order": "ASCENDING"
         }
       ]
