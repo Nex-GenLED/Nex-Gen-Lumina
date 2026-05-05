@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
+import 'package:nexgen_command/models/commercial/brand_signature.dart';
 import 'package:nexgen_command/models/commercial/business_hours.dart';
 import 'package:nexgen_command/models/commercial/channel_role.dart';
+import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 import 'package:nexgen_command/screens/commercial/commercial_mode_providers.dart';
 import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_state.dart';
 
@@ -53,6 +56,11 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
         'primary_address': draft.primaryAddress,
         'brand_colors':
             draft.brandColors.map((c) => c.toJson()).toList(),
+        // Library tie-back when the customer selected from /brand_library
+        // in the enhanced BrandIdentityScreen (Path 1, Part 8). Null
+        // when colors were entered manually.
+        if (draft.brandLibraryId != null)
+          'brand_library_id': draft.brandLibraryId,
         'apply_brand_to_defaults': draft.applyBrandToDefaults,
         'weekly_schedule': draft.weeklySchedule
             .map((day, sched) => MapEntry(day.name, sched.toJson())),
@@ -114,6 +122,45 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
         locationDoc,
       );
       await batch.commit();
+
+      // Persist the rich brand profile + auto-generate the five canonical
+      // brand designs. Done after the batch commit so the user-doc and
+      // location-doc writes are atomic; the brand-profile / favorites
+      // writes are best-effort — a failure here doesn't undo Commercial
+      // Mode activation, the customer can re-run from the Brand tab.
+      if (draft.brandColors.isNotEmpty) {
+        try {
+          final brandProfile = CommercialBrandProfile(
+            companyName: draft.businessName.isEmpty
+                ? 'Brand'
+                : draft.businessName,
+            brandLibraryId: draft.brandLibraryId,
+            colors: draft.brandColors,
+            customized: false,
+            signature: const BrandSignature(),
+            generatedDesigns: const [],
+            createdAt: DateTime.now(),
+          );
+
+          final brandJson = brandProfile.toJson();
+          // Server-stamp the timestamp on the create.
+          brandJson['created_at'] = FieldValue.serverTimestamp();
+
+          await userRef
+              .collection('brand_profile')
+              .doc('brand')
+              .set(brandJson, SetOptions(merge: true));
+
+          // Auto-generate five favorites + write the names list back to
+          // the brand_profile doc.
+          final gen = ref.read(brandDesignGeneratorProvider);
+          await gen.generateBrandDesigns(
+              userId: uid, brand: brandProfile);
+        } catch (e) {
+          debugPrint('ReviewGoLive: brand profile/design persist failed '
+              '(non-blocking): $e');
+        }
+      }
 
       // Mirror to local prefs so the next app launch reads commercial mode
       // even before Firestore has refreshed.

@@ -52,6 +52,12 @@ class CommercialOnboardingDraft {
   // Screen 2 — Brand Identity
   final List<BrandColor> brandColors;
   final bool applyBrandToDefaults;
+  /// brand_id of a /brand_library entry that pre-populated the colors.
+  /// Null when the customer entered colors manually with no library
+  /// match. Persisted to user.commercial_profile.brand_library_id +
+  /// /users/{uid}/brand_profile/brand on go-live so the Brand tab can
+  /// resolve back to the library entry.
+  final String? brandLibraryId;
 
   // Screen 3 — Hours of Operation
   final Map<DayOfWeek, DaySchedule> weeklySchedule;
@@ -84,6 +90,7 @@ class CommercialOnboardingDraft {
     this.primaryAddress = '',
     this.brandColors = const [],
     this.applyBrandToDefaults = true,
+    this.brandLibraryId,
     this.weeklySchedule = const {},
     this.preOpenBufferMinutes = 30,
     this.postCloseWindDownMinutes = 15,
@@ -107,6 +114,8 @@ class CommercialOnboardingDraft {
     String? primaryAddress,
     List<BrandColor>? brandColors,
     bool? applyBrandToDefaults,
+    String? brandLibraryId,
+    bool clearBrandLibraryId = false,
     Map<DayOfWeek, DaySchedule>? weeklySchedule,
     int? preOpenBufferMinutes,
     int? postCloseWindDownMinutes,
@@ -129,6 +138,9 @@ class CommercialOnboardingDraft {
       primaryAddress: primaryAddress ?? this.primaryAddress,
       brandColors: brandColors ?? this.brandColors,
       applyBrandToDefaults: applyBrandToDefaults ?? this.applyBrandToDefaults,
+      brandLibraryId: clearBrandLibraryId
+          ? null
+          : (brandLibraryId ?? this.brandLibraryId),
       weeklySchedule: weeklySchedule ?? this.weeklySchedule,
       preOpenBufferMinutes: preOpenBufferMinutes ?? this.preOpenBufferMinutes,
       postCloseWindDownMinutes: postCloseWindDownMinutes ?? this.postCloseWindDownMinutes,

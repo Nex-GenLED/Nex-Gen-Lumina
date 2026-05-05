@@ -2,19 +2,34 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 
 /// Auto-generates the five canonical brand-aligned WLED designs and
 /// saves them as favorites + records their names on the customer's
-/// /users/{uid}/brand_profile/brand doc.
+/// /users/{userId}/brand_profile/brand doc.
 ///
-/// Called by BrandSetupScreen after a successful profile save.
+/// Two call sites:
+///   1. Customer self-service (BrandSetupScreen.dart): runs after the
+///      customer saves their own brand profile.
+///   2. Installer pre-seed (InstallerSetupWizard's handoff): runs after
+///      the installer creates the customer's auth account and selected
+///      a brand during the wizard's brandSetup step.
 ///
-/// Design naming convention (no folder/grouping infrastructure exists in
-/// FavoritesNotifier — see Conflict A directive in the architectural
-/// notes — so brand designs are kept findable via name prefix):
+/// Writes favorites directly to Firestore at /users/{userId}/favorites/
+/// {patternId} — explicit userId is authoritative. No FavoritesNotifier
+/// indirection because the installer flow needs to write to the
+/// CUSTOMER's uid even though the active auth session may be the
+/// installer's anonymous session by the time generation runs.
+///
+/// Field shape matches what FavoritesNotifier.addFavorite writes (name,
+/// usageCount, lastUsed, wledPayload, autoAdded) so the existing
+/// favorites streams (favoritesPatternsProvider et al.) can read these
+/// designs without any changes.
+///
+/// Naming convention (no folder/grouping infrastructure exists in
+/// FavoritesNotifier — see Conflict A architectural directive — so brand
+/// designs are kept findable via name prefix):
 ///
 ///   "[CompanyName] Solid"
 ///   "[CompanyName] Breathe"
@@ -26,13 +41,9 @@ import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 /// etc.) so re-saving the brand profile updates the existing favorites
 /// in-place rather than creating duplicates.
 class BrandDesignGenerator {
-  BrandDesignGenerator({
-    required FavoritesNotifier favoritesNotifier,
-    required FirebaseFirestore firestore,
-  })  : _favorites = favoritesNotifier,
-        _firestore = firestore;
+  BrandDesignGenerator({required FirebaseFirestore firestore})
+      : _firestore = firestore;
 
-  final FavoritesNotifier _favorites;
   final FirebaseFirestore _firestore;
 
   /// Generate and persist all five designs for [brand]. Writes favorites
@@ -59,14 +70,20 @@ class BrandDesignGenerator {
       _buildWelcome(brand),
     ];
 
+    final favoritesCol = _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('favorites');
+
     for (final d in designs) {
       try {
-        await _favorites.addFavorite(
-          patternId: d.patternId,
-          patternName: d.name,
-          patternData: d.payload,
-          autoAdded: true,
-        );
+        await favoritesCol.doc(d.patternId).set({
+          'name': d.name,
+          'usageCount': 1,
+          'lastUsed': FieldValue.serverTimestamp(),
+          'wledPayload': d.payload,
+          'autoAdded': true,
+        }, SetOptions(merge: true));
       } catch (e) {
         // One failure shouldn't take down the rest. Log and continue.
         debugPrint(
@@ -364,17 +381,9 @@ class _BrandDesign {
 }
 
 /// Riverpod provider for [BrandDesignGenerator]. Singleton at root scope.
-///
-/// Note: the FavoritesNotifier and the generator share the same root
-/// ProviderScope lifetime — capturing the notifier reference here is
-/// safe because neither is rebuilt for the duration of the app session.
-final brandDesignGeneratorProvider = Provider<BrandDesignGenerator>((ref) {
-  final favorites = ref.read(favoritesNotifierProvider.notifier);
-  return BrandDesignGenerator(
-    favoritesNotifier: favorites,
-    firestore: FirebaseFirestore.instance,
-  );
-});
+final brandDesignGeneratorProvider = Provider<BrandDesignGenerator>(
+  (ref) => BrandDesignGenerator(firestore: FirebaseFirestore.instance),
+);
 
 /// Convenience: pulls the generator from the provider and runs it for
 /// the currently-signed-in user. Returns the names that were generated,

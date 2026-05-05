@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 
 /// Session timeout duration (30 minutes of inactivity)
 const Duration kInstallerSessionTimeout = Duration(minutes: 30);
@@ -396,12 +397,20 @@ class CustomerInfo {
 /// Provider for the current installer setup session's customer info
 final installerCustomerInfoProvider = StateProvider<CustomerInfo>((ref) => const CustomerInfo());
 
-/// Enum for tracking installer wizard progress
+/// Enum for tracking installer wizard progress.
+///
+/// `brandSetup` (Part 8) is positioned between `hardwareConfig` and
+/// `handoff`. It auto-advances for residential installs (no UI shown)
+/// and renders the commercial brand pre-seed flow for commercial
+/// installs. Drafts saved before this version with currentStepIndex=4
+/// (handoff) will now resolve to brandSetup; the auto-advance logic
+/// makes the residential resume harmless.
 enum InstallerWizardStep {
   customerInfo,
   controllerSetup,
   zoneConfiguration,
   hardwareConfig,
+  brandSetup,
   handoff,
 }
 
@@ -492,6 +501,18 @@ final installerPhotoUrlProvider = StateProvider<String?>((ref) => null);
 
 /// Provider for the installer preference draft collected during handoff
 final installerPreferenceDraftProvider = StateProvider<InstallerPreferenceDraft?>((ref) => null);
+
+/// Provider for the brand-library entry the installer selected during the
+/// commercial brandSetup wizard step (Part 8). Held in transient state
+/// because the customer's UID isn't created until _completeSetup runs —
+/// the brand_profile + design-generation writes happen inside
+/// _completeSetup right after createUserWithEmailAndPassword resolves
+/// the new customer's uid.
+///
+/// Null when the installer skipped brand setup OR for residential
+/// installs (the brandSetup step auto-advances and never sets this).
+final installerSelectedBrandLibraryEntryProvider =
+    StateProvider<BrandLibraryEntry?>((ref) => null);
 
 /// Notifier for managing zones during Commercial mode setup
 class InstallerZonesNotifier extends StateNotifier<List<ZoneModel>> {
@@ -675,4 +696,5 @@ void resetInstallerWizardState(WidgetRef ref) {
   ref.read(installerLinkedControllersProvider.notifier).state = {};
   ref.read(installerZonesProvider.notifier).clear();
   ref.read(installerPhotoUrlProvider.notifier).state = null;
+  ref.read(installerSelectedBrandLibraryEntryProvider.notifier).state = null;
 }

@@ -13,7 +13,10 @@ import 'package:nexgen_command/features/installer/screens/customer_info_screen.d
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
 import 'package:nexgen_command/features/installer/screens/hardware_config_step.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
+import 'package:nexgen_command/features/installer/screens/commercial_brand_setup_step.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
+import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
@@ -451,11 +454,33 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       case InstallerWizardStep.hardwareConfig:
         return HardwareConfigStep(
           onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
-          onNext: () => _goToStep(InstallerWizardStep.handoff),
+          onNext: () => _goToStep(InstallerWizardStep.brandSetup),
+        );
+      case InstallerWizardStep.brandSetup:
+        // Auto-advance for residential — the brand-setup step is a
+        // commercial-only insertion that must be transparent for the
+        // residential install path. Reads the site mode synchronously
+        // and either renders the commercial pre-seed UI or advances
+        // post-frame to handoff.
+        final isCommercial =
+            ref.read(installerSiteModeProvider) == SiteMode.commercial;
+        if (!isCommercial) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted &&
+                ref.read(installerWizardStepProvider) ==
+                    InstallerWizardStep.brandSetup) {
+              _goToStep(InstallerWizardStep.handoff);
+            }
+          });
+          return const SizedBox.shrink();
+        }
+        return CommercialBrandSetupStep(
+          onComplete: () => _goToStep(InstallerWizardStep.handoff),
+          onSkip: () => _goToStep(InstallerWizardStep.handoff),
         );
       case InstallerWizardStep.handoff:
         return HandoffScreen(
-          onBack: () => _goToStep(InstallerWizardStep.hardwareConfig),
+          onBack: () => _goToStep(InstallerWizardStep.brandSetup),
           onNext: (draft) {
             ref.read(installerPreferenceDraftProvider.notifier).state = draft;
             _completeSetup();
@@ -752,6 +777,71 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         userJson,
         SetOptions(merge: true),
       );
+
+      // Pre-seed the commercial brand profile if the installer selected a
+      // brand library entry during the brandSetup step (Part 8, Path 2).
+      // This must happen AFTER the customer's user doc exists (the
+      // brand_profile rule requires writing under the customer's uid).
+      // BrandDesignGenerator writes favorites directly to
+      // /users/{userId}/favorites/* via Firestore (see Part 8 generator
+      // refactor), so the auth state at the moment of execution
+      // (anonymous after the signInAnonymously above) doesn't matter —
+      // the explicit userId is authoritative.
+      // Non-blocking: a failure here doesn't undo the install. The
+      // customer can re-run brand setup themselves from the Brand tab.
+      final selectedBrand =
+          ref.read(installerSelectedBrandLibraryEntryProvider);
+      if (selectedBrand != null && siteMode == SiteMode.commercial) {
+        try {
+          final brandProfile = CommercialBrandProfile(
+            companyName: selectedBrand.companyName,
+            brandLibraryId: selectedBrand.brandId,
+            colors: selectedBrand.colors,
+            customized: false,
+            signature: selectedBrand.signature,
+            generatedDesigns: const [],
+            createdByInstaller: installerAnonymousUid,
+            createdAt: DateTime.now(),
+          );
+          final brandJson = brandProfile.toJson();
+          brandJson['created_at'] = FieldValue.serverTimestamp();
+
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .collection('brand_profile')
+              .doc('brand')
+              .set(brandJson, SetOptions(merge: true));
+
+          // Mirror brand_library_id onto the user-doc commercial_profile
+          // map for the residential→commercial mode switcher's quick-read
+          // path. The full commercial_profile structure is written later
+          // by the customer's CommercialOnboardingWizard (or here if a
+          // commercial profile already exists, set+merge will only add
+          // brand_library_id without overwriting other fields).
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .set({
+            'commercial_profile': {
+              'brand_library_id': selectedBrand.brandId,
+            },
+          }, SetOptions(merge: true));
+
+          // Auto-generate the five canonical brand designs into the
+          // customer's favorites + write generated_designs to the
+          // brand_profile doc.
+          final gen = BrandDesignGenerator(
+              firestore: FirebaseFirestore.instance);
+          await gen.generateBrandDesigns(
+              userId: userId, brand: brandProfile);
+
+          debugPrint('Installer: brand profile pre-seeded for '
+              '${selectedBrand.companyName} → $userId');
+        } catch (e) {
+          debugPrint('Installer: brand pre-seed failed (non-blocking): $e');
+        }
+      }
 
       // Seed the customer's autopilot_events collection so the calendar isn't
       // empty on first login. Uses the customer's UID (not the anonymous
@@ -1087,6 +1177,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return _StepInfo('Zone Configuration', 'Zones');
       case InstallerWizardStep.hardwareConfig:
         return _StepInfo('Hardware Config', 'Hardware');
+      case InstallerWizardStep.brandSetup:
+        return _StepInfo('Brand Setup', 'Brand');
       case InstallerWizardStep.handoff:
         return _StepInfo('Customer Handoff', 'Handoff');
     }
