@@ -9,6 +9,7 @@ import 'package:nexgen_command/models/commercial/brand_correction.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 import 'package:nexgen_command/models/commercial/brand_signature.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
 import 'package:nexgen_command/services/commercial/brand_library_providers.dart';
 
 /// Industry keys mirrored from scripts/seed_brand_library.js so the
@@ -232,14 +233,31 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
         await _submitCorrection(user);
       }
 
+      // Auto-generate the five canonical brand designs (Solid / Breathe
+      // / Chase / Event Mode / Welcome) and save them as favorites.
+      // Wrapped in its own try so a generator failure doesn't undo the
+      // profile save — the user still has a saved brand even if the
+      // designs need to be regenerated later. The generator updates
+      // brand_profile.generated_designs as part of its run.
+      List<String> generatedNames = const [];
+      try {
+        generatedNames = await runBrandDesignGenerator(ref, profile);
+      } catch (e) {
+        debugPrint('BrandSetupScreen: design generator failed — $e');
+      }
+
       if (!mounted) return;
+      final designsMsg = generatedNames.isEmpty
+          ? ''
+          : ' ${generatedNames.length} brand designs added to favorites.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(alsoSubmitCorrection
-              ? 'Saved — color correction submitted for review.'
-              : 'Brand profile saved.'),
+          content: Text((alsoSubmitCorrection
+                  ? 'Saved — color correction submitted for review.'
+                  : 'Brand profile saved.') +
+              designsMsg),
           backgroundColor: NexGenPalette.cyan,
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 4),
         ),
       );
       Navigator.of(context).pop();
