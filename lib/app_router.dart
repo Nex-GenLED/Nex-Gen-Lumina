@@ -51,6 +51,7 @@ import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
+import 'package:nexgen_command/features/installer/admin/brand_library_admin_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_pin_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_dashboard_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/dealer_detail_screen.dart';
@@ -601,6 +602,28 @@ class AppRouter {
           );
         },
       ),
+      // Corporate-admin brand library management (Part 9). Both screens
+      // gate access in-screen via isUserRoleAdminProvider — the
+      // /brand_library and /brand_library_corrections firestore rules
+      // are the security boundary; the in-screen check is UX.
+      GoRoute(
+        path: AppRoutes.adminBrandLibrary,
+        name: 'admin-brand-library',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandLibraryAdminScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.adminBrandCorrections,
+        name: 'admin-brand-corrections',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandCorrectionReviewScreen(),
+        ),
+      ),
       GoRoute(
         path: AppRoutes.dealerPayouts,
         name: 'dealer-payouts',
@@ -1130,6 +1153,9 @@ class AppRoutes {
   // Admin management routes
   static const String adminPin = '/admin/pin';
   static const String adminDashboard = '/admin/dashboard';
+  // Corporate-admin brand library management (Part 9)
+  static const String adminBrandLibrary = '/admin/brand-library';
+  static const String adminBrandCorrections = '/admin/brand-corrections';
   // Dealer dashboard
   static const String dealerDashboard = '/dealer/dashboard';
 

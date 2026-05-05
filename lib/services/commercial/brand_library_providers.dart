@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/models/commercial/brand_correction.dart';
@@ -50,6 +51,48 @@ final brandLibraryEntryProvider =
       .doc(brandId)
       .snapshots()
       .map((doc) => doc.exists ? BrandLibraryEntry.fromFirestore(doc) : null);
+});
+
+/// Streams the entire /brand_library collection ordered by company_name.
+///
+/// Powers the corporate-admin BrandLibraryAdminScreen list. The
+/// collection is small enough (< 1000 docs in practice — see seed
+/// script + Brandfetch claim coverage) that streaming all of it and
+/// filtering client-side is cheaper than per-keystroke arrayContains
+/// queries. Pure read — Firestore rules already restrict writes to
+/// user_role admins.
+final allBrandsProvider = StreamProvider<List<BrandLibraryEntry>>((ref) {
+  return FirebaseFirestore.instance
+      .collection('brand_library')
+      .orderBy('company_name')
+      .snapshots()
+      .map((s) => s.docs
+          .map(BrandLibraryEntry.fromFirestore)
+          .toList(growable: false));
+});
+
+/// One-shot check: does the current user have user_role == 'admin'?
+///
+/// Same predicate the firestore rules use for /brand_library writes
+/// (see firestore.rules → isUserRoleAdmin). The screens that gate on
+/// admin (BrandCorrectionReviewScreen, BrandLibraryAdminScreen) read
+/// this provider once and render either the screen body or a
+/// "Not authorized" view. Security boundary lives in the rules; this
+/// is purely UX.
+final isUserRoleAdminProvider = FutureProvider<bool>((ref) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return false;
+  try {
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (!doc.exists) return false;
+    final data = doc.data();
+    return (data?['user_role'] as String?) == 'admin';
+  } catch (_) {
+    return false;
+  }
 });
 
 // ─── Per-user brand profile ────────────────────────────────────────────────

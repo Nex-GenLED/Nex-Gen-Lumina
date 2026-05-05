@@ -43,23 +43,43 @@ const _kIndustries = <String>[
 ///     existing CommercialBrandProfile from
 ///     /users/{uid}/brand_profile/brand on first build.
 ///
-/// On Save, writes a [CommercialBrandProfile] to
+///  4. Admin edit (Part 9): opened from BrandLibraryAdminScreen. When
+///     [isAdmin] is true, save writes to /brand_library/{brandId}
+///     (NOT /users/{uid}/brand_profile/brand), the correction-submission
+///     UI is suppressed, and the CTA reads "Save to Library". When
+///     [isAdmin] AND [createNew] are both true the brandId is derived
+///     from the company name on save.
+///
+/// On Save (default, non-admin): writes a [CommercialBrandProfile] to
 /// /users/{uid}/brand_profile/brand (snake_case via toJson()).
 class BrandSetupScreen extends ConsumerStatefulWidget {
   const BrandSetupScreen({
     super.key,
     this.preSelected,
     this.isEditing = false,
+    this.isAdmin = false,
+    this.createNew = false,
   });
 
   final BrandLibraryEntry? preSelected;
   final bool isEditing;
 
+  /// True when launched from the corporate-admin path. Save target
+  /// switches to /brand_library/{brandId}; correction-submission UI is
+  /// hidden; CTA reads "Save to Library".
+  final bool isAdmin;
+
+  /// True when [isAdmin] is also true and the admin is creating a new
+  /// brand-library entry from scratch (vs editing an existing one).
+  /// Brand id is derived from company name on save.
+  final bool createNew;
+
   /// Resolves a [GoRouterState.extra] payload into a fully-configured
   /// [BrandSetupScreen]. Routes that push this screen pass either:
   ///   • a bare [BrandLibraryEntry] (from BrandSearchScreen → pre-select), or
-  ///   • a `Map { 'preSelected': BrandLibraryEntry?, 'isEditing': bool }`
-  ///     (from the Brand tab Edit button on CommercialHomeScreen), or
+  ///   • a `Map { 'preSelected': …, 'isEditing': …, 'isAdmin': …,
+  ///     'createNew': … }` (from the Brand tab Edit button or the admin
+  ///     library screen), or
   ///   • `null` (from the "Create Brand Profile" empty-state button).
   ///
   /// Lives on the widget itself (not the State) so the GoRouter
@@ -71,9 +91,13 @@ class BrandSetupScreen extends ConsumerStatefulWidget {
     if (extra is Map) {
       final pre = extra['preSelected'];
       final ed = extra['isEditing'];
+      final adm = extra['isAdmin'];
+      final cn = extra['createNew'];
       return BrandSetupScreen(
         preSelected: pre is BrandLibraryEntry ? pre : null,
         isEditing: ed is bool ? ed : isEditing,
+        isAdmin: adm is bool ? adm : false,
+        createNew: cn is bool ? cn : false,
       );
     }
     return BrandSetupScreen(isEditing: isEditing);
@@ -184,6 +208,15 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
     setState(() => _isSaving = true);
 
     try {
+      // Admin path: write directly to /brand_library/{brandId} and
+      // skip the customer-side correction + design-generation logic.
+      // The library is the source of truth for everyone — no
+      // per-customer profile is created from this branch.
+      if (widget.isAdmin) {
+        await _saveAsAdmin();
+        return;
+      }
+
       final colorJsons =
           _colors.map((c) => c.toBrandColor().toJson()).toList(growable: false);
 
@@ -266,6 +299,106 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  /// Admin save path (Part 9): writes /brand_library/{brandId}.
+  ///
+  /// For [BrandSetupScreen.createNew] the brand id is slugified from
+  /// the company name (matches scripts/seed_brand_library.js's
+  /// toBrandId). For an existing-entry edit, [_brandLibraryId] is the
+  /// pre-loaded id.
+  Future<void> _saveAsAdmin() async {
+    final companyName = _nameCtrl.text.trim();
+    String brandId;
+    if (widget.createNew) {
+      brandId = _slugifyBrandId(companyName);
+      if (brandId.isEmpty) {
+        _showError('Could not derive a brand id from the company name.');
+        return;
+      }
+    } else {
+      brandId = _brandLibraryId ?? _slugifyBrandId(companyName);
+      if (brandId.isEmpty) {
+        _showError('Missing brand id for the existing library entry.');
+        return;
+      }
+    }
+
+    final colorJsons =
+        _colors.map((c) => c.toBrandColor().toJson()).toList(growable: false);
+
+    // Document shape mirrors what scripts/seed_brand_library.js writes
+    // so the existing BrandLibraryEntry.fromFirestore deserialization
+    // path works without any changes.
+    final docData = <String, dynamic>{
+      'brand_id': brandId,
+      'company_name': companyName,
+      'search_terms': _searchTermsFor(companyName),
+      'industry': _industry,
+      'colors': colorJsons,
+      'signature': _signature.toJson(),
+      'last_verified': FieldValue.serverTimestamp(),
+      'status': 'verified',
+    };
+    if (widget.createNew) {
+      // First write — fix the trust source. Re-saves of existing
+      // entries preserve whatever verified_by + correction_count were
+      // already set (handled by SetOptions(merge: true) below).
+      docData['verified_by'] = 'nex-gen-manual';
+      docData['correction_count'] = 0;
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('brand_library')
+          .doc(brandId)
+          .set(docData, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.createNew
+              ? 'Added "$companyName" to brand library.'
+              : 'Saved "$companyName" to brand library.'),
+          backgroundColor: NexGenPalette.cyan,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      _showError('Save failed: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  /// Slug rules mirror scripts/seed_brand_library.js's toBrandId so
+  /// admin-created entries land at the same id pattern as seeded
+  /// entries. Lowercase, alphanumerics + hyphens only, no leading or
+  /// trailing hyphens, no doubled hyphens.
+  String _slugifyBrandId(String name) {
+    return name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
+        .replaceAll(RegExp(r'\s+'), '-')
+        .replaceAll(RegExp(r'-+'), '-')
+        .replaceAll(RegExp(r'^-|-$'), '')
+        .trim();
+  }
+
+  /// Search-term generation mirrors the seed script:
+  /// full lowercased name, no-spaces variant, and per-word splits ≥ 3
+  /// chars. De-duplicated and ≤ a handful of entries — small enough to
+  /// fit Firestore's arrayContains query path.
+  List<String> _searchTermsFor(String name) {
+    final lower = name.toLowerCase().trim();
+    if (lower.isEmpty) return const [];
+    final noSpaces = lower.replaceAll(RegExp(r'\s'), '');
+    final words = lower
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length > 2)
+        .toList();
+    final set = <String>{lower, noSpaces, ...words};
+    return set.where((t) => t.isNotEmpty).toList(growable: false);
   }
 
   Future<void> _submitCorrection(User user) async {
@@ -391,15 +524,23 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final showCorrectionBanner =
-        _hasModifiedFromLibrary && _brandLibraryId != null;
+    // Correction banner is suppressed entirely on the admin path —
+    // admins are editing the source of truth, not submitting a
+    // correction against it.
+    final showCorrectionBanner = !widget.isAdmin &&
+        _hasModifiedFromLibrary &&
+        _brandLibraryId != null;
+
+    final title = widget.isAdmin
+        ? (widget.createNew ? 'New Brand' : 'Edit Brand Library')
+        : (widget.isEditing ? 'Edit Brand Profile' : 'Brand Profile');
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       appBar: AppBar(
         backgroundColor: NexGenPalette.gunmetal90,
         elevation: 0,
-        title: Text(widget.isEditing ? 'Edit Brand Profile' : 'Brand Profile'),
+        title: Text(title),
         iconTheme: const IconThemeData(color: NexGenPalette.textHigh),
       ),
       body: ListView(
@@ -630,6 +771,7 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
   }
 
   Widget _buildActions(bool showCorrection) {
+    final primaryLabel = widget.isAdmin ? 'Save to Library' : 'Save Brand Profile';
     return Column(
       children: [
         SizedBox(
@@ -649,8 +791,8 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
                     height: 22,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.black))
-                : const Text('Save Brand Profile',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
+                : Text(primaryLabel,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
         ),
         if (showCorrection) ...[

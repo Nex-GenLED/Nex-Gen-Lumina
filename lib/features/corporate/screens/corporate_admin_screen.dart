@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/corporate/models/network_announcement.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_admin_providers.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
+import 'package:nexgen_command/services/commercial/brand_library_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Corporate Admin tab.
@@ -23,6 +26,8 @@ class CorporateAdminScreen extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
           _DealerManagementSection(),
+          SizedBox(height: 16),
+          _BrandLibrarySection(),
           SizedBox(height: 16),
           _PricingDefaultsSection(),
           SizedBox(height: 16),
@@ -380,6 +385,178 @@ class _DealerEditSheetState extends ConsumerState<_DealerEditSheet> {
           borderSide: BorderSide(
               color: NexGenPalette.gold.withValues(alpha: 0.6)),
         ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 1.5 — BRAND LIBRARY (Part 9D)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Single section card combining the entry points the spec asked for in
+// Parts 9A and 9D. Shows total brand count + pending-corrections badge,
+// with two action buttons that push the full BrandLibraryAdminScreen
+// and BrandCorrectionReviewScreen routes (both admin-gated in-screen).
+//
+// The streams (allBrandsProvider + pendingBrandCorrectionsProvider)
+// are read-only collection listeners — both safe to render here even
+// though the corporate dashboard is reachable by any signed-in user
+// who passed the corporate PIN. The full management screens enforce
+// user_role == 'admin' before allowing any writes.
+
+class _BrandLibrarySection extends ConsumerWidget {
+  const _BrandLibrarySection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final brandsAsync = ref.watch(allBrandsProvider);
+    final correctionsAsync = ref.watch(pendingBrandCorrectionsProvider);
+
+    final totalBrands = brandsAsync.valueOrNull?.length;
+    final pendingCount = correctionsAsync.valueOrNull?.length ?? 0;
+    final hasPending = pendingCount > 0;
+
+    return _SectionCard(
+      title: 'Brand Library',
+      subtitle:
+          'Manage the global brand catalog and review installer/customer '
+          'color corrections.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _CountTile(
+                  icon: Icons.palette_outlined,
+                  label: 'Brands in library',
+                  value: totalBrands == null ? '…' : '$totalBrands',
+                  highlight: false,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _CountTile(
+                  icon: Icons.rate_review_outlined,
+                  label: 'Pending corrections',
+                  value: '$pendingCount',
+                  highlight: hasPending,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => context
+                      .push(AppRoutes.adminBrandLibrary),
+                  icon: const Icon(Icons.palette, size: 18),
+                  label: const Text('Manage Library'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: NexGenPalette.gold,
+                    side: BorderSide(
+                        color: NexGenPalette.gold.withValues(alpha: 0.6)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => context
+                      .push(AppRoutes.adminBrandCorrections),
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.rate_review, size: 18),
+                      if (hasPending)
+                        Positioned(
+                          right: -6,
+                          top: -4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.amber,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$pendingCount',
+                              style: const TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  label: const Text('Review Corrections'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: hasPending
+                        ? NexGenPalette.amber
+                        : NexGenPalette.gold,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CountTile extends StatelessWidget {
+  const _CountTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.highlight,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = highlight ? NexGenPalette.amber : NexGenPalette.gold;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: highlight ? 0.12 : 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: accent.withValues(alpha: highlight ? 0.5 : 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        color: NexGenPalette.textMedium, fontSize: 11)),
+                Text(value,
+                    style: TextStyle(
+                        color: accent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
