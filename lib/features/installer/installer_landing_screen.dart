@@ -318,6 +318,39 @@ class InstallerLandingScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    // Zone & Fixture Setup — formerly behind the customer-
+                    // facing _InstallerPinDialog in settings_page.dart.
+                    // Migrated here on 2026-05-05 so customers no longer
+                    // need a route to installer-functional UI; staff
+                    // sessions reach it directly from this landing page.
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.push(AppRoutes.zoneSetup),
+                        icon: const Icon(
+                          Icons.cable,
+                          color: NexGenPalette.cyan,
+                        ),
+                        label: const Text(
+                          'Zone & Fixture Setup',
+                          style: TextStyle(
+                            color: NexGenPalette.cyan,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                   // ── Corporate (Nex-Gen internal) entry point ──
                   // Always visible — gated downstream by the corporate PIN

@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'dart:ui';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -24,9 +22,6 @@ import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
-
-/// Session-level flag — resets only on full app restart.
-bool _installerUnlocked = false;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -93,53 +88,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const _GrowthCard(),
           const SizedBox(height: 16),
           const _SupportResourcesCard(),
-          // ── Installer Tools ──────────────────────────────────────
-          const SizedBox(height: 24),
-          Divider(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3)),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              'Installer Tools',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-          Card(
-            child: ListTile(
-              leading: Icon(Icons.cable, color: NexGenPalette.cyan),
-              title: const Text('Zone & Fixture Setup'),
-              subtitle: const Text('Assign fixture types to controller segments'),
-              trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              onTap: () => _guardInstallerAccess(() => context.push(AppRoutes.zoneSetup)),
-            ),
-          ),
           if (mode == SiteMode.commercial) ...[
             const SizedBox(height: 16),
             _buildZonesSection(context, zones),
           ]
         ],
-      ),
-    );
-  }
-
-  /// Gates [action] behind the installer PIN dialog unless already unlocked
-  /// this session.
-  void _guardInstallerAccess(VoidCallback action) {
-    if (_installerUnlocked) {
-      action();
-      return;
-    }
-    showDialog<bool>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => _InstallerPinDialog(
-        onSuccess: () {
-          _installerUnlocked = true;
-          action();
-        },
       ),
     );
   }
@@ -1573,196 +1526,5 @@ class _SupportRequestFormSheetState extends ConsumerState<SupportRequestFormShee
         ]),
       ),
     );
-  }
-}
-
-// ── Installer PIN Dialog ─────────────────────────────────────────────────────
-
-class _InstallerPinDialog extends StatefulWidget {
-  final VoidCallback onSuccess;
-  const _InstallerPinDialog({required this.onSuccess});
-
-  @override
-  State<_InstallerPinDialog> createState() => _InstallerPinDialogState();
-}
-
-class _InstallerPinDialogState extends State<_InstallerPinDialog> {
-  String _pin = '';
-  bool _error = false;
-  bool _validating = false;
-
-  void _onDigit(String digit) {
-    if (_validating) return;
-    if (_pin.length >= 4) return;
-    setState(() {
-      _error = false;
-      _pin += digit;
-    });
-    if (_pin.length == 4) {
-      _validatePin();
-    }
-  }
-
-  Future<void> _validatePin() async {
-    setState(() => _validating = true);
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('app_config')
-          .doc('master_installer')
-          .get();
-
-      if (!mounted) return;
-
-      if (doc.exists && doc.data() != null) {
-        final storedHash = doc.data()!['pin_hash'] as String?;
-        if (storedHash != null && storedHash.isNotEmpty) {
-          final enteredHash = sha256.convert(utf8.encode(_pin)).toString();
-          if (enteredHash == storedHash) {
-            Navigator.of(context).pop();
-            widget.onSuccess();
-            return;
-          }
-        }
-      }
-
-      setState(() {
-        _error = true;
-        _pin = '';
-        _validating = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = true;
-        _pin = '';
-        _validating = false;
-      });
-    }
-  }
-
-  void _onBackspace() {
-    if (_validating) return;
-    if (_pin.isEmpty) return;
-    setState(() {
-      _error = false;
-      _pin = _pin.substring(0, _pin.length - 1);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: NexGenPalette.gunmetal90,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: NexGenPalette.line),
-      ),
-      title: Row(
-        children: [
-          Icon(Icons.lock_outline, color: NexGenPalette.cyan),
-          const SizedBox(width: 12),
-          const Text('Installer Access'),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Enter installer code to continue',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: NexGenPalette.textMedium,
-            ),
-          ),
-          const SizedBox(height: 24),
-          // PIN dots
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(4, (i) {
-              final filled = i < _pin.length;
-              return Container(
-                width: 18,
-                height: 18,
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: filled ? NexGenPalette.cyan : Colors.transparent,
-                  border: Border.all(
-                    color: _error ? Colors.redAccent : NexGenPalette.cyan,
-                    width: 2,
-                  ),
-                ),
-              );
-            }),
-          ),
-          if (_error) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Incorrect code',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.redAccent,
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
-          // Numeric keypad
-          ..._buildKeypadRows(),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-      ],
-    );
-  }
-
-  List<Widget> _buildKeypadRows() {
-    const rows = [
-      ['1', '2', '3'],
-      ['4', '5', '6'],
-      ['7', '8', '9'],
-      ['', '0', '⌫'],
-    ];
-    return rows.map((row) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: row.map((key) {
-            if (key.isEmpty) {
-              return const SizedBox(width: 64, height: 48);
-            }
-            final isBackspace = key == '⌫';
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: SizedBox(
-                width: 64,
-                height: 48,
-                child: TextButton(
-                  style: TextButton.styleFrom(
-                    backgroundColor: NexGenPalette.line,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: isBackspace ? _onBackspace : () => _onDigit(key),
-                  child: isBackspace
-                      ? Icon(Icons.backspace_outlined, color: NexGenPalette.textHigh, size: 20)
-                      : Text(
-                          key,
-                          style: TextStyle(
-                            fontSize: 20,
-                            color: NexGenPalette.textHigh,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      );
-    }).toList();
   }
 }

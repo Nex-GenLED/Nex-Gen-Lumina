@@ -382,6 +382,12 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
       ),
       GoRoute(
+        path: AppRoutes.zoneSetup,
+        name: 'zone-setup',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(child: ZoneSetupScreen()),
+      ),
+      GoRoute(
         path: AppRoutes.installerWizard,
         name: 'installer-wizard',
         parentNavigatorKey: _rootNavigatorKey,
@@ -1030,12 +1036,6 @@ class AppRouter {
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: PreferredWhiteSelectionPage()),
                   ),
-                  GoRoute(
-                    path: 'zone-setup',
-                    name: 'zone-setup',
-                    parentNavigatorKey: _systemNavigatorKey,
-                    pageBuilder: (context, state) => const NoTransitionPage(child: ZoneSetupScreen()),
-                  ),
                   // Sports Alerts — registered as a proper system-shell
                   // child route (was previously pushed via raw Navigator,
                   // which left the screen unreachable-to-back-out-of when
@@ -1221,7 +1221,7 @@ class AppRoutes {
   static const String firstWeekReveal = '/autopilot/first-week';
   static const String autopilotCalendar = '/autopilot/calendar';
 
-  static const String zoneSetup = '/settings/zone-setup';
+  static const String zoneSetup = '/installer/zone-setup';
   // Commercial mode routes
   static const String commercialHome = '/commercial';
   static const String commercialOnboarding = '/commercial/onboarding';
