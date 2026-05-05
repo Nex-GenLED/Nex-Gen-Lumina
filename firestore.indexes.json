@@ -143,6 +143,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "installers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "dealerCode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "fullPin",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sales_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "dealerCode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ]
 }
