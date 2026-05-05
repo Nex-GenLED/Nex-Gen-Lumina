@@ -58,6 +58,10 @@ class RewardCalculationService {
       referrerUid: referrerUid,
       referralDocId: referralDocId,
       jobId: job.id,
+      // Carry the dealer code from the linked sales_job so firestore.rules
+      // can scope payout reads via hasStaffClaim() without dereferencing
+      // the linked job on every rule eval.
+      dealerCode: job.dealerCode,
       jobNumber: job.jobNumber,
       prospectName: job.prospect.fullName,
       installValueUsd: job.totalPriceUsd,

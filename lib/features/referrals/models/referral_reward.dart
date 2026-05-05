@@ -95,6 +95,15 @@ class ReferralPayout {
   final String referrerUid;
   final String referralDocId;
   final String jobId;
+  /// Dealer code that owns this payout. Derived from the linked
+  /// `sales_jobs/{jobId}.dealerCode` at write time. Required so
+  /// firestore.rules can scope reads via hasStaffClaim() without
+  /// dereferencing the linked sales_job on every rule eval.
+  ///
+  /// Legacy docs written before this field existed will have an
+  /// empty string here until the one-shot backfill script
+  /// (scripts/backfill_payout_dealercodes.js) runs against them.
+  final String dealerCode;
   final String jobNumber;
   final String prospectName;
   final double installValueUsd;
@@ -115,6 +124,7 @@ class ReferralPayout {
     required this.referrerUid,
     required this.referralDocId,
     required this.jobId,
+    required this.dealerCode,
     required this.jobNumber,
     required this.prospectName,
     required this.installValueUsd,
@@ -136,6 +146,7 @@ class ReferralPayout {
     'referrerUid': referrerUid,
     'referralDocId': referralDocId,
     'jobId': jobId,
+    'dealerCode': dealerCode,
     'jobNumber': jobNumber,
     'prospectName': prospectName,
     'installValueUsd': installValueUsd,
@@ -167,6 +178,10 @@ class ReferralPayout {
       referrerUid: j['referrerUid'] ?? '',
       referralDocId: j['referralDocId'] ?? '',
       jobId: j['jobId'] ?? '',
+      // Legacy docs written before dealerCode existed land here as ''.
+      // The backfill script populates them; until then, downstream
+      // logic (rules, queries) treats empty as "no dealer scope".
+      dealerCode: j['dealerCode'] ?? '',
       jobNumber: j['jobNumber'] ?? '',
       prospectName: j['prospectName'] ?? '',
       installValueUsd: (j['installValueUsd'] as num).toDouble(),
@@ -195,6 +210,7 @@ class ReferralPayout {
     referrerUid: referrerUid,
     referralDocId: referralDocId,
     jobId: jobId,
+    dealerCode: dealerCode,
     jobNumber: jobNumber,
     prospectName: prospectName,
     installValueUsd: installValueUsd,
