@@ -77,7 +77,12 @@ Future<AdminPinResult> validateAdminPin(String enteredPin) async {
   try {
     final doc = await FirebaseFirestore.instance
         .collection('app_config')
-        .doc('admin')
+        // Renamed from 'admin' to 'master_admin' on 2026-05-05 to fit
+        // the master_* slot convention. This direct read is temporary
+        // continuity — Prompt 8-iii migrates this entire path to
+        // mintStaffToken (mode: 'admin'), at which point the client
+        // stops reading the doc directly.
+        .doc('master_admin')
         .get();
 
     if (!doc.exists || doc.data() == null) {

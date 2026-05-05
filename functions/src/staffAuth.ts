@@ -7,6 +7,11 @@
  *     SalesModeNotifier.enterSalesMode (lines 60-144)
  *   • lib/features/installer/installer_providers.dart
  *     InstallerModeNotifier.enterInstallerMode (lines 164-258)
+ *   • lib/features/installer/admin/admin_providers.dart
+ *     validateAdminPin (lines 60-115; will be migrated to call this
+ *     callable in Prompt 8-iii)
+ *   • lib/features/corporate/providers/corporate_providers.dart
+ *     CorporateModeNotifier.authenticate — to be migrated as 'owner' mode
  *
  * Why this exists: the existing client flow forces the staff-pin
  * screen to read the master PIN hashes directly out of Firestore. A
@@ -17,8 +22,34 @@
  * client never reads the hashes.
  *
  * Contract:
- *   request.data: { pin: string, mode: 'sales' | 'installer' }
+ *   request.data: { pin: string, mode: 'sales' | 'installer' | 'admin' | 'owner' }
  *   response:     { token, role, dealerCode, displayName, source }
+ *
+ *   `dealerCode` in the response is an empty string for owner mode
+ *   (cross-dealer god mode); for other modes it's the dealer this
+ *   session is scoped to. The custom token's `dealerCode` claim is
+ *   only minted for non-owner modes — owner sessions have no
+ *   dealerCode claim at all so rule helpers cleanly distinguish
+ *   "scoped staff" from "unscoped owner."
+ *
+ * Mode → master doc → role mapping:
+ *   sales      → app_config/master_sales_pin     → role: 'salesperson'
+ *   installer  → app_config/master_installer     → role: 'installer'
+ *   admin      → app_config/master_admin         → role: 'admin'
+ *   owner      → app_config/master_corporate_pin → role: 'owner'
+ *                (no installers fallback, no dealer.isActive check)
+ *
+ * Strict mode-role enforcement on the per-installer fallback:
+ *   When the master PIN doesn't match, sales/installer/admin modes
+ *   look up the PIN in the `installers` collection. The matched doc's
+ *   `role` field MUST equal the role corresponding to the requested
+ *   mode. A salesperson PIN cannot accidentally authenticate under
+ *   installer mode (or vice versa) just because it's a 4-digit number
+ *   that exists in the collection. Missing role field is treated as
+ *   a mismatch (PIN miss).
+ *
+ *   Owner mode skips the installers fallback entirely — corporate
+ *   credentials are master-only by design.
  *
  * Errors:
  *   invalid-argument    pin is not 4-6 digits, or mode is not one of
@@ -26,11 +57,12 @@
  *   resource-exhausted  rate limit exceeded for the caller's IP
  *                       (10 attempts per 60 seconds).
  *   permission-denied   no master PIN match AND no active installer
- *                       doc match — OR matched installer's dealer is
- *                       inactive. The error message is intentionally
- *                       generic — clients should not be able to
- *                       distinguish "wrong PIN" from "missing config"
- *                       from "inactive dealer" from "inactive installer".
+ *                       doc match — OR matched installer's role
+ *                       doesn't match the requested mode — OR matched
+ *                       installer's dealer is inactive. The error
+ *                       message is intentionally generic — clients
+ *                       should not be able to distinguish between
+ *                       these failure modes.
  *   internal            createCustomToken failed (e.g. IAM
  *                       Service Account Token Creator role missing
  *                       on the Cloud Functions runtime SA).
@@ -44,7 +76,8 @@
  *   `source` field on audit-log entries:
  *     'master'           success via master PIN doc
  *     'installer_doc'    success via per-installer fallback
- *     null               PIN miss (no branch matched)
+ *     null               PIN miss (no branch matched, OR role mismatch
+ *                        on installers fallback)
  *     'dealer_inactive'  per-installer match but dealer.isActive false
  *     'mint_failed'      createCustomToken threw (e.g. IAM denial)
  *     'rate_limited'     IP exceeded the 10/60s window
@@ -78,9 +111,12 @@ import { createHash } from "crypto";
 
 const PIN_REGEX = /^\d{4,6}$/;
 
-// Mirrors the synthetic session created when the client matches the
-// master installer PIN — see installer_providers.dart lines 183-198.
-const MASTER_DEALER_CODE = "88";
+// Dealer code minted for master-PIN auth that doesn't have a per-PIN
+// derived dealer (i.e. installer + admin masters). Was '88' as a
+// sentinel before 2026-05-05; corrected to '55' (Tyler's HQ /
+// Nex-Gen first dealer) so dealer.isActive checks resolve against a
+// real dealer doc rather than a fictitious one.
+const MASTER_DEALER_CODE = "55";
 const MASTER_DISPLAY_NAME = "Nex-Gen Administrator";
 
 // Per-IP rate limit. The 10/60s window is loose enough that a real
@@ -92,7 +128,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-type StaffMode = "sales" | "installer";
+type StaffMode = "sales" | "installer" | "admin" | "owner";
 
 // Source values returned to the client on success. The client treats
 // these as opaque and stores them in the staff session for display /
@@ -109,7 +145,7 @@ type AuditSource =
   | "mint_failed"
   | "dealer_inactive";
 
-type StaffRole = "salesperson" | "installer";
+type StaffRole = "salesperson" | "installer" | "admin" | "owner";
 
 interface MintStaffTokenInput {
   pin: string;
@@ -137,7 +173,44 @@ function sha256Hex(input: string): string {
 }
 
 function roleForMode(mode: StaffMode): StaffRole {
-  return mode === "sales" ? "salesperson" : "installer";
+  switch (mode) {
+    case "sales":
+      return "salesperson";
+    case "installer":
+      return "installer";
+    case "admin":
+      return "admin";
+    case "owner":
+      return "owner";
+  }
+}
+
+/**
+ * Mode → master PIN doc id + the dealerCode that a successful match on
+ * THAT master doc should mint. Returns null for unknown modes (defense
+ * in depth — the caller already validated mode, but switch fall-through
+ * is the kind of bug that bites later).
+ *
+ *   sales:     dealerCode derived from PIN's first 2 digits
+ *              (mirrors sales_providers.dart line 84)
+ *   installer: dealerCode = MASTER_DEALER_CODE ('55')
+ *   admin:     dealerCode = MASTER_DEALER_CODE ('55')
+ *   owner:     dealerCode = '' (no dealer scope — cross-dealer god mode)
+ */
+function masterConfigForMode(
+  mode: StaffMode,
+  pin: string,
+): { docId: string; dealerCode: string } {
+  switch (mode) {
+    case "sales":
+      return { docId: "master_sales_pin", dealerCode: pin.substring(0, 2) };
+    case "installer":
+      return { docId: "master_installer", dealerCode: MASTER_DEALER_CODE };
+    case "admin":
+      return { docId: "master_admin", dealerCode: MASTER_DEALER_CODE };
+    case "owner":
+      return { docId: "master_corporate_pin", dealerCode: "" };
+  }
 }
 
 /**
@@ -214,10 +287,7 @@ async function checkRateLimit(
  * Resolve a session against the master PIN doc for `mode`. Returns
  * null if the doc is missing OR the stored hash does not match.
  *
- * Sales master uses the first 2 digits of the PIN as the dealer code
- * (mirrors sales_providers.dart line 84). Installer master uses the
- * fixed Nex-Gen admin dealer code (mirrors installer_providers.dart
- * line 186).
+ * Per-mode dealerCode mapping is centralized in masterConfigForMode().
  */
 async function tryMasterPin(
   db: admin.firestore.Firestore,
@@ -225,16 +295,15 @@ async function tryMasterPin(
   pin: string,
   hashHex: string,
 ): Promise<ResolvedSession | null> {
-  const docId = mode === "sales" ? "master_sales_pin" : "master_installer";
-  const snap = await db.collection("app_config").doc(docId).get();
+  const config = masterConfigForMode(mode, pin);
+  const snap = await db.collection("app_config").doc(config.docId).get();
   if (!snap.exists) return null;
 
   const storedHash = snap.data()?.pin_hash as string | undefined;
   if (!storedHash || storedHash !== hashHex) return null;
 
   return {
-    dealerCode:
-      mode === "sales" ? pin.substring(0, 2) : MASTER_DEALER_CODE,
+    dealerCode: config.dealerCode,
     displayName: MASTER_DISPLAY_NAME,
     source: "master",
   };
@@ -242,10 +311,14 @@ async function tryMasterPin(
 
 /**
  * Fallback: query `installers` for an active doc whose `fullPin`
- * equals the entered PIN. Used by both modes when the master PIN
- * doesn't match (mirrors the per-installer fallback shared by
- * sales_providers.dart lines 99-134 and installer_providers.dart
- * lines 207-257).
+ * equals the entered PIN. Used by sales/installer/admin modes when
+ * the master PIN doesn't match. Owner mode skips this fallback —
+ * corporate credentials are master-only.
+ *
+ * Strict mode-role enforcement: matched doc's `role` field MUST equal
+ * the role corresponding to the requested mode. Mismatch (including
+ * missing role field) returns null — treated as a PIN miss to avoid
+ * leaking which branch was tried.
  *
  * NOTE: the dealer-active check is NOT done here — it's done in the
  * caller via isDealerActive() after we have a resolved session. That
@@ -256,7 +329,11 @@ async function tryMasterPin(
 async function tryInstallersDoc(
   db: admin.firestore.Firestore,
   pin: string,
+  mode: StaffMode,
 ): Promise<ResolvedSession | null> {
+  // Owner mode is master-only by design — no per-installer fallback.
+  if (mode === "owner") return null;
+
   const snap = await db
     .collection("installers")
     .where("fullPin", "==", pin)
@@ -266,9 +343,22 @@ async function tryInstallersDoc(
   if (snap.empty) return null;
 
   const data = snap.docs[0].data();
+
+  // Strict mode-role enforcement: the matched installer doc's role
+  // must match the requested mode. Prevents a salesperson PIN from
+  // authenticating under installer mode (or vice versa) just because
+  // it's a 4-digit number that exists in the collection.
+  //
+  // Missing role field is a mismatch — the AdminService that creates
+  // these docs will need to populate role explicitly going forward.
+  // Existing docs (none in dev as of 2026-05-05; collection is empty)
+  // would fail this check until role is backfilled.
+  const docRole = data.role as string | undefined;
+  if (docRole !== roleForMode(mode)) return null;
+
   const dealerCode =
     (data.dealerCode as string | undefined) ?? pin.substring(0, 2);
-  const displayName = (data.name as string | undefined) ?? "Installer";
+  const displayName = (data.name as string | undefined) ?? "Staff";
 
   return {
     dealerCode,
@@ -284,7 +374,8 @@ async function tryInstallersDoc(
  * doc-id lookup because dealer docs may not be keyed by dealerCode.
  *
  * Only called in the per-installer fallback path. Master PIN paths
- * deliberately bypass this check.
+ * deliberately bypass this check, AND owner mode bypasses it entirely
+ * (cross-dealer scope by design).
  */
 async function isDealerActive(
   db: admin.firestore.Firestore,
@@ -347,10 +438,15 @@ export const mintStaffToken = onCall(
     }
 
     // ── 2. Validate mode ────────────────────────────────────────────────
-    if (mode !== "sales" && mode !== "installer") {
+    if (
+      mode !== "sales" &&
+      mode !== "installer" &&
+      mode !== "admin" &&
+      mode !== "owner"
+    ) {
       throw new HttpsError(
         "invalid-argument",
-        "mode must be 'sales' or 'installer'",
+        "mode must be 'sales', 'installer', 'admin', or 'owner'",
       );
     }
 
@@ -381,6 +477,11 @@ export const mintStaffToken = onCall(
     const hashHex = sha256Hex(pin);
 
     // ── 5-6. Resolution: master first, then installers fallback ─────────
+    //
+    // Owner mode skips the installers fallback (master-only by design).
+    // tryInstallersDoc handles that internally — returns null for owner
+    // without making the query — but the comment is here so the flow is
+    // obvious.
     let resolved: ResolvedSession | null = await tryMasterPin(
       db,
       mode,
@@ -388,7 +489,7 @@ export const mintStaffToken = onCall(
       hashHex,
     );
     if (!resolved) {
-      resolved = await tryInstallersDoc(db, pin);
+      resolved = await tryInstallersDoc(db, pin, mode);
     }
 
     // ── No match: log the failure and refuse ────────────────────────────
@@ -410,6 +511,10 @@ export const mintStaffToken = onCall(
     // matches MUST verify the dealer is active to mirror the client
     // behavior at installer_providers.dart:228-238 and to prevent a
     // deactivated dealer's still-active installer from minting tokens.
+    //
+    // Owner mode never reaches this branch (no installers fallback) —
+    // even if it did, owner is cross-dealer by design and shouldn't be
+    // gated by any single dealer's active state.
     if (resolved.source === "installer_doc") {
       const dealerActive = await isDealerActive(db, resolved.dealerCode);
       if (!dealerActive) {
@@ -427,14 +532,26 @@ export const mintStaffToken = onCall(
     }
 
     // ── 8. Mint the custom token (with audit-on-failure) ────────────────
+    //
+    // Owner mode mints WITHOUT a `dealerCode` claim — the absence of
+    // the claim is how rule helpers distinguish "scoped staff session"
+    // from "unscoped owner session". For all other modes the claim is
+    // present and equals the resolved dealerCode.
     const role = roleForMode(mode);
     const uid = `staff_${mode}_${pin}`;
-    const claims = {
+    const claims: {
+      role: StaffRole;
+      source: StaffSource;
+      pin: string;
+      dealerCode?: string;
+    } = {
       role,
-      dealerCode: resolved.dealerCode,
       source: resolved.source,
       pin, // Server-side audit only; never read by Firestore rules.
     };
+    if (mode !== "owner") {
+      claims.dealerCode = resolved.dealerCode;
+    }
 
     let token: string;
     try {
@@ -455,7 +572,7 @@ export const mintStaffToken = onCall(
         success: false,
         source: "mint_failed",
         ip,
-        dealerCode: resolved.dealerCode,
+        dealerCode: resolved.dealerCode || null,
         error: String(errCode).slice(0, 200),
       });
       throw new HttpsError("internal", "Failed to mint staff token");
@@ -467,7 +584,7 @@ export const mintStaffToken = onCall(
       success: true,
       source: resolved.source,
       ip,
-      dealerCode: resolved.dealerCode,
+      dealerCode: resolved.dealerCode || null,
     });
 
     return {

@@ -80,6 +80,8 @@ final networkPricingDefaultsProvider =
 //   - app_config/master_installer  (NOTE: no `_pin` suffix — matches the
 //     existing InstallerModeNotifier code)
 //   - app_config/master_corporate_pin
+//   - app_config/master_admin       (added 2026-05-05; no `_pin` suffix
+//     to match the master_installer convention)
 // ─────────────────────────────────────────────────────────────────────────
 
 class PinSlotState {
@@ -96,6 +98,7 @@ class PinSlotState {
 const String kPinDocSales = 'master_sales_pin';
 const String kPinDocInstaller = 'master_installer';
 const String kPinDocCorporate = 'master_corporate_pin';
+const String kPinDocAdmin = 'master_admin';
 
 final pinSlotStatesProvider = FutureProvider<List<PinSlotState>>((ref) async {
   final db = FirebaseFirestore.instance;
@@ -126,6 +129,11 @@ final pinSlotStatesProvider = FutureProvider<List<PinSlotState>>((ref) async {
       slotKey: kPinDocCorporate,
       label: 'Master Corporate PIN',
       isSet: await isSet(kPinDocCorporate),
+    ),
+    PinSlotState(
+      slotKey: kPinDocAdmin,
+      label: 'Master Admin PIN',
+      isSet: await isSet(kPinDocAdmin),
     ),
   ];
 });
