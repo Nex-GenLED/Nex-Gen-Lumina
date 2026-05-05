@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -12,6 +11,7 @@ import 'package:nexgen_command/services/bridge_api_client.dart';
 import 'package:nexgen_command/services/bridge_discovery_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/ip_entry_sheet.dart';
 
 /// Three-step bridge setup wizard:
 ///   1. Discover — find the bridge via Firestore self-registration
@@ -241,9 +241,9 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
   }
 
   Future<void> _promptManualIp() async {
-    final ip = await showDialog<String>(
-      context: context,
-      builder: (_) => const _BridgeIpDialog(),
+    final ip = await showIpEntrySheet(
+      context,
+      title: 'Enter Bridge IP',
     );
     if (ip != null && ip.isNotEmpty) {
       _selectBridgeByIp(ip);
@@ -1192,85 +1192,3 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-/// Manual bridge-IP entry dialog. Lifted out of an inline StatefulBuilder
-/// so the AlertDialog rebuilds against MediaQuery changes — wrapping it in
-/// a Padding tied to viewInsetsOf forces the dialog to lift above the
-/// software keyboard on iOS, which the previous StatefulBuilder version
-/// did not do reliably.
-class _BridgeIpDialog extends StatefulWidget {
-  const _BridgeIpDialog();
-
-  @override
-  State<_BridgeIpDialog> createState() => _BridgeIpDialogState();
-}
-
-class _BridgeIpDialogState extends State<_BridgeIpDialog> {
-  final _ctrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
-      child: AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        title: const Text(
-          'Enter Bridge IP',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: TextField(
-            controller: _ctrl,
-            autofocus: true,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-              LengthLimitingTextInputFormatter(15),
-            ],
-            onSubmitted: (_) =>
-                Navigator.pop(context, _ctrl.text.trim()),
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: '192.168.1.100',
-              hintStyle: TextStyle(
-                color: NexGenPalette.textMedium.withValues(alpha: 0.5),
-              ),
-              filled: true,
-              fillColor: NexGenPalette.matteBlack,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: NexGenPalette.textMedium),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () =>
-                Navigator.pop(context, _ctrl.text.trim()),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: NexGenPalette.cyan,
-            ),
-            child: const Text(
-              'Connect',
-              style: TextStyle(color: Colors.black),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

@@ -16,6 +16,7 @@ import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/services/image_upload_service.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/ip_entry_sheet.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Step 2: Controller Setup screen for the installer wizard
@@ -439,125 +440,33 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     final controllerType = await _pickControllerType();
     if (controllerType == null || !mounted) return;
 
-    // Step 2: IP entry (unchanged)
-    final ipCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
-          return AlertDialog(
-            backgroundColor: NexGenPalette.gunmetal90,
-            insetPadding: EdgeInsets.only(
-              left: 24,
-              right: 24,
-              top: 24,
-              bottom: 24 + bottomInset,
-            ),
-            title: const Text('Add Controller by IP',
-                style: TextStyle(color: Colors.white)),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // static IP warning banner
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: Colors.amber.withValues(alpha: 0.4)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.warning_amber_rounded,
-                            color: Colors.amber, size: 18),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Set a static IP in WLED first: '
-                            'Config → WiFi Setup → Static IP. '
-                            'DHCP addresses change and will break the connection.',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.amber),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // IP field. autofocus intentionally omitted — auto-popping
-                  // the keyboard before the AlertDialog finishes settling
-                  // pushed the field under the dialog's action row on
-                  // smaller screens. Installer taps the field to focus.
-                  TextField(
-                    controller: ipCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'IP Address',
-                      hintText: '192.168.50.200',
-                      labelStyle:
-                          const TextStyle(color: NexGenPalette.textMedium),
-                      hintStyle: TextStyle(
-                          color: NexGenPalette.textMedium
-                              .withValues(alpha: 0.5)),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Name field (keep existing)
-                  TextField(
-                    controller: nameCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Name (optional)',
-                      hintText: 'e.g., Front Roofline',
-                      labelStyle:
-                          const TextStyle(color: NexGenPalette.textMedium),
-                      hintStyle: TextStyle(
-                          color: NexGenPalette.textMedium
-                              .withValues(alpha: 0.5)),
-                      filled: true,
-                      fillColor: NexGenPalette.matteBlack,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel',
-                    style: TextStyle(color: NexGenPalette.textMedium)),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan),
-                child: const Text('Add',
-                    style: TextStyle(color: Colors.black)),
-              ),
-            ],
-          );
-        },
-      ),
+    // Step 2: IP entry — bottom sheet that lifts above the iOS keyboard
+    // via viewInsets.bottom padding at the widget root (the legacy
+    // AlertDialog pattern was unreliable on iOS regardless of inset
+    // strategy). Static-IP reminder previously shown as an in-dialog
+    // banner is now surfaced as a SnackBar before the sheet opens, so
+    // installers still see the cue without breaking the keyboard fix.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set a static IP in WLED first '
+            '(Config → WiFi Setup → Static IP). DHCP IPs will drift.',
+            style: TextStyle(fontSize: 12),
+          ),
+          backgroundColor: Colors.amber,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+    if (!mounted) return;
+    final ip = await showIpEntrySheet(
+      context,
+      title: 'Enter Controller IP',
+      hintText: '192.168.50.200',
     );
 
-    if (confirmed != true) return;
-
-    final ip = ipCtrl.text.trim();
-    if (ip.isEmpty) return;
+    if (ip == null || ip.isEmpty) return;
 
     // Step 3: Validate controller type against live device info. The
     // validation call also returns the parsed /json/info so we can enrich
@@ -598,9 +507,11 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         (ethRaw is num && ethRaw != 0);
     final connectionType = hasEthernet ? 'ethernet_wifi' : 'wifi';
 
-    final name = nameCtrl.text.trim().isEmpty
-        ? 'Controller ($ip)'
-        : nameCtrl.text.trim();
+    // Name field was dropped when the IP entry dialog became a single-
+    // input bottom sheet (Bug-1 keyboard occlusion fix). Default name
+    // uses the IP — installer can rename from the controllers list
+    // afterward.
+    final name = 'Controller ($ip)';
 
     final controllersRef = FirebaseFirestore.instance
         .collection('users')
