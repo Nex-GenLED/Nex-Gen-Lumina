@@ -101,6 +101,8 @@ import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboardi
 import 'package:nexgen_command/features/commercial/brand/brand_search_screen.dart';
 import 'package:nexgen_command/features/commercial/brand/brand_setup_screen.dart';
 import 'package:nexgen_command/features/commercial/brand/brand_correction_review_screen.dart';
+import 'package:nexgen_command/features/commercial/events/events_screen.dart';
+import 'package:nexgen_command/features/commercial/events/create_event_screen.dart';
 
 /// Slide + fade transition for Explore sub-routes.
 CustomTransitionPage<void> _exploreFadeSlide({
@@ -693,6 +695,25 @@ class AppRouter {
           child: BrandCorrectionReviewScreen(),
         ),
       ),
+      // Sales & Events. The list screen is reachable from the
+      // commercial home screen; the create screen is pushed from the
+      // FAB on the list and from the empty-state CTA.
+      GoRoute(
+        path: AppRoutes.commercialEvents,
+        name: 'commercial-events',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: EventsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialEventsCreate,
+        name: 'commercial-events-create',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: CreateEventScreen(),
+        ),
+      ),
 
       // ===== STATEFUL SHELL ROUTE (persistent bottom nav) =====
       StatefulShellRoute.indexedStack(
@@ -1168,6 +1189,9 @@ class AppRoutes {
   static const String commercialBrandSetup = '/commercial/brand/setup';
   static const String commercialBrandCorrections =
       '/commercial/brand/corrections';
+  // Sales & Events routes
+  static const String commercialEvents = '/commercial/events';
+  static const String commercialEventsCreate = '/commercial/events/create';
 }
 
 /// Returns the Design Studio path nested under the current shell branch so
