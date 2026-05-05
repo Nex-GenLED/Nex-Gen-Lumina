@@ -98,6 +98,9 @@ import 'package:nexgen_command/route_guards.dart';
 // Commercial mode imports
 import 'package:nexgen_command/screens/commercial/CommercialHomeScreen.dart';
 import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_wizard.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_search_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_setup_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_correction_review_screen.dart';
 
 /// Slide + fade transition for Explore sub-routes.
 CustomTransitionPage<void> _exploreFadeSlide({
@@ -660,6 +663,36 @@ class AppRouter {
         pageBuilder: (context, state) =>
             const MaterialPage(fullscreenDialog: true, child: CommercialOnboardingWizard()),
       ),
+      // Brand library — search, setup, and corporate correction review.
+      // Setup accepts either a BrandLibraryEntry (from search → pre-selected)
+      // or a Map {preSelected, isEditing} (from the Brand tab edit button)
+      // via state.extra. The corrections route's admin gate is enforced
+      // in-screen against user_role == 'admin' (the firestore rule on
+      // /brand_library_corrections.update enforces the same predicate).
+      GoRoute(
+        path: AppRoutes.commercialBrandSearch,
+        name: 'commercial-brand-search',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: BrandSearchScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialBrandSetup,
+        name: 'commercial-brand-setup',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          child: BrandSetupScreen.fromExtra(state.extra),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialBrandCorrections,
+        name: 'commercial-brand-corrections',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandCorrectionReviewScreen(),
+        ),
+      ),
 
       // ===== STATEFUL SHELL ROUTE (persistent bottom nav) =====
       StatefulShellRoute.indexedStack(
@@ -1130,6 +1163,11 @@ class AppRoutes {
   // Commercial mode routes
   static const String commercialHome = '/commercial';
   static const String commercialOnboarding = '/commercial/onboarding';
+  // Brand library routes (admin-gated for corrections)
+  static const String commercialBrandSearch = '/commercial/brand/search';
+  static const String commercialBrandSetup = '/commercial/brand/setup';
+  static const String commercialBrandCorrections =
+      '/commercial/brand/corrections';
 }
 
 /// Returns the Design Studio path nested under the current shell branch so
