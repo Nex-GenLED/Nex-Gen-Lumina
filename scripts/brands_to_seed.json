@@ -1691,5 +1691,38 @@
       {"name": "Red", "hex": "#E4002B", "role": "secondary"}
     ],
     "confidence": "verify"
+  },
+
+  {
+    "_section": "Pre-staged customer brands"
+  },
+  {
+    "name": "Diamond Family Jewelers",
+    "industry": "retail",
+    "domain": "diamondfamily.com",
+    "colors": [
+      {"name": "Sapphire Blue", "hex": "#0F52BA", "role": "primary"}
+    ],
+    "confidence": "high",
+    "customDesigns": [
+      {
+        "designId": "shimmer",
+        "displayName": "Shimmer",
+        "wledEffectName": "Twinkle",
+        "wledEffectId": 50,
+        "effectParams": {"sx": 80, "ix": 64, "pal": 0},
+        "description": "Subtle white twinkle pulses on a sapphire blue base — light catching the facets of a fine jewel. High-end jewelry retail.",
+        "mood": "luxurious"
+      }
+    ]
+  },
+  {
+    "name": "The Blue Line Bar",
+    "industry": "restaurant",
+    "domain": "bluelinebar.com",
+    "colors": [
+      {"name": "NHL Shield Blue", "hex": "#0033A0", "role": "primary"}
+    ],
+    "confidence": "high"
   }
 ]
