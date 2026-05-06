@@ -125,6 +125,7 @@ scripts/enforce_schedule_limit.js
 scripts/reset_all_bridge_records.js
 scripts/clear_bridge_data.js
 scripts/wipe_customer_data.js
+scripts/_cleanup_failed_customer.js
 
 # Catalog seeder — run once to seed the canonical SKU list, then forget.
 # Per Tyler's request, kept out of source control to discourage re-runs.
