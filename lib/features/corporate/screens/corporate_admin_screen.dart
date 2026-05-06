@@ -6,8 +6,10 @@ import 'package:nexgen_command/features/corporate/models/network_announcement.da
 import 'package:nexgen_command/features/corporate/providers/corporate_admin_providers.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/inventory/corporate/catalog_management_screen.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/services/commercial/brand_library_providers.dart';
+import 'package:nexgen_command/services/inventory/product_catalog_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Corporate Admin tab.
@@ -28,6 +30,8 @@ class CorporateAdminScreen extends ConsumerWidget {
           _DealerManagementSection(),
           SizedBox(height: 16),
           _BrandLibrarySection(),
+          SizedBox(height: 16),
+          _ProductCatalogSection(),
           SizedBox(height: 16),
           _PricingDefaultsSection(),
           SizedBox(height: 16),
@@ -554,6 +558,76 @@ class _CountTile extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         fontSize: 16)),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 2.5 — PRODUCT CATALOG
+// ═══════════════════════════════════════════════════════════════════════
+
+class _ProductCatalogSection extends ConsumerWidget {
+  const _ProductCatalogSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final productsAsync = ref.watch(allProductsIncludingInactiveProvider);
+    final all = productsAsync.valueOrNull ?? const [];
+    final activeCount = all.where((p) => p.isActive).length;
+    final unpriced = all.where((p) => p.isActive && p.unitPrice <= 0).length;
+
+    return _SectionCard(
+      title: 'Product Catalog',
+      subtitle:
+          'Manage SKU prices, deactivate retired products, and add new SKUs to the global Nex-Gen catalog.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _CountTile(
+                  icon: Icons.inventory_outlined,
+                  label: 'Active SKUs',
+                  value:
+                      productsAsync.isLoading ? '…' : '$activeCount',
+                  highlight: false,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _CountTile(
+                  icon: Icons.price_change_outlined,
+                  label: 'Need pricing',
+                  value: '$unpriced',
+                  highlight: unpriced > 0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  Navigator.of(context).push(MaterialPageRoute<void>(
+                fullscreenDialog: true,
+                builder: (_) => const CatalogManagementScreen(),
+              )),
+              icon: const Icon(Icons.list_alt_outlined, size: 18),
+              label: const Text('Manage Catalog'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: NexGenPalette.gold,
+                side: BorderSide(
+                    color: NexGenPalette.gold.withValues(alpha: 0.6)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
             ),
           ),
         ],

@@ -95,3 +95,104 @@ final catalogSearchProvider =
         p.description.toLowerCase().contains(q);
   }).toList();
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductCatalogNotifier
+//
+// Write surface for the global /product_catalog. Used by the
+// corporate catalog management screen (Part 9). All writes are
+// gated by the firestore.rules /product_catalog/{sku} rule
+// (isUserRoleAdmin OR hasAdminOrOwnerClaim) — the notifier itself
+// adds no in-process auth checks; the rule layer is the boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class ProductCatalogNotifier {
+  final FirebaseFirestore _db;
+  ProductCatalogNotifier(this._db);
+
+  CollectionReference<Map<String, dynamic>> get _catalog =>
+      _db.collection('product_catalog');
+
+  /// Set unit_price for a single SKU.
+  Future<void> updateUnitPrice({
+    required String sku,
+    required double unitPrice,
+  }) async {
+    await _catalog.doc(sku).update({
+      'unit_price': unitPrice,
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Set unit_price for every active SKU in [category]. Returns the
+  /// number of docs updated. Bulk updates run in a single batch so
+  /// they're atomic — a partial failure won't leave the category in
+  /// a half-updated state.
+  Future<int> bulkUpdateCategoryPrice({
+    required String category,
+    required double unitPrice,
+  }) async {
+    final snap = await _catalog
+        .where('category', isEqualTo: category)
+        .where('is_active', isEqualTo: true)
+        .get();
+    if (snap.docs.isEmpty) return 0;
+    final batch = _db.batch();
+    final now = FieldValue.serverTimestamp();
+    for (final doc in snap.docs) {
+      batch.update(doc.reference, {
+        'unit_price': unitPrice,
+        'updated_at': now,
+      });
+    }
+    await batch.commit();
+    return snap.docs.length;
+  }
+
+  /// Toggle is_active. Deactivated SKUs disappear from the dealer
+  /// order screen but remain in /product_catalog so historical
+  /// orders that reference them can still resolve names + pack info
+  /// via allProductsIncludingInactiveProvider.
+  Future<void> setActive({
+    required String sku,
+    required bool isActive,
+  }) async {
+    await _catalog.doc(sku).update({
+      'is_active': isActive,
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Create a brand-new SKU. Throws StateError if the SKU id is
+  /// already taken — the spec forbids overwriting existing catalog
+  /// docs (would silently lose price history on collision).
+  Future<void> createProduct(ProductCatalogItem item) async {
+    final ref = _catalog.doc(item.sku);
+    final existing = await ref.get();
+    if (existing.exists) {
+      throw StateError(
+          'SKU ${item.sku} already exists in the catalog.');
+    }
+    final now = Timestamp.now();
+    await ref.set({
+      ...item.toJson(),
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  /// Update arbitrary fields on an existing SKU (name, description,
+  /// pack info, voltage flags). SKU id itself is immutable — to
+  /// rename, deactivate the old and create a new one.
+  Future<void> updateProduct(ProductCatalogItem item) async {
+    await _catalog.doc(item.sku).update({
+      ...item.toJson(),
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+/// Singleton notifier provider.
+final productCatalogNotifierProvider = Provider<ProductCatalogNotifier>(
+  (ref) => ProductCatalogNotifier(FirebaseFirestore.instance),
+);
