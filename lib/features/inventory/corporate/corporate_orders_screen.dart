@@ -426,12 +426,12 @@ class _OrderDetailScreenState extends ConsumerState<_OrderDetailScreen> {
             .updateNotes(orderId: order.orderId, notes: notes);
       }
 
-      // 3) Corporate inventory: Tyler's spec says "decrement
-      //    reserved_for_orders for each line item" on approve. The
-      //    semantics are unusual (reserved typically goes UP at
-      //    approve, DOWN at ship) — flagged for follow-up. Doing it
-      //    literally for now via FieldValue.increment(-qty) so the
-      //    write stays atomic and reversible.
+      // 3) Corporate inventory: approve commits stock to this dealer
+      //    order, so reserved_for_orders increments by the line qty.
+      //    available = on_hand - reserved_for_orders, so this
+      //    correctly reduces available stock for new orders. The
+      //    matching decrement happens at ship time when stock
+      //    physically leaves the warehouse.
       final batch = FirebaseFirestore.instance.batch();
       for (final line in order.lineItems) {
         final invRef = FirebaseFirestore.instance
@@ -442,7 +442,7 @@ class _OrderDetailScreenState extends ConsumerState<_OrderDetailScreen> {
           {
             'sku': line.sku,
             'reserved_for_orders':
-                FieldValue.increment(-line.quantityOrdered),
+                FieldValue.increment(line.quantityOrdered),
             'last_updated': Timestamp.now(),
           },
           SetOptions(merge: true),
