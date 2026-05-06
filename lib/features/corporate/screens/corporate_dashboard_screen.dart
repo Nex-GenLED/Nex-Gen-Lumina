@@ -7,9 +7,9 @@ import 'package:nexgen_command/features/corporate/providers/corporate_network_pr
 import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_admin_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_pipeline_screen.dart';
-import 'package:nexgen_command/features/corporate/screens/corporate_warehouse_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/inventory/corporate/corporate_orders_screen.dart';
+import 'package:nexgen_command/features/inventory/corporate/warehouse_screen.dart';
 import 'package:nexgen_command/services/inventory/corporate_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
