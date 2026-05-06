@@ -27,6 +27,7 @@ Color _statusColor(SalesJobStatus s) => switch (s) {
       SalesJobStatus.prewireComplete => const Color(0xFFEF9F27),
       SalesJobStatus.installScheduled => const Color(0xFF00D4FF),
       SalesJobStatus.installComplete => const Color(0xFF00D4FF),
+      SalesJobStatus.completePaid => const Color(0xFF00D4FF),
     };
 
 /// Cross-dealer pipeline view — replaces the Pipeline tab stub on the
