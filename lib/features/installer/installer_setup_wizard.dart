@@ -662,6 +662,28 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
       // 3. Get installer-collected configuration
       final siteMode = ref.read(installerSiteModeProvider);
+
+      // Reconcile the two residential/commercial signals at the write
+      // boundary. Today the wizard exposes them through two independent
+      // UIs:
+      //   • zone_configuration_screen toggles installerSiteModeProvider
+      //   • handoff_screen sets draft.profileType (default 'residential')
+      // A May 6 audit found nothing keeps them in sync, so an installer
+      // who picks Commercial on the zone-config toggle but speeds past
+      // the handoff cards (or vice versa) can silently produce a broken
+      // hybrid account. Until the UI is consolidated in the staged
+      // Wizard UX prompt, treat siteMode as the source of truth — it is
+      // the more recent decision in the wizard flow and drives the
+      // installation doc's schema/limits already.
+      final resolvedProfileType =
+          siteMode == SiteMode.commercial ? 'commercial' : 'residential';
+      if (draft != null && draft.profileType != resolvedProfileType) {
+        debugPrint('Installer: wizard signal mismatch — handoff said '
+            '"${draft.profileType}" but zone-config said '
+            '"$resolvedProfileType". Using "$resolvedProfileType" '
+            '(siteMode is the source of truth).');
+      }
+
       final selectedControllers = ref.read(installerSelectedControllersProvider);
       final linkedControllers = ref.read(installerLinkedControllersProvider);
 
@@ -755,7 +777,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         vibeLevel: draft?.vibeLevel ?? 0.5,
         changeToleranceLevel: draft?.changeToleranceLevel ?? 2,
         autonomyLevel: draft?.autonomyLevel ?? 1,
-        profileType: draft?.profileType ?? 'residential',
+        profileType: resolvedProfileType,
         managerEmail: draft?.managerEmail,
         autopilotEnabled: true,
         weeklySchedulePreviewEnabled: true,
@@ -777,6 +799,76 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         userJson,
         SetOptions(merge: true),
       );
+
+      // For commercial installs: write the route-guard-required fields
+      // and a commercial_locations/primary stub so the customer lands on
+      // the commercial dashboard immediately on first sign-in. Without
+      // these the route guard at route_guards.dart:266-275 sees
+      // profile_type == 'commercial' but no commercial_locations doc and
+      // falls back to the residential dashboard.
+      //
+      // Mirrors the canonical batch in
+      // lib/screens/commercial/onboarding/screens/review_go_live_screen.dart
+      // (the CommercialOnboardingWizard's "Go Live" step) so an
+      // installer-driven commercial install produces the same
+      // route-guard-recognised state the self-service flow does.
+      //
+      // Wrapped in try/catch + debugPrint, non-blocking, consistent with
+      // the brand pre-seed below — a failure leaves the account in the
+      // pre-fix state, which can be patched via Firebase Console.
+      if (siteMode == SiteMode.commercial) {
+        try {
+          final locationDoc = <String, dynamic>{
+            'location_id': 'primary',
+            'org_id': '',
+            'location_name': customerInfo.name.isNotEmpty
+                ? customerInfo.name
+                : 'Primary Location',
+            'address':
+                '${customerInfo.address}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}'
+                    .trim(),
+            'lat': 0.0,
+            'lng': 0.0,
+            'controller_id': '',
+            'business_hours_id': '',
+            'schedule_id': '',
+            'teams_config_id': '',
+            'is_using_org_template': false,
+            'channel_configs': const [],
+            'managers': [
+              {
+                'user_id': userId,
+                'role': 'corporateAdmin',
+                'assigned_at': DateTime.now().toIso8601String(),
+              }
+            ],
+            'created_at': FieldValue.serverTimestamp(),
+            'active': true,
+          };
+
+          final commercialBatch = FirebaseFirestore.instance.batch();
+          commercialBatch.set(
+            FirebaseFirestore.instance.collection('users').doc(userId),
+            {
+              'commercial_mode_enabled': true,
+              'commercial_mode_override': true,
+            },
+            SetOptions(merge: true),
+          );
+          commercialBatch.set(
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(userId)
+                .collection('commercial_locations')
+                .doc('primary'),
+            locationDoc,
+          );
+          await commercialBatch.commit();
+        } catch (e) {
+          debugPrint('Installer: commercial flag/location seed failed '
+              '(non-blocking): $e');
+        }
+      }
 
       // Pre-seed the commercial brand profile if the installer selected a
       // brand library entry during the brandSetup step (Part 8, Path 2).
