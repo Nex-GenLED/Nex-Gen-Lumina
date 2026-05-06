@@ -328,6 +328,7 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen> {
     SalesJobStatus.prewireComplete => NexGenPalette.amber,
     SalesJobStatus.installScheduled => NexGenPalette.green,
     SalesJobStatus.installComplete => NexGenPalette.green,
+    SalesJobStatus.completePaid => NexGenPalette.green,
   };
 
   Widget _buildTaskChecklist(SalesJob job, int day) {

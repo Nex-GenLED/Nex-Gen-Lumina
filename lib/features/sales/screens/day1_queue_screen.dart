@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,6 +26,79 @@ class Day1QueueScreen extends ConsumerWidget {
     SalesJobStatus.estimateSigned,
     SalesJobStatus.prewireScheduled,
   ];
+
+  /// Resolve a stable identifier for the person taking action — Firebase
+  /// Auth uid when available (real user), else the installer-pin
+  /// fallback (legacy installer auth still in use). Same fallback
+  /// pattern as Day2WrapUpScreen._completeJob.
+  String _byUid(WidgetRef ref) {
+    final fbUid = FirebaseAuth.instance.currentUser?.uid;
+    if (fbUid != null && fbUid.isNotEmpty) return fbUid;
+    final session = ref.read(installerSessionProvider);
+    return session?.installer.fullPin ?? 'unknown';
+  }
+
+  /// Deposit gate: 50% of total_price_usd must be collected before
+  /// Day 1 can be scheduled. Snapshots the deposit amount on the job
+  /// at the moment of collection so retroactive total-price edits
+  /// don't change the historical record.
+  Future<void> _markDepositCollected(
+    BuildContext context,
+    WidgetRef ref,
+    SalesJob job,
+  ) async {
+    final depositAmount = job.totalPriceUsd * 0.5;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal,
+        title: const Text('Confirm Deposit Collected',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Confirm that you have collected '
+          '\$${depositAmount.toStringAsFixed(2)} from '
+          '${job.prospect.fullName}? '
+          'Day 1 scheduling unlocks immediately.',
+          style: TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: NexGenPalette.amber,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Yes, deposit collected'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await ref.read(salesJobServiceProvider).markDepositCollected(
+            jobId: job.id,
+            byUid: _byUid(ref),
+            depositAmount: depositAmount,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Deposit recorded — Day 1 scheduling unlocked for ${job.prospect.fullName}'),
+          backgroundColor: NexGenPalette.green,
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to record deposit: $e')),
+      );
+    }
+  }
 
   Future<void> _scheduleDay1(
     BuildContext context,
@@ -128,6 +202,8 @@ class Day1QueueScreen extends ConsumerWidget {
                     .replaceFirst(':jobId', jobs[i].id),
               ),
               onSchedule: () => _scheduleDay1(context, ref, jobs[i]),
+              onMarkDeposit: () =>
+                  _markDepositCollected(context, ref, jobs[i]),
             ),
           );
         },
@@ -175,11 +251,13 @@ class _Day1JobCard extends StatelessWidget {
   final SalesJob job;
   final VoidCallback onTap;
   final VoidCallback onSchedule;
+  final VoidCallback onMarkDeposit;
 
   const _Day1JobCard({
     required this.job,
     required this.onTap,
     required this.onSchedule,
+    required this.onMarkDeposit,
   });
 
   static Color _statusColor(SalesJobStatus s) => switch (s) {
@@ -277,8 +355,15 @@ class _Day1JobCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
+              // Deposit gate — shown INSTEAD of scheduling UI when the
+              // 50% deposit hasn't been collected yet (Part 10).
+              if (!job.depositCollected)
+                _DepositGateBanner(
+                  job: job,
+                  onMarkDeposit: onMarkDeposit,
+                )
               // Date or schedule button
-              if (hasDate)
+              else if (hasDate)
                 Row(
                   children: [
                     Icon(
@@ -345,6 +430,77 @@ class _Day1JobCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deposit gate banner (Part 10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DepositGateBanner extends StatelessWidget {
+  final SalesJob job;
+  final VoidCallback onMarkDeposit;
+
+  const _DepositGateBanner({required this.job, required this.onMarkDeposit});
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = job.totalPriceUsd * 0.5;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NexGenPalette.amber.withValues(alpha: 0.1),
+        border: Border.all(color: NexGenPalette.amber),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.payments_outlined,
+                  color: NexGenPalette.amber, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                '50% Deposit Required',
+                style: TextStyle(
+                  color: NexGenPalette.amber,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Collect \$${amount.toStringAsFixed(2)} from '
+            '${job.prospect.fullName} before scheduling Day 1 installation.',
+            style: TextStyle(
+              color: NexGenPalette.textMedium,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onMarkDeposit,
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Mark Deposit Collected'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NexGenPalette.amber,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -139,9 +140,11 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
       setState(() {
         _job = job;
         _isLoading = false;
-        // If wrap-up was already finished previously, jump to the close
-        // step so the install team sees the summary directly.
-        if (job.status == SalesJobStatus.installComplete) {
+        // If wrap-up was already finished previously (install
+        // complete OR completePaid), jump to the close step so the
+        // install team sees the summary directly.
+        if (job.status == SalesJobStatus.installComplete ||
+            job.status == SalesJobStatus.completePaid) {
           _step = _WrapUpStep.close;
         }
       });
@@ -565,14 +568,16 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
           .markDay2Complete(widget.jobId, techUid);
       if (!mounted) return;
 
-      // Show the completion summary AlertDialog before popping back so
-      // the install team can confirm everything looks right.
-      await _showCompletionSummary(job);
+      // Reload the job so the screen rebuilds with status =
+      // installComplete. Don't pop yet — the final payment gate
+      // (Part 10) renders inside _buildStep4Close once the status is
+      // installComplete + !finalPaymentCollected. The dealer
+      // continues from inside the wrap-up screen by either marking
+      // payment collected or sending a reminder; pop happens when
+      // payment is recorded.
+      await _loadJob();
       if (!mounted) return;
-      // Pop back to the Day 2 queue. context.go is appropriate here so
-      // we land at the queue regardless of how deep the navigation stack
-      // is (we may have pushed the installer wizard between Step 3 and 4).
-      context.go(AppRoutes.day2Queue);
+      setState(() => _isCompleting = false);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isCompleting = false);
@@ -582,111 +587,111 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
     }
   }
 
-  Future<void> _showCompletionSummary(SalesJob job) async {
-    final photoCount = _photoByChannel.length;
-    final returnedCount = job.actualMaterialUsage?.entries
-            .where((e) => e.returnedQty > 0)
-            .length ??
-        0;
-    final accountCreated = _createdUserUid != null && _createdUserUid!.isNotEmpty;
+  /// Resolve a stable identifier for the person taking action. Same
+  /// fallback chain as _completeJob: Firebase Auth uid first, then
+  /// installer pin, then 'unknown'.
+  String _byUid() {
+    final fbUid = FirebaseAuth.instance.currentUser?.uid;
+    if (fbUid != null && fbUid.isNotEmpty) return fbUid;
+    final session = ref.read(installerSessionProvider);
+    return session?.installer.fullPin ?? 'unknown';
+  }
 
-    await showDialog<void>(
+  /// Final payment gate (Part 10). Marks finalPaymentCollected,
+  /// flips status to completePaid, and pops back to the queue.
+  Future<void> _markFinalPayment() async {
+    final job = _job;
+    if (job == null || _isCompleting) return;
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: NexGenPalette.gunmetal,
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: NexGenPalette.green, size: 28),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Install complete',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              job.prospect.fullName,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _summaryRow(
-              icon: Icons.photo_library_outlined,
-              label: 'Install photos',
-              value: '$photoCount captured',
-            ),
-            _summaryRow(
-              icon: Icons.inventory_2_outlined,
-              label: 'Materials returned',
-              value: '$returnedCount line${returnedCount == 1 ? '' : 's'}',
-            ),
-            _summaryRow(
-              icon: accountCreated
-                  ? Icons.person_outline
-                  : Icons.person_off_outlined,
-              label: 'Customer account',
-              value: accountCreated ? 'Created' : 'Skipped',
-              valueColor: accountCreated
-                  ? NexGenPalette.green
-                  : NexGenPalette.amber,
-            ),
-          ],
+        title: const Text('Confirm Final Payment',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Confirm that ${job.prospect.fullName} has paid the '
+          'remaining balance? The job will be archived as complete.',
+          style: TextStyle(color: NexGenPalette.textMedium),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Back to Day 2 Queue',
-              style: TextStyle(color: NexGenPalette.green),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: NexGenPalette.green,
+              foregroundColor: Colors.black,
             ),
+            child: const Text('Yes, payment collected'),
           ),
         ],
       ),
     );
+    if (ok != true || !mounted) return;
+    setState(() => _isCompleting = true);
+    try {
+      await ref.read(salesJobServiceProvider).markFinalPaymentCollected(
+            jobId: job.id,
+            byUid: _byUid(),
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Job complete! Payment recorded.'),
+          backgroundColor: NexGenPalette.green,
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      context.go(AppRoutes.day2Queue);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isCompleting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to record payment: $e')),
+      );
+    }
   }
 
-  Widget _summaryRow({
-    required IconData icon,
-    required String label,
-    required String value,
-    Color? valueColor,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: NexGenPalette.green, size: 16),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 13,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
+  /// Queues a payment-due reminder via the existing
+  /// /email_notifications collection (same Cloud-Function-driven
+  /// queue used for new-lead emails). Until the Cloud Function
+  /// handler for type 'payment_reminder' lands, the doc accumulates
+  /// as a queue.
+  Future<void> _sendPaymentReminder() async {
+    final job = _job;
+    if (job == null) return;
+    final balance = job.totalPriceUsd - (job.depositAmount ?? 0);
+    try {
+      await ref.read(salesJobServiceProvider).queuePaymentReminder(
+            jobId: job.id,
+            customerUid: job.linkedUserId,
+            customerName: job.prospect.fullName,
+            customerEmail: job.prospect.email,
+            customerPhone: job.prospect.phone,
+            amount: balance,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reminder queued — Nex-Gen will dispatch shortly.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to queue reminder: $e')),
+      );
+    }
   }
+
+  // _showCompletionSummary + _summaryRow were removed in Part 10.
+  // Post-install celebration is now in _FinalPaymentSection /
+  // _PaidConfirmationCard inside _buildStep4Close so the dealer can
+  // record the final payment before the screen pops back to the
+  // queue.
 
   // ── Navigation between steps ──────────────────────────────────────────
 
@@ -1095,7 +1100,10 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
         0;
     final accountCreated =
         _createdUserUid != null && _createdUserUid!.isNotEmpty;
-    final alreadyComplete = job.status == SalesJobStatus.installComplete;
+    final installComplete = job.status == SalesJobStatus.installComplete ||
+        job.status == SalesJobStatus.completePaid;
+    final paid = job.status == SalesJobStatus.completePaid ||
+        job.finalPaymentCollected;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1103,10 +1111,13 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
         const _SectionHeader(title: 'CLOSE JOB'),
         const SizedBox(height: 6),
         Text(
-          alreadyComplete
-              ? 'This job is already marked complete.'
-              : 'Confirm everything looks right, then mark the install '
-                  'complete to archive the job.',
+          paid
+              ? 'This job is complete and paid in full.'
+              : (installComplete
+                  ? 'Install marked complete. Collect the final payment to '
+                      'archive the job.'
+                  : 'Confirm everything looks right, then mark the install '
+                      'complete to archive the job.'),
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.5),
             fontSize: 12,
@@ -1134,6 +1145,20 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
           done: accountCreated,
           warnIfNotDone: true,
         ),
+        const SizedBox(height: 16),
+
+        // Final payment gate (Part 10). Renders only after install is
+        // marked complete. Shows the remaining balance, a reminder
+        // dispatch button, and a "Mark Final Payment Collected" CTA.
+        // Once payment is recorded the job moves to the completePaid
+        // terminal state and pops back to the queue.
+        if (installComplete && !paid) _FinalPaymentSection(
+          job: job,
+          isBusy: _isCompleting,
+          onMarkPaymentCollected: _markFinalPayment,
+          onSendReminder: _sendPaymentReminder,
+        ),
+        if (paid) const _PaidConfirmationCard(),
         const SizedBox(height: 24),
       ],
     );
@@ -1199,7 +1224,12 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
   Widget _bottomBar(SalesJob job) {
     final isLastStep = _step == _WrapUpStep.close;
     final canAdvance = _canAdvance();
-    final alreadyComplete = job.status == SalesJobStatus.installComplete;
+    // Complete-Job button is locked once install is complete (or paid)
+    // — interaction post-completion happens through the in-content
+    // final payment section.
+    final alreadyComplete =
+        job.status == SalesJobStatus.installComplete ||
+            job.status == SalesJobStatus.completePaid;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -1537,6 +1567,166 @@ class _MaterialCheckInRow extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Final payment gate widgets (Part 10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Renders the post-install payment-pending UI: remaining balance,
+/// "Send Payment Reminder" button, and "Mark Final Payment Collected"
+/// CTA. Shown inside _buildStep4Close after the install is marked
+/// complete and before the final payment is recorded.
+class _FinalPaymentSection extends StatelessWidget {
+  const _FinalPaymentSection({
+    required this.job,
+    required this.isBusy,
+    required this.onMarkPaymentCollected,
+    required this.onSendReminder,
+  });
+
+  final SalesJob job;
+  final bool isBusy;
+  final VoidCallback onMarkPaymentCollected;
+  final VoidCallback onSendReminder;
+
+  @override
+  Widget build(BuildContext context) {
+    final remaining = job.totalPriceUsd - (job.depositAmount ?? 0);
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NexGenPalette.green.withValues(alpha: 0.08),
+        border: Border.all(color: NexGenPalette.green.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.celebration_outlined,
+                  color: NexGenPalette.green, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Installation Complete!',
+                style: TextStyle(
+                  color: NexGenPalette.green,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Notify the customer that their final balance is due.',
+            style: TextStyle(
+              color: NexGenPalette.textMedium,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '\$${remaining.toStringAsFixed(2)}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          Text(
+            'Remaining balance',
+            style: TextStyle(
+              color: NexGenPalette.textMedium,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isBusy ? null : onSendReminder,
+              icon: const Icon(Icons.notifications_outlined, size: 16),
+              label: const Text('Send Payment Reminder to Customer'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: NexGenPalette.cyan,
+                side: BorderSide(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: isBusy ? null : onMarkPaymentCollected,
+              icon: const Icon(Icons.check_circle, size: 16),
+              label: isBusy
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                  : const Text('Mark Final Payment Collected'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NexGenPalette.green,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Read-only "complete + paid" celebration card. Replaces the payment
+/// section once the dealer marks final payment collected; gives the
+/// install team visual confirmation before the screen pops.
+class _PaidConfirmationCard extends StatelessWidget {
+  const _PaidConfirmationCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NexGenPalette.green.withValues(alpha: 0.12),
+        border: Border.all(color: NexGenPalette.green),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle,
+              color: NexGenPalette.green, size: 24),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Job complete and paid in full.',
+              style: TextStyle(
+                color: NexGenPalette.green,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
         ],
       ),

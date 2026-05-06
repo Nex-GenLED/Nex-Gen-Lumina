@@ -96,6 +96,76 @@ class SalesJobService {
     });
   }
 
+  /// Record that the 50% deposit has been collected. Snapshots the
+  /// deposit amount on the job so retroactive total-price edits can't
+  /// change the historical record.
+  ///
+  /// Gates Day 1 scheduling — see day1_queue_screen.dart.
+  Future<void> markDepositCollected({
+    required String jobId,
+    required String byUid,
+    required double depositAmount,
+  }) async {
+    final now = DateTime.now();
+    await _jobs().doc(jobId).update({
+      'depositCollected': true,
+      'depositCollectedAt': Timestamp.fromDate(now),
+      'depositCollectedBy': byUid,
+      'depositAmount': depositAmount,
+      'updatedAt': Timestamp.fromDate(now),
+    });
+  }
+
+  /// Record that the final balance has been collected and flip the
+  /// job to the terminal `completePaid` state. Filters the job out of
+  /// active queues; only historical lists will surface it.
+  Future<void> markFinalPaymentCollected({
+    required String jobId,
+    required String byUid,
+  }) async {
+    final now = DateTime.now();
+    await _jobs().doc(jobId).update({
+      'finalPaymentCollected': true,
+      'finalPaymentCollectedAt': Timestamp.fromDate(now),
+      'finalPaymentCollectedBy': byUid,
+      'status': SalesJobStatus.completePaid.name,
+      'updatedAt': Timestamp.fromDate(now),
+    });
+  }
+
+  /// Queue a payment-due reminder to be dispatched server-side.
+  ///
+  /// Writes to /email_notifications (the same Cloud-Function-driven
+  /// queue [DemoLeadService] uses for new-lead emails) with type
+  /// 'payment_reminder'. The Cloud Function consumes the doc, sends
+  /// FCM/SMS/email through whatever channel is configured for the
+  /// customer, and flips `processed: true`. Until the Cloud Function
+  /// handler is in place, the doc just accumulates as a queue.
+  Future<void> queuePaymentReminder({
+    required String jobId,
+    String? customerUid,
+    required String customerName,
+    required String customerEmail,
+    required String customerPhone,
+    required double amount,
+  }) async {
+    await _db.collection('email_notifications').add({
+      'type': 'payment_reminder',
+      'jobId': jobId,
+      if (customerUid != null) 'customerUid': customerUid,
+      'customerName': customerName,
+      'customerEmail': customerEmail,
+      'customerPhone': customerPhone,
+      'amount': amount,
+      'title': 'Your installation is complete!',
+      'body': 'Thank you for choosing Nex-Gen LED. '
+          'Your final balance of \$${amount.toStringAsFixed(2)} is now due. '
+          'Please contact your installer to arrange payment.',
+      'createdAt': FieldValue.serverTimestamp(),
+      'processed': false,
+    });
+  }
+
   /// Atomically mark Day 1 (electrician pre-wire) as complete.
   ///
   /// Writes `status: prewireComplete`, `day1CompletedAt: now`,

@@ -95,6 +95,18 @@ class InventoryService {
         'lastUpdatedBy': installerId,
       });
 
+      // TODO (Part 10): Dual-write to /dealers/{dealerCode}/sku_inventory
+      // when materialCatalogId → product_catalog SKU mapping exists.
+      // Expected effect on each mapped SKU:
+      //   in_warehouse -= checkedOutQty
+      //   on_truck     += checkedOutQty
+      //   reserved     -= checkedOutQty   (was reserved, now on truck)
+      // Skipped today because JobMaterialLine.materialId is the per-
+      // dealer materialCatalogId, not an NGL SKU. When MaterialCatalogItem
+      // gains a `sku` field (or a mapping table is introduced), iterate
+      // those into a parallel batch.update on
+      // _db.collection('dealers').doc(dealerCode).collection('sku_inventory').doc(sku).
+
       // Dealer inventory ledger
       final dealerEntry = _dealerLedger(dealerCode).doc();
       batch.set(dealerEntry, {
@@ -204,6 +216,14 @@ class InventoryService {
         'lastUpdated': now,
         'lastUpdatedBy': installerId,
       });
+
+      // TODO (Part 10): Dual-write to sku_inventory once materialId →
+      // SKU mapping exists. Expected effect per mapped SKU:
+      //   on_truck     -= line.checkedOutQty   (truck unloaded)
+      //   in_warehouse += restockQty            (unused returns to shelf)
+      // Note: actual usedDay1 + usedDay2 quantities are CONSUMED on
+      // the job and don't return to inventory — they simply disappear
+      // from the books, mirrored on both inventories.
 
       // Dealer inventory ledger
       final dealerEntry = _dealerLedger(dealerCode).doc();

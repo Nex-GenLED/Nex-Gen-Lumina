@@ -43,6 +43,9 @@ Color _statusColor(SalesJobStatus status) {
     case SalesJobStatus.installScheduled:
     case SalesJobStatus.installComplete:
       return const Color(0xFF00D4FF);
+    case SalesJobStatus.completePaid:
+      // Same family as installComplete — terminal state, cyan.
+      return const Color(0xFF00D4FF);
   }
 }
 
@@ -61,6 +64,7 @@ double _statusProgress(SalesJobStatus status) {
     case SalesJobStatus.installScheduled:
       return 0.9;
     case SalesJobStatus.installComplete:
+    case SalesJobStatus.completePaid:
       return 1.0;
   }
 }

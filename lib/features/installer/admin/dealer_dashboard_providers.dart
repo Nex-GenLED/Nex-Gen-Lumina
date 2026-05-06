@@ -224,6 +224,7 @@ DealerActivityEvent _jobToActivity(SalesJob job) {
     case SalesJobStatus.installScheduled:
       type = DealerActivityType.prewireComplete;
     case SalesJobStatus.installComplete:
+    case SalesJobStatus.completePaid:
       type = DealerActivityType.installComplete;
   }
 

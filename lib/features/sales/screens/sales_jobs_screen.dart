@@ -163,6 +163,7 @@ class _JobCard extends StatelessWidget {
     SalesJobStatus.prewireComplete => const Color(0xFFFFAB00),
     SalesJobStatus.installScheduled => const Color(0xFF00E5A0), // green
     SalesJobStatus.installComplete => const Color(0xFF00E5A0), // green
+    SalesJobStatus.completePaid => const Color(0xFF00E5A0), // terminal green
   };
 
   static double _statusProgress(SalesJobStatus s) => switch (s) {
@@ -173,6 +174,7 @@ class _JobCard extends StatelessWidget {
     SalesJobStatus.prewireComplete => 0.67,
     SalesJobStatus.installScheduled => 0.83,
     SalesJobStatus.installComplete => 1.0,
+    SalesJobStatus.completePaid => 1.0,
   };
 
   @override

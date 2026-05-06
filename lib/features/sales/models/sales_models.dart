@@ -1120,6 +1120,10 @@ enum SalesJobStatus {
   prewireComplete,
   installScheduled,
   installComplete,
+  // Terminal state: install is complete AND final payment has been
+  // collected. Filtered out of active queues — only appears in
+  // historical job lists.
+  completePaid,
 }
 
 extension SalesJobStatusX on SalesJobStatus {
@@ -1131,6 +1135,7 @@ extension SalesJobStatusX on SalesJobStatus {
     SalesJobStatus.prewireComplete: 'Pre-wire complete',
     SalesJobStatus.installScheduled: 'Install scheduled',
     SalesJobStatus.installComplete: 'Install complete',
+    SalesJobStatus.completePaid: 'Complete (paid)',
   }[this]!;
 
   static SalesJobStatus fromString(String s) =>
@@ -1219,6 +1224,46 @@ class SalesJob {
   /// Null until the install team confirms quantities returned.
   final ActualMaterialUsage? actualMaterialUsage;
 
+  // ── Payment gates (Part 10) ────────────────────────────────────────────
+  //
+  // Two-step payment cycle introduced for the post-launch inventory build:
+  //   1. 50% deposit collected before Day 1 can be scheduled.
+  //   2. Final payment collected after Day 2 install is complete.
+  //
+  // All fields default to safe nulls/false so jobs created before this
+  // schema change continue to round-trip without migration. Naming
+  // matches the existing camelCase JSON convention on this model
+  // (existing keys: dealerCode, totalPriceUsd, day2CompletedAt) — the
+  // newer snake_case convention used elsewhere in the inventory build is
+  // intentionally NOT applied here so SalesJob stays internally
+  // consistent.
+
+  /// Whether the 50% deposit has been collected. Gates Day 1 scheduling.
+  final bool depositCollected;
+
+  /// When the deposit was marked collected (server timestamp).
+  final DateTime? depositCollectedAt;
+
+  /// UID (or installer pin fallback) of the person who marked the
+  /// deposit collected.
+  final String? depositCollectedBy;
+
+  /// The deposit amount that was collected. Snapshot of
+  /// totalPriceUsd * 0.5 at the moment of collection — preserved so
+  /// retroactive total-price edits don't change the historical record.
+  final double? depositAmount;
+
+  /// Whether the final balance has been collected. Drives the
+  /// completePaid status transition.
+  final bool finalPaymentCollected;
+
+  /// When the final payment was marked collected.
+  final DateTime? finalPaymentCollectedAt;
+
+  /// UID (or installer pin fallback) of the person who marked the
+  /// final payment collected.
+  final String? finalPaymentCollectedBy;
+
   double get calculatedTotal =>
       zones.fold(0.0, (acc, z) => acc + z.priceUsd);
 
@@ -1258,6 +1303,13 @@ class SalesJob {
     this.estimateBreakdown,
     this.installCompletePhotoUrls = const [],
     this.actualMaterialUsage,
+    this.depositCollected = false,
+    this.depositCollectedAt,
+    this.depositCollectedBy,
+    this.depositAmount,
+    this.finalPaymentCollected = false,
+    this.finalPaymentCollectedAt,
+    this.finalPaymentCollectedBy,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1300,6 +1352,17 @@ class SalesJob {
     'estimateBreakdown': estimateBreakdown?.toJson(),
     'installCompletePhotoUrls': installCompletePhotoUrls,
     'actualMaterialUsage': actualMaterialUsage?.toJson(),
+    'depositCollected': depositCollected,
+    'depositCollectedAt': depositCollectedAt != null
+        ? Timestamp.fromDate(depositCollectedAt!)
+        : null,
+    'depositCollectedBy': depositCollectedBy,
+    'depositAmount': depositAmount,
+    'finalPaymentCollected': finalPaymentCollected,
+    'finalPaymentCollectedAt': finalPaymentCollectedAt != null
+        ? Timestamp.fromDate(finalPaymentCollectedAt!)
+        : null,
+    'finalPaymentCollectedBy': finalPaymentCollectedBy,
   };
 
   factory SalesJob.fromJson(Map<String, dynamic> j) => SalesJob(
@@ -1355,6 +1418,14 @@ class SalesJob {
         ? null
         : ActualMaterialUsage.fromJson(
             j['actualMaterialUsage'] as Map<String, dynamic>),
+    depositCollected: j['depositCollected'] as bool? ?? false,
+    depositCollectedAt: (j['depositCollectedAt'] as Timestamp?)?.toDate(),
+    depositCollectedBy: j['depositCollectedBy'] as String?,
+    depositAmount: (j['depositAmount'] as num?)?.toDouble(),
+    finalPaymentCollected: j['finalPaymentCollected'] as bool? ?? false,
+    finalPaymentCollectedAt:
+        (j['finalPaymentCollectedAt'] as Timestamp?)?.toDate(),
+    finalPaymentCollectedBy: j['finalPaymentCollectedBy'] as String?,
   );
 
   SalesJob copyWith({
@@ -1390,6 +1461,13 @@ class SalesJob {
     EstimateBreakdown? estimateBreakdown,
     List<String>? installCompletePhotoUrls,
     ActualMaterialUsage? actualMaterialUsage,
+    bool? depositCollected,
+    DateTime? depositCollectedAt,
+    String? depositCollectedBy,
+    double? depositAmount,
+    bool? finalPaymentCollected,
+    DateTime? finalPaymentCollectedAt,
+    String? finalPaymentCollectedBy,
   }) => SalesJob(
     id: id ?? this.id,
     jobNumber: jobNumber ?? this.jobNumber,
@@ -1424,5 +1502,15 @@ class SalesJob {
     installCompletePhotoUrls:
         installCompletePhotoUrls ?? this.installCompletePhotoUrls,
     actualMaterialUsage: actualMaterialUsage ?? this.actualMaterialUsage,
+    depositCollected: depositCollected ?? this.depositCollected,
+    depositCollectedAt: depositCollectedAt ?? this.depositCollectedAt,
+    depositCollectedBy: depositCollectedBy ?? this.depositCollectedBy,
+    depositAmount: depositAmount ?? this.depositAmount,
+    finalPaymentCollected:
+        finalPaymentCollected ?? this.finalPaymentCollected,
+    finalPaymentCollectedAt:
+        finalPaymentCollectedAt ?? this.finalPaymentCollectedAt,
+    finalPaymentCollectedBy:
+        finalPaymentCollectedBy ?? this.finalPaymentCollectedBy,
   );
 }
