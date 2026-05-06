@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
 import 'package:nexgen_command/models/commercial/brand_correction.dart';
+import 'package:nexgen_command/models/commercial/brand_custom_design.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 import 'package:nexgen_command/models/commercial/brand_signature.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
@@ -25,6 +26,38 @@ const _kIndustries = <String>[
   'healthcare',
   'salon',
   'auto',
+];
+
+/// Curated WLED effects offered to corporate admins when authoring a
+/// custom design card. Kept short and well-tested — a full WLED effect
+/// picker is out of scope here. Tuple is (effectId, displayLabel) and
+/// the displayLabel is what gets stored in
+/// [BrandCustomDesign.wledEffectName].
+const _kCuratedCustomDesignEffects = <(int, String)>[
+  (0, 'Solid'),
+  (2, 'Breathe'),
+  (12, 'Fade'),
+  (13, 'Glitter'),
+  (15, 'Running'),
+  (28, 'Chase'),
+  (50, 'Twinkle'),
+  (74, 'Twinkle Cat'),
+];
+
+/// Mood vocabulary for custom designs. Mirrors the values
+/// [BrandSignature.mood] documents so the same chip set surfaces both
+/// places.
+const _kCustomDesignMoods = <String>[
+  'trustworthy',
+  'energetic',
+  'stable',
+  'inviting',
+  'welcoming',
+  'luxurious',
+  'calm',
+  'elegant',
+  'dynamic',
+  'professional',
 ];
 
 /// Brand setup / edit screen. Used in two modes:
@@ -120,6 +153,11 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
   List<BrandColor>? _originalColors;
   String? _brandLibraryId;
 
+  /// Per-brand custom design cards beyond the canonical five. Only
+  /// surfaced + editable on the admin path. For the customer-facing
+  /// path this stays empty and is never written.
+  final List<BrandCustomDesign> _customDesigns = [];
+
   @override
   void initState() {
     super.initState();
@@ -134,6 +172,7 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
       for (final c in widget.preSelected!.colors) {
         _colors.add(_EditableColor.fromBrandColor(c));
       }
+      _customDesigns.addAll(widget.preSelected!.customDesigns);
     }
 
     if (widget.isEditing) {
@@ -339,6 +378,8 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
       'signature': _signature.toJson(),
       'last_verified': FieldValue.serverTimestamp(),
       'status': 'verified',
+      'custom_designs':
+          _customDesigns.map((d) => d.toJson()).toList(growable: false),
     };
     if (widget.createNew) {
       // First write — fix the trust source. Re-saves of existing
@@ -557,11 +598,125 @@ class _BrandSetupScreenState extends ConsumerState<BrandSetupScreen> {
           _buildPreviewSection(),
           const SizedBox(height: 24),
           _buildSignatureSection(),
+          if (widget.isAdmin) ...[
+            const SizedBox(height: 24),
+            _buildCustomDesignsSection(),
+          ],
           const SizedBox(height: 32),
           _buildActions(showCorrectionBanner),
         ],
       ),
     );
+  }
+
+  // ─── Custom designs (admin-only) ─────────────────────────────────────────
+
+  Widget _buildCustomDesignsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            _sectionTitle('Custom Designs'),
+            const SizedBox(width: 8),
+            Text(
+              '— optional, beyond the canonical 5',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: NexGenPalette.textMedium),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Adds extra design cards that materialize alongside Solid, '
+          'Breathe, Chase, Event Mode, and Welcome whenever a customer '
+          'selects this brand.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < _customDesigns.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _CustomDesignRow(
+              design: _customDesigns[i],
+              onEdit: () => _editCustomDesign(i),
+              onDelete: () => _confirmDeleteCustomDesign(i),
+            ),
+          ),
+        OutlinedButton.icon(
+          onPressed: _addCustomDesign,
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add Custom Design'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: NexGenPalette.cyan,
+            side: const BorderSide(color: NexGenPalette.cyan),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _addCustomDesign() async {
+    final result = await showDialog<BrandCustomDesign>(
+      context: context,
+      builder: (ctx) => const _CustomDesignDialog(initial: null),
+    );
+    if (result == null || !mounted) return;
+    if (_customDesigns.any((d) => d.designId == result.designId)) {
+      _showError(
+          'A custom design with id "${result.designId}" already exists.');
+      return;
+    }
+    setState(() => _customDesigns.add(result));
+  }
+
+  Future<void> _editCustomDesign(int index) async {
+    final existing = _customDesigns[index];
+    final result = await showDialog<BrandCustomDesign>(
+      context: context,
+      builder: (ctx) => _CustomDesignDialog(initial: existing),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _customDesigns[index] = result);
+  }
+
+  Future<void> _confirmDeleteCustomDesign(int index) async {
+    final design = _customDesigns[index];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Delete custom design?',
+            style: TextStyle(color: NexGenPalette.textHigh)),
+        content: Text(
+          'Remove "${design.displayName}" from this brand? Customers who '
+          'already have this design as a favorite will keep their copy '
+          'until the next regenerate.',
+          style: const TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel',
+                style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _customDesigns.removeAt(index));
   }
 
   Widget _sectionTitle(String text) {
@@ -1026,6 +1181,339 @@ class _ColorRowState extends State<_ColorRow> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Internal: custom design row + dialog (admin) ──────────────────────────
+
+class _CustomDesignRow extends StatelessWidget {
+  const _CustomDesignRow({
+    required this.design,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final BrandCustomDesign design;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final params = design.effectParams;
+    final paramSummary = <String>[];
+    if (params['sx'] is num) paramSummary.add('sx ${params['sx']}');
+    if (params['ix'] is num) paramSummary.add('ix ${params['ix']}');
+    if (params['pal'] is num) paramSummary.add('pal ${params['pal']}');
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(design.displayName,
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  '${design.wledEffectName} (fx=${design.wledEffectId})'
+                  ' • ${design.mood}'
+                  '${paramSummary.isEmpty ? '' : ' • ${paramSummary.join(', ')}'}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (design.description != null &&
+                    design.description!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(design.description!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: NexGenPalette.textMedium)),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined,
+                color: NexGenPalette.cyan, size: 20),
+            tooltip: 'Edit',
+            onPressed: onEdit,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline,
+                color: Colors.redAccent, size: 20),
+            tooltip: 'Delete',
+            onPressed: onDelete,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomDesignDialog extends StatefulWidget {
+  const _CustomDesignDialog({required this.initial});
+
+  /// Existing design when editing, or null for "add new".
+  final BrandCustomDesign? initial;
+
+  @override
+  State<_CustomDesignDialog> createState() => _CustomDesignDialogState();
+}
+
+class _CustomDesignDialogState extends State<_CustomDesignDialog> {
+  late final TextEditingController _displayNameCtrl;
+  late final TextEditingController _descriptionCtrl;
+  late int _effectId;
+  late String _effectName;
+  late double _speed;
+  late double _intensity;
+  late String _mood;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.initial;
+    _displayNameCtrl = TextEditingController(text: i?.displayName ?? '');
+    _descriptionCtrl = TextEditingController(text: i?.description ?? '');
+    _effectId = i?.wledEffectId ?? _kCuratedCustomDesignEffects.first.$1;
+    _effectName = i?.wledEffectName ??
+        _kCuratedCustomDesignEffects.first.$2;
+    _speed = (i?.effectParams['sx'] is num
+            ? (i!.effectParams['sx'] as num).toDouble()
+            : 128)
+        .clamp(0, 255);
+    _intensity = (i?.effectParams['ix'] is num
+            ? (i!.effectParams['ix'] as num).toDouble()
+            : 150)
+        .clamp(0, 255);
+    _mood = (i?.mood != null && _kCustomDesignMoods.contains(i!.mood))
+        ? i.mood
+        : 'professional';
+  }
+
+  @override
+  void dispose() {
+    _displayNameCtrl.dispose();
+    _descriptionCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Slug rules mirror the seed script's toBrandId so admin-authored
+  /// designs land at predictable, URL-safe ids
+  /// ("Shimmer" → "shimmer", "Wave Sync" → "wave-sync").
+  String _slugifyDesignId(String name) {
+    return name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
+        .replaceAll(RegExp(r'\s+'), '-')
+        .replaceAll(RegExp(r'-+'), '-')
+        .replaceAll(RegExp(r'^-|-$'), '')
+        .trim();
+  }
+
+  void _submit() {
+    final displayName = _displayNameCtrl.text.trim();
+    if (displayName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Display name is required.'),
+          backgroundColor: NexGenPalette.amber,
+        ),
+      );
+      return;
+    }
+    // Lock the design id once on first save so re-renames don't orphan
+    // the favorites doc on the customer side.
+    final designId = widget.initial?.designId.isNotEmpty == true
+        ? widget.initial!.designId
+        : _slugifyDesignId(displayName);
+    if (designId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Could not derive a design id from the display name.'),
+          backgroundColor: NexGenPalette.amber,
+        ),
+      );
+      return;
+    }
+
+    final descriptionText = _descriptionCtrl.text.trim();
+    final result = BrandCustomDesign(
+      designId: designId,
+      displayName: displayName,
+      wledEffectName: _effectName,
+      wledEffectId: _effectId,
+      effectParams: {
+        'sx': _speed.round(),
+        'ix': _intensity.round(),
+      },
+      description: descriptionText.isEmpty ? null : descriptionText,
+      mood: _mood,
+    );
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.initial != null;
+    return AlertDialog(
+      backgroundColor: NexGenPalette.gunmetal90,
+      title: Text(isEdit ? 'Edit Custom Design' : 'New Custom Design',
+          style: const TextStyle(color: NexGenPalette.textHigh)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _displayNameCtrl,
+              autofocus: !isEdit,
+              style: const TextStyle(color: NexGenPalette.textHigh),
+              decoration: _dialogFieldDecoration(label: 'Display name'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<int>(
+              initialValue: _effectId,
+              dropdownColor: NexGenPalette.gunmetal,
+              style: const TextStyle(color: NexGenPalette.textHigh),
+              decoration: _dialogFieldDecoration(label: 'WLED effect'),
+              items: [
+                for (final (id, label) in _kCuratedCustomDesignEffects)
+                  DropdownMenuItem(value: id, child: Text('$label  (fx=$id)')),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                final match = _kCuratedCustomDesignEffects
+                    .firstWhere((e) => e.$1 == v);
+                setState(() {
+                  _effectId = match.$1;
+                  _effectName = match.$2;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            _sliderRow(
+              label: 'Speed (sx)',
+              value: _speed,
+              onChanged: (v) => setState(() => _speed = v),
+            ),
+            _sliderRow(
+              label: 'Intensity (ix)',
+              value: _intensity,
+              onChanged: (v) => setState(() => _intensity = v),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _mood,
+              dropdownColor: NexGenPalette.gunmetal,
+              style: const TextStyle(color: NexGenPalette.textHigh),
+              decoration: _dialogFieldDecoration(label: 'Mood'),
+              items: [
+                for (final m in _kCustomDesignMoods)
+                  DropdownMenuItem(value: m, child: Text(m)),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _mood = v);
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _descriptionCtrl,
+              maxLines: 2,
+              maxLength: 200,
+              style: const TextStyle(color: NexGenPalette.textHigh),
+              decoration: _dialogFieldDecoration(
+                label: 'Description (optional)',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel',
+              style: TextStyle(color: NexGenPalette.textMedium)),
+        ),
+        ElevatedButton(
+          onPressed: _submit,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NexGenPalette.cyan,
+            foregroundColor: Colors.black,
+          ),
+          child: Text(isEdit ? 'Save' : 'Add'),
+        ),
+      ],
+    );
+  }
+
+  Widget _sliderRow({
+    required String label,
+    required double value,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(label,
+                style: Theme.of(context).textTheme.bodySmall),
+          ),
+          Expanded(
+            child: Slider(
+              min: 0,
+              max: 255,
+              divisions: 51,
+              value: value,
+              activeColor: NexGenPalette.cyan,
+              onChanged: onChanged,
+            ),
+          ),
+          SizedBox(
+            width: 36,
+            child: Text(
+              value.round().toString(),
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: NexGenPalette.textHigh),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _dialogFieldDecoration({required String label}) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: NexGenPalette.textMedium),
+      filled: true,
+      fillColor: NexGenPalette.gunmetal,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: NexGenPalette.line),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: NexGenPalette.line),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: NexGenPalette.cyan, width: 1.5),
       ),
     );
   }

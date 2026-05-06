@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
+import 'package:nexgen_command/models/commercial/brand_custom_design.dart';
 import 'package:nexgen_command/models/commercial/brand_signature.dart';
 
 /// Read-only Flutter model for a single document in the global
@@ -51,6 +52,13 @@ class BrandLibraryEntry {
   /// states like 'deprecated' if a brand is retired.
   final String status;
 
+  /// Per-brand custom design cards beyond the five canonical
+  /// auto-generated designs. Empty for the originally-seeded brands
+  /// (the field was added after the first 14 entries shipped). Read by
+  /// [BrandDesignGenerator] at generation time and appended to the
+  /// favorites it writes for the user.
+  final List<BrandCustomDesign> customDesigns;
+
   const BrandLibraryEntry({
     required this.brandId,
     required this.companyName,
@@ -62,6 +70,7 @@ class BrandLibraryEntry {
     this.lastVerified,
     this.correctionCount = 0,
     this.status = 'verified',
+    this.customDesigns = const [],
   });
 
   factory BrandLibraryEntry.fromJson(Map<String, dynamic> json) {
@@ -85,6 +94,11 @@ class BrandLibraryEntry {
       lastVerified: (json['last_verified'] as Timestamp?)?.toDate(),
       correctionCount: (json['correction_count'] as num?)?.toInt() ?? 0,
       status: (json['status'] as String?) ?? 'verified',
+      customDesigns: (json['custom_designs'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => BrandCustomDesign.fromJson(e))
+              .toList() ??
+          const [],
     );
   }
 
@@ -113,6 +127,7 @@ class BrandLibraryEntry {
         if (lastVerified != null) 'last_verified': Timestamp.fromDate(lastVerified!),
         'correction_count': correctionCount,
         'status': status,
+        'custom_designs': customDesigns.map((e) => e.toJson()).toList(),
       };
 
   /// Convenience accessor for the primary brand color (role_tag 'primary')

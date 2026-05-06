@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
+import 'package:nexgen_command/models/commercial/brand_custom_design.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 
 /// Auto-generates the five canonical brand-aligned WLED designs and
@@ -69,6 +70,12 @@ class BrandDesignGenerator {
       _buildEventMode(brand),
       _buildWelcome(brand),
     ];
+
+    // Append per-brand custom designs from /brand_library/{brandId}.
+    // Only library-backed profiles carry these — manually-entered
+    // brands have no library doc to read. A fetch failure is
+    // non-fatal; the canonical five always go through regardless.
+    designs.addAll(await _fetchCustomDesigns(brand));
 
     final favoritesCol = _firestore
         .collection('users')
@@ -267,6 +274,81 @@ class BrandDesignGenerator {
             'col': activeColors.map(_toRgbw).toList(),
           },
         ],
+      },
+    );
+  }
+
+  /// Reads `custom_designs[]` off /brand_library/{brand.brandLibraryId}
+  /// and turns each entry into a [_BrandDesign] using the brand's active
+  /// colors. Returns an empty list when:
+  ///   • the brand has no library origin (no library doc to read), or
+  ///   • the library doc has no `custom_designs` field (the originally
+  ///     seeded brands), or
+  ///   • the fetch errors out (logged, swallowed — the canonical five
+  ///     designs always go through).
+  Future<List<_BrandDesign>> _fetchCustomDesigns(
+      CommercialBrandProfile brand) async {
+    final libraryId = brand.brandLibraryId?.trim() ?? '';
+    if (libraryId.isEmpty) return const [];
+
+    try {
+      final doc = await _firestore
+          .collection('brand_library')
+          .doc(libraryId)
+          .get();
+      if (!doc.exists) return const [];
+      final data = doc.data() ?? const <String, dynamic>{};
+      final raw = data['custom_designs'];
+      if (raw is! List) return const [];
+      final out = <_BrandDesign>[];
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        final cd = BrandCustomDesign.fromJson(
+            Map<String, dynamic>.from(entry));
+        if (cd.designId.isEmpty || cd.displayName.isEmpty) continue;
+        out.add(_buildCustomDesign(brand, cd));
+      }
+      return out;
+    } catch (e) {
+      debugPrint(
+          'BrandDesignGenerator: custom_designs fetch failed — $e');
+      return const [];
+    }
+  }
+
+  /// Materializes a [BrandCustomDesign] into a generator-shaped design,
+  /// matching the schema of the auto-generated five exactly so favorites
+  /// downstream can't tell them apart:
+  ///   • patternId: brand_{brandId}_{designId}
+  ///   • name:      "[CompanyName] [displayName]"
+  ///   • payload:   { on: true, bri: 255 (or override), seg: [{ fx,
+  ///                 ...effectParams, col: [...active brand colors] }] }
+  ///
+  /// `fx` and `col` are reserved for the generator and stripped from
+  /// effectParams; `bri` flows up to the top level. Everything else
+  /// (sx, ix, pal, future params) is passed through unchanged.
+  _BrandDesign _buildCustomDesign(
+      CommercialBrandProfile brand, BrandCustomDesign cd) {
+    final activeColors = _activeColors(brand);
+    final seg = <String, dynamic>{
+      'fx': cd.wledEffectId,
+    };
+    cd.effectParams.forEach((key, value) {
+      if (key == 'col' || key == 'fx' || key == 'bri') return;
+      seg[key] = value;
+    });
+    seg['col'] = activeColors.map(_toRgbw).toList();
+
+    final briRaw = cd.effectParams['bri'];
+    final bri = briRaw is num ? briRaw.toInt().clamp(0, 255) : 255;
+
+    return _BrandDesign(
+      patternId: _patternId(brand, cd.designId),
+      name: '${brand.companyName} ${cd.displayName}',
+      payload: {
+        'on': true,
+        'bri': bri,
+        'seg': [seg],
       },
     );
   }

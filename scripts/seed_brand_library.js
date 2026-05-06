@@ -17,6 +17,34 @@
  *     trademark holder) are accepted. Unclaimed entries are skipped — they
  *     are not authoritative.
  *
+ * brands_to_seed.json schema (per entry):
+ *   {
+ *     "name": "Brand Name",
+ *     "industry": "restaurant" | "insurance" | "bank" | "retail" |
+ *                 "realestate" | "fitness" | "hotel" | "healthcare" |
+ *                 "salon" | "auto",
+ *     "domain": "brand.com",
+ *     "colors": [
+ *       { "name": "Color Name", "hex": "#RRGGBB",
+ *         "role": "primary" | "secondary" | "accent" }
+ *     ],
+ *     "confidence": "high" | "verify",
+ *     // Optional — per-brand custom design cards beyond the five
+ *     // canonical auto-generated designs (Solid/Breathe/Chase/Event
+ *     // Mode/Welcome). Mirrors lib/models/commercial/brand_custom_design.dart.
+ *     "customDesigns": [
+ *       {
+ *         "designId": "shimmer",
+ *         "displayName": "Shimmer",
+ *         "wledEffectName": "Twinkle",
+ *         "wledEffectId": 50,
+ *         "effectParams": { "sx": 96, "ix": 200 },
+ *         "description": "Subtle jewelry-like glimmer",
+ *         "mood": "elegant"
+ *       }
+ *     ]
+ *   }
+ *
  * SAFETY RULES (enforced):
  *   1. Defaults to DRY-RUN. Pass --commit to actually write.
  *   2. Never overwrites an existing /brand_library/{brandId} doc — existing
@@ -229,6 +257,43 @@ function toSignatureJson(sig) {
   };
 }
 
+/**
+ * Convert a single customDesign entry from brands_to_seed.json into the
+ * snake_case Firestore shape consumed by
+ * lib/models/commercial/brand_custom_design.dart.
+ *
+ * Accepts either camelCase keys (the JSON convention used by other
+ * fields in this seeder) or snake_case keys (defensive — in case the
+ * JSON is hand-edited). Missing or invalid fields fall back to safe
+ * defaults rather than throwing, mirroring how the Dart model defaults
+ * on the read side.
+ */
+function toCustomDesignJson(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const designId = (raw.designId || raw.design_id || '').toString().trim();
+  const displayName = (raw.displayName || raw.display_name || '').toString().trim();
+  if (!designId || !displayName) return null;
+  const params = raw.effectParams || raw.effect_params || {};
+  const out = {
+    design_id: designId,
+    display_name: displayName,
+    wled_effect_name: (raw.wledEffectName || raw.wled_effect_name || '').toString(),
+    wled_effect_id:
+      typeof raw.wledEffectId === 'number'
+        ? raw.wledEffectId
+        : typeof raw.wled_effect_id === 'number'
+          ? raw.wled_effect_id
+          : 0,
+    effect_params: params && typeof params === 'object' ? params : {},
+    mood: (raw.mood || 'professional').toString(),
+  };
+  const desc = raw.description;
+  if (typeof desc === 'string' && desc.trim().length > 0) {
+    out.description = desc.trim();
+  }
+  return out;
+}
+
 async function seedBrand(brand, source) {
   const brandId = toBrandId(brand.name);
   if (!brandId) return { status: 'failed', reason: 'invalid brand id' };
@@ -247,6 +312,14 @@ async function seedBrand(brand, source) {
     toBrandColorJson(c, brandId, i)
   );
 
+  // Optional per-brand custom design cards. Empty array when the JSON
+  // entry omits the field — the Flutter side already defaults to []
+  // for legacy docs that have no field at all, but writing the empty
+  // array here keeps newly-seeded docs self-describing.
+  const customDesignsJson = Array.isArray(brand.customDesigns)
+    ? brand.customDesigns.map(toCustomDesignJson).filter(Boolean)
+    : [];
+
   // Snake_case at the document level matches the project convention used
   // by every other Flutter model (see lib/models/commercial/brand_color.dart
   // for the canonical example). Read by Flutter via fromJson on the
@@ -262,6 +335,7 @@ async function seedBrand(brand, source) {
     last_verified: admin.firestore.FieldValue.serverTimestamp(),
     correction_count: 0,
     status: 'verified',
+    custom_designs: customDesignsJson,
   };
 
   if (!COMMIT) {
