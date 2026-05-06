@@ -67,7 +67,7 @@ class BrandCustomDesign {
   factory BrandCustomDesign.fromJson(Map<String, dynamic> json) {
     final raw = json['effect_params'];
     final params = raw is Map
-        ? Map<String, dynamic>.from(raw as Map)
+        ? Map<String, dynamic>.from(raw)
         : <String, dynamic>{};
     return BrandCustomDesign(
       designId: (json['design_id'] as String?) ?? '',

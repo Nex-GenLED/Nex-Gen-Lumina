@@ -1288,14 +1288,8 @@ class _CustomDesignDialogState extends State<_CustomDesignDialog> {
     _effectId = i?.wledEffectId ?? _kCuratedCustomDesignEffects.first.$1;
     _effectName = i?.wledEffectName ??
         _kCuratedCustomDesignEffects.first.$2;
-    _speed = (i?.effectParams['sx'] is num
-            ? (i!.effectParams['sx'] as num).toDouble()
-            : 128)
-        .clamp(0, 255);
-    _intensity = (i?.effectParams['ix'] is num
-            ? (i!.effectParams['ix'] as num).toDouble()
-            : 150)
-        .clamp(0, 255);
+    _speed = _clampToSlider(i?.effectParams['sx'], fallback: 128);
+    _intensity = _clampToSlider(i?.effectParams['ix'], fallback: 150);
     _mood = (i?.mood != null && _kCustomDesignMoods.contains(i!.mood))
         ? i.mood
         : 'professional';
@@ -1306,6 +1300,18 @@ class _CustomDesignDialogState extends State<_CustomDesignDialog> {
     _displayNameCtrl.dispose();
     _descriptionCtrl.dispose();
     super.dispose();
+  }
+
+  /// Coerces a possibly-num effect param into a 0–255 double for the
+  /// slider. Non-numeric values fall back to [fallback]. Centralized
+  /// because Dart's `num.clamp` returns `num`, not `double`, and the
+  /// inline cast was getting noisy.
+  double _clampToSlider(Object? raw, {required double fallback}) {
+    if (raw is! num) return fallback;
+    final v = raw.toDouble();
+    if (v < 0) return 0;
+    if (v > 255) return 255;
+    return v;
   }
 
   /// Slug rules mirror the seed script's toBrandId so admin-authored

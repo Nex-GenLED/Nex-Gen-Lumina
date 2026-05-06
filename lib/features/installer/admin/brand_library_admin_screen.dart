@@ -402,6 +402,27 @@ class _BrandRow extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (brand.customDesigns.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color:
+                              NexGenPalette.cyan.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      '${brand.customDesigns.length} custom design${brand.customDesigns.length == 1 ? '' : 's'}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: NexGenPalette.cyan),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
