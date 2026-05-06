@@ -9,6 +9,8 @@ import 'package:nexgen_command/features/corporate/screens/corporate_admin_screen
 import 'package:nexgen_command/features/corporate/screens/corporate_pipeline_screen.dart';
 import 'package:nexgen_command/features/corporate/screens/corporate_warehouse_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
+import 'package:nexgen_command/features/inventory/corporate/corporate_orders_screen.dart';
+import 'package:nexgen_command/services/inventory/corporate_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Manual whole-dollar currency formatter — matches NumberFormat
@@ -51,7 +53,7 @@ class _CorporateDashboardScreenState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     // Bounce to PIN screen if NEITHER session is active — done after
     // first frame so we can use GoRouter without breaking the build
     // phase.
@@ -171,11 +173,47 @@ class _CorporateDashboardScreenState
           unselectedLabelStyle: const TextStyle(fontSize: 13),
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: const [
-            Tab(text: 'Network'),
-            Tab(text: 'Pipeline'),
-            Tab(text: 'Warehouse'),
-            Tab(text: 'Admin'),
+          tabs: [
+            const Tab(text: 'Network'),
+            const Tab(text: 'Pipeline'),
+            const Tab(text: 'Warehouse'),
+            // Orders tab gets a red count badge when there are
+            // orders waiting for Tyler's review (status == submitted).
+            // Builder so the badge updates live without rebuilding
+            // the whole tab strip.
+            Tab(
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final pending = ref.watch(pendingReviewCountProvider);
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Orders'),
+                      if (pending > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '$pending',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+            const Tab(text: 'Admin'),
           ],
         ),
       ),
@@ -185,6 +223,7 @@ class _CorporateDashboardScreenState
           _NetworkTab(),
           CorporatePipelineScreen(),
           CorporateWarehouseScreen(),
+          CorporateOrdersScreen(),
           CorporateAdminScreen(),
         ],
       ),

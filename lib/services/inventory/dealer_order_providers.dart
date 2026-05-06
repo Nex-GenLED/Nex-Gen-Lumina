@@ -362,6 +362,35 @@ class DealerOrderNotifier {
     }
     await _orders.doc(orderId).delete();
   }
+
+  /// Corporate-side: reject a submitted order. Returns it to the
+  /// dealer as a draft with the rejection reason appended to notes
+  /// so the dealer can revise and resubmit. The audit trail
+  /// (submitted_at) is intentionally preserved — only status, notes,
+  /// and updated_at change.
+  Future<void> rejectOrder({
+    required String orderId,
+    required String reason,
+  }) async {
+    final docRef = _orders.doc(orderId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(docRef);
+      if (!snap.exists) return;
+      final order = DealerOrder.fromJson(snap.data()!);
+      final now = Timestamp.now();
+      final stampedReason =
+          'Rejected by Nex-Gen ${now.toDate().toIso8601String()}: '
+          '$reason';
+      final mergedNotes = order.notes == null || order.notes!.trim().isEmpty
+          ? stampedReason
+          : '${order.notes}\n\n$stampedReason';
+      tx.update(docRef, {
+        'status': OrderStatus.draft.toJson(),
+        'notes': mergedNotes,
+        'updated_at': now,
+      });
+    });
+  }
 }
 
 /// Singleton notifier provider. The notifier is stateless (every call
