@@ -300,13 +300,46 @@ class DealerOrderNotifier {
     required String trackingNumber,
     String? carrier,
   }) async {
-    await _orders.doc(orderId).update({
+    final orderRef = _orders.doc(orderId);
+    final orderSnap = await orderRef.get();
+    if (!orderSnap.exists) return;
+    final order = DealerOrder.fromJson(orderSnap.data()!);
+
+    final batch = _db.batch();
+    final now = Timestamp.now();
+
+    // 1) Order-side: status + tracking + shipped_at, all in one
+    //    write so an interrupted run can't end with the order
+    //    flipped but tracking missing.
+    batch.update(orderRef, {
       'status': OrderStatus.shipped.toJson(),
       'tracking_number': trackingNumber,
       if (carrier != null) 'shipping_carrier': carrier,
-      'shipped_at': Timestamp.now(),
-      'updated_at': Timestamp.now(),
+      'shipped_at': now,
+      'updated_at': now,
     });
+
+    // 2) Corporate inventory: stock physically leaves the warehouse,
+    //    so reserved_for_orders comes back down for each line item.
+    //    Pairs with the +qty increment in approveWithShipping (via
+    //    the corporate orders screen) — net zero across approve→ship.
+    //    Set with merge so a missing inventory doc doesn't fail.
+    for (final line in order.lineItems) {
+      final invRef =
+          _db.collection('corporate_inventory').doc(line.sku);
+      batch.set(
+        invRef,
+        {
+          'sku': line.sku,
+          'reserved_for_orders':
+              FieldValue.increment(-line.quantityOrdered),
+          'last_updated': now,
+        },
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
   }
 
   /// Dealer-side: mark a shipped order as received. Atomically:

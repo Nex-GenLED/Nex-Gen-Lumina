@@ -1,3 +1,8 @@
+// NOTE: This file contains legacy cross-dealer inventory intelligence
+// (network aggregation, waste %, active demand). Not currently wired
+// into any screen after the warehouse tab replacement. Preserved for
+// future analytics use.
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_job_providers.dart';
