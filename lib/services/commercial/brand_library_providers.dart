@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/models/commercial/brand_correction.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
@@ -106,12 +107,14 @@ final isUserRoleAdminProvider = FutureProvider<bool>((ref) async {
 /// immediately on the Brand tab.
 final commercialBrandProfileProvider =
     StreamProvider<CommercialBrandProfile?>((ref) {
-  final user = ref.watch(authStateProvider).value;
-  if (user == null) return Stream.value(null);
+  // Effective UID — installer impersonation via the existing-customer
+  // flow points this at the customer's UID.
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) return Stream.value(null);
 
   return FirebaseFirestore.instance
       .collection('users')
-      .doc(user.uid)
+      .doc(uid)
       .collection('brand_profile')
       .doc('brand')
       .snapshots()

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
@@ -12,16 +13,15 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 
 /// Streams the current user's schedules from Firestore.
-/// This is the source of truth for schedule data.
+/// This is the source of truth for schedule data. Reads via
+/// [effectiveUserUidProvider] so installer impersonation transparently
+/// scopes the stream to the chosen customer's account.
 final userSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) {
-  final user = ref.watch(authStateProvider).maybeWhen(
-        data: (u) => u,
-        orElse: () => null,
-      );
-  if (user == null) return const Stream.empty();
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) return const Stream.empty();
 
   final userService = ref.watch(userServiceProvider);
-  return userService.streamSchedules(user.uid);
+  return userService.streamSchedules(uid);
 });
 
 /// Notifier that manages schedule state and syncs with Firestore.

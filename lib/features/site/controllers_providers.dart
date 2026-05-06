@@ -2,29 +2,26 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
-/// Streams the current user's controllers collection.
-/// Watches [authStateProvider] so the stream rebuilds automatically when the
-/// signed-in user changes (e.g. installer flow → customer login).
+/// Streams the current user's controllers collection. Reads from
+/// [effectiveUserUidProvider] so installer impersonation (Existing
+/// Customer flow) transparently scopes the stream to the customer's UID.
 final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
-  final user = ref.watch(authStateProvider).maybeWhen(
-    data: (u) => u,
-    orElse: () => null,
-  );
-  if (user == null) {
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) {
     debugPrint('controllersStreamProvider: No user logged in');
     return const Stream.empty();
   }
 
-  debugPrint('controllersStreamProvider: Listening to controllers for user ${user.uid}');
+  debugPrint('controllersStreamProvider: Listening to controllers for user $uid');
 
   // Don't use orderBy to avoid composite index requirement - we'll sort in memory
   final col = FirebaseFirestore.instance
       .collection('users')
-      .doc(user.uid)
+      .doc(uid)
       .collection('controllers');
 
   return col.snapshots().map((snap) {

@@ -47,6 +47,7 @@ import 'package:nexgen_command/features/auth/staff_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_landing_screen.dart';
+import 'package:nexgen_command/features/installer/screens/existing_customer_screen.dart';
 import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
@@ -392,6 +393,13 @@ class AppRouter {
         name: 'installer-wizard',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
+      ),
+      GoRoute(
+        path: AppRoutes.existingCustomer,
+        name: 'existing-customer',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: ExistingCustomerScreen()),
       ),
 
       // ── Sales Mode ────────────────────────────────────────────
@@ -1131,6 +1139,10 @@ class AppRoutes {
   static const String installerLanding = '/installer';
   static const String installerPin = '/installer/pin';
   static const String installerWizard = '/installer/wizard';
+  // Existing-customer search — installer impersonates the chosen customer
+  // (sets installerAccessingCustomerProvider) and lands on the main
+  // customer dashboard with an InstallerModeBanner pinned to the top.
+  static const String existingCustomer = '/installer/existing-customer';
   // Sales mode routes
   static const String salesPin = '/sales/pin';
   static const String salesLanding = '/sales';

@@ -1,23 +1,17 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
-import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
-/// Landing screen explaining Installer Mode before PIN entry.
-///
-/// Purpose: Customer onboarding and hardware setup by certified installers.
-/// - Create new customer accounts with temporary passwords
-/// - Pair and configure WLED controllers
-/// - Complete installation records for warranty tracking
-class InstallerLandingScreen extends ConsumerWidget {
+/// Installer-mode home screen, reached after a valid installer PIN at
+/// `/staff/pin`. Hosts the four primary install/service entry points
+/// (New Install, Existing Customer, Day 1 Queue, Day 2 Queue) plus a
+/// secondary Dealer Dashboard tile.
+class InstallerLandingScreen extends StatelessWidget {
   const InstallerLandingScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hasSession = ref.watch(installerSessionProvider) != null;
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: SafeArea(
@@ -36,340 +30,131 @@ class InstallerLandingScreen extends ConsumerWidget {
               ),
             ),
 
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 20),
-
-                    // Icon
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [
-                            NexGenPalette.violet.withValues(alpha: 0.3),
-                            NexGenPalette.cyan.withValues(alpha: 0.3),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+            // Explanatory header — fully visible, NOT inside an Expanded/scroll
+            // wrapper that would compete with the button grid below for
+            // vertical space.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 88,
+                    height: 88,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [
+                          NexGenPalette.violet.withValues(alpha: 0.3),
+                          NexGenPalette.cyan.withValues(alpha: 0.3),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      border: Border.all(
+                        color: NexGenPalette.cyan.withValues(alpha: 0.5),
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.engineering_outlined,
+                      size: 42,
+                      color: NexGenPalette.cyan,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Installer Mode',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: NexGenPalette.textHigh,
+                          fontWeight: FontWeight.bold,
                         ),
-                        border: Border.all(
-                          color: NexGenPalette.cyan.withValues(alpha: 0.5),
-                          width: 2,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Onboard new customers, complete day-of installs, and manage existing accounts.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: NexGenPalette.textMedium,
+                          height: 1.35,
                         ),
-                      ),
-                      child: const Icon(
-                        Icons.engineering_outlined,
-                        size: 48,
-                        color: NexGenPalette.cyan,
-                      ),
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Title
-                    Text(
-                      'Installer Mode',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        color: NexGenPalette.textHigh,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Subtitle
-                    Text(
-                      'For certified Nex-Gen LED installers',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: NexGenPalette.textMedium,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-
-                    const SizedBox(height: 40),
-
-                    // Feature cards
-                    _buildFeatureCard(
-                      context,
-                      icon: Icons.person_add_outlined,
-                      title: 'Customer Onboarding',
-                      description: 'Create new customer accounts with secure temporary credentials during installation.',
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _buildFeatureCard(
-                      context,
-                      icon: Icons.bluetooth,
-                      title: 'Controller Setup',
-                      description: 'Pair and configure Lumina controllers via Bluetooth. Connect to customer Wi-Fi.',
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _buildFeatureCard(
-                      context,
-                      icon: Icons.verified_outlined,
-                      title: 'Warranty Registration',
-                      description: 'Installation records are logged for 5-year warranty tracking and dealer statistics.',
-                    ),
-
-                    const SizedBox(height: 40),
-
-                    // PIN format info
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: NexGenPalette.gunmetal90.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: NexGenPalette.line),
-                          ),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.info_outline, size: 20, color: NexGenPalette.textMedium),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      'PIN Format',
-                                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                        color: NexGenPalette.textHigh,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  _buildPinSegment(context, 'XX', 'Dealer Code', NexGenPalette.violet),
-                                  const SizedBox(width: 8),
-                                  Text('+', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 20)),
-                                  const SizedBox(width: 8),
-                                  _buildPinSegment(context, 'XX', 'Installer Code', NexGenPalette.cyan),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Your 4-digit PIN was assigned by your dealer administrator.',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: NexGenPalette.textMedium,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 40),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
 
-            // Bottom buttons
+            // Spacer pushes the button grid toward the bottom; flex: 1 means
+            // any leftover vertical space goes here, not into the explanatory
+            // text.
+            const Spacer(),
+
+            // Action grid — 2 rows of 2 buttons + a full-width Dealer Dashboard.
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: () => context.push(AppRoutes.installerPin),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: NexGenPalette.cyan,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  // Row 1: New Install | Existing Customer
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _GridActionButton(
+                          icon: Icons.home_work_outlined,
+                          label: 'New Install',
+                          accent: NexGenPalette.green,
+                          onTap: () => context.push(AppRoutes.installerWizard),
                         ),
                       ),
-                      icon: const Icon(Icons.lock_outline),
-                      label: const Text(
-                        'Enter Installer PIN',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _GridActionButton(
+                          icon: Icons.manage_accounts,
+                          label: 'Existing Customer',
+                          accent: NexGenPalette.cyan,
+                          onTap: () => context.push(AppRoutes.existingCustomer),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                  if (hasSession) ...[
-                    const SizedBox(height: 12),
-                    // Direct entry to the install wizard for a brand-new
-                    // customer install — bypasses the Day 2 queue, which
-                    // otherwise requires a pre-existing sales job. The
-                    // wizard is fully self-contained: customer info →
-                    // controller setup → zone configuration → handoff,
-                    // and creates the customer's Firebase Auth account
-                    // at the handoff step.
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () => context.push(AppRoutes.installerWizard),
-                        icon: const Icon(Icons.add_home_outlined),
-                        label: const Text(
-                          'New Customer Install',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: NexGenPalette.green,
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push(AppRoutes.dealerDashboard),
-                        icon: const Icon(Icons.dashboard_outlined, color: Colors.amber),
-                        label: const Text(
-                          'Dealer Dashboard',
-                          style: TextStyle(
-                            color: Colors.amber,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.amber.withValues(alpha: 0.4)),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push(AppRoutes.day1Queue),
-                        icon: const Icon(
-                          Icons.electrical_services_outlined,
-                          color: NexGenPalette.cyan,
-                        ),
-                        label: const Text(
-                          'Day 1 Queue',
-                          style: TextStyle(
-                            color: NexGenPalette.cyan,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push(AppRoutes.day2Queue),
-                        icon: const Icon(
-                          Icons.construction_outlined,
-                          color: NexGenPalette.green,
-                        ),
-                        label: const Text(
-                          'Day 2 Queue',
-                          style: TextStyle(
-                            color: NexGenPalette.green,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: NexGenPalette.green.withValues(alpha: 0.4),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    // Zone & Fixture Setup — formerly behind the customer-
-                    // facing _InstallerPinDialog in settings_page.dart.
-                    // Migrated here on 2026-05-05 so customers no longer
-                    // need a route to installer-functional UI; staff
-                    // sessions reach it directly from this landing page.
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push(AppRoutes.zoneSetup),
-                        icon: const Icon(
-                          Icons.cable,
-                          color: NexGenPalette.cyan,
-                        ),
-                        label: const Text(
-                          'Zone & Fixture Setup',
-                          style: TextStyle(
-                            color: NexGenPalette.cyan,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                  // ── Corporate (Nex-Gen internal) entry point ──
-                  // Always visible — gated downstream by the corporate PIN
-                  // screen, which validates against
-                  // app_config/master_corporate_pin in Firestore.
                   const SizedBox(height: 12),
+                  // Row 2: Day 1 Queue | Day 2 Queue
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _GridActionButton(
+                          icon: Icons.looks_one_outlined,
+                          label: 'Day 1 Queue',
+                          accent: NexGenPalette.cyan,
+                          onTap: () => context.push(AppRoutes.day1Queue),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _GridActionButton(
+                          icon: Icons.looks_two_outlined,
+                          label: 'Day 2 Queue',
+                          accent: NexGenPalette.green,
+                          onTap: () => context.push(AppRoutes.day2Queue),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Row 3: Dealer Dashboard (full width, secondary styling, shorter)
                   SizedBox(
                     width: double.infinity,
+                    height: 56,
                     child: OutlinedButton.icon(
-                      onPressed: () => context.push(AppRoutes.corporatePin),
+                      onPressed: () => context.push(AppRoutes.dealerDashboard),
                       icon: const Icon(
-                        Icons.business_center_outlined,
+                        Icons.dashboard_outlined,
                         color: NexGenPalette.gold,
                       ),
                       label: const Text(
-                        'Corporate (Nex-Gen)',
+                        'Dealer Dashboard',
                         style: TextStyle(
                           color: NexGenPalette.gold,
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -377,7 +162,6 @@ class InstallerLandingScreen extends ConsumerWidget {
                         side: BorderSide(
                           color: NexGenPalette.gold.withValues(alpha: 0.4),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -393,88 +177,62 @@ class InstallerLandingScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildFeatureCard(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String description,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: NexGenPalette.cyan, size: 22),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: NexGenPalette.textHigh,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: NexGenPalette.textMedium,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+}
 
-  Widget _buildPinSegment(BuildContext context, String value, String label, Color color) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+/// Square primary action tile used in the 2x2 grid on the installer
+/// landing screen. Min height 80, icon above label, accent-tinted card
+/// styling.
+class _GridActionButton extends StatelessWidget {
+  const _GridActionButton({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: NexGenPalette.gunmetal90,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: 0.5)),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withValues(alpha: 0.4)),
           ),
-          child: Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 4,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 80),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, color: accent, size: 26),
+                  const SizedBox(height: 8),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: NexGenPalette.textHigh,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: color.withValues(alpha: 0.8),
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

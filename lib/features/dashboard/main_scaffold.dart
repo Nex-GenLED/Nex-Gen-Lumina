@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
@@ -133,6 +134,11 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         },
         child: Column(
           children: [
+            // Installer-impersonation banner — visible whenever an
+            // installer entered a customer's account from the existing-
+            // customer search. Renders an empty SizedBox.shrink when no
+            // session is active, so it's always safe to mount.
+            const InstallerModeBanner(),
             if (isBrowsing) _DemoBanner(onExit: () => _showExitDemoSheet(context)),
             Expanded(
               child: Scaffold(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/analytics/analytics_providers.dart';
@@ -62,14 +63,16 @@ final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern
   // Watch white preferences so favorites update when whites change
   final whiteSlots = _buildWhiteSlots(ref);
 
-  final user = ref.watch(authStateProvider).value;
-  if (user == null) {
+  // Effective UID — respects installer impersonation via the
+  // existing-customer flow.
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) {
     yield whiteSlots;
     return;
   }
 
   final userService = ref.watch(userServiceProvider);
-  await for (final favoritesData in userService.streamFavorites(user.uid)) {
+  await for (final favoritesData in userService.streamFavorites(uid)) {
     final userFavorites = favoritesData
         .map((data) => FavoritePattern.fromJson(data))
         .toList();
