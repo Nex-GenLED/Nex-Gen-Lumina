@@ -330,6 +330,26 @@ service cloud.firestore {
       match /commercial_events/{eventId} {
         allow read, create, update, delete: if isOwner(userId);
       }
+
+      // Commercial Locations subcollection - per-location commercial
+      // configuration written by the canonical commercial onboarding
+      // wizard (review_go_live_screen.dart) and by the installer setup
+      // wizard's commercial branch (installer_setup_wizard.dart).
+      //
+      // Mirrors the controllers/{controllerId} write pattern (above):
+      // any authenticated user can create/update because the install
+      // wizard writes under the customer's UID while signed in as the
+      // installer/anonymous. Without this rule the atomic batch in
+      // both wizards (user-doc commercial_mode flags + this doc) rolls
+      // back, leaving customers in profile_type='commercial' but no
+      // location doc — route guard then falls back to residential
+      // (Item #29 in project memory documents the discovery).
+      match /commercial_locations/{locationId} {
+        allow read: if canReadUserData(userId) || request.auth != null;
+        allow create: if request.auth != null;
+        allow update: if isOwner(userId) || request.auth != null;
+        allow delete: if isOwner(userId) || request.auth != null;
+      }
     }
 
     // ── Bridge Registry (self-registration for Lumina ESP32 bridges) ──
