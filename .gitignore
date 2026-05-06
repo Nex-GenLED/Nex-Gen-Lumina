@@ -124,6 +124,15 @@ scripts/cleanup_schedules.js
 scripts/enforce_schedule_limit.js
 scripts/reset_all_bridge_records.js
 scripts/clear_bridge_data.js
+scripts/wipe_customer_data.js
+
+# Catalog seeder — run once to seed the canonical SKU list, then forget.
+# Per Tyler's request, kept out of source control to discourage re-runs.
+scripts/seed_product_catalog.js
+
+# Wipe audit logs — outputs of wipe_customer_data.js. Archived to ~/.claude memory dir.
+wipe_*.json
+wipe_dryrun_*.json
 
 # Brand library seeder secrets (script + JSON are committed; only .env isn't)
 scripts/.env
