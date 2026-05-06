@@ -944,6 +944,48 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Dealer SKU Inventory ─────────────────────────────────────
+    // Per-dealer warehouse stock keyed by /product_catalog/{sku}.
+    // Distinct from /dealers/{dealerCode}/inventory above which is
+    // materialId-keyed and tracks per-job material commitments
+    // (Day-1/Day-2 install material checkout flow). This new path
+    // is the SKU-level "what's physically on the shelf" surface
+    // for the ordering pipeline.
+    //
+    // Schema: in_warehouse, reserved, on_truck, on_order,
+    //         needed (computed), reorder_threshold,
+    //         auto_reorder_enabled, auto_reorder_qty, last_updated.
+    match /dealers/{dealerCode}/sku_inventory/{sku} {
+      function isDealerMember() {
+        return request.auth != null && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
+          hasMediaAccess() ||
+          hasStaffClaim(dealerCode) ||
+          hasAdminOrOwnerClaim()
+        );
+      }
+      allow read, write: if isDealerMember();
+    }
+
+    // ── Dealer Shipping Address ──────────────────────────────────
+    // Per-dealer shipping address used as the ship-to on every
+    // dealer_orders write. Canonical doc id is 'primary'; rule is
+    // scoped to the subcollection so future expansion (additional
+    // warehouses, return centers) doesn't require a rule change.
+    match /dealers/{dealerCode}/shipping_address/{docId} {
+      function isDealerMember() {
+        return request.auth != null && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
+          hasMediaAccess() ||
+          hasStaffClaim(dealerCode) ||
+          hasAdminOrOwnerClaim()
+        );
+      }
+      allow read, write: if isDealerMember();
+    }
+
     // ── Dealer Pricing ───────────────────────────────────────────
     match /dealers/{dealerCode}/pricing/{docId} {
       function isDealerMember() {
@@ -1107,6 +1149,99 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Product Catalog (global) ─────────────────────────────────
+    // Canonical Nex-Gen SKU catalog. Read by every authenticated
+    // user (dealers browse it from the order screen and the
+    // dealer inventory screen joins by sku); writes restricted to
+    // corporate user_role admins (legacy path) and admin/owner
+    // staff-claim sessions (catalog management screen).
+    //
+    // Distinct from per-dealer /dealers/{dealerCode}/materialCatalog
+    // which is dealer-scoped job estimation data — both serve
+    // different purposes, neither replaces the other.
+    match /product_catalog/{sku} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+    }
+
+    // ── Dealer Orders ────────────────────────────────────────────
+    // Top-level orders submitted by dealers to Nex-Gen corporate.
+    // Status flow:
+    //   draft → submitted → payment_pending → payment_confirmed
+    //   → processing → shipped → received
+    //
+    // Stakeholder identity comes from any of:
+    //   • users.dealer_code matches order.dealer_code
+    //   • users.installer_dealer_code matches order.dealer_code
+    //   • staff custom-token claim with dealerCode matching
+    //     order.dealer_code (mintStaffToken)
+    // Admin/owner staff sessions and corporate (media+admin) read
+    // every dealer's orders for review/approval.
+    match /dealer_orders/{orderId} {
+      function isOrderStakeholder() {
+        return request.auth != null && (
+          (resource != null &&
+           resource.data.dealer_code != null &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealer_code) ||
+          (resource != null &&
+           resource.data.dealer_code != null &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealer_code) ||
+          (resource != null &&
+           resource.data.dealer_code != null &&
+           hasStaffClaim(resource.data.dealer_code))
+        );
+      }
+
+      allow read: if isOrderStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim();
+
+      // Create: dealer creates an order tagged with their own
+      // dealer_code (verified via user-doc field or staff claim).
+      // Admin/owner staff can also create on a dealer's behalf.
+      allow create: if request.auth != null && (
+        (request.resource.data.dealer_code != null &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == request.resource.data.dealer_code) ||
+        (request.resource.data.dealer_code != null &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == request.resource.data.dealer_code) ||
+        (request.resource.data.dealer_code != null &&
+         hasStaffClaim(request.resource.data.dealer_code)) ||
+        hasAdminOrOwnerClaim()
+      );
+
+      // Update: stakeholders update their own orders (status
+      // transitions, notes, line-item edits while in draft).
+      // Admin/owner update for approval, shipping cost entry,
+      // payment confirmation, and shipping tracking. App-side
+      // code enforces the state-machine integrity.
+      allow update: if isOrderStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim();
+
+      // Delete: only drafts. Submitted orders are an audit trail
+      // for payment + shipping reconciliation and must never be
+      // deleted from the client.
+      allow delete: if (isOrderStakeholder() || hasAdminOrOwnerClaim()) &&
+                     resource.data.status == 'draft';
+    }
+
+    // ── Corporate Inventory (Nex-Gen warehouse on-hand) ──────────
+    // Top-level, admin/owner-only. Tracks Nex-Gen master warehouse
+    // stock keyed by SKU. Decremented when dealer orders are
+    // approved (reserved_for_orders); incremented when
+    // /purchase_orders are received from suppliers.
+    match /corporate_inventory/{sku} {
+      allow read: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+      allow create, update, delete: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+    }
+
+    // ── Purchase Orders (Nex-Gen → suppliers) ────────────────────
+    // Tyler's inbound POs to Gouly et al. Status flow:
+    //   ordered → partial → received
+    // Admin/owner-only — no dealer or installer access. Receiving
+    // a PO line-item increments /corporate_inventory.on_hand for
+    // that SKU.
+    match /purchase_orders/{poId} {
+      allow read: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+      allow create, update, delete: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+    }
+
     // ──────────────────────────────────────────────────────────────────
     // Collection-group rules — for queries that traverse subcollections
     // across all dealers. The corporate dashboard's Warehouse tab uses
@@ -1121,6 +1256,10 @@ service cloud.firestore {
     // ──────────────────────────────────────────────────────────────────
 
     match /{path=**}/inventory/{itemId} {
+      allow read: if hasAdminOrOwnerClaim();
+    }
+
+    match /{path=**}/sku_inventory/{itemId} {
       allow read: if hasAdminOrOwnerClaim();
     }
 
