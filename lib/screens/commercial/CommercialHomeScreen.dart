@@ -213,6 +213,26 @@ class _DashboardTab extends ConsumerWidget {
               ? brand!.companyName
               : 'Dashboard',
         ),
+        actions: [
+          // Mirrors the residential AppBar Settings button at
+          // wled_dashboard_page.dart:354-358 so commercial customers reach
+          // the same /settings tree (sign-out, profile, system management,
+          // properties, support). SettingsPage is already mode-aware —
+          // its only conditional section, _buildZonesSection at
+          // settings_page.dart:91-94, surfaces the commercial Zones card
+          // when mode == SiteMode.commercial.
+          //
+          // Uses context.push (not residential's context.go) because
+          // CommercialHomeScreen lives outside the StatefulShellRoute
+          // that wraps the residential branches; go would replace the
+          // location and Android back from /settings would close the
+          // app rather than return here.
+          IconButton(
+            icon: const Icon(Icons.settings_suggest_outlined),
+            tooltip: 'Settings',
+            onPressed: () => context.push(AppRoutes.settings),
+          ),
+        ],
       ),
       body: SafeArea(
         child: ListView(
