@@ -17,7 +17,6 @@ import 'package:nexgen_command/features/installer/screens/commercial_brand_setup
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
 import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
-import 'package:nexgen_command/features/autopilot/services/autopilot_event_repository.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
@@ -779,11 +778,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         autonomyLevel: draft?.autonomyLevel ?? 1,
         profileType: resolvedProfileType,
         managerEmail: draft?.managerEmail,
-        autopilotEnabled: true,
-        weeklySchedulePreviewEnabled: true,
-        autoDetectGameDays: true,
-        preGameLighting: true,
-        scoreCelebrations: true,
+        // Autopilot stays off by default — users opt in from the autopilot
+        // screen post-install. The previous behavior auto-enabled autopilot
+        // and pushed a "Daily" + days-of-week schedule the customer never
+        // asked for (Bug 4c, 2026-05-07 tracker).
         welcomeCompleted: false,
       );
 
@@ -935,20 +933,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         }
       }
 
-      // Seed the customer's autopilot_events collection so the calendar isn't
-      // empty on first login. Uses the customer's UID (not the anonymous
-      // installer session). Non-fatal — calendar pull-to-refresh will retry.
-      try {
-        final repo = ref.read(autopilotEventRepositoryProvider);
-        await repo.runWeeklyRegeneration(
-          uid: userId,
-          profile: userModel,
-          sportingEvents: const [],
-          holidays: const [],
-        );
-      } catch (e) {
-        debugPrint('Installer: initial autopilot regen failed (non-fatal): $e');
-      }
+      // No initial autopilot regeneration here — autopilot defaults to off
+      // for fresh installs (Bug 4c, 2026-05-07 tracker). Customers who want
+      // autopilot can enable it from the autopilot screen, which seeds the
+      // calendar on first enable.
 
       // 6. Create installation record for tracking/analytics
       final installationRecord = InstallationRecord(
