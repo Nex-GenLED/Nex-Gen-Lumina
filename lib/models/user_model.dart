@@ -148,10 +148,6 @@ class UserModel {
   final String? homeSsidHash;
   /// Whether remote access via cloud relay is enabled
   final bool remoteAccessEnabled;
-  /// Whether to use MQTT relay via Lumina Backend (vs Firestore/webhook)
-  final bool mqttRelayEnabled;
-  /// Lumina Backend URL (for MQTT relay)
-  final String? luminaBackendUrl;
 
   // Bridge configuration
   /// Local IP (or mDNS hostname) of the paired Lumina Bridge
@@ -312,8 +308,6 @@ class UserModel {
     this.homeSsidEncrypted,
     this.homeSsidHash,
     this.remoteAccessEnabled = false,
-    this.mqttRelayEnabled = false,
-    String? luminaBackendUrl,
     this.bridgeIp,
     this.bridgePaired = false,
     this.welcomeCompleted = false,
@@ -375,7 +369,6 @@ class UserModel {
         dealerEmail = InputValidation.validateDealerEmail(dealerEmail),
         webhookUrl = InputValidation.validateWebhookUrl(webhookUrl),
         homeSsid = InputValidation.validateSsid(homeSsid),
-        luminaBackendUrl = InputValidation.validateWebhookUrl(luminaBackendUrl),
         changeToleranceLevel = InputValidation.validateChangeTolerance(changeToleranceLevel) ?? 2,
         preferredCategoryIds = InputValidation.validateStringList(preferredCategoryIds),
         interestTags = InputValidation.validateStringList(interestTags),
@@ -431,8 +424,6 @@ class UserModel {
       homeSsidEncrypted: json['home_ssid_encrypted'] as String?,
       homeSsidHash: json['home_ssid_hash'] as String?,
       remoteAccessEnabled: (json['remote_access_enabled'] as bool?) ?? false,
-      mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
-      luminaBackendUrl: json['lumina_backend_url'] as String?,
       bridgeIp: json['bridge_ip'] as String?,
       bridgePaired: (json['bridge_paired'] as bool?) ?? false,
       welcomeCompleted: (json['welcome_completed'] as bool?) ?? false,
@@ -585,8 +576,6 @@ class UserModel {
       'home_ssid_encrypted': homeSsidEncrypted,
       'home_ssid_hash': homeSsidHash,
       'remote_access_enabled': remoteAccessEnabled,
-      'mqtt_relay_enabled': mqttRelayEnabled,
-      'lumina_backend_url': luminaBackendUrl,
       if (bridgeIp != null) 'bridge_ip': bridgeIp,
       'bridge_paired': bridgePaired,
       'welcome_completed': welcomeCompleted,
@@ -673,8 +662,6 @@ class UserModel {
     String? homeSsidEncrypted,
     String? homeSsidHash,
     bool? remoteAccessEnabled,
-    bool? mqttRelayEnabled,
-    String? luminaBackendUrl,
     String? bridgeIp,
     bool? bridgePaired,
     bool? welcomeCompleted,
@@ -757,8 +744,6 @@ class UserModel {
       homeSsidEncrypted: homeSsidEncrypted ?? this.homeSsidEncrypted,
       homeSsidHash: homeSsidHash ?? this.homeSsidHash,
       remoteAccessEnabled: remoteAccessEnabled ?? this.remoteAccessEnabled,
-      mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
-      luminaBackendUrl: luminaBackendUrl ?? this.luminaBackendUrl,
       bridgeIp: bridgeIp ?? this.bridgeIp,
       bridgePaired: bridgePaired ?? this.bridgePaired,
       welcomeCompleted: welcomeCompleted ?? this.welcomeCompleted,

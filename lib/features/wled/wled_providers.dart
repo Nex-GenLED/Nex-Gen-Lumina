@@ -10,11 +10,9 @@ import 'package:nexgen_command/features/wled/ddp_service.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
-import 'package:nexgen_command/features/wled/mqtt_relay_repository.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
-import 'package:nexgen_command/services/lumina_backend_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -126,9 +124,8 @@ final bridgeHealthProvider = FutureProvider<BridgeHealth>((ref) async {
 /// 3.  Connectivity loading                         → null (wait for check)
 /// 4.  Offline                                      → null
 /// 5.  Local WiFi                                   → WledService (direct HTTP, fastest)
-/// 6.  Remote + MQTT configured + authenticated     → MqttRelayRepository
-/// 7.  Remote + userId + controllerId               → CloudRelayRepository (bridge relay)
-/// 8.  Everything else                              → null
+/// 6.  Remote + userId + controllerId               → CloudRelayRepository (bridge relay)
+/// 7.  Everything else                              → null
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   // ── 1. Demo / reviewer mode ───────────────────────────────────────────────
   final isDemo = ref.watch(demoModeProvider);
@@ -197,23 +194,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     return WledService('http://$ip');
   }
 
-  // ── 6. Remote + MQTT relay (highest-priority remote path) ────────────────
-  if (userProfile?.remoteAccessEnabled == true) {
-    final backendService = ref.watch(luminaBackendServiceProvider);
-    if (userProfile?.mqttRelayEnabled == true &&
-        backendService.isAuthenticated &&
-        controllerId != null) {
-      debugPrint('RepositoryInit: selected=MqttRelayRepository, '
-          'network=${connectivityStatus.name}, hasControllerId=$controllerId');
-      return MqttRelayRepository(
-        backendService: backendService,
-        deviceId: controllerId,
-        deviceSerial: null,
-      );
-    }
-  }
-
-  // ── 7. Remote + Firestore bridge relay ───────────────────────────────────
+  // ── 6. Remote + Firestore bridge relay ───────────────────────────────────
   if (userId != null && controllerId != null) {
     final hasWebhook = webhookUrl != null && webhookUrl.isNotEmpty;
     final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
@@ -229,7 +210,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     );
   }
 
-  // ── 8. Remote but no relay path available ────────────────────────────────
+  // ── 7. Remote but no relay path available ────────────────────────────────
   debugPrint('RepositoryInit: selected=null, '
       'network=${connectivityStatus.name}, hasControllerId=$controllerId');
   return null;
