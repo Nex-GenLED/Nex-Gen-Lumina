@@ -178,7 +178,11 @@ void setup() {
 
   pairedUserId = savedUid;
   pairedWledIp = savedIp;
-  isPaired = (pairedUserId.length() > 0);
+  // isPaired requires an actual NVS-stored UID, not just a non-empty default.
+  // Defends against the bug class where a non-empty FIREBASE_USER_UID compile-time
+  // default would cause fresh bridges to falsely report as paired and self-register
+  // with an orphan UID. See Item #47 in MEMORY.md.
+  isPaired = nvsUidFound && pairedUserId.length() > 0;
 
   if (nvsUidFound) {
     Serial.println("[Bridge] Loaded UID from NVS: " + pairedUserId);
