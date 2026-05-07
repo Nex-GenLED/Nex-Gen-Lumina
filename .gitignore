@@ -115,7 +115,9 @@ coverage/
 # Use config.h.example as the committed template.
 esp32-bridge/src/config.h
 esp32-mqtt-bridge/src/config.h
-firmware/lumina_bridge/config.h
+
+# PlatformIO build outputs (any firmware tree)
+**/.pio/
 
 # One-off destructive admin scripts — never commit
 scripts/wipe_controllers.js
@@ -124,6 +126,7 @@ scripts/cleanup_schedules.js
 scripts/enforce_schedule_limit.js
 scripts/reset_all_bridge_records.js
 scripts/clear_bridge_data.js
+scripts/clear_bridge_state.js
 scripts/wipe_customer_data.js
 scripts/_cleanup_failed_customer.js
 

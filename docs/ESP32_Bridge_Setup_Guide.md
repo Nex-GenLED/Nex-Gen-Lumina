@@ -75,7 +75,7 @@ Install the [PlatformIO IDE extension](https://platformio.org/install/ide?instal
 
 ### Step 2: Open the firmware project
 
-Open the `lumina-firmware/` folder in VS Code. PlatformIO detects it automatically.
+Open the `esp32-bridge/` folder in VS Code. PlatformIO detects it automatically.
 
 ### Step 3: Connect the bridge
 
