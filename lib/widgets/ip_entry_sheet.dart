@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,11 +9,21 @@ import 'package:nexgen_command/theme.dart';
 /// pattern that consistently failed to lift its TextField above the
 /// software keyboard on iOS regardless of inset-padding strategy.
 ///
-/// The fix is `viewInsets.bottom` padding at the WIDGET ROOT (not on
-/// the AlertDialog container) — this lifts the entire sheet up as the
-/// keyboard appears so the input stays visible above it. Used for both
-/// bridge IP entry (BridgeSetupScreen) and controller IP entry
-/// (ControllerSetupScreen).
+/// Two layout fixes layered together:
+///   1. `viewInsets.bottom` padding at the widget root lifts the sheet
+///      above the keyboard.
+///   2. `max(keyboardHeight, safeAreaBottom)` ensures the Connect/Cancel
+///      buttons clear the home indicator (iOS) or OS nav buttons
+///      (Android) when the keyboard isn't open.
+///
+/// The companion helper [showIpEntrySheet] uses `useRootNavigator: true`
+/// so the sheet renders above MainScaffold's GlassDockNavBar — without
+/// that flag the modal is anchored to the active branch navigator,
+/// which is a sibling of (not parent of) the dock, and the buttons end
+/// up hidden behind it.
+///
+/// Used for both bridge IP entry (BridgeSetupScreen) and controller IP
+/// entry (ControllerSetupScreen).
 class IpEntrySheet extends StatefulWidget {
   const IpEntrySheet({
     super.key,
@@ -37,10 +49,17 @@ class _IpEntrySheetState extends State<IpEntrySheet> {
 
   @override
   Widget build(BuildContext context) {
-    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final mq = MediaQuery.of(context);
+    final keyboardHeight = mq.viewInsets.bottom;
+    final safeBottom = mq.padding.bottom;
+    // When the keyboard is up, viewInsets.bottom > padding.bottom (which
+    // collapses to 0), so keyboardHeight wins. When the keyboard is
+    // down, the safe-area inset wins so the buttons clear the home
+    // indicator / OS nav buttons.
+    final bottomPad = math.max(keyboardHeight, safeBottom);
 
     return Padding(
-      padding: EdgeInsets.only(bottom: keyboardHeight),
+      padding: EdgeInsets.only(bottom: bottomPad),
       child: Container(
         decoration: const BoxDecoration(
           color: NexGenPalette.gunmetal90,
@@ -161,6 +180,13 @@ class _IpEntrySheetState extends State<IpEntrySheet> {
 /// rounded gunmetal container shows; isScrollControlled: true so the
 /// sheet can grow tall enough to hold the keyboard offset).
 ///
+/// `useRootNavigator: true` is critical — without it the sheet is
+/// anchored to the active branch navigator (System/Home/etc) and
+/// renders BELOW MainScaffold's GlassDockNavBar (a sibling Positioned
+/// widget in the same Stack). The Connect button ends up hidden under
+/// the dock. Hoisting to the root navigator places the sheet above
+/// the entire scaffold including the dock.
+///
 /// Returns the trimmed entered IP, or null if the user cancelled.
 Future<String?> showIpEntrySheet(
   BuildContext context, {
@@ -170,6 +196,7 @@ Future<String?> showIpEntrySheet(
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
+    useRootNavigator: true,
     backgroundColor: Colors.transparent,
     builder: (_) => IpEntrySheet(
       title: title,
