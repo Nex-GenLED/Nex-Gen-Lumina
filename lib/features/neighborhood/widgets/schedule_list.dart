@@ -712,7 +712,12 @@ class _ExplorePatternsPicker extends ConsumerWidget {
 
       // FAB: "Use This Pattern" — reads current WLED state and pops with result
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 80),
+        // Use navBarTotalHeight() so the offset includes the device bottom
+        // safe-area inset (e.g. iPhone home indicator, modern Android tablet
+        // gesture bar). The shell-branch navigator overlays the glass dock
+        // even on routes pushed from inside the branch. See
+        // main_scaffold.dart:187-198 for the convention.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
         child: FloatingActionButton.extended(
           onPressed: () => _confirmSelection(context, ref),
           backgroundColor: NexGenPalette.violet,

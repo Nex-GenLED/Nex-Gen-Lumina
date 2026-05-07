@@ -16,10 +16,16 @@ class ManageControllersPage extends ConsumerWidget {
     final asyncList = ref.watch(controllersStreamProvider);
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Controllers')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(AppRoutes.wifiConnect),
-        icon: const Icon(Icons.add, color: Colors.black),
-        label: const Text('Add Controller'),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. See main_scaffold.dart:187-198 for the
+        // convention. Matches my_schedule_page.dart / edit_profile_screen.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton.extended(
+          onPressed: () => context.push(AppRoutes.wifiConnect),
+          icon: const Icon(Icons.add, color: Colors.black),
+          label: const Text('Add Controller'),
+        ),
       ),
       body: Padding(
         padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),

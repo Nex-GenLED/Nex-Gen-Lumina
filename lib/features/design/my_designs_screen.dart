@@ -53,11 +53,17 @@ class MyDesignsScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(AppRoutes.designStudio),
-        icon: const Icon(Icons.add),
-        label: const Text('New Design'),
-        backgroundColor: NexGenPalette.cyan,
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. See main_scaffold.dart:187-198 for the
+        // convention. Matches my_schedule_page.dart / edit_profile_screen.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton.extended(
+          onPressed: () => context.push(AppRoutes.designStudio),
+          icon: const Icon(Icons.add),
+          label: const Text('New Design'),
+          backgroundColor: NexGenPalette.cyan,
+        ),
       ),
     );
   }
