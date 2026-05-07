@@ -543,10 +543,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         error: (e, st) => Center(child: Text('Auth error: $e')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _saving ? null : _onSave,
-        icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-        label: Text(_saving ? 'Saving…' : 'Update Profile'),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. The parent shell uses extendBody:true with the
+        // dock overlaid via Stack (not bottomNavigationBar), so default FAB
+        // positioning sits underneath the dock and the user can't see/tap
+        // the Update Profile button. Matches my_schedule_page.dart pattern.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton.extended(
+          onPressed: _saving ? null : _onSave,
+          icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
+          label: Text(_saving ? 'Saving…' : 'Update Profile'),
+        ),
       ),
     );
   }
