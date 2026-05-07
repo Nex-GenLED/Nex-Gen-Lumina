@@ -393,10 +393,17 @@ Rules:
       );
     } on FirebaseFunctionsException catch (e) {
       debugPrint('📅 Calendar AI: Firebase error ${e.code} — ${e.message}');
-      return PendingCalendarChanges(
-        message: "Couldn't reach Lumina right now. Check your connection and try again.",
-        changes: const [],
-      );
+      final message = switch (e.code) {
+        'resource-exhausted' =>
+            "You've reached the hourly AI limit. Try again in an hour.",
+        'unauthenticated' =>
+            'Please sign out and sign back in to use Lumina AI.',
+        'internal' =>
+            'Lumina is temporarily unavailable. Please try again shortly.',
+        _ =>
+            "Couldn't reach Lumina right now. Check your connection and try again.",
+      };
+      return PendingCalendarChanges(message: message, changes: const []);
     } on TimeoutException catch (e) {
       debugPrint('📅 Calendar AI: Timeout — $e');
       return PendingCalendarChanges(

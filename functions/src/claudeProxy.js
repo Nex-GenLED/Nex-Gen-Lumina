@@ -122,15 +122,27 @@ exports.claudeProxy = onCall(
     try {
       response = await _callAnthropicApi(apiKey, requestBody);
     } catch (err) {
-      console.error(`claudeProxy Anthropic error: uid=${userId}`, err.message || err);
+      const errMsg = err.message || 'unknown';
+      // Tag credit-balance failures so they're greppable in Cloud Logging:
+      //   gcloud logging read 'jsonPayload.event="anthropic_credit_exhausted"'
+      if (/credit balance/i.test(errMsg)) {
+        console.error(JSON.stringify({
+          event: 'anthropic_credit_exhausted',
+          uid: userId,
+          model,
+          message: errMsg,
+        }));
+      } else {
+        console.error(`claudeProxy Anthropic error: uid=${userId}`, errMsg);
+      }
       await usageRef.add({
         timestamp: now,
         status: 'failed',
         model,
-        error: err.message || 'unknown',
+        error: errMsg,
         latency: Date.now() - startTime,
       });
-      throw new HttpsError('internal', `Lumina AI error: ${err.message || 'Unknown error'}`);
+      throw new HttpsError('internal', `Lumina AI error: ${errMsg}`);
     }
 
     const latency = Date.now() - startTime;
