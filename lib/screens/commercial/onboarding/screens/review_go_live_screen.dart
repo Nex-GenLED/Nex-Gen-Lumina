@@ -178,7 +178,14 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
       if (!mounted) return;
       Navigator.of(context).pop(); // dismiss success dialog
       if (!mounted) return;
-      context.go(AppRoutes.commercialHome);
+      // Phase 3a: route to residential home, consistent with the
+      // route-guard change that landed customers on /dashboard. The
+      // CommercialOnboardingWizard itself is unreachable from in-app
+      // navigation (Item #28) and slated for replacement with a short
+      // conversion flow in residential Settings; this update prevents
+      // dead code from pointing at the (eventually) retired /commercial
+      // shell if/when the wizard is rewired.
+      context.go(AppRoutes.dashboard);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isActivating = false);

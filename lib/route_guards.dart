@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -243,46 +242,14 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     debugPrint('Redirect: Error checking welcome_completed: $e');
   }
 
-  // Commercial mode redirect: when navigating to residential dashboard,
-  // check if user should be routed to commercial home instead.
-  final isCommercialRoute = state.matchedLocation.startsWith('/commercial');
-  if (state.matchedLocation == AppRoutes.dashboard && !isCommercialRoute) {
-    try {
-      // Check local override first (fastest)
-      final prefs = await SharedPreferences.getInstance();
-      final override = prefs.getBool('commercial_mode_override');
-      bool isCommercialMode = false;
-
-      if (override != null) {
-        isCommercialMode = override;
-      } else {
-        // Check Firestore profile type
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        if (userDoc.exists) {
-          final data = userDoc.data()!;
-          if (data['profile_type'] == 'commercial') {
-            // Verify at least one commercial location exists
-            final locSnap = await FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .collection('commercial_locations')
-                .limit(1)
-                .get();
-            isCommercialMode = locSnap.docs.isNotEmpty;
-          }
-        }
-      }
-
-      if (isCommercialMode) {
-        return AppRoutes.commercialHome;
-      }
-    } catch (e) {
-      debugPrint('Redirect: Commercial mode check failed: $e');
-    }
-  }
+  // Phase 3a (commit pending) removed the commercial-mode redirect that
+  // forked customers with profile_type == 'commercial' off to /commercial
+  // (the parallel CommercialHomeScreen shell). Both residential and
+  // commercial customers now land on /dashboard. Commercial-only features
+  // remain reachable via direct URL to /commercial during the transition;
+  // Phase 4 migrates them to additive surfaces on residential home; Phase
+  // 6 deletes the parallel shell. See docs/commercial_ux_audit.md and
+  // memory Item #37 for the retirement timeline.
 
   // For protected routes (dashboard, settings, etc.), verify installation access
   try {

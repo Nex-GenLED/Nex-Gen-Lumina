@@ -203,6 +203,17 @@ class NotificationsService {
   // ===========================================================================
   // COMMERCIAL NOTIFICATIONS
   // ===========================================================================
+  //
+  // Phase 3a (2026-05-06): all 5 deep-link payloads below route to
+  // AppRoutes.dashboard (residential home), not AppRoutes.commercialHome.
+  // Commercial customers no longer auto-route to the parallel /commercial
+  // shell at sign-in (route_guards.dart commercial fork removed in the
+  // same change), so notification taps must land them in the same place
+  // sign-in does — residential home — to avoid inconsistent navigation.
+  // Phase 4 will refine each payload to a specific residential-side
+  // feature surface (alerts banner, events list, schedule conflict
+  // panel, etc.) as those surfaces are built. See
+  // docs/commercial_ux_audit.md and memory Item #37.
 
   static const _commercialChannel = AndroidNotificationDetails(
     'commercial',
@@ -223,7 +234,7 @@ class NotificationsService {
         'Controller Offline',
         'A controller at $locationName is not responding.',
         _commercialDetails,
-        payload: 'commercial:${AppRoutes.commercialHome}',
+        payload: 'commercial:${AppRoutes.dashboard}',
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
@@ -238,7 +249,7 @@ class NotificationsService {
         'Holiday Schedule Conflict',
         'Upcoming holiday on $date \u2014 confirm your schedule.',
         _commercialDetails,
-        payload: 'commercial:${AppRoutes.commercialHome}',
+        payload: 'commercial:${AppRoutes.dashboard}',
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
@@ -254,7 +265,7 @@ class NotificationsService {
         'Game Day Alert',
         '$teamName game today at $gameTime \u2014 Game Day mode activating at $leadTime.',
         _commercialDetails,
-        payload: 'commercial:${AppRoutes.commercialHome}',
+        payload: 'commercial:${AppRoutes.dashboard}',
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
@@ -269,7 +280,7 @@ class NotificationsService {
         'Schedule Updated',
         '$orgName has updated your schedule.',
         _commercialDetails,
-        payload: 'commercial:${AppRoutes.commercialHome}',
+        payload: 'commercial:${AppRoutes.dashboard}',
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
@@ -284,7 +295,7 @@ class NotificationsService {
         'Lock Expiring Soon',
         'Corporate schedule lock at $locationName expires in 24 hours.',
         _commercialDetails,
-        payload: 'commercial:${AppRoutes.commercialHome}',
+        payload: 'commercial:${AppRoutes.dashboard}',
       );
     } catch (e) {
       debugPrint('Commercial notification failed: $e');
