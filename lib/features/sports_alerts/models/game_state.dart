@@ -1,13 +1,23 @@
 /// Current status of a game.
+///
+/// `unknown` is the safe-fallback bucket for any ESPN status string outside
+/// the known set (`scheduled`, `inProgress`, `halftime`, `final_`) — typically
+/// transient states like `postponed`, `cancelled`, `delayed`, or `suspended`.
+/// Downstream phase machines treat `unknown` as "neither in-progress nor
+/// final" — they take no action and wait for the next poll.
 enum GameStatus {
   scheduled,
   inProgress,
   halftime,
-  final_;
+  final_,
+  unknown;
 
   factory GameStatus.fromJson(String json) {
     if (json == 'final_' || json == 'final') return GameStatus.final_;
-    return GameStatus.values.firstWhere((e) => e.name == json);
+    return GameStatus.values.firstWhere(
+      (e) => e.name == json,
+      orElse: () => GameStatus.unknown,
+    );
   }
 
   String toJson() => name;

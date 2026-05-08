@@ -370,7 +370,9 @@ Future<_PollingInterval> _resolvePollingInterval(
         if (hasSoon && 300 < minInterval) minInterval = 300;
 
       case GameStatus.final_:
-        // Game over — no interval needed for this one.
+      case GameStatus.unknown:
+        // Game over or transient unknown state (postponed/cancelled/etc.) —
+        // no interval needed for this one.
         break;
     }
   }
