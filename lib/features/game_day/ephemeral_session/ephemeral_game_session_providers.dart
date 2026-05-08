@@ -53,3 +53,25 @@ final activeEphemeralSessionsProvider =
   if (svc == null) return Stream.value(const []);
   return svc.watchActiveSessions();
 });
+
+/// Item #51 Prompt 4 — the single ephemeral session currently in an active
+/// phase ([EphemeralSessionPhase.preGame], [EphemeralSessionPhase.liveGame],
+/// or [EphemeralSessionPhase.postGame]). Returns null otherwise (no
+/// sessions, or all sessions are still idle waiting for game time).
+///
+/// At most one session is in active phase at a time per Item #51 design:
+/// doubleheader sessions for the same team are scheduled hours apart so
+/// they cannot overlap. Used by the home dashboard Game Day button to
+/// decide its color treatment and tap target.
+final activePhaseSessionProvider = Provider<EphemeralGameSession?>((ref) {
+  final sessions = ref.watch(activeEphemeralSessionsProvider).valueOrNull ??
+      const <EphemeralGameSession>[];
+  for (final session in sessions) {
+    if (session.phase == EphemeralSessionPhase.preGame ||
+        session.phase == EphemeralSessionPhase.liveGame ||
+        session.phase == EphemeralSessionPhase.postGame) {
+      return session;
+    }
+  }
+  return null;
+});

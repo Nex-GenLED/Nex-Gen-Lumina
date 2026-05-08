@@ -42,6 +42,10 @@ import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
+import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart';
+import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session_providers.dart';
+import 'package:nexgen_command/features/game_day/ephemeral_session/active_session_sheet.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -428,11 +432,16 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             // doesn't support AudioReactive — installs without the firmware
             // shouldn't surface a button that always lands on a "not
             // supported" screen).
+            //
+            // Item #51 Prompt 4: when an ephemeral session is in active phase
+            // (preGame/liveGame/postGame), the Game Day button paints with a
+            // team-color gradient and tapping opens the ActiveSessionSheet
+            // instead of navigating to the Game Day hub.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _FeatureButton(icon: Icons.stadium_rounded, label: 'Game Day', onTap: () => context.push(AppRoutes.gameDay)),
+                  _buildGameDayButton(context, ref),
                   const SizedBox(width: 12),
                   if (audioSupported)
                     _FeatureButton(
@@ -458,6 +467,43 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           ]),
         ),
       ]),
+    );
+  }
+
+  /// Item #51 Prompt 4 — builds the Game Day feature button with active-
+  /// phase awareness. When a session is in preGame/liveGame/postGame phase,
+  /// the button paints with the team's primary→secondary gradient and tap
+  /// opens [ActiveSessionSheet]. Otherwise renders the default cyan button
+  /// that navigates to the Game Day hub.
+  Widget _buildGameDayButton(BuildContext context, WidgetRef ref) {
+    final activeSession = ref.watch(activePhaseSessionProvider);
+    final teamInfo = activeSession != null
+        ? kTeamColors[activeSession.teamSlug]
+        : null;
+    final gradient = (activeSession != null && teamInfo != null)
+        ? LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [teamInfo.primary, teamInfo.secondary],
+          )
+        : null;
+
+    return _FeatureButton(
+      icon: Icons.stadium_rounded,
+      label: 'Game Day',
+      onTap: activeSession != null
+          ? () => _showActiveSessionSheet(activeSession)
+          : () => context.push(AppRoutes.gameDay),
+      gradient: gradient,
+    );
+  }
+
+  void _showActiveSessionSheet(EphemeralGameSession session) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => ActiveSessionSheet(session: session),
     );
   }
 
@@ -1858,10 +1904,21 @@ class _FeatureButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _FeatureButton({required this.icon, required this.label, required this.onTap});
+  /// When non-null, replaces the default solid background with a gradient
+  /// fill. Used by the Game Day button to surface active ephemeral session
+  /// state with the team's primary→secondary colors (Item #51 Prompt 4).
+  final Gradient? gradient;
+
+  const _FeatureButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.gradient,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasGradient = gradient != null;
     return Expanded(
       child: Material(
         color: Colors.transparent,
@@ -1871,22 +1928,35 @@ class _FeatureButton extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
             decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              color: hasGradient
+                  ? null
+                  : NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              gradient: gradient,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
+              border: Border.all(
+                color: hasGradient
+                    ? Colors.white.withValues(alpha: 0.25)
+                    : NexGenPalette.cyan.withValues(alpha: 0.25),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 20, color: NexGenPalette.cyan),
+                Icon(
+                  icon,
+                  size: 20,
+                  color: hasGradient ? Colors.white : NexGenPalette.cyan,
+                ),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: NexGenPalette.textPrimary,
+                      color: hasGradient
+                          ? Colors.white
+                          : NexGenPalette.textPrimary,
                       letterSpacing: 0.3,
                     ),
                     maxLines: 1,
