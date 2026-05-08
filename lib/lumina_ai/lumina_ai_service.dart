@@ -399,9 +399,15 @@ class LuminaAI {
       '("warm white at 11pm", "every weekday at 6am turn on blue"). → '
       'schedulingIntent, NOT ephemeralSession.\n'
       'gameAnchor.type vocabulary:\n'
-      '• "today" — game scheduled today (any time today)\n'
-      '• "tonight" — game scheduled this evening (treat same as today; '
-      'included because users say "tonight")\n'
+      '• "today" — DEFAULT for any reference to a game today without a '
+      'time-of-day modifier. Examples: "the game today", "for today\'s game", '
+      '"Royals game today".\n'
+      '• "tonight" — ONLY when the user explicitly says "tonight", "this '
+      'evening", or otherwise specifies an evening/night time-of-day. '
+      'Examples: "tonight\'s game", "for the game this evening". When '
+      'unsure, use "today" not "tonight". Both resolve to the same calendar '
+      'date; the handler uses "tonight" as a hint to filter to evening games '
+      'on doubleheader days.\n'
       '• "tomorrow" — game scheduled tomorrow\n'
       '• "next" — the next upcoming game regardless of date\n'
       '• "specific_date" — gameAnchor.specificDate populated with YYYY-MM-DD; '
@@ -517,9 +523,24 @@ class LuminaAI {
 
     final effectiveTemp = temperature ?? (tier == _LuminaTier.smart ? 0.4 : 0.2);
 
+    // Inject today's date so the AI resolves relative phrases ("next Friday",
+    // "November 23rd", "tonight") against the actual current date instead of
+    // training-data priors. Mirrors LuminaCalendarService._buildPrefix in
+    // calendar_providers.dart.
+    final today = DateTime.now();
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+    final isoDate = today.toIso8601String().substring(0, 10);
+    final dateContext = 'Today is $isoDate (${dayNames[today.weekday - 1]}, '
+        '${monthNames[today.month - 1]} ${today.day}, ${today.year}).';
+    final combinedContext = (contextBlock == null || contextBlock.trim().isEmpty)
+        ? dateContext
+        : '$dateContext\n\n$contextBlock';
+
     return _callClaude(
       model: model,
-      systemPrompt: _injectContext(systemPrompt, contextBlock),
+      systemPrompt: _injectContext(systemPrompt, combinedContext),
       userMessage: userPrompt,
       temperature: effectiveTemp,
       label: tier == _LuminaTier.fast ? '⚡ Fast' : '🧠 Smart',
