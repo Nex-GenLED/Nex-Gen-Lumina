@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/team_colors.dart';
 import '../models/game_event.dart';
 import '../models/game_state.dart';
 import '../models/sport_type.dart';
@@ -116,6 +117,48 @@ class GameScheduleService {
 
     final diff = nextGame.difference(DateTime.now());
     return diff.inMinutes <= minutes && diff.inMinutes >= -120;
+  }
+
+  /// Resolve a team's games scheduled on a specific calendar date.
+  ///
+  /// Used by the ephemeral one-shot session flow ([Item #51 / #54]) to
+  /// turn "the game today" into a concrete `gameId`. May return:
+  ///   - empty list (no game on that date)
+  ///   - single game (most common)
+  ///   - multiple games (doubleheader / back-to-back)
+  ///
+  /// The caller decides how to handle ambiguity. Date comparison is in
+  /// the user's local timezone since "today" is a local-day concept.
+  ///
+  /// `teamSlug` is a key from `kTeamColors` (e.g. `mlb_royals`). Returns
+  /// empty list for unknown slugs.
+  Future<List<GameEvent>> resolveGamesForTeamOnDate(
+    String teamSlug,
+    DateTime date,
+  ) async {
+    final teamInfo = kTeamColors[teamSlug];
+    if (teamInfo == null) {
+      debugPrint(
+          '[GameSchedule] resolveGamesForTeamOnDate: unknown slug $teamSlug');
+      return const [];
+    }
+
+    final games = await fetchSeasonSchedule(
+      espnTeamId: teamInfo.espnTeamId,
+      sport: teamInfo.sport,
+      season: date.year,
+      homeGamesOnly: false,
+    );
+
+    String dateKey(DateTime dt) => '${dt.year}-'
+        '${dt.month.toString().padLeft(2, '0')}-'
+        '${dt.day.toString().padLeft(2, '0')}';
+    final targetKey = dateKey(date);
+
+    return games.where((g) {
+      final local = g.scheduledDate.toLocal();
+      return dateKey(local) == targetKey;
+    }).toList();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
