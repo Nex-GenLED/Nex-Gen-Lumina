@@ -20,7 +20,10 @@ import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
+import 'package:nexgen_command/app_providers.dart'
+    show selectedTabIndexProvider, authStateProvider;
+import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
+import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
 import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -543,6 +546,16 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         return;
       }
 
+      // ── Ephemeral session intent (Item #51) ────────────────────────────
+      // When the AI emits ephemeralSession (sports/team event + "after"
+      // state), apply the immediate WLED design AND wire up a one-shot
+      // session that auto-reverts at game end.
+      final ephemeralIntent = result.ephemeralSessionIntent;
+      if (ephemeralIntent != null && ephemeralIntent.isValid) {
+        await _handleEphemeralSession(ephemeralIntent, result, prompt);
+        return;
+      }
+
       // Apply WLED payload to lights if available
       LuminaPatternPreview? preview;
       if (result.wledPayload != null) {
@@ -599,6 +612,98 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     }
 
     _scrollToEnd();
+  }
+
+  /// Item #51 Prompt 3 — applies the immediate WLED design then dispatches
+  /// the ephemeral session intent to [EphemeralSessionDispatcher]. Builds
+  /// a chat confirmation that augments the AI's response text with the
+  /// session details (or a no-game-found alternative offer).
+  Future<void> _handleEphemeralSession(
+    EphemeralSessionIntent intent,
+    LuminaCommandResult result,
+    String prompt,
+  ) async {
+    final controller = ref.read(luminaSheetProvider.notifier);
+
+    // 1. Apply the immediate WLED payload (the team design). Mirrors the
+    //    existing single-pattern apply so the user gets the design they
+    //    asked for regardless of the dispatch outcome.
+    LuminaPatternPreview? preview;
+    if (result.wledPayload != null) {
+      preview = _extractPreview(result.wledPayload!);
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo != null) {
+        try {
+          final ok = await repo.applyJson(result.wledPayload!);
+          if (ok && mounted) {
+            if (preview != null) {
+              ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+                    colorSequence: preview.colors,
+                    colorNames: preview.colorNames,
+                    effectName: preview.effectName,
+                  );
+            }
+            final aiName = preview?.patternName ??
+                result.command?.parameters['patternName'] as String?;
+            final label = resolveLuminaDisplayName(aiName, prompt);
+            if (label != null) {
+              ref.read(activePresetLabelProvider.notifier).state = label;
+            } else {
+              ref.read(activePresetLabelProvider.notifier).clear();
+            }
+          }
+        } catch (e) {
+          debugPrint('Apply (ephemeral) from Lumina sheet failed: $e');
+        }
+      }
+    }
+
+    // 2. Dispatch the ephemeral session intent.
+    var responseText = result.responseText;
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      debugPrint(
+          '[Lumina sheet] ephemeral session — no authenticated user; skipping dispatch');
+    } else {
+      final dispatchResult = await EphemeralSessionDispatcher.dispatch(
+        intent: intent,
+        ref: ref,
+        userId: user.uid,
+      );
+      final augmentation = _buildEphemeralAugmentation(dispatchResult);
+      if (augmentation != null) {
+        responseText = '$responseText\n\n$augmentation';
+      }
+    }
+
+    if (!mounted) return;
+    controller.addAssistantMessage(
+      responseText,
+      preview: preview,
+      wledPayload: result.wledPayload,
+    );
+  }
+
+  /// Builds the chat confirmation suffix appended to the AI's response
+  /// text after an ephemeral session dispatch. Returns null when there's
+  /// nothing to add (hard error or empty result).
+  String? _buildEphemeralAugmentation(DispatchResult dispatchResult) {
+    if (dispatchResult.noGameFoundMessage != null) {
+      return dispatchResult.noGameFoundMessage;
+    }
+    if (dispatchResult.createdSessionIds.isEmpty) {
+      debugPrint(
+          '[Lumina sheet] ephemeral dispatch returned no sessions and no message: ${dispatchResult.errorMessage}');
+      return null;
+    }
+    final labels = dispatchResult.sessionLabels;
+    if (labels.length == 1) {
+      return '✓ Will revert to ${dispatchResult.revertLabel} when ${labels.first} ends.';
+    }
+    return '✓ Will revert to ${dispatchResult.revertLabel} after each game ends: ${labels.join(', ')}.';
   }
 
   /// Handles navigation commands by closing the sheet and navigating.

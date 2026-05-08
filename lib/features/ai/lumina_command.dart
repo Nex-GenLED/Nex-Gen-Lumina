@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'ephemeral_session_intent.dart';
+
 /// Types of commands the Lumina voice assistant can process.
 enum LuminaCommandType {
   power,
@@ -91,10 +93,16 @@ class LuminaCommandResult {
   /// Optional ephemeral one-shot session intent emitted by the AI when
   /// the user combines a sports/team event with an "after"/"revert" state.
   /// Populated by [CloudAIProcessor] from the `ephemeralSession` field of
-  /// the AI response. Type stays as a raw map for now — Item #51 Prompt 3
-  /// will add a typed [EphemeralSessionIntent] model and dispatch this
-  /// into [EphemeralGameSessionService].
+  /// the AI response. Raw map kept for forward-compatibility with future
+  /// schema evolutions; handlers should consume the typed accessor
+  /// [ephemeralSessionIntent] which validates the shape via fromJson.
   final Map<String, dynamic>? ephemeralSession;
+
+  /// Typed accessor for [ephemeralSession]. Returns null when the field is
+  /// null or fails validation in [EphemeralSessionIntent.fromJson]. Handler
+  /// dispatch sites should use this rather than reading the raw map.
+  EphemeralSessionIntent? get ephemeralSessionIntent =>
+      EphemeralSessionIntent.fromJson(ephemeralSession);
 
   const LuminaCommandResult({
     this.command,
