@@ -276,16 +276,6 @@ class _ColorwayEffectSelectorPageState
         ),
       );
     }
-
-    // Item #64 fix 2026-05-09: Apply was doing the design apply correctly
-    // but not navigating back to the calling screen, leaving users stranded
-    // on the picker. Pop on successful device apply so the user returns to
-    // wherever they came from (Game Day team card, Explore Designs folder,
-    // etc). Keep the user here on offline so they see the offline warning
-    // and can retry without re-navigating.
-    if (mounted && appliedToDevice && context.mounted) {
-      context.pop();
-    }
   }
 
   @override

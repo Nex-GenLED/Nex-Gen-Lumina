@@ -374,8 +374,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
 
   void _openDesignPicker(
       BuildContext context, WidgetRef ref, GameDayAutopilotConfig config) {
+    // Item #64 fix 2026-05-09: route via /dashboard/game-day/picker/:nodeId
+    // (parentNavigatorKey: _rootNavigatorKey) instead of the explore-branch
+    // route /explore/library/:nodeId. The dashboard-branch route pushes onto
+    // the root navigator so the picker's back-arrow returns to Game Day,
+    // not the Explore tab root. Other callers of /explore/library/:nodeId
+    // (in-explore browsing) keep their branch-local navigation.
     final nodeId = 'team_${config.teamSlug}';
-    context.push('/explore/library/$nodeId');
+    context.push('/dashboard/game-day/picker/$nodeId');
   }
 
   /// Falls back to cyan if the team's primary color is too dark to read

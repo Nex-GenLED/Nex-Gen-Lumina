@@ -772,6 +772,29 @@ class AppRouter {
                     parentNavigatorKey: _homeNavigatorKey,
                     pageBuilder: (context, state) =>
                         const NoTransitionPage(child: GameDayScreen()),
+                    routes: [
+                      // /dashboard/game-day/picker/:nodeId — Game Day pattern
+                      // picker. Same screen as /explore/library/:nodeId; this
+                      // dashboard-branch route is for callers that want a
+                      // full-screen modal-style picker without losing the
+                      // calling branch context. Used by Game Day team card's
+                      // Pattern button and Item #51 active session sheet's
+                      // Edit Design action. parentNavigatorKey: _rootNavigatorKey
+                      // so the picker pushes onto the root navigator and the
+                      // back-arrow inside LibraryBrowserScreen pops cleanly
+                      // back to /dashboard/game-day. Item #64 fix 2026-05-09.
+                      GoRoute(
+                        path: 'picker/:nodeId',
+                        name: 'game-day-picker',
+                        parentNavigatorKey: _rootNavigatorKey,
+                        pageBuilder: (context, state) {
+                          final nodeId = state.pathParameters['nodeId']!;
+                          return NoTransitionPage(
+                            child: LibraryBrowserScreen(nodeId: nodeId),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                   // /dashboard/audio-reactive — Audio Mode. Nested here for
                   // the same reason as Game Day: keep the nav bar visible
@@ -1198,6 +1221,12 @@ class AppRoutes {
   // Game Day hub — nested under /dashboard so the bottom nav bar persists
   // and back navigation pops within the home branch.
   static const String gameDay = '/dashboard/game-day';
+  // Game Day pattern picker — same screen as libraryNode but pushed onto
+  // the root navigator so back-arrow returns to Game Day rather than the
+  // explore branch root. Item #64 fix 2026-05-09. The :nodeId parameter
+  // matches the kTeamColors slug prefixed with `team_` (e.g.
+  // `team_mlb_royals`).
+  static const String gameDayPicker = '/dashboard/game-day/picker/:nodeId';
   // Library hierarchy routes (nested under /explore for persistent nav bar)
   static const String libraryNode = '/explore/library/:nodeId';
   // Installation access control routes
