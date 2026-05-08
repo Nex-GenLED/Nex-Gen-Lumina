@@ -631,11 +631,20 @@ class GameDayAutopilotService {
     ({double lat, double lon})? location,
   ) {
     if (location == null) return false;
-    final gameEnd = game.scheduledDate.add(config.estimatedDuration);
+    // Item #63 fix 2026-05-08: ESPN-sourced DateTime values are UTC-flagged.
+    // Direct .hour/.minute/.year/.month/.day access returns UTC clock values,
+    // which when stuffed into onTime/offTime/dateKey strings cause the
+    // schedule screen to render game times offset by the user's UTC gap
+    // (5 hours for CDT customers like Blue Line Bar, etc).
+    // .toLocal() converts to the device's local timezone before extraction.
+    // Here SunUtils.sunsetLocal extracts year/month/day from its date arg
+    // and expects them in local time (per its docstring).
+    final localStart = game.scheduledDate.toLocal();
+    final gameEnd = localStart.add(config.estimatedDuration);
     final sunset = SunUtils.sunsetLocal(
       location.lat,
       location.lon,
-      game.scheduledDate,
+      localStart,
     );
     if (sunset == null) return false;
     return gameEnd.isBefore(sunset.subtract(const Duration(minutes: 30)));
@@ -678,15 +687,29 @@ class GameDayAutopilotService {
   String _computeOnTime(GameDayAutopilotConfig config, GameEvent game) {
     if (config.onTimeOverride != null) return config.onTimeOverride!;
     final leadMinutes = config.effectiveLeadTimeMinutes;
-    final onTime =
-        game.scheduledDate.subtract(Duration(minutes: leadMinutes));
+    // Item #63 fix 2026-05-08: ESPN-sourced DateTime values are UTC-flagged.
+    // Direct .hour/.minute/.year/.month/.day access returns UTC clock values,
+    // which when stuffed into onTime/offTime/dateKey strings cause the
+    // schedule screen to render game times offset by the user's UTC gap
+    // (5 hours for CDT customers like Blue Line Bar, etc).
+    // .toLocal() converts to the device's local timezone before extraction.
+    final onTime = game.scheduledDate
+        .toLocal()
+        .subtract(Duration(minutes: leadMinutes));
     return _formatHHmm(onTime);
   }
 
   /// Compute the off-time for a calendar entry.
   String _computeOffTime(GameDayAutopilotConfig config, GameEvent game) {
     if (config.offTimeOverride != null) return config.offTimeOverride!;
+    // Item #63 fix 2026-05-08: ESPN-sourced DateTime values are UTC-flagged.
+    // Direct .hour/.minute/.year/.month/.day access returns UTC clock values,
+    // which when stuffed into onTime/offTime/dateKey strings cause the
+    // schedule screen to render game times offset by the user's UTC gap
+    // (5 hours for CDT customers like Blue Line Bar, etc).
+    // .toLocal() converts to the device's local timezone before extraction.
     final offTime = game.scheduledDate
+        .toLocal()
         .add(config.estimatedDuration)
         .add(const Duration(minutes: 60));
     return _formatHHmm(offTime);
@@ -704,9 +727,16 @@ class GameDayAutopilotService {
     required String onTime,
     required String offTime,
   }) {
-    final dateKey = '${game.scheduledDate.year}-'
-        '${game.scheduledDate.month.toString().padLeft(2, '0')}-'
-        '${game.scheduledDate.day.toString().padLeft(2, '0')}';
+    // Item #63 fix 2026-05-08: ESPN-sourced DateTime values are UTC-flagged.
+    // Direct .hour/.minute/.year/.month/.day access returns UTC clock values,
+    // which when stuffed into onTime/offTime/dateKey strings cause the
+    // schedule screen to render game times offset by the user's UTC gap
+    // (5 hours for CDT customers like Blue Line Bar, etc).
+    // .toLocal() converts to the device's local timezone before extraction.
+    final localStart = game.scheduledDate.toLocal();
+    final dateKey = '${localStart.year}-'
+        '${localStart.month.toString().padLeft(2, '0')}-'
+        '${localStart.day.toString().padLeft(2, '0')}';
 
     final opponent = game.isHome ? game.awayTeam : game.homeTeam;
     final vsOrAt = game.isHome ? 'vs' : '@';
