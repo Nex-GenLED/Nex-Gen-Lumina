@@ -168,3 +168,8 @@ functions/.runtimeconfig.json
 android/app/*.keystore
 android/build/
 android/.gradle/
+
+# Preserved debug symbols from prior release builds. Lives outside /build/
+# so `flutter clean` can't wipe it. Required for Play Console crash
+# de-obfuscation; never commit (large + per-build) and never delete locally.
+debug-info-archive/
