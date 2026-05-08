@@ -222,6 +222,16 @@ class CloudAIProcessor {
     // Determine confidence (cloud results are always accepted)
     final confidence = (obj['confidence'] as num?)?.toDouble() ?? 0.90;
 
+    // Extract ephemeral session intent (Item #51). Item #51 Prompt 3 will
+    // wire this into EphemeralGameSessionService; for now we surface it on
+    // the result and log so end-to-end JSON shape can be verified.
+    Map<String, dynamic>? ephemeralSession;
+    final ephemeralRaw = obj['ephemeralSession'];
+    if (ephemeralRaw is Map) {
+      ephemeralSession = Map<String, dynamic>.from(ephemeralRaw);
+      debugPrint('[Lumina AI] Ephemeral session intent received: $ephemeralSession');
+    }
+
     final command = LuminaCommand(
       type: type,
       parameters: {
@@ -243,6 +253,7 @@ class CloudAIProcessor {
       previewColors: previewColors,
       clarificationOptions: clarificationOptions,
       tier: ProcessingTier.cloud,
+      ephemeralSession: ephemeralSession,
     );
   }
 

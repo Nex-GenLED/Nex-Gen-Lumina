@@ -88,6 +88,14 @@ class LuminaCommandResult {
   /// Which tier produced this result.
   final ProcessingTier tier;
 
+  /// Optional ephemeral one-shot session intent emitted by the AI when
+  /// the user combines a sports/team event with an "after"/"revert" state.
+  /// Populated by [CloudAIProcessor] from the `ephemeralSession` field of
+  /// the AI response. Type stays as a raw map for now — Item #51 Prompt 3
+  /// will add a typed [EphemeralSessionIntent] model and dispatch this
+  /// into [EphemeralGameSessionService].
+  final Map<String, dynamic>? ephemeralSession;
+
   const LuminaCommandResult({
     this.command,
     required this.responseText,
@@ -95,5 +103,6 @@ class LuminaCommandResult {
     this.previewColors = const [],
     this.clarificationOptions = const [],
     this.tier = ProcessingTier.local,
+    this.ephemeralSession,
   });
 }

@@ -285,6 +285,20 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      // Ephemeral Game Sessions subcollection - one-shot, time-bounded
+      // Game Day sessions ("Mode 3"). Created by Lumina chat when the
+      // user combines a sports/team event with an "after"/"revert" state
+      // (Item #51). Lifecycle: idle -> preGame -> liveGame -> postGame
+      // -> completed; the doc is deleted on completion. Independent of
+      // /game_day_autopilot above — does NOT subscribe the user to
+      // future games for the team.
+      match /ephemeral_game_sessions/{sessionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+
       // Referrals subcollection - tracks people the user has referred.
       // Read by ambassadorTierProvider and the rewards-tracking stream in
       // the Refer & Earn screen. Written by ReferralAttributionService when
