@@ -184,10 +184,17 @@ class EspnApiService {
     return team?['id']?.toString() ?? '';
   }
 
+  // Item #61 fix 2026-05-08: unknown ESPN status strings (postponed,
+  // cancelled, delayed, suspended) route to GameStatus.unknown rather
+  // than GameStatus.scheduled. STATUS_SCHEDULED gets an explicit case
+  // to preserve correct pre-game mapping (relied on by live_scoring_prompt,
+  // score_monitor_service, sports_background_service downstream consumers).
+  // Consistent with JSON round-trip path fixed in Item #55 (commit 5079f7d).
   static GameStatus _mapStatus(String espnStatus) => switch (espnStatus) {
         'STATUS_IN_PROGRESS' => GameStatus.inProgress,
         'STATUS_HALFTIME' => GameStatus.halftime,
         'STATUS_FINAL' || 'STATUS_FINAL_OT' => GameStatus.final_,
-        _ => GameStatus.scheduled,
+        'STATUS_SCHEDULED' => GameStatus.scheduled,
+        _ => GameStatus.unknown,
       };
 }
