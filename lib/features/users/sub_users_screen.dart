@@ -251,118 +251,87 @@ class _SubUsersScreenState extends ConsumerState<SubUsersScreen> {
   }
 
   Future<void> _showInviteDialog(BuildContext context) async {
+    // Item #48 pre-launch mitigation 2026-05-08: per-bit permission toggles
+    // and viewOnly preset removed from invite UI. Enforcement layer (Phase 5)
+    // not implemented; exposing toggles misleadingly implied permission
+    // control the system doesn't deliver. Owner+Limited two-role model is
+    // the planned Phase 5 implementation. Until then, all invitees receive
+    // permissive defaults at the data layer.
     final emailController = TextEditingController();
     final nameController = TextEditingController();
-    SubUserPermissions permissions = SubUserPermissions.basic;
+    const permissions = SubUserPermissions.full;
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: NexGenPalette.gunmetal90,
-          title: const Text('Invite Family Member', style: TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Email Address *',
-                    labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                    hintText: 'name@example.com',
-                    hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                    filled: true,
-                    fillColor: NexGenPalette.line.withValues(alpha: 0.3),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
+      builder: (context) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text('Invite Family Member', style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: emailController,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Email Address *',
+                  labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                  hintText: 'name@example.com',
+                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                  filled: true,
+                  fillColor: NexGenPalette.line.withValues(alpha: 0.3),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Name (optional)',
-                    labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                    hintText: 'John',
-                    hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
-                    filled: true,
-                    fillColor: NexGenPalette.line.withValues(alpha: 0.3),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Name (optional)',
+                  labelStyle: TextStyle(color: NexGenPalette.textMedium),
+                  hintText: 'John',
+                  hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
+                  filled: true,
+                  fillColor: NexGenPalette.line.withValues(alpha: 0.3),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'PERMISSIONS',
-                  style: TextStyle(
-                    color: NexGenPalette.textMedium,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _PermissionToggle(
-                  label: 'Control Lights',
-                  value: permissions.canControl,
-                  enabled: false, // Always enabled for sub-users
-                  onChanged: null,
-                ),
-                _PermissionToggle(
-                  label: 'Change Patterns',
-                  value: permissions.canChangePatterns,
-                  onChanged: (v) => setDialogState(() =>
-                      permissions = permissions.copyWith(canChangePatterns: v)),
-                ),
-                _PermissionToggle(
-                  label: 'Edit Schedules',
-                  value: permissions.canEditSchedules,
-                  onChanged: (v) => setDialogState(() =>
-                      permissions = permissions.copyWith(canEditSchedules: v)),
-                ),
-                _PermissionToggle(
-                  label: 'Invite Others',
-                  value: permissions.canInvite,
-                  onChanged: (v) => setDialogState(() =>
-                      permissions = permissions.copyWith(canInvite: v)),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final email = emailController.text.trim();
-                if (email.isEmpty || !email.contains('@')) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please enter a valid email'), backgroundColor: Colors.red),
-                  );
-                  return;
-                }
-                Navigator.of(context).pop({
-                  'email': email,
-                  'name': nameController.text.trim(),
-                  'permissions': permissions,
-                });
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
-              child: const Text('Send Invite', style: TextStyle(color: Colors.black)),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cancel', style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final email = emailController.text.trim();
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid email'), backgroundColor: Colors.red),
+                );
+                return;
+              }
+              Navigator.of(context).pop({
+                'email': email,
+                'name': nameController.text.trim(),
+                'permissions': permissions,
+              });
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: NexGenPalette.cyan),
+            child: const Text('Send Invite', style: TextStyle(color: Colors.black)),
+          ),
+        ],
       ),
     );
 
@@ -689,41 +658,3 @@ class _PendingInviteTile extends StatelessWidget {
   }
 }
 
-class _PermissionToggle extends StatelessWidget {
-  final String label;
-  final bool value;
-  final bool enabled;
-  final ValueChanged<bool>? onChanged;
-
-  const _PermissionToggle({
-    required this.label,
-    required this.value,
-    this.enabled = true,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: enabled ? Colors.white : NexGenPalette.textMedium,
-                fontSize: 14,
-              ),
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: enabled ? onChanged : null,
-            activeColor: NexGenPalette.cyan,
-          ),
-        ],
-      ),
-    );
-  }
-}
