@@ -102,7 +102,7 @@ class _ReferralProgramScreenState extends ConsumerState<ReferralProgramScreen> {
   final _rewardsKey = GlobalKey();
 
   Future<void> _shareViaSms(BuildContext context, String code) async {
-    final msg = Uri.encodeComponent('Check out Lumina Lighting. Use my code $code for a discount!');
+    final msg = Uri.encodeComponent('Check out Lumina Lighting. Use my code $code for a discount! https://nex-genled.com/r/$code');
     final uri = Uri.parse('sms:?body=$msg');
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
