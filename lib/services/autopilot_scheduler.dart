@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -395,6 +396,8 @@ class AutopilotScheduler {
 
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');
+
+        _ref.read(activePresetLabelProvider.notifier).state = item.patternName;
 
         _addActivityLogEntry(AutopilotActivityEntry(
           timestamp: DateTime.now(),

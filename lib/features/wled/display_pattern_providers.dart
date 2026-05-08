@@ -3,6 +3,18 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
+/// Convert slug-style names ("KC_Royals_Game_Day") to title case
+/// ("KC Royals Game Day"). Returns the input unchanged if it already contains
+/// spaces or non-slug characters, so already-humanized labels pass through.
+String _humanizePresetName(String raw) {
+  if (!RegExp(r'^[A-Za-z0-9_]+$').hasMatch(raw)) return raw;
+  return raw
+      .split('_')
+      .where((w) => w.isNotEmpty)
+      .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+      .join(' ');
+}
+
 /// Computed display name for the currently active pattern/effect.
 ///
 /// Label resolution hierarchy:
@@ -14,9 +26,9 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 ///               stored in activePresetLabelProvider by _resolvePresetName)
 ///               OR any app-set label (library pattern, saved design, quick
 ///               control). Both flow through activePresetLabelProvider.
-///   Priority 3: Warm White detection (RGBW strip, white channel active, solid)
-///   Priority 4: Effect name only (e.g. "Glitter", "Chase") — never color
-///   Priority 5: "Custom" — absolute fallback
+///               Slug-style names ("KC_Royals_Game_Day") are humanized.
+///   Priority 3: Effect name only (e.g. "Glitter", "Chase") — never color
+///   Priority 4: "Custom" — absolute fallback
 final displayPatternNameProvider = Provider<String>((ref) {
   final wledState = ref.watch(wledStateProvider);
 
@@ -36,22 +48,20 @@ final displayPatternNameProvider = Provider<String>((ref) {
         }
       }
     }
-    // Priority 2: fall through to the preset / app-set label.
-    return activePreset;
+    // Priority 2: fall through to the preset / app-set label, humanizing
+    // slug-style names that leak through from on-device WLED preset slots.
+    return _humanizePresetName(activePreset);
   }
 
-  // Priority 3: Warm White detection
-  if (wledState.supportsRgbw && wledState.warmWhite > 0 && wledState.effectId == 0) {
-    return 'Warm White';
-  }
-
-  // Priority 4: Effect name only — no color prefix/suffix
+  // Priority 3: Effect name only — no color prefix/suffix. For solid mode
+  // (effectId 0) this returns 'Solid', which is honest about the device
+  // state instead of asserting a specific color we can't verify.
   final effectName = wledState.effectName;
   if (effectName.isNotEmpty && effectName != 'Effect #${wledState.effectId}') {
     return effectName;
   }
 
-  // Priority 5: Absolute fallback
+  // Priority 4: Absolute fallback
   return 'Custom';
 });
 

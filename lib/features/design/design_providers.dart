@@ -385,6 +385,8 @@ final applyDesignProvider = Provider<Future<bool> Function()>((ref) {
 
     // Log usage for Lumina learning (if successful)
     if (success) {
+      ref.read(activePresetLabelProvider.notifier).state = design.name;
+
       final user = ref.read(authStateProvider).valueOrNull;
       if (user != null) {
         final userService = ref.read(userServiceProvider);
