@@ -179,10 +179,17 @@ class CustomDesign {
         colors.add([255, 255, 255, 0]);
       }
 
+      // When effect 0 (Solid) is used with multiple colors, substitute effect 83
+      // (Solid Pattern) which distributes colors in repeating blocks. Solid only
+      // shows the first color, losing the rest of the palette.
+      final fx = (channel.effectId == 0 && channel.colorGroups.length > 1)
+          ? 83
+          : channel.effectId;
+
       segments.add({
         'id': channel.channelId,
         'col': colors,
-        'fx': channel.effectId,
+        'fx': fx,
         'sx': channel.speed,
         'ix': channel.intensity,
         'rev': channel.reverse,
