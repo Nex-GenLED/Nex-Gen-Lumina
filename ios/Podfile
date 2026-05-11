@@ -39,11 +39,27 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    
-    # --- FORCE IOS 15.0 ON ALL DEPENDENCIES ---
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+
+      # permission_handler macros — without these, the iOS plugin strategies
+      # (LocationPermissionStrategy, CameraPermissionStrategy, etc.) are
+      # compiled out by #if guards, so .request() calls are silent no-ops
+      # and iOS never surfaces the system permission prompts.
+      # See https://pub.dev/packages/permission_handler#setup
+      # Item #75 root cause: missing PERMISSION_LOCATION caused Detect
+      # Home Network to fail silently — Info.plist keys correct but
+      # plugin strategy never registered with PermissionManager.
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_LOCATION=1',
+        'PERMISSION_BLUETOOTH=1',
+        'PERMISSION_CAMERA=1',
+        'PERMISSION_MICROPHONE=1',
+        'PERMISSION_SPEECH_RECOGNIZER=1',
+        'PERMISSION_PHOTOS=1',
+        'PERMISSION_NOTIFICATIONS=1',
+      ]
     end
-    # ------------------------------------------
   end
 end
