@@ -130,6 +130,11 @@ scripts/clear_bridge_state.js
 scripts/wipe_customer_data.js
 scripts/clear_account_state.js
 scripts/_cleanup_failed_customer.js
+scripts/audit_test_data.js
+scripts/_drive_clear_accounts.js
+scripts/clear_leftovers.js
+scripts/_diag_command_routing.sh
+scripts/diag-output-*.log
 
 # Catalog seeder — run once to seed the canonical SKU list, then forget.
 # Per Tyler's request, kept out of source control to discourage re-runs.
@@ -139,6 +144,9 @@ scripts/seed_product_catalog.js
 wipe_*.json
 wipe_dryrun_*.json
 clear_accounts_*.json
+audit_test_data_*.json
+clear_leftovers*.json
+audit_for_risk_check.json
 
 # Brand library seeder secrets (script + JSON are committed; only .env isn't)
 scripts/.env
