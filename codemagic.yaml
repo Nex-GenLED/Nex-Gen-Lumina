@@ -33,8 +33,17 @@ workflows:
           echo "Version: $(grep '^version:' pubspec.yaml)"
       - name: Install CocoaPods
         script: |
+          # Belt-and-suspenders clean state: even though Codemagic builds
+          # from a fresh git clone with no cache: block, wipe every layer
+          # that has ever shipped a "trailing bug" symptom. Cheap insurance
+          # against stale Pods, stale plugin symlinks, or stale CocoaPods
+          # download cache silently masking a Podfile change.
+          flutter clean
           flutter pub get
-          cd ios && pod install --repo-update
+          cd ios
+          rm -rf Pods Podfile.lock .symlinks
+          pod cache clean --all
+          pod install --repo-update
       - name: Build IPA
         script: flutter build ipa --release
     artifacts:
