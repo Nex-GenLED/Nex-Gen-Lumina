@@ -39,7 +39,14 @@ class CloudRelayRepository implements WledRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Timeout for waiting for command execution.
-  static const _commandTimeout = Duration(seconds: 30);
+  ///
+  /// Sized to cover the worst-case tail observed in production: under
+  /// queue pressure (poller backpressure + serial bridge processing)
+  /// individual setState commands have been measured at 30-32s. 45s
+  /// keeps the snackbar from firing while the bridge is still completing
+  /// the command. Pair-tuned with the 3s remote poll cadence in
+  /// WledNotifier (Item #76 latency fix).
+  static const _commandTimeout = Duration(seconds: 45);
 
   /// Polling interval when waiting for command completion.
   static const _pollInterval = Duration(milliseconds: 500);
@@ -88,10 +95,10 @@ class CloudRelayRepository implements WledRepository {
       }, onError: (e) {
         debugPrint('BridgeDiag: snapshot listener error → $e');
       });
-      // Auto-cancel after 30s
-      Future.delayed(const Duration(seconds: 30), () {
+      // Auto-cancel after the command timeout window
+      Future.delayed(_commandTimeout, () {
         if (diagSw.isRunning) {
-          debugPrint('BridgeDiag: 30s timeout — document never acknowledged by bridge');
+          debugPrint('BridgeDiag: ${_commandTimeout.inSeconds}s timeout — document never acknowledged by bridge');
           diagSw.stop();
         }
         diagSub?.cancel();
@@ -101,19 +108,27 @@ class CloudRelayRepository implements WledRepository {
       // Wait for the command to complete
       final result = await _waitForCompletion(commandId);
 
-      // Stop diag stopwatch so the 30s timeout message won't fire
+      // Stop diag stopwatch so the auto-cancel timeout message won't fire
       diagSw.stop();
       diagSub?.cancel();
 
       if (result == null) {
         debugPrint('❌ CloudRelay: Command sent but not confirmed by controller. '
             'Bridge may be offline. (type=$type, docId=$commandId)');
+        debugPrint('BridgeDiag: command TIMEOUT at ${_commandTimeout.inMilliseconds}ms, type=$type, controllerId=$controllerId');
         // Mark as timeout
         await docRef.update({'status': 'timeout'});
         return null;
       }
 
       if (result.status == CommandStatus.completed) {
+        // End-to-end latency from Firestore createdAt to completedAt. Both
+        // are server timestamps, so this is independent of client clock skew.
+        final completedAt = result.completedAt;
+        if (completedAt != null) {
+          final latencyMs = completedAt.difference(result.createdAt).inMilliseconds;
+          debugPrint('BridgeDiag: command latency=${latencyMs}ms, type=$type, controllerId=$controllerId');
+        }
         debugPrint('🔍 BridgeRouter: send result=completed, error=none');
         return result.result;
       } else {

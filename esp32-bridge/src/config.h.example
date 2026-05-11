@@ -52,8 +52,13 @@
 // Bridge Configuration
 // ============================================================================
 
-// How often to poll Firestore for new commands (in milliseconds)
-#define POLL_INTERVAL_MS 2000
+// How often to poll Firestore for new commands (in milliseconds).
+// 1000ms (Item #76 latency fix). Each bridge polls Firestore at this
+// cadence; halving the interval from the old 2000ms ~doubles
+// per-bridge Firestore read load in exchange for halved per-command
+// pickup latency. Revisit via Firestore listeners (Item #82) once
+// customer count grows.
+#define POLL_INTERVAL_MS 1000
 
 // Timeout for HTTP requests to WLED devices (in milliseconds)
 #define WLED_HTTP_TIMEOUT_MS 10000

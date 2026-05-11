@@ -322,7 +322,13 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   void _startPolling() {
     _poller?.cancel();
-    _poller = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+    // Remote mode pays 10-30s per Firestore round-trip, so a 1.5s LAN-tuned
+    // cadence floods the command queue with stale getState polls that block
+    // user setState commands behind them (Item #76 latency cause). Slow to
+    // 3s when remote — still keeps Now Playing responsive without starving
+    // user actions. Captured at start; restart-on-reconnect picks up changes.
+    final pollMs = ref.read(isRemoteModeProvider) ? 3000 : 1500;
+    _poller = Timer.periodic(Duration(milliseconds: pollMs), (_) async {
       final service = ref.read(wledRepositoryProvider);
       if (service == null) return;
       if (_posting) return; // avoid fighting with user updates
