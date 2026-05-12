@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
 import 'package:nexgen_command/features/commercial/events/events_screen.dart';
@@ -201,7 +202,15 @@ class _DashboardTab extends ConsumerWidget {
     final activeEvent = ref.watch(activeCommercialEventProvider);
     final brand = ref.watch(commercialBrandProfileProvider).valueOrNull;
     final wled = ref.watch(wledStateProvider);
-    final nowPlaying = ref.watch(activePresetLabelProvider);
+    // Read the resolved display name (priority chain in
+    // displayPatternNameProvider: favorite override → activePreset label
+    // → effect name → "Custom") instead of the raw label, so this
+    // commercial surface stays in lockstep with the residential
+    // dashboard at wled_dashboard_page.dart:969. Item #88e cross-surface
+    // parity — fixes the long-running divergence where Now Playing
+    // labels could render differently on commercial vs residential for
+    // the same controller state.
+    final nowPlaying = ref.watch(displayPatternNameProvider);
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -596,16 +605,18 @@ class _QuickActionCard extends StatelessWidget {
 
 class _NowPlayingSection extends StatelessWidget {
   const _NowPlayingSection({required this.label, required this.connected});
-  final String? label;
+
+  /// Resolved display name from [displayPatternNameProvider]. Never null
+  /// or empty — the provider's P0 returns "Lights Off" when the device
+  /// is off, P4 returns "Custom" as an absolute fallback. This is the
+  /// same source residential's Now Playing bar reads.
+  final String label;
   final bool connected;
 
   @override
   Widget build(BuildContext context) {
     final dotColor =
         connected ? NexGenPalette.cyan : NexGenPalette.textMedium;
-    final text = (label == null || label!.isEmpty)
-        ? 'Nothing playing'
-        : label!;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -628,7 +639,7 @@ class _NowPlayingSection extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              text,
+              label,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleSmall,
             ),
