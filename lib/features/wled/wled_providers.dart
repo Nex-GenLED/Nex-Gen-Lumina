@@ -322,44 +322,68 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   void _startPolling() {
     _poller?.cancel();
-    // Remote mode pays 10-30s per Firestore round-trip, so a 1.5s LAN-tuned
-    // cadence floods the command queue with stale getState polls that block
-    // user setState commands behind them (Item #76 latency cause). Slow to
-    // 3s when remote — still keeps Now Playing responsive without starving
-    // user actions. Captured at start; restart-on-reconnect picks up changes.
-    final pollMs = ref.read(isRemoteModeProvider) ? 3000 : 1500;
+    // Remote mode pays 5-10s per Firestore round-trip under healthy load
+    // and can spike to 30-40s when the bridge queue stalls. A 1.5s LAN-tuned
+    // cadence was the original Item #76 cause; 3s helped but still ran
+    // faster than typical bridge service time and grew the queue under
+    // load (diag 2026-05-12 12:53-12:57). 10s in remote mode matches the
+    // observed service time so the queue stays at depth ≤ 1 thanks to the
+    // _polling in-flight gate below. Local-mode 1.5s unchanged.
+    final pollMs = ref.read(isRemoteModeProvider) ? 10000 : 1500;
     _poller = Timer.periodic(Duration(milliseconds: pollMs), (_) async {
       final service = ref.read(wledRepositoryProvider);
       if (service == null) return;
       if (_posting) return; // avoid fighting with user updates
-      // In remote mode, CloudRelayRepository.getState() can take up to 30s
-      // waiting for the bridge to respond. Without this guard, the 1.5s poll
-      // timer fires ~20 concurrent getState() calls that all time out together,
-      // instantly hitting the 3-failure threshold and marking the bridge dead.
-      if (_polling) return;
+      // In remote mode, CloudRelayRepository.getState() can take up to 45s
+      // waiting for the bridge to respond. Without this guard, the periodic
+      // timer would fire concurrent getState() calls that all time out
+      // together, instantly hitting the 3-failure threshold and marking the
+      // bridge dead. Caps Firestore-side queue depth at 1.
+      if (_polling) {
+        // Surfaced so diag logs show when remote-mode latency exceeded the
+        // poll interval and a tick was suppressed. Expected occasionally
+        // under heavy bridge load; sustained skips indicate a stall.
+        debugPrint('🔍 BridgeRouter: poll skipped (previous in-flight)');
+        return;
+      }
       _polling = true;
       try {
         final data = await service.getState();
         final isRemote = ref.read(isRemoteModeProvider);
         if (data == null) {
-          if (state.connected) {
-            state = state.copyWith(connected: false);
-          }
-          // Track consecutive failures in remote mode. Downgrade bridge status
-          // after repeated failures to prevent stale "Connected" indicator.
           if (isRemote) {
             _consecutiveRemoteFailures++;
+            // Fix D: defer state.connected flip until threshold reached in
+            // remote mode. A single null/timeout poll is normal during bridge
+            // queue spikes (10-30s round-trips) and shouldn't trigger the
+            // disconnected indicator. The same threshold gates both the dot
+            // and bridgeReachableProvider so they flip together.
             if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
+              if (state.connected) {
+                state = state.copyWith(connected: false);
+              }
               ref.read(bridgeReachableProvider.notifier).state = false;
             }
+          } else {
+            // Local mode: flip immediately as before — LAN HTTP failure is
+            // more likely real (no queue layer to absorb transient spikes).
+            if (state.connected) {
+              state = state.copyWith(connected: false);
+            }
+            // Repository transitioned remote → local at some point; clear
+            // any stacked remote failures so the next remote session starts
+            // fresh (Fix D reset semantics).
+            _consecutiveRemoteFailures = 0;
           }
           _ensureReconnectTimer();
           return;
         }
         _cancelReconnectTimer();
-        // Successful poll in remote mode confirms bridge is working.
+        // Reset the consecutive-failure counter on ANY successful poll — a
+        // successful local-mode session shouldn't carry stale remote failures
+        // forward (Fix D reset semantics).
+        _consecutiveRemoteFailures = 0;
         if (isRemote) {
-          _consecutiveRemoteFailures = 0;
           ref.read(bridgeReachableProvider.notifier).state = true;
         }
         try {
@@ -629,6 +653,10 @@ class WledNotifier extends Notifier<WledStateModel> {
     // return early and the connection would appear permanently lost.
     _polling = false;
     _posting = false;
+    // Fix D: reset the remote-failure counter on app-resume / explicit
+    // reconnect so a successful refresh doesn't inherit stale failures
+    // accumulated before the suspend.
+    _consecutiveRemoteFailures = 0;
     // Mark state as stale until fresh data arrives
     ref.read(wledStateFreshProvider.notifier).state = false;
     final service = ref.read(wledRepositoryProvider);
