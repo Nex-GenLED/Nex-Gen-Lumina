@@ -1,7 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
 import 'package:nexgen_command/features/demo/demo_code_screen.dart' show validatedDemoCodeProvider;
+import 'package:nexgen_command/features/labels/label_intent.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -54,16 +57,43 @@ void exitDemoMode(WidgetRef ref) {
 /// This mode doesn't restrict features - it makes them easier to discover and use.
 final guidedModeProvider = StateProvider<bool>((ref) => true);
 
-/// Storage key for persisting the active preset label
+/// Legacy storage key. Persisted a bare label string with no device-state
+/// fingerprint — that's the root of the "Now Playing shows Warm White after
+/// cold restart regardless of device state" bug. Read once on app startup
+/// for migration logging, then deleted. New writes go to [_activePresetIntentKey].
 const String _activePresetKey = 'active_preset_label';
+
+/// Current storage key. Persists a JSON-encoded [LabelIntent] containing the
+/// label plus a device-state fingerprint (effectId, presetId, color hash).
+/// On cold start the persisted intent is held in escrow until the first
+/// successful /json/state poll, then either committed (fingerprint matches
+/// device) or discarded (device has drifted).
+const String _activePresetIntentKey = 'active_preset_label_intent';
 
 /// Static cache for the active preset label to avoid async race conditions.
 /// This ensures immediate reads return the correct value even during navigation.
 String? _activePresetLabelCache;
 
-/// Notifier that persists the active preset label to SharedPreferences.
-/// This ensures the pattern name survives app restarts.
-/// Uses a static cache to avoid race conditions during navigation.
+/// Test-only escape hatch to clear the module-level [_activePresetLabelCache]
+/// between test cases. Production code must not call this — the cache is
+/// intentionally session-wide so navigation rebuilds preserve state.
+@visibleForTesting
+void resetActivePresetLabelCacheForTest() {
+  _activePresetLabelCache = null;
+}
+
+/// Notifier that persists the active preset label to SharedPreferences with
+/// a device-state fingerprint. The fingerprint is reconciled against the
+/// freshly-polled WLED state on first poll after cold-start; if the device
+/// has drifted (manual web-UI tap, schedule fired, controller reboot to
+/// default), the stale label is dropped and the dashboard falls back to
+/// the live effect name.
+///
+/// The legacy bare-string setter `state = '...'` is retained for backward
+/// compatibility with the 30+ existing call sites; it persists without a
+/// fingerprint and is marked deprecated. New code should call
+/// [setLabelWithFingerprint] so the label round-trips correctly through a
+/// cold restart.
 class ActivePresetLabelNotifier extends Notifier<String?> {
   // Timestamp of the most recent state write. Read by the WLED polling loop's
   // _resolvePresetName so a stale in-flight HTTP response cannot overwrite a
@@ -71,13 +101,29 @@ class ActivePresetLabelNotifier extends Notifier<String?> {
   DateTime? _labelUserSetAt;
   DateTime? get labelUserSetAt => _labelUserSetAt;
 
+  /// Persisted intent loaded from SharedPreferences at startup, held in
+  /// escrow until [reconcileWithDeviceState] is called with the first
+  /// successful /json/state poll. Null after reconciliation or on fresh
+  /// install. Single-use: cleared whether the intent was committed or
+  /// discarded.
+  LabelIntent? _pendingLabelIntent;
+
+  /// Test hook: expose the in-escrow intent so tests can verify it landed
+  /// in pending state before reconciliation. Not for production use.
+  LabelIntent? get pendingLabelIntentForTest => _pendingLabelIntent;
+
   @override
   String? build() {
-    // Return cached value immediately if available (handles navigation scenarios)
+    // Return cached value immediately if available (handles navigation scenarios
+    // and hot-reload — preserves state when the notifier rebuilds within a
+    // single app session).
     if (_activePresetLabelCache != null) {
       return _activePresetLabelCache;
     }
-    // Load persisted value asynchronously on first access
+    // Load persisted value asynchronously on first access. The result lands
+    // in [_pendingLabelIntent] rather than [state] — the WLED notifier will
+    // call [reconcileWithDeviceState] on the first successful poll to decide
+    // whether to commit it.
     _loadPersistedValue();
     return null;
   }
@@ -85,41 +131,140 @@ class ActivePresetLabelNotifier extends Notifier<String?> {
   Future<void> _loadPersistedValue() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString(_activePresetKey);
-      if (saved != null && saved.isNotEmpty) {
-        _activePresetLabelCache = saved;
-        state = saved;
+
+      // One-time migration: surface any legacy bare-string label so we can
+      // see it in logs, then delete the key. We deliberately do NOT promote
+      // the legacy value into the new fingerprinted format — without a
+      // fingerprint we can't reconcile against the device, and committing
+      // it unconditionally would just reproduce the bug we're fixing.
+      final legacyLabel = prefs.getString(_activePresetKey);
+      if (legacyLabel != null) {
+        debugPrint(
+            '🏷️ Migrating legacy active_preset_label="$legacyLabel" → discarded (no fingerprint)');
+        await prefs.remove(_activePresetKey);
       }
+
+      final encoded = prefs.getString(_activePresetIntentKey);
+      if (encoded == null || encoded.isEmpty) return;
+      final intent = LabelIntent.decode(encoded);
+      if (intent == null) {
+        // Corrupt or unreadable — drop it.
+        await prefs.remove(_activePresetIntentKey);
+        return;
+      }
+      _pendingLabelIntent = intent;
+      debugPrint(
+          '🏷️ Loaded persisted intent into escrow: ${intent.toString()}');
     } catch (e) {
-      // Ignore errors - will just show default label
+      debugPrint('🏷️ _loadPersistedValue error: $e');
     }
   }
 
+  /// Reconcile the persisted intent (loaded in escrow at startup) against
+  /// the device's freshly-polled state. One-shot per session: clears
+  /// [_pendingLabelIntent] after running regardless of outcome.
+  ///
+  /// - If escrow is empty → no-op (fresh install or post-reconcile call).
+  /// - If fingerprint matches → commit the label to [state].
+  /// - If fingerprint mismatches → drop both the in-memory and persisted
+  ///   intent. The dashboard will fall through to the live effect name.
+  void reconcileWithDeviceState(WledStateModel deviceState) {
+    final intent = _pendingLabelIntent;
+    _pendingLabelIntent = null; // single-use, always clear
+    if (intent == null) return;
+
+    if (intent.matches(deviceState)) {
+      debugPrint(
+          '🏷️ Reconcile MATCH: restoring "${intent.label}" (fx=${intent.effectId}, ps=${intent.presetId}, color=${intent.colorFingerprint})');
+      _activePresetLabelCache = intent.label;
+      _labelUserSetAt = intent.writtenAt;
+      // Bypass the deprecated setter so we don't re-persist (we already
+      // have the intent stored; rewriting would just update writtenAt
+      // unnecessarily). Persisted record stays as-is.
+      super.state = intent.label;
+    } else {
+      debugPrint(
+          '🏷️ Reconcile MISMATCH: dropping "${intent.label}" '
+          '(intent fx=${intent.effectId} ps=${intent.presetId} color=${intent.colorFingerprint}, '
+          'device fx=${deviceState.effectId} ps=${deviceState.presetId} color=${LabelIntent.fingerprintForState(deviceState)})');
+      _activePresetLabelCache = null;
+      super.state = null;
+      _clearPersistedIntent();
+    }
+  }
+
+  /// Preferred write path. Persists the label with a fingerprint of the
+  /// current device state so cold-restart can verify the device hasn't
+  /// drifted before re-showing the label.
+  void setLabelWithFingerprint(String label, WledStateModel deviceState) {
+    final intent = LabelIntent.fromDeviceState(
+      label: label,
+      deviceState: deviceState,
+    );
+    _activePresetLabelCache = label;
+    _labelUserSetAt = intent.writtenAt;
+    super.state = label;
+    _persistIntent(intent);
+  }
+
+  /// Bare-string setter — keeps the 30+ existing call sites working without
+  /// migration in this commit. Persists under the new key with a degenerate
+  /// fingerprint (all zeros), which means the cold-restart reconciler will
+  /// always treat it as a mismatch and drop it. That's intentional: bare
+  /// labels can't be reliably restored across a cold start anyway, and the
+  /// dashboard correctly falls back to the live effect name. Migrate call
+  /// sites to [setLabelWithFingerprint] in a follow-up to make them
+  /// cold-restart-stable.
+  @Deprecated(
+      'Use setLabelWithFingerprint(label, deviceState) so the label survives '
+      'cold-restart reconciliation. The bare-string setter persists without '
+      'a fingerprint and is dropped on the next cold start.')
   @override
   set state(String? value) {
-    // Update cache synchronously before updating state
     _activePresetLabelCache = value;
     _labelUserSetAt = DateTime.now();
     super.state = value;
-    _persistValue(value);
-  }
-
-  Future<void> _persistValue(String? value) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (value == null || value.isEmpty) {
-        await prefs.remove(_activePresetKey);
-      } else {
-        await prefs.setString(_activePresetKey, value);
-      }
-    } catch (e) {
-      // Ignore persistence errors - label will just reset on next app launch
+    if (value == null || value.isEmpty) {
+      _clearPersistedIntent();
+    } else {
+      // Degenerate fingerprint — guaranteed not to match any real device
+      // state. The label survives the current session but won't be
+      // restored across a cold start. Call sites that want round-trip
+      // persistence should use setLabelWithFingerprint().
+      _persistIntent(LabelIntent(
+        label: value,
+        effectId: -1,
+        presetId: -1,
+        colorFingerprint: '',
+        writtenAt: _labelUserSetAt!,
+      ));
     }
   }
 
-  /// Clear the active preset label (e.g., when turning off lights)
+  Future<void> _persistIntent(LabelIntent intent) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_activePresetIntentKey, intent.encode());
+    } catch (e) {
+      debugPrint('🏷️ _persistIntent error: $e');
+    }
+  }
+
+  Future<void> _clearPersistedIntent() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_activePresetIntentKey);
+    } catch (e) {
+      debugPrint('🏷️ _clearPersistedIntent error: $e');
+    }
+  }
+
+  /// Clear the active preset label (e.g., when turning off lights).
   void clear() {
-    state = null;
+    _activePresetLabelCache = null;
+    _labelUserSetAt = DateTime.now();
+    super.state = null;
+    _clearPersistedIntent();
   }
 }
 

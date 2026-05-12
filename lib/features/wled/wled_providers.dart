@@ -307,6 +307,13 @@ class WledNotifier extends Notifier<WledStateModel> {
   int _consecutiveRemoteFailures = 0;
   static const _maxRemoteFailuresBeforeDowngrade = 3;
 
+  /// One-shot guard for the cold-start Now Playing label reconciliation.
+  /// Flipped true on the first successful /json/state parse after notifier
+  /// construction (or refreshConnection-driven rebuild), preventing
+  /// subsequent polls from re-triggering reconcile. See
+  /// ActivePresetLabelNotifier.reconcileWithDeviceState.
+  bool _hasReconciledOnStartup = false;
+
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
@@ -573,6 +580,23 @@ class WledNotifier extends Notifier<WledStateModel> {
     // is owned by explicit app actions (AI apply, pattern picker, preset
     // save, lights off) and by _resolvePresetName for ps > 0 — the
     // polling path should not second-guess those writes.
+
+    // One-shot cold-start reconciliation of any persisted Now Playing
+    // label intent against the freshly-parsed device state. Fires on the
+    // first successful poll after notifier construction; subsequent polls
+    // are no-ops because the notifier's escrow has been emptied. See
+    // ActivePresetLabelNotifier.reconcileWithDeviceState for the
+    // fingerprint-matching logic.
+    if (!_hasReconciledOnStartup) {
+      _hasReconciledOnStartup = true;
+      try {
+        ref
+            .read(activePresetLabelProvider.notifier)
+            .reconcileWithDeviceState(state);
+      } catch (e) {
+        debugPrint('🏷️ Reconcile on startup failed: $e');
+      }
+    }
   }
 
   /// Fetches preset names from the WLED controller and sets the active label.
