@@ -1,0 +1,195 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
+
+void main() {
+  group('displayNameFor — Tyler\'s spec cases', () {
+    test('KC_Royals_Game_Day → "KC Royals Game Day"', () {
+      expect(displayNameFor('KC_Royals_Game_Day'), 'KC Royals Game Day');
+    });
+
+    test('St_Louis_Cardinals_Twinkle → "St Louis Cardinals Twinkle"', () {
+      // No override for "St Louis Cardinals" (not in the team-short-name map,
+      // its .split().last default of "Cardinals" is correct). Falls through
+      // to title-case path; "St" is NOT in the acronyms allowlist so it
+      // stays as "St" not "ST".
+      expect(displayNameFor('St_Louis_Cardinals_Twinkle'),
+          'St Louis Cardinals Twinkle');
+    });
+
+    test('warm_white → "Warm White"', () {
+      expect(displayNameFor('warm_white'), 'Warm White');
+    });
+
+    test('"Already Named Properly" → unchanged (has spaces)', () {
+      expect(displayNameFor('Already Named Properly'), 'Already Named Properly');
+    });
+
+    test('"" → ""', () {
+      expect(displayNameFor(''), '');
+    });
+  });
+
+  group('displayNameFor — acronym preservation', () {
+    test('KC at start → uppercase', () {
+      expect(displayNameFor('KC_Mood'), 'KC Mood');
+    });
+
+    test('AI at start → uppercase', () {
+      expect(displayNameFor('AI_Pulse'), 'AI Pulse');
+    });
+
+    test('case-insensitive match: kc_pulse → "KC Pulse"', () {
+      // _kAcronyms membership check uppercases the chunk before testing.
+      expect(displayNameFor('kc_pulse'), 'KC Pulse');
+    });
+
+    test('NY, LA, SF, DC at any position → uppercase', () {
+      expect(displayNameFor('NY_Knicks'), 'NY Knicks');
+      expect(displayNameFor('LA_Lakers'), 'LA Lakers');
+      expect(displayNameFor('SF_Giants'), 'SF Giants');
+      expect(displayNameFor('DC_Tour'), 'DC Tour');
+    });
+
+    test('3-letter league acronyms', () {
+      expect(displayNameFor('NFL_Wave'), 'NFL Wave');
+      expect(displayNameFor('NBA_Pulse'), 'NBA Pulse');
+      expect(displayNameFor('MLB_Twinkle'), 'MLB Twinkle');
+      expect(displayNameFor('NHL_Flash'), 'NHL Flash');
+      expect(displayNameFor('MLS_Theme'), 'MLS Theme');
+    });
+
+    test('US, UK acronyms', () {
+      expect(displayNameFor('US_Flag'), 'US Flag');
+      expect(displayNameFor('UK_Theme'), 'UK Theme');
+    });
+
+    test('"St" (not in allowlist) stays title-cased, not uppercased', () {
+      expect(displayNameFor('St_Patrick'), 'St Patrick');
+    });
+
+    test('"Mr" (not in allowlist) stays title-cased', () {
+      expect(displayNameFor('Mr_Glow'), 'Mr Glow');
+    });
+  });
+
+  group('displayNameFor — edge cases', () {
+    test('multiple underscores collapsed (empty chunks filtered)', () {
+      expect(displayNameFor('warm__white'), 'Warm White');
+      expect(displayNameFor('_warm_white_'), 'Warm White');
+    });
+
+    test('single word slug → title case', () {
+      expect(displayNameFor('shimmer'), 'Shimmer');
+    });
+
+    test('all-caps slug chunks fall through to title case unless allowlist',
+        () {
+      expect(displayNameFor('SHIMMER'), 'Shimmer');
+      expect(displayNameFor('MULTI_WORD'), 'Multi Word');
+    });
+
+    test('numeric chunks pass through', () {
+      expect(displayNameFor('pattern_2024'), 'Pattern 2024');
+    });
+
+    test('input with punctuation returned unchanged', () {
+      expect(displayNameFor("Tyler's House"), "Tyler's House");
+      expect(displayNameFor('Foo-Bar'), 'Foo-Bar');
+    });
+  });
+
+  group('displayNameFor — team override slug variants', () {
+    test('Boston_Red_Sox_Game_Day → "Red Sox Game Day"', () {
+      expect(displayNameFor('Boston_Red_Sox_Game_Day'), 'Red Sox Game Day');
+    });
+
+    test('Boston_Red_Sox_Twinkle → "Red Sox Twinkle"', () {
+      expect(displayNameFor('Boston_Red_Sox_Twinkle'), 'Red Sox Twinkle');
+    });
+
+    test('Boston_Red_Sox_Wave → "Red Sox Wave"', () {
+      expect(displayNameFor('Boston_Red_Sox_Wave'), 'Red Sox Wave');
+    });
+
+    test('Manchester_United_Game_Day → "Man United Game Day"', () {
+      expect(displayNameFor('Manchester_United_Game_Day'), 'Man United Game Day');
+    });
+
+    test('Inter_Miami_CF_Twinkle → "Inter Miami Twinkle"', () {
+      expect(displayNameFor('Inter_Miami_CF_Twinkle'), 'Inter Miami Twinkle');
+    });
+
+    test('Vegas_Golden_Knights_Wave → "Golden Knights Wave"', () {
+      expect(displayNameFor('Vegas_Golden_Knights_Wave'), 'Golden Knights Wave');
+    });
+
+    test('Paris_Saint-Germain (with hyphen) → returned unchanged (not a slug)',
+        () {
+      // The hyphen breaks the slug regex, so the input is returned as-is.
+      // The team override only fires for the exact slug form, which doesn't
+      // include hyphens.
+      expect(displayNameFor('Paris_Saint-Germain_Game_Day'),
+          'Paris_Saint-Germain_Game_Day');
+    });
+  });
+
+  group('displayNameFor — override map exhaustiveness', () {
+    test('every team in _kTeamShortNames generates 3 slug entries', () {
+      final overrides = debugAllSlugOverridesForTest;
+      final teams = debugTeamShortNamesForTest;
+      for (final teamEntry in teams.entries) {
+        final slugBase = teamEntry.key.replaceAll(' ', '_');
+        final shortName = teamEntry.value;
+        for (final suffix in const ['Game_Day', 'Twinkle', 'Wave']) {
+          final slug = '${slugBase}_$suffix';
+          final humanSuffix = suffix.replaceAll('_', ' ');
+          expect(overrides[slug], '$shortName $humanSuffix',
+              reason: 'Missing or wrong override for $slug');
+        }
+      }
+    });
+
+    test('KC_Royals_Game_Day extra override is present', () {
+      expect(debugAllSlugOverridesForTest['KC_Royals_Game_Day'],
+          'KC Royals Game Day');
+    });
+
+    test('total override count = (teams × 3) + extras', () {
+      final teamCount = debugTeamShortNamesForTest.length;
+      // 1 extra (KC_Royals_Game_Day) plus 3 entries per team.
+      expect(debugAllSlugOverridesForTest.length, teamCount * 3 + 1);
+    });
+
+    test('acronym allowlist matches Tyler\'s spec', () {
+      expect(debugAcronymsForTest,
+          {'KC', 'AI', 'NY', 'LA', 'SF', 'DC', 'US', 'UK', 'NFL', 'NBA', 'MLB', 'NHL', 'MLS'});
+    });
+  });
+
+  group('teamShortName — spaced official-name lookup', () {
+    test('override hit returns short form', () {
+      expect(teamShortName('Boston Red Sox'), 'Red Sox');
+      expect(teamShortName('Manchester United'), 'Man United');
+      expect(teamShortName('Vegas Golden Knights'), 'Golden Knights');
+      expect(teamShortName('Paris Saint-Germain'), 'PSG');
+    });
+
+    test('no override falls back to .split(" ").last', () {
+      expect(teamShortName('Kansas City Royals'), 'Royals');
+      expect(teamShortName('Los Angeles Dodgers'), 'Dodgers');
+      expect(teamShortName('Chicago Bears'), 'Bears');
+    });
+
+    test('empty returns empty', () {
+      expect(teamShortName(''), '');
+    });
+
+    test('every entry in _kTeamShortNames round-trips through teamShortName',
+        () {
+      for (final entry in debugTeamShortNamesForTest.entries) {
+        expect(teamShortName(entry.key), entry.value,
+            reason: 'teamShortName("${entry.key}") should equal "${entry.value}"');
+      }
+    });
+  });
+}

@@ -1,11 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
 /// Convert slug-style names ("KC_Royals_Game_Day") to title case
-/// ("KC Royals Game Day"). Returns the input unchanged if it already contains
-/// spaces or non-slug characters, so already-humanized labels pass through.
+/// ("KC Royals Game Day"). Returns the input unchanged if it already
+/// contains spaces or non-slug characters, so already-humanized labels
+/// pass through.
+@Deprecated(
+    'Use displayNameFor() from lib/features/patterns/utils/pattern_display_name.dart. '
+    'This helper title-cased every chunk and produced incorrect output for '
+    'acronyms (KC_Royals → "Kc Royals"). Kept in place for one release cycle '
+    'in case out-of-tree callers reference it.')
+// ignore: unused_element
 String _humanizePresetName(String raw) {
   if (!RegExp(r'^[A-Za-z0-9_]+$').hasMatch(raw)) return raw;
   return raw
@@ -50,7 +58,7 @@ final displayPatternNameProvider = Provider<String>((ref) {
     }
     // Priority 2: fall through to the preset / app-set label, humanizing
     // slug-style names that leak through from on-device WLED preset slots.
-    return _humanizePresetName(activePreset);
+    return displayNameFor(activePreset);
   }
 
   // Priority 3: Effect name only — no color prefix/suffix. For solid mode
