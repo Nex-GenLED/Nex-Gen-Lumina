@@ -314,6 +314,16 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// ActivePresetLabelNotifier.reconcileWithDeviceState.
   bool _hasReconciledOnStartup = false;
 
+  /// Flipped true at the END of the first successful _applyStateData, AFTER
+  /// the cold-start reconciler has run. Gates the steady-state polling
+  /// resolver: on the first poll, cold-start reconciliation owns the label
+  /// outcome and the resolver does not touch activePresetLabelProvider;
+  /// on subsequent polls, the resolver handles steady-state drift
+  /// (preset changes + effect-only changes) via [_resolvePresetName] and
+  /// the effect-drift clear branch. See the comment block in
+  /// [_applyStateData] for the full lifecycle.
+  bool _hasPolledOnce = false;
+
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
@@ -443,6 +453,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// Used by both polling and refreshConnection to avoid duplication.
   void _applyStateData(Map<String, dynamic> data) {
     final prevPresetId = state.presetId;
+    final prevEffectId = state.effectId;
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
     int speed = state.speed;
@@ -544,45 +555,72 @@ class WledNotifier extends Notifier<WledStateModel> {
     // Mark that we have received a live fetch
     ref.read(wledStateFreshProvider.notifier).state = true;
 
-    // Resolve preset name from WLED only when the preset slot actually
-    // changed. The previous "or label is empty" clause caused stale resolves
-    // to overwrite freshly-set user labels (Now Playing flicker) — the
-    // null-label case is already covered by explicit setters.
-    if (ps > 0 && ps != prevPresetId) {
-      _resolvePresetName(ps);
-    }
+    // First-poll cold-start is handled by
+    // activePresetLabelProvider.reconcileWithDeviceState in
+    // app_providers.dart, gated by [_hasReconciledOnStartup] below. This
+    // resolver handles steady-state drift only — when the device's effect
+    // or preset changes after [_hasPolledOnce] is true without a
+    // corresponding user-driven label write within the 3-second race-guard
+    // window. On the first poll all three branches are skipped so
+    // reconcile owns the label outcome and the persisted fingerprint
+    // controls whether a previously-set label is restored.
+    if (_hasPolledOnce) {
+      // Preset slot changed to a new non-zero value → resolve the
+      // device-side preset name and write it via setLabelWithFingerprint.
+      // Race-guard inside [_resolvePresetName] protects against a
+      // user-driven label write landing while fetchPresetNames is in flight.
+      if (ps > 0 && ps != prevPresetId) {
+        _resolvePresetName(ps);
+      }
 
-    // Preset was cleared on-device (ps went from >0 to 0). Drop the stale
-    // preset label so the display falls back to the effect name / custom
-    // pattern name, rather than showing the old preset name indefinitely.
-    // This branch is safe to fire on first poll: prevPresetId starts at 0,
-    // so the `prevPresetId > 0` guard only triggers after we've actually
-    // observed a preset being active in a prior poll.
-    if (ps <= 0 && prevPresetId > 0) {
-      try {
-        final customName = state.customEffectName;
-        if (customName != null && customName.isNotEmpty) {
-          // `state` here is the Notifier's WledStateModel (just updated by
-          // the surrounding _applyStateData call), so we can fingerprint
-          // against it directly rather than re-reading wledStateProvider.
-          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(customName, state);
-        } else {
-          ref.read(activePresetLabelProvider.notifier).clear();
+      // Preset slot dropped to 0. Use the custom effect name when present
+      // (Lumina-set), otherwise clear so the dashboard falls through to the
+      // P3 effect-name display.
+      if (ps <= 0 && prevPresetId > 0) {
+        try {
+          final customName = state.customEffectName;
+          if (customName != null && customName.isNotEmpty) {
+            // `state` here is the Notifier's WledStateModel (just updated by
+            // the surrounding _applyStateData call), so we can fingerprint
+            // against it directly rather than re-reading wledStateProvider.
+            ref
+                .read(activePresetLabelProvider.notifier)
+                .setLabelWithFingerprint(customName, state);
+          } else {
+            ref.read(activePresetLabelProvider.notifier).clear();
+          }
+        } catch (e) {
+          debugPrint('Error in WledNotifier clearing preset label: $e');
         }
-      } catch (e) {
-        debugPrint('Error in WledNotifier clearing preset label: $e');
+      }
+
+      // Effect drifted on-device without a matching preset change (manual
+      // WLED web-UI tap, autopilot fired, wall switch loaded a different
+      // scene, etc.). The persisted Lumina label is no longer truthful —
+      // clear it so the dashboard falls through to the live effect name.
+      // The 3-second race guard prevents this from clobbering a label the
+      // user just set when the device's response races ahead of the
+      // optimistic state update.
+      if (ps == prevPresetId && effectId != prevEffectId) {
+        try {
+          final notifier = ref.read(activePresetLabelProvider.notifier);
+          final lastSet = notifier.labelUserSetAt;
+          final recentUserWrite = lastSet != null &&
+              DateTime.now().difference(lastSet).inSeconds < 3;
+          if (!recentUserWrite) {
+            debugPrint(
+                '🏷️ Effect drift detected (fx $prevEffectId → $effectId, ps unchanged at $ps), clearing stale label');
+            notifier.clear();
+          } else {
+            debugPrint(
+                '🏷️ Effect drift detected (fx $prevEffectId → $effectId), '
+                'but recent user write ${DateTime.now().difference(lastSet).inMilliseconds}ms ago — label preserved');
+          }
+        } catch (e) {
+          debugPrint('Error in WledNotifier drift clear: $e');
+        }
       }
     }
-
-    // NOTE: We deliberately do NOT auto-clear activePresetLabelProvider
-    // when effectId != prevEffectId on its own. prevEffectId is 0 on the
-    // very first poll after cold-start, so any device that's actually
-    // playing fx > 0 would trigger an "effect changed" branch that
-    // cleared the persisted Lumina label (e.g. "KC Royals Twinkle") and
-    // dropped the dashboard back to the raw WLED effect name. The label
-    // is owned by explicit app actions (AI apply, pattern picker, preset
-    // save, lights off) and by _resolvePresetName for ps > 0 — the
-    // polling path should not second-guess those writes.
 
     // One-shot cold-start reconciliation of any persisted Now Playing
     // label intent against the freshly-parsed device state. Fires on the
@@ -600,7 +638,27 @@ class WledNotifier extends Notifier<WledStateModel> {
         debugPrint('🏷️ Reconcile on startup failed: $e');
       }
     }
+
+    // Flip the steady-state gate ONLY after the cold-start reconciler has
+    // run on this poll. The drift branches above check this flag at the top
+    // of the next poll so they don't see the first poll's effectId/ps
+    // values as "drift from the initial WledStateModel.initial() zeros".
+    _hasPolledOnce = true;
   }
+
+  /// Test-only entry point that directly drives the polling parse + drift
+  /// handlers without going through the periodic Timer. Tests can simulate
+  /// a sequence of polls by calling this with successive state maps.
+  @visibleForTesting
+  void applyStateDataForTest(Map<String, dynamic> data) {
+    _applyStateData(data);
+  }
+
+  @visibleForTesting
+  bool get hasPolledOnceForTest => _hasPolledOnce;
+
+  @visibleForTesting
+  bool get hasReconciledOnStartupForTest => _hasReconciledOnStartup;
 
   /// Fetches preset names from the WLED controller and sets the active label.
   /// If the requested preset isn't in the cached map (e.g. it was added
