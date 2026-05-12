@@ -578,7 +578,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       _updateLocalState(ref);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
@@ -629,7 +629,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }

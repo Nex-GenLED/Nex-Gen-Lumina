@@ -99,7 +99,7 @@ class _GradientPatternCard extends ConsumerWidget {
             final channels = ref.read(effectiveChannelIdsProvider);
             if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
             await repo.applyJson(payload);
-            ref.read(activePresetLabelProvider.notifier).state = data.name;
+            ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(data.name, ref.read(wledStateProvider));
             ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
               colors: data.colors,
               effectId: data.effectId,
@@ -235,7 +235,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = _current.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(_current.name, ref.read(wledStateProvider));
       if (toast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playing: ${_current.name}')));
       }

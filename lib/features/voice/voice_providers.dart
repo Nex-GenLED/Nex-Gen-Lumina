@@ -284,7 +284,7 @@ void _setColor(Ref ref, Map<String, dynamic> userInfo) {
   }
 
   // Update the preset label
-  ref.read(activePresetLabelProvider.notifier).state = colorName;
+  ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(colorName, ref.read(wledStateProvider));
 }
 
 /// Run the current schedule - applies whatever pattern/action should be active now
@@ -313,13 +313,13 @@ Future<void> _runSchedule(Ref ref) async {
 
     if (actionLower.contains('turn off') || actionLower == 'off') {
       await repo.applyJson({'on': false});
-      ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Off (Scheduled)', ref.read(wledStateProvider));
     } else if (actionLower.startsWith('brightness')) {
       final match = RegExp(r'(\d{1,3})%').firstMatch(action);
       final brightness = int.tryParse(match?.group(1) ?? '') ?? 100;
       final bri = (brightness * 255 / 100).round().clamp(0, 255);
       await repo.applyJson({'on': true, 'bri': bri});
-      ref.read(activePresetLabelProvider.notifier).state = 'Brightness $brightness%';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Brightness $brightness%', ref.read(wledStateProvider));
     } else if (actionLower.startsWith('pattern')) {
       final idx = action.indexOf(':');
       final patternName = (idx != -1 && idx + 1 < action.length)
@@ -333,22 +333,22 @@ Future<void> _runSchedule(Ref ref) async {
 
       if (pattern != null) {
         await repo.applyJson(pattern.toWledPayload());
-        ref.read(activePresetLabelProvider.notifier).state = patternName;
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
 
         // Track usage
         ref.trackPatternUsage(pattern: pattern, source: 'voice');
       } else {
         debugPrint('Voice: Pattern "$patternName" not found, applying generic');
         await repo.applyJson({'on': true, 'bri': 200, 'seg': [{'id': 0, 'fx': 0}]});
-        ref.read(activePresetLabelProvider.notifier).state = patternName;
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
       }
     } else if (actionLower.contains('turn on') || actionLower == 'on') {
       await repo.applyJson({'on': true, 'bri': 200});
-      ref.read(activePresetLabelProvider.notifier).state = 'On (Scheduled)';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('On (Scheduled)', ref.read(wledStateProvider));
     } else {
       debugPrint('Voice: Unknown schedule action: $action');
       await repo.applyJson({'on': true});
-      ref.read(activePresetLabelProvider.notifier).state = action;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(action, ref.read(wledStateProvider));
     }
 
     debugPrint('Voice: Successfully applied schedule');

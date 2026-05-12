@@ -385,7 +385,7 @@ final applyDesignProvider = Provider<Future<bool> Function()>((ref) {
 
     // Log usage for Lumina learning (if successful)
     if (success) {
-      ref.read(activePresetLabelProvider.notifier).state = design.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(design.name, ref.read(wledStateProvider));
 
       final user = ref.read(authStateProvider).valueOrNull;
       if (user != null) {

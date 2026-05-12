@@ -441,8 +441,8 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       // game-day apply rather than falling through to the raw WLED
       // effect name. Uses shortTeamName to avoid wrapping (e.g.
       // "Royals Game Day" instead of "Kansas City Royals Game Day").
-      ref.read(activePresetLabelProvider.notifier).state =
-          '${config.shortTeamName} Game Day';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(
+          '${config.shortTeamName} Game Day', ref.read(wledStateProvider));
     }
 
     ScaffoldMessenger.of(context).showSnackBar(

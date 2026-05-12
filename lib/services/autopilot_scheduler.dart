@@ -397,7 +397,7 @@ class AutopilotScheduler {
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');
 
-        _ref.read(activePresetLabelProvider.notifier).state = item.patternName;
+        _ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.patternName, _ref.read(wledStateProvider));
 
         _addActivityLogEntry(AutopilotActivityEntry(
           timestamp: DateTime.now(),

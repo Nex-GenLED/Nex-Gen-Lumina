@@ -174,7 +174,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
             );
         final paletteName = s.palette.name != 'Custom Palette' ? s.palette.name : null;
         if (paletteName != null) {
-          ref.read(activePresetLabelProvider.notifier).state = paletteName;
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(paletteName, ref.read(wledStateProvider));
         } else {
           ref.read(activePresetLabelProvider.notifier).clear();
         }

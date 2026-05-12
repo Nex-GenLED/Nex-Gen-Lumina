@@ -132,7 +132,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     final designId = await ref.read(saveCurrentAsDesignProvider)(name);
     if (designId != null) {
-      ref.read(activePresetLabelProvider.notifier).state = name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(name, ref.read(wledStateProvider));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved "$name" to My Designs')),
@@ -678,7 +678,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       if (mounted && result.isNotEmpty) {
         // If the result looks like a pattern name (short, no markdown), set as active preset
         if (result.length < 60 && !result.contains('\n') && !result.startsWith('{')) {
-          ref.read(activePresetLabelProvider.notifier).state = result;
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(result, ref.read(wledStateProvider));
         }
       }
     } catch (e) {
@@ -1333,7 +1333,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 showPixelLayout: false,
                                 onCustomized: () {
                                   ref.read(wledStateProvider.notifier).clearLuminaPatternMetadata();
-                                  ref.read(activePresetLabelProvider.notifier).state = 'Custom';
+                                  ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Custom', ref.read(wledStateProvider));
                                 },
                               ),
                               const Divider(height: 24),
@@ -1404,7 +1404,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       colorGroupSize: preview.colorGroupSize,
                       spacing: preview.spacing,
                     );
-                    ref.read(activePresetLabelProvider.notifier).state = patternName;
+                    ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
                   } catch (e) {
                     debugPrint('Error in AI suggestion applyLocalPreview: $e');
                   }
@@ -1474,7 +1474,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 } catch (e) {
                   debugPrint('Error in favorite grid applyLocalPreview: $e');
                 }
-                try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (e) {
+                try { ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(favorite.patternName, ref.read(wledStateProvider)); } catch (e) {
                   debugPrint('Error in favorite grid set active label: $e');
                 }
                 try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {

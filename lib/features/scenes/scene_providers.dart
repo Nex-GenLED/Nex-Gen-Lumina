@@ -146,7 +146,7 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
       // This prevents the UI from showing stale colors during the polling delay
       if (success) {
         // Update the active preset label
-        ref.read(activePresetLabelProvider.notifier).state = scene.name;
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(scene.name, ref.read(wledStateProvider));
 
         // Convert preview colors to Color objects for the color sequence
         final colorSequence = scene.previewColors

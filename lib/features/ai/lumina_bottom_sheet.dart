@@ -576,7 +576,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                   result.command?.parameters['patternName'] as String?;
               final label = resolveLuminaDisplayName(aiName, prompt);
               if (label != null) {
-                ref.read(activePresetLabelProvider.notifier).state = label;
+                ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
               } else {
                 ref.read(activePresetLabelProvider.notifier).clear();
               }
@@ -647,7 +647,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                 result.command?.parameters['patternName'] as String?;
             final label = resolveLuminaDisplayName(aiName, prompt);
             if (label != null) {
-              ref.read(activePresetLabelProvider.notifier).state = label;
+              ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
             } else {
               ref.read(activePresetLabelProvider.notifier).clear();
             }
@@ -1290,7 +1290,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         final aiName = preview?.patternName ?? wled['patternName'] as String?;
         final label = resolveLuminaDisplayName(aiName, originalPrompt);
         if (label != null) {
-          ref.read(activePresetLabelProvider.notifier).state = label;
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
         } else {
           ref.read(activePresetLabelProvider.notifier).clear();
         }

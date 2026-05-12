@@ -481,7 +481,7 @@ class MySavedDesignsSection extends ConsumerWidget {
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = design.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(design.name, ref.read(wledStateProvider));
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -753,7 +753,7 @@ class RecentPatternsSection extends ConsumerWidget {
         await repo.applyJson(payload);
       }
 
-      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(pattern.name, ref.read(wledStateProvider));
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

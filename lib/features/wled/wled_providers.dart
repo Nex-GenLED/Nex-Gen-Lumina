@@ -562,7 +562,10 @@ class WledNotifier extends Notifier<WledStateModel> {
       try {
         final customName = state.customEffectName;
         if (customName != null && customName.isNotEmpty) {
-          ref.read(activePresetLabelProvider.notifier).state = customName;
+          // `state` here is the Notifier's WledStateModel (just updated by
+          // the surrounding _applyStateData call), so we can fingerprint
+          // against it directly rather than re-reading wledStateProvider.
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(customName, state);
         } else {
           ref.read(activePresetLabelProvider.notifier).clear();
         }
@@ -636,7 +639,10 @@ class WledNotifier extends Notifier<WledStateModel> {
           debugPrint('🏷️ Preset $presetId → "$name" skipped (label set ${DateTime.now().difference(lastSet).inMilliseconds}ms ago)');
           return;
         }
-        notifier.state = name;
+        // `state` here is the Notifier's WledStateModel; passing it directly
+        // avoids a second provider read and ensures the fingerprint reflects
+        // exactly the state that this resolver is naming.
+        notifier.setLabelWithFingerprint(name, state);
         debugPrint('🏷️ Resolved WLED preset $presetId → "$name"');
       }
     } catch (e) {

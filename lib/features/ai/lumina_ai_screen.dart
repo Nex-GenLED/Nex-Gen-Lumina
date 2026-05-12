@@ -251,7 +251,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                   result.command?.parameters['patternName'] as String?;
               final label = resolveLuminaDisplayName(aiName, prompt);
               if (label != null) {
-                ref.read(activePresetLabelProvider.notifier).state = label;
+                ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
               } else {
                 ref.read(activePresetLabelProvider.notifier).clear();
               }
@@ -321,7 +321,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                 result.command?.parameters['patternName'] as String?;
             final label = resolveLuminaDisplayName(aiName, prompt);
             if (label != null) {
-              ref.read(activePresetLabelProvider.notifier).state = label;
+              ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
             } else {
               ref.read(activePresetLabelProvider.notifier).clear();
             }
@@ -441,7 +441,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     // Set the preset label to the full schedule name
     final scheduleLabel = payload['patternName'] as String?;
     if (scheduleLabel != null && mounted) {
-      ref.read(activePresetLabelProvider.notifier).state = scheduleLabel;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(scheduleLabel, ref.read(wledStateProvider));
     }
 
     // Step 4 — Post response card to chat thread
@@ -719,7 +719,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         final aiName = preview?.patternName ?? wled['patternName'] as String?;
         final label = resolveLuminaDisplayName(aiName, originalPrompt);
         if (label != null) {
-          ref.read(activePresetLabelProvider.notifier).state = label;
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
         } else {
           ref.read(activePresetLabelProvider.notifier).clear();
         }

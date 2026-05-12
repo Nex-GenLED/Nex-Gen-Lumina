@@ -412,8 +412,8 @@ class EphemeralGameSessionService {
 
     // Update the Now Playing label.
     try {
-      _ref.read(activePresetLabelProvider.notifier).state =
-          session.revertLabel;
+      _ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(
+          session.revertLabel, _ref.read(wledStateProvider));
     } catch (e) {
       debugPrint(
           '[EphemeralSession] Label set failed for $sessionId: $e');

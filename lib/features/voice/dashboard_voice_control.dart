@@ -124,7 +124,7 @@ class VoiceCommandHandler {
   Future<String> _handlePowerOn() async {
     try {
       await ref.read(wledStateProvider.notifier).togglePower(true);
-      ref.read(activePresetLabelProvider.notifier).state = 'On';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('On', ref.read(wledStateProvider));
       return '✓ Turning on';
     } catch (e) {
       debugPrint('Voice: Power on failed: $e');
@@ -135,7 +135,7 @@ class VoiceCommandHandler {
   Future<String> _handlePowerOff() async {
     try {
       await ref.read(wledStateProvider.notifier).togglePower(false);
-      ref.read(activePresetLabelProvider.notifier).state = 'Off';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Off', ref.read(wledStateProvider));
       return '✓ Turning off';
     } catch (e) {
       debugPrint('Voice: Power off failed: $e');
@@ -201,7 +201,7 @@ class VoiceCommandHandler {
         effectId: 0,
         effectName: 'Warm White',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Warm White';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Warm White', ref.read(wledStateProvider));
       return '✓ Applying warm white';
     } catch (e) {
       debugPrint('Voice: Warm white failed: $e');
@@ -236,7 +236,7 @@ class VoiceCommandHandler {
         brightness: 255,
         effectName: 'Bright White',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Bright White';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Bright White', ref.read(wledStateProvider));
       return '✓ Applying bright white';
     } catch (e) {
       debugPrint('Voice: Bright white failed: $e');
@@ -277,7 +277,7 @@ class VoiceCommandHandler {
         speed: 150,
         effectName: 'Festive',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Festive';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Festive', ref.read(wledStateProvider));
       return '✓ Applying festive pattern';
     } catch (e) {
       debugPrint('Voice: Festive failed: $e');
@@ -394,7 +394,7 @@ class VoiceCommandHandler {
       final success = await applyScene(scene);
 
       if (success) {
-        ref.read(activePresetLabelProvider.notifier).state = scene.name;
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(scene.name, ref.read(wledStateProvider));
         return '✓ Applying ${scene.name}';
       } else {
         return 'Failed to apply ${scene.name}';

@@ -1649,7 +1649,7 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       } catch (e) {
         debugPrint('Error in pattern grid applyLocalPreview: $e');
       }
-      ref.read(activePresetLabelProvider.notifier).state = widget.pattern.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(widget.pattern.name, ref.read(wledStateProvider));
       // Update Explore page roofline preview
       ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
         colors: activeColors,
