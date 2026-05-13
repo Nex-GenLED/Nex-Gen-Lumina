@@ -1,9 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
+import 'package:nexgen_command/features/installer/connection_method_resolver.dart';
+import 'package:nexgen_command/features/installer/connection_method_verification.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/widgets/team_autocomplete.dart';
+
+/// Test-visible key for the pre-flight verification section. Tests use
+/// `find.descendant(of: find.byKey(handoffVerificationSectionKey), ...)`
+/// to scope icon/text finds and avoid colliding with similarly-styled
+/// widgets elsewhere on the screen (autonomy tiles, Simple Mode list).
+const Key handoffVerificationSectionKey = ValueKey('handoff-verification');
 
 /// Customer handoff screen for installer setup wizard.
 /// Allows installer to configure user preferences before handing off.
@@ -34,6 +48,22 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   final _managerEmailController = TextEditingController();
   final _teamInputCtrl = TextEditingController();
 
+  // Verification state — keyed by controller doc id. Starts empty; the
+  // sweep fills entries as probes resolve. Complete Setup stays disabled
+  // until every selected controller has a non-pending entry and none are
+  // in the fail bucket.
+  final Map<String, VerificationResult> _verifications = {};
+  bool _sweepStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _startSweep();
+    });
+  }
+
   static const _holidays = [
     'Christmas',
     'Halloween',
@@ -50,6 +80,134 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
     _managerEmailController.dispose();
     _teamInputCtrl.dispose();
     super.dispose();
+  }
+
+  List<ControllerInfo> _selectedControllers() {
+    final selectedIds = ref.read(installerSelectedControllersProvider);
+    final controllersAsync = ref.read(controllersStreamProvider);
+    return controllersAsync.maybeWhen(
+      data: (list) =>
+          list.where((c) => selectedIds.contains(c.id)).toList(),
+      orElse: () => const <ControllerInfo>[],
+    );
+  }
+
+  Future<void> _startSweep() async {
+    if (_sweepStarted) return;
+    _sweepStarted = true;
+    final controllers = _selectedControllers();
+    if (controllers.isEmpty) {
+      // Stream may still be loading; reschedule once and bail otherwise
+      // so the screen doesn't get stuck waiting forever in a test where
+      // the stream emits nothing.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final retry = _selectedControllers();
+        if (retry.isNotEmpty) {
+          _sweepStarted = false;
+          _startSweep();
+        }
+      });
+      return;
+    }
+    setState(() {
+      for (final c in controllers) {
+        _verifications[c.id] = const VerificationResult.pending();
+      }
+    });
+    final resolver = ref.read(connectionMethodResolverProvider);
+    final persistedMethods = ref.read(installerConnectionMethodsProvider);
+    final skipped = ref.read(installerConnectionMethodSkippedProvider);
+
+    for (final controller in controllers) {
+      unawaited(_verifyOne(
+        controller: controller,
+        resolver: resolver,
+        persisted: persistedMethods[controller.id],
+        isSkipped: skipped.contains(controller.id),
+      ));
+    }
+  }
+
+  Future<void> _verifyOne({
+    required ControllerInfo controller,
+    required ConnectionMethodResolver resolver,
+    required ConnectionMethod? persisted,
+    required bool isSkipped,
+  }) async {
+    final observed = await resolver.probeOrNull(controller);
+    if (!mounted) return;
+    final result = verifyController(
+      persisted: persisted,
+      isSkipped: isSkipped,
+      observed: observed,
+    );
+    setState(() {
+      _verifications[controller.id] = result;
+    });
+  }
+
+  bool get _canCompleteSetup {
+    final selected = _selectedControllers();
+    if (selected.isEmpty) return false;
+    if (_verifications.length < selected.length) return false;
+    return isAllVerifiedAcceptable(_verifications.values);
+  }
+
+  void _showBlockingFailureDialog() {
+    final controllers = _selectedControllers();
+    final fails = <ControllerInfo>[];
+    for (final c in controllers) {
+      final r = _verifications[c.id];
+      if (r != null && r.status == VerificationStatus.fail) {
+        fails.add(c);
+      }
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text(
+          'Cannot complete install',
+          style: TextStyle(color: NexGenPalette.textHigh),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final c in fails)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '${c.name ?? c.ip} — ${_verifications[c.id]?.reason ?? 'verification failed'}',
+                  style:
+                      const TextStyle(color: NexGenPalette.textMedium),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // State (selected controllers, resolved methods, skipped
+              // set) is preserved — the wizard reads them from providers,
+              // not from screen-local state.
+              ref.read(installerWizardStepProvider.notifier).state =
+                  InstallerWizardStep.connectionMethod;
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+            ),
+            child: const Text(
+              'Back to Connection Step',
+              style: TextStyle(color: Colors.black),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _vibeDescription(double value) {
@@ -96,7 +254,11 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                   'Configure user preferences before completing setup.',
                   style: TextStyle(color: NexGenPalette.textMedium, fontSize: 16),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // ── Pre-flight: connection-method verification ──
+                _buildVerificationSection(),
+                const SizedBox(height: 24),
 
                 // ── SECTION 1: Profile Type ──
                 _buildSectionLabel('Profile Type'),
@@ -382,9 +544,11 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
               if (widget.onNext != null)
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _completeHandoff,
+                    onPressed: _canCompleteSetup ? _completeHandoff : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: NexGenPalette.cyan,
+                      disabledBackgroundColor:
+                          NexGenPalette.cyan.withValues(alpha: 0.25),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -580,7 +744,71 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
     );
   }
 
+  Widget _buildVerificationSection() {
+    final controllers = _selectedControllers();
+    return Container(
+      key: handoffVerificationSectionKey,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.fact_check_outlined,
+                  color: NexGenPalette.cyan, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Pre-flight check',
+                style: TextStyle(
+                  color: NexGenPalette.textHigh,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Verifying every controller is on the connection method '
+            'you picked. Complete Setup unlocks once this passes.',
+            style:
+                TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          if (controllers.isEmpty)
+            const Text(
+              'No controllers selected — go back to add one.',
+              style:
+                  TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            )
+          else
+            for (final c in controllers)
+              _VerificationRow(
+                controller: c,
+                result: _verifications[c.id] ??
+                    const VerificationResult.pending(),
+              ),
+        ],
+      ),
+    );
+  }
+
   void _completeHandoff() {
+    // Defensive failure guard — the button is gated by _canCompleteSetup,
+    // but if anything bypasses that (state race, hot-reload) we still
+    // block the install with the same dialog the gate would prevent.
+    final hasFail = _verifications.values
+        .any((r) => r.status == VerificationStatus.fail);
+    if (hasFail) {
+      _showBlockingFailureDialog();
+      return;
+    }
+
     // Apply Simple Mode preference
     if (_useSimpleMode) {
       ref.read(simpleModeProvider.notifier).enable();
@@ -600,5 +828,102 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
     );
 
     widget.onNext?.call(draft);
+  }
+}
+
+/// One row inside the pre-flight section. Renders the controller name +
+/// IP and a status pill (pending spinner, green check, amber warning, or
+/// red X) plus an inline reason for warn/fail.
+class _VerificationRow extends StatelessWidget {
+  const _VerificationRow({required this.controller, required this.result});
+
+  final ControllerInfo controller;
+  final VerificationResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusIcon(status: result.status),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  controller.name ?? controller.ip,
+                  style: const TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  controller.ip,
+                  style: const TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 11,
+                  ),
+                ),
+                if (result.reason != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.reason!,
+                    style: TextStyle(
+                      color: _reasonColor(result.status),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _reasonColor(VerificationStatus status) {
+    switch (status) {
+      case VerificationStatus.fail:
+        return Colors.red;
+      case VerificationStatus.warn:
+        return NexGenPalette.amber;
+      case VerificationStatus.pass:
+      case VerificationStatus.pending:
+        return NexGenPalette.textMedium;
+    }
+  }
+}
+
+class _StatusIcon extends StatelessWidget {
+  const _StatusIcon({required this.status});
+
+  final VerificationStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case VerificationStatus.pending:
+        return const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: NexGenPalette.cyan,
+          ),
+        );
+      case VerificationStatus.pass:
+        return const Icon(Icons.check_circle,
+            color: NexGenPalette.green, size: 18);
+      case VerificationStatus.warn:
+        return const Icon(Icons.warning_amber_rounded,
+            color: NexGenPalette.amber, size: 18);
+      case VerificationStatus.fail:
+        return const Icon(Icons.cancel, color: Colors.red, size: 18);
+    }
   }
 }

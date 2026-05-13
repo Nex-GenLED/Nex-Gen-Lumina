@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/installer/widgets/info_expansion_card.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Installer-mode home screen, reached after a valid installer PIN at
@@ -78,6 +79,28 @@ class InstallerLandingScreen extends StatelessWidget {
                           color: NexGenPalette.textMedium,
                           height: 1.35,
                         ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Informational note about dual-network controllers. Collapsed
+            // by default so it reads as a hint rather than a section
+            // header. The 2x2 button grid stays bottom-aligned via the
+            // Spacer below.
+            const SizedBox(height: 20),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24),
+              child: InfoExpansionCard(
+                title: 'Installing a SKIKBILY or dual-network controller?',
+                paragraphs: [
+                  InfoExpansionParagraph(
+                    body:
+                        'When the controller has both WiFi and Ethernet '
+                        'capability, use Ethernet whenever a wall jack is '
+                        'available. The setup wizard will guide you '
+                        'through disabling the unused connection. One '
+                        'controller = one IP = one router entry.',
                   ),
                 ],
               ),
