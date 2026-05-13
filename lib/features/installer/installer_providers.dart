@@ -5,6 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
@@ -400,6 +401,7 @@ final installerCustomerInfoProvider = StateProvider<CustomerInfo>((ref) => const
 enum InstallerWizardStep {
   customerInfo,
   controllerSetup,
+  connectionMethod,
   zoneConfiguration,
   hardwareConfig,
   brandSetup,
@@ -490,6 +492,20 @@ final installerLinkedControllersProvider = StateProvider<Set<String>>((ref) => {
 
 /// Provider for installation photo URL
 final installerPhotoUrlProvider = StateProvider<String?>((ref) => null);
+
+/// Per-controller resolved [ConnectionMethod] for the connectionMethod
+/// wizard step. Keyed by controller doc id. Empty when the step opens;
+/// populated as the installer makes choices or as auto-probe completes.
+/// Persisted to Firestore by the screen when the installer continues.
+final installerConnectionMethodsProvider =
+    StateProvider<Map<String, ConnectionMethod>>((ref) => const {});
+
+/// Controllers the installer explicitly chose to skip on the
+/// connectionMethod step (left in dual-homed state). Kept separate from
+/// the resolved map so the Continue gate can distinguish "resolved to
+/// dual-homed by choice" from "not yet resolved."
+final installerConnectionMethodSkippedProvider =
+    StateProvider<Set<String>>((ref) => const {});
 
 /// Provider for the installer preference draft collected during handoff
 final installerPreferenceDraftProvider = StateProvider<InstallerPreferenceDraft?>((ref) => null);
@@ -689,4 +705,7 @@ void resetInstallerWizardState(WidgetRef ref) {
   ref.read(installerZonesProvider.notifier).clear();
   ref.read(installerPhotoUrlProvider.notifier).state = null;
   ref.read(installerSelectedBrandLibraryEntryProvider.notifier).state = null;
+  ref.read(installerConnectionMethodsProvider.notifier).state = const {};
+  ref.read(installerConnectionMethodSkippedProvider.notifier).state =
+      const {};
 }

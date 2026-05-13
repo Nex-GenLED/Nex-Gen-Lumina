@@ -341,13 +341,22 @@ class WledService implements WledRepository {
     }
     try {
       final body = jsonEncode(data);
+      final bodyBytes = utf8.encode(body);
       debugPrint('📤 WLED POST /json/cfg');
       debugPrint('   Payload: $body');
 
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final req = await client.postUrl(_uri('/json/cfg'));
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-      req.add(utf8.encode(body));
+      // Explicit Content-Length keeps the request out of Dart HttpClient's
+      // chunked transfer-encoding path. WLED 0.15.x on ESP32_Ethernet builds
+      // returns HTTP 413 on chunked /json/cfg posts — exactly the hardware
+      // the WiFi-disable flow needs to work on. Same fix shipped earlier in
+      // wled_config_pusher.dart; backporting it here so every /json/cfg
+      // writer (config pusher, schedule sync, hardware screen,
+      // clearWifiCredentials) uses an unchunked request.
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
       final res = await req.close().timeout(const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
       client.close(force: true);
@@ -364,6 +373,37 @@ class WledService implements WledRepository {
       debugPrint('❌ WLED /json/cfg exception: $e');
     }
     return false;
+  }
+
+  /// Clears the controller's WiFi station credentials and forces a reboot,
+  /// so the device comes back up on its Ethernet interface only. Returns
+  /// true on a 2xx response from `/json/cfg`. The controller drops the
+  /// connection after the reboot directive — callers should wait several
+  /// seconds before re-polling.
+  ///
+  /// Payload — flat /json/cfg merge:
+  ///   nw.ins[0].ssid = ""    -- clear the saved network
+  ///   nw.ins[0].psk  = ""    -- clear the saved password
+  ///   ap.behav       = 0     -- never broadcast AP fallback
+  ///   ap.hide        = true  -- belt-and-suspenders SSID hide
+  ///   cn             = 1     -- reboot now
+  ///
+  /// First and only `cn:1` usage in the codebase. Scoped here intentionally
+  /// — generic config writes should NOT include cn:1 as a side effect.
+  ///
+  /// Ethernet has no symmetric runtime-disable. The Ethernet-disable path
+  /// stays physical (unplug + verify the IP stops responding).
+  Future<bool> clearWifiCredentials({bool reboot = true}) {
+    final payload = <String, dynamic>{
+      'nw': {
+        'ins': [
+          {'ssid': '', 'psk': ''},
+        ],
+      },
+      'ap': {'behav': 0, 'hide': true},
+      if (reboot) 'cn': 1,
+    };
+    return _postConfig(payload);
   }
 
   @override

@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
+import 'package:nexgen_command/features/installer/screens/connection_method_screen.dart';
 import 'package:nexgen_command/features/installer/screens/hardware_config_step.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/screens/commercial_brand_setup_step.dart';
@@ -25,6 +26,54 @@ import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
+
+/// Linear forward routing for the installer wizard. Single source of
+/// truth for "what comes next" — `_buildStepContent` wires every onNext
+/// closure through this so a step insertion or rename touches one place.
+/// The terminal step (handoff) is its own successor; the wizard does not
+/// auto-advance off of it.
+@visibleForTesting
+InstallerWizardStep nextWizardStep(InstallerWizardStep step) {
+  switch (step) {
+    case InstallerWizardStep.customerInfo:
+      return InstallerWizardStep.controllerSetup;
+    case InstallerWizardStep.controllerSetup:
+      return InstallerWizardStep.connectionMethod;
+    case InstallerWizardStep.connectionMethod:
+      return InstallerWizardStep.zoneConfiguration;
+    case InstallerWizardStep.zoneConfiguration:
+      return InstallerWizardStep.hardwareConfig;
+    case InstallerWizardStep.hardwareConfig:
+      return InstallerWizardStep.brandSetup;
+    case InstallerWizardStep.brandSetup:
+      return InstallerWizardStep.handoff;
+    case InstallerWizardStep.handoff:
+      return InstallerWizardStep.handoff;
+  }
+}
+
+/// Linear backward routing for the installer wizard. Mirrors
+/// [nextWizardStep]; customerInfo is its own predecessor (the back button
+/// at the very first step is suppressed at the call site).
+@visibleForTesting
+InstallerWizardStep prevWizardStep(InstallerWizardStep step) {
+  switch (step) {
+    case InstallerWizardStep.customerInfo:
+      return InstallerWizardStep.customerInfo;
+    case InstallerWizardStep.controllerSetup:
+      return InstallerWizardStep.customerInfo;
+    case InstallerWizardStep.connectionMethod:
+      return InstallerWizardStep.controllerSetup;
+    case InstallerWizardStep.zoneConfiguration:
+      return InstallerWizardStep.connectionMethod;
+    case InstallerWizardStep.hardwareConfig:
+      return InstallerWizardStep.zoneConfiguration;
+    case InstallerWizardStep.brandSetup:
+      return InstallerWizardStep.hardwareConfig;
+    case InstallerWizardStep.handoff:
+      return InstallerWizardStep.brandSetup;
+  }
+}
 
 /// Main wizard shell for installer setup flow
 class InstallerSetupWizard extends ConsumerStatefulWidget {
@@ -435,25 +484,32 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     // Record activity when navigating between steps
     ref.read(installerModeActiveProvider.notifier).recordActivity();
 
+    // onNext / onBack targets come from nextWizardStep / prevWizardStep
+    // (top of file) — one source of truth for the linear progression.
     switch (step) {
       case InstallerWizardStep.customerInfo:
         return CustomerInfoScreen(
-          onNext: () => _goToStep(InstallerWizardStep.controllerSetup),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.controllerSetup:
         return ControllerSetupScreen(
-          onBack: () => _goToStep(InstallerWizardStep.customerInfo),
-          onNext: () => _goToStep(InstallerWizardStep.zoneConfiguration),
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
+      case InstallerWizardStep.connectionMethod:
+        return ConnectionMethodScreen(
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.zoneConfiguration:
         return ZoneConfigurationScreen(
-          onBack: () => _goToStep(InstallerWizardStep.controllerSetup),
-          onNext: () => _goToStep(InstallerWizardStep.hardwareConfig),
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.hardwareConfig:
         return HardwareConfigStep(
-          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
-          onNext: () => _goToStep(InstallerWizardStep.brandSetup),
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.brandSetup:
         // Auto-advance for residential — the brand-setup step is a
@@ -479,7 +535,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         );
       case InstallerWizardStep.handoff:
         return HandoffScreen(
-          onBack: () => _goToStep(InstallerWizardStep.brandSetup),
+          onBack: () => _goToStep(prevWizardStep(step)),
           onNext: (draft) {
             ref.read(installerPreferenceDraftProvider.notifier).state = draft;
             _completeSetup();
@@ -1253,6 +1309,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return _StepInfo('Customer Info', 'Customer');
       case InstallerWizardStep.controllerSetup:
         return _StepInfo('Controller Setup', 'Controllers');
+      case InstallerWizardStep.connectionMethod:
+        return _StepInfo('Connection Method', 'Network');
       case InstallerWizardStep.zoneConfiguration:
         return _StepInfo('Zone Configuration', 'Zones');
       case InstallerWizardStep.hardwareConfig:
