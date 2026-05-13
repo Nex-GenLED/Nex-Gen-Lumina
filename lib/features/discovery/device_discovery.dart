@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 
 /// Represents a discovered device endpoint
 class DeviceEndpoint {
@@ -200,7 +201,12 @@ class DeviceRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   /// Save or update a device under users/{uid}/controllers/{docId}
-  /// Stores: serial, ip, name, ssid (optional), wifiConfigured, createdAt/updatedAt
+  /// Stores: serial, ip, name, ssid (optional), wifiConfigured,
+  /// connectionMethod, createdAt/updatedAt.
+  ///
+  /// [connectionMethod] defaults to [ConnectionMethod.unknown] because the
+  /// BLE-add path lands here before any `/json/info` inspection has run.
+  /// A later "Apply NGL Defaults" or background refresh upgrades the value.
   Future<void> saveDevice({
     required String userId,
     required String serial,
@@ -208,6 +214,7 @@ class DeviceRepository {
     String? name,
     String? ssid,
     bool? wifiConfigured,
+    ConnectionMethod connectionMethod = ConnectionMethod.unknown,
   }) async {
     try {
       final docId = serial.isNotEmpty ? serial.replaceAll(':', '_') : ip.replaceAll('.', '_');
@@ -220,6 +227,7 @@ class DeviceRepository {
       debugPrint('   - ssid: ${ssid ?? 'N/A'}');
       final resolvedWifiConfigured = wifiConfigured ?? (ssid != null && ssid.isNotEmpty);
       debugPrint('   - wifiConfigured: $resolvedWifiConfigured');
+      debugPrint('   - connectionMethod: ${connectionMethodToJson(connectionMethod)}');
 
       final ref = _db.collection('users').doc(userId).collection('controllers').doc(docId);
 
@@ -229,6 +237,7 @@ class DeviceRepository {
         'name': name ?? 'Controller '+ip,
         if (ssid != null && ssid.isNotEmpty) 'ssid': ssid,
         'wifiConfigured': resolvedWifiConfigured,
+        'connectionMethod': connectionMethodToJson(connectionMethod),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 

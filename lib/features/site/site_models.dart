@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/site/connection_method.dart';
 
 /// Site operating modes
 enum SiteMode { residential, commercial }
@@ -59,6 +60,7 @@ class ControllerInfo {
   final String? serial;
   final String? ssid;
   final bool? wifiConfigured;
+  final ConnectionMethod? connectionMethod;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -69,6 +71,7 @@ class ControllerInfo {
     this.serial,
     this.ssid,
     this.wifiConfigured,
+    this.connectionMethod,
     this.createdAt,
     this.updatedAt,
   });
@@ -80,6 +83,7 @@ class ControllerInfo {
     String? serial,
     String? ssid,
     bool? wifiConfigured,
+    ConnectionMethod? connectionMethod,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) =>
@@ -90,6 +94,7 @@ class ControllerInfo {
         serial: serial ?? this.serial,
         ssid: ssid ?? this.ssid,
         wifiConfigured: wifiConfigured ?? this.wifiConfigured,
+        connectionMethod: connectionMethod ?? this.connectionMethod,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );

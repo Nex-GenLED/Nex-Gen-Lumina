@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -505,6 +506,36 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     final hasEthernet = ethRaw == true ||
         (ethRaw is Map && ethRaw.isNotEmpty) ||
         (ethRaw is num && ethRaw != 0);
+    // Symmetric WiFi-active heuristic: WLED reports the wifi object on every
+    // build, but signal == 0 (or absent bssid) means the station isn't
+    // associated. Same shape as wled_manual_setup.dart's check.
+    final wifiRaw = info?.raw['wifi'];
+    bool hasWifi = false;
+    if (wifiRaw is Map) {
+      final signal = wifiRaw['signal'];
+      final rssi = wifiRaw['rssi'];
+      final bssid = wifiRaw['bssid'];
+      hasWifi = (signal is num && signal > 0) ||
+          (rssi is num && rssi < 0) ||
+          (bssid is String && bssid.isNotEmpty);
+    }
+    final ConnectionMethod connectionMethod;
+    if (info == null) {
+      connectionMethod = ConnectionMethod.unknown;
+    } else if (hasEthernet && hasWifi) {
+      connectionMethod = ConnectionMethod.ethernetWifiActive;
+    } else if (hasEthernet) {
+      connectionMethod = ConnectionMethod.ethernet;
+    } else if (hasWifi) {
+      connectionMethod = ConnectionMethod.wifi;
+    } else {
+      connectionMethod = ConnectionMethod.unknown;
+    }
+    // Legacy field — kept for one release cycle so any downstream consumer
+    // that still reads `connectionType` doesn't regress while we roll out
+    // the migration. Drop once telemetry confirms 100% adoption of
+    // `connectionMethod`.
+    // TODO: remove after migration confirms 100% adoption
     final connectionType = hasEthernet ? 'ethernet_wifi' : 'wifi';
 
     // Name field was dropped when the IP entry dialog became a single-
@@ -572,7 +603,9 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         'name': name,
         'wifiConfigured': true,
         'controller_type': controllerType.toFirestore(),
+        // TODO: remove after migration confirms 100% adoption
         'connectionType': connectionType,
+        'connectionMethod': connectionMethodToJson(connectionMethod),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         if (mac != null) 'mac': mac,

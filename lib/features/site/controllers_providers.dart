@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
@@ -39,6 +40,7 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
         serial: data['serial'] as String?,
         ssid: data['ssid'] as String?,
         wifiConfigured: data['wifiConfigured'] as bool?,
+        connectionMethod: connectionMethodFromJson(data['connectionMethod']),
         createdAt: createdTs is Timestamp ? createdTs.toDate() : null,
         updatedAt: updatedTs is Timestamp ? updatedTs.toDate() : null,
       );

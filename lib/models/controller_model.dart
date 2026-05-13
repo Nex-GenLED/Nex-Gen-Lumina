@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/models/controller_type.dart';
 
 /// Represents a saved WLED controller in Firestore.
@@ -26,6 +27,11 @@ class ControllerModel {
   /// Hardware variant of this controller.
   final ControllerType controllerType;
 
+  /// How this controller is reachable on the local network. `null` on
+  /// documents written before the field was introduced; the one-time
+  /// migration in `connection_method_migration.dart` backfills these.
+  final ConnectionMethod? connectionMethod;
+
   /// When this document was first created.
   final DateTime? createdAt;
 
@@ -40,6 +46,7 @@ class ControllerModel {
     this.ssid,
     this.wifiConfigured,
     this.controllerType = ControllerType.genericWled,
+    this.connectionMethod,
     this.createdAt,
     this.updatedAt,
   });
@@ -69,6 +76,7 @@ class ControllerModel {
       controllerType: json['controller_type'] is String
           ? ControllerType.fromFirestore(json['controller_type'] as String)
           : ControllerType.genericWled,
+      connectionMethod: connectionMethodFromJson(json['connectionMethod']),
       createdAt: createdTs is Timestamp ? createdTs.toDate() : null,
       updatedAt: updatedTs is Timestamp ? updatedTs.toDate() : null,
     );
@@ -82,6 +90,8 @@ class ControllerModel {
         if (ssid != null && ssid!.isNotEmpty) 'ssid': ssid,
         if (wifiConfigured != null) 'wifiConfigured': wifiConfigured,
         'controller_type': controllerType.toFirestore(),
+        if (connectionMethod != null)
+          'connectionMethod': connectionMethodToJson(connectionMethod!),
         if (createdAt != null) 'createdAt': Timestamp.fromDate(createdAt!),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -94,6 +104,7 @@ class ControllerModel {
     String? ssid,
     bool? wifiConfigured,
     ControllerType? controllerType,
+    ConnectionMethod? connectionMethod,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) =>
@@ -105,6 +116,7 @@ class ControllerModel {
         ssid: ssid ?? this.ssid,
         wifiConfigured: wifiConfigured ?? this.wifiConfigured,
         controllerType: controllerType ?? this.controllerType,
+        connectionMethod: connectionMethod ?? this.connectionMethod,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );

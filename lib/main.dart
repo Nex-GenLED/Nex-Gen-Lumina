@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
+import 'package:nexgen_command/services/connection_method_migration.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
@@ -201,6 +203,21 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       if (next == true) {
         BackgroundLearningService.runAutopilotRegenIfNeeded(ref);
       }
+    });
+
+    // One-time connection-method backfill — fires when a non-anonymous
+    // user signs in. Internal SharedPreferences guard makes the call
+    // idempotent across sign-out/sign-in cycles. Errors are swallowed
+    // inside the migration so a failure here cannot block app startup
+    // or the UI from rendering.
+    ref.listen<AsyncValue<User?>>(authStateProvider, (prev, next) {
+      next.whenData((user) {
+        ConnectionMethodMigration.tryRunForUid(
+          uid: user?.uid,
+          isAnonymous: user?.isAnonymous ?? true,
+          runner: ConnectionMethodMigration.runOnce,
+        );
+      });
     });
 
     // Run schedule persistence health check once after auth is ready
