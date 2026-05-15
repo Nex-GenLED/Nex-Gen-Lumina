@@ -19,6 +19,8 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_conflict_dialog.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:uuid/uuid.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -187,11 +189,30 @@ class CalendarScheduleNotifier
   /// Apply a list of date-specific entries, overwriting any existing
   /// entries for those dates.  Persists non-holiday entries to Firestore.
   /// Pass [resolution] after showing the conflict dialog to handle overlaps.
+  ///
+  /// When [recurringIntent] is non-null, the per-day [entries] are discarded
+  /// and a single recurring [ScheduleItem] is written instead. This is the
+  /// collapse path for Lumina chat requests like "warm white every night
+  /// this week" — the detector classifies the intent at parse time
+  /// (see [LuminaCalendarService._detectRecurringIntent]) and this method
+  /// routes the write. Other callers (autopilot, manual entry editor) leave
+  /// [recurringIntent] null and get the original per-day write behavior.
+  ///
   /// Returns true if the Firestore write succeeded.
   Future<bool> applyEntries(List<CalendarEntry> entries,
-      {ConflictResolution? resolution}) async {
+      {ConflictResolution? resolution, RecurringIntent? recurringIntent}) async {
     // ── Conflict resolution (before optimistic update) ───────────
     if (resolution == ConflictResolution.cancel) return false;
+
+    // Recurring-intent fast path: skip CalendarEntry storage entirely and
+    // write a single ScheduleItem instead. The schedules-provider addAll
+    // path has its own content-fingerprint dedup against existing entries
+    // (e.g. an autopilot-created sibling), so a no-op result is normal
+    // when a matching ScheduleItem already exists.
+    if (recurringIntent != null) {
+      return _writeAsScheduleItem(recurringIntent);
+    }
+
     if (resolution == ConflictResolution.removeExisting) {
       final conflicts = checkConflictsForEntries(entries);
       final schedNotifier = _ref.read(schedulesProvider.notifier);
@@ -224,6 +245,106 @@ class CalendarScheduleNotifier
       debugPrint('❌ applyEntries: $e');
       return false;
     }
+  }
+
+  /// Write a single recurring [ScheduleItem] from the detected [intent]
+  /// onto the user's schedules array. Used by [applyEntries] when the
+  /// Lumina chat path classified the request as a routine rather than
+  /// one-off date overrides.
+  ///
+  /// Bypasses [CalendarEntry] storage entirely — the schedules array is
+  /// the long-lived recurring form, and [ScheduleItem.timeLabel] preserves
+  /// symbolic "Sunset"/"Sunrise" labels that [ScheduleSyncService] honors
+  /// via WLED's astronomical timer flags (hour: 24/25). Cross-path dedup
+  /// against an existing autopilot-created sibling is handled by
+  /// [SchedulesNotifier.addAll]'s content-fingerprint check.
+  Future<bool> _writeAsScheduleItem(RecurringIntent intent) async {
+    final uid = _userId;
+    if (uid == null) {
+      debugPrint('❌ _writeAsScheduleItem: no userId');
+      return false;
+    }
+
+    // Inline WLED payload construction. CalendarEntry has no effect field,
+    // so fx: 0 (Solid) is the safest reading — the color + brightness
+    // already encode the intent for the most common case (e.g. "warm
+    // white every night"). Pattern-with-motion requests routinely flow
+    // through the SmartScheduler path which has full effect metadata; if
+    // they reach here it's a Solid-fallback degradation, not data loss.
+    final color = intent.color ?? const Color(0xFFFFFFFF);
+    final r = (color.r * 255).round();
+    final g = (color.g * 255).round();
+    final b = (color.b * 255).round();
+    final colRgbw = rgbToRgbw(r, g, b, forceZeroWhite: true);
+    final briWled = (intent.brightness * 255 / 100).round().clamp(0, 255);
+    final wledPayload = <String, dynamic>{
+      'on': true,
+      'bri': briWled,
+      'seg': [
+        {
+          'fx': 0,
+          'sx': 128,
+          'ix': 128,
+          'col': [colRgbw],
+        }
+      ],
+    };
+
+    // Order repeatDays Mon-Sun for stable dedup against autopilot-written
+    // siblings (SchedulesNotifier.addAll fingerprints on repeatDays.join).
+    const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final repeatDaysList =
+        dayOrder.where(intent.repeatDays.contains).toList();
+
+    final timeLabel = _toScheduleTimeLabel(intent.onTime);
+    final offTimeLabelRaw = _toScheduleTimeLabel(intent.offTime);
+    final item = ScheduleItem(
+      id: 'lumina-chat-${const Uuid().v4()}',
+      timeLabel: timeLabel,
+      offTimeLabel: offTimeLabelRaw.isEmpty ? null : offTimeLabelRaw,
+      repeatDays: repeatDaysList,
+      actionLabel: intent.patternName,
+      enabled: true,
+      wledPayload: wledPayload,
+    );
+
+    try {
+      final beforeLen = _ref.read(schedulesProvider).length;
+      await _ref.read(schedulesProvider.notifier).addAll([item]);
+      final afterLen = _ref.read(schedulesProvider).length;
+      final matched = afterLen == beforeLen;
+      debugPrint('[LuminaCalendar] Recurring intent → ScheduleItem. '
+          '${matched ? "Existing match — skipped write" : "Wrote new ScheduleItem"} '
+          '(pattern="${intent.patternName}" '
+          'days=${repeatDaysList.join(",")} '
+          'time="${item.timeLabel}→${item.offTimeLabel ?? "(none)"}")');
+      return true;
+    } catch (e) {
+      debugPrint('❌ _writeAsScheduleItem: $e');
+      return false;
+    }
+  }
+
+  /// Map a CalendarEntry time string ("18:00" 24-hr, or symbolic
+  /// "sunset"/"sunrise") to the form [ScheduleItem.timeLabel] expects:
+  /// either "h:mm AM/PM" 12-hr clock, or the capitalized symbolic strings
+  /// "Sunset"/"Sunrise" that [ScheduleSyncService._buildTimerEntry]
+  /// translates to WLED's hour:25 / hour:24 astronomical timer flags.
+  static String _toScheduleTimeLabel(String? input) {
+    if (input == null || input.isEmpty) return '';
+    final lower = input.trim().toLowerCase();
+    if (lower == 'sunset') return 'Sunset';
+    if (lower == 'sunrise') return 'Sunrise';
+    final match = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(input.trim());
+    if (match != null) {
+      final h24 = int.parse(match.group(1)!);
+      final mm = int.parse(match.group(2)!);
+      if (h24 < 0 || h24 > 23 || mm < 0 || mm > 59) return input;
+      final period = h24 >= 12 ? 'PM' : 'AM';
+      final h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
+      return '$h12:${mm.toString().padLeft(2, '0')} $period';
+    }
+    return input;
   }
 
   /// Remove a specific date override, reverting it to the autopilot/recurring
@@ -279,7 +400,58 @@ final calendarViewModeProvider = StateProvider<String>((ref) => 'week');
 class PendingCalendarChanges {
   final String message;
   final List<CalendarEntry> changes;
-  const PendingCalendarChanges({required this.message, required this.changes});
+  /// When non-null, the changes array represents a single recurring intent
+  /// (e.g. "warm white every night this week") and should be persisted as a
+  /// ScheduleItem on the user's recurring schedules array, NOT as N
+  /// CalendarEntry overrides. See [LuminaCalendarService._detectRecurringIntent]
+  /// for the detection rules and [CalendarScheduleNotifier._writeAsScheduleItem]
+  /// for the write path.
+  final RecurringIntent? recurringIntent;
+  const PendingCalendarChanges({
+    required this.message,
+    required this.changes,
+    this.recurringIntent,
+  });
+}
+
+/// A uniform recurring schedule intent inferred from a Lumina chat request.
+///
+/// Built by [LuminaCalendarService._detectRecurringIntent] when the parsed
+/// CalendarEntry list represents a routine rather than a series of one-off
+/// date overrides. Consumed by [CalendarScheduleNotifier._writeAsScheduleItem]
+/// to produce a single [ScheduleItem] with the appropriate repeatDays and
+/// time labels.
+class RecurringIntent {
+  final String patternName;
+  final Color? color;
+  /// Source time string from the CalendarEntry — may be a 24-hr clock string
+  /// like "18:00", or the literal symbolic strings "sunset" / "sunrise".
+  /// [CalendarScheduleNotifier._toScheduleTimeLabel] maps both forms to the
+  /// 12-hr / capitalized form that [ScheduleItem.timeLabel] expects.
+  final String? onTime;
+  final String? offTime;
+  /// 0–100 (matches CalendarEntry.brightness). The ScheduleItem write path
+  /// scales this to the 0–255 range WLED expects.
+  final int brightness;
+  /// 3-letter title-case day names ('Mon', 'Tue', etc) matching the format
+  /// [ScheduleItem.repeatDays] expects and the WLED timer day-of-week parser.
+  final Set<String> repeatDays;
+  /// Preserved for logging and any future "show what was collapsed" UI.
+  final List<CalendarEntry> originalChanges;
+  /// Human-readable summary of the detected pattern (e.g. "every night this
+  /// week", "every weekday") for debug logs.
+  final String intentSummary;
+
+  const RecurringIntent({
+    required this.patternName,
+    required this.color,
+    required this.onTime,
+    required this.offTime,
+    required this.brightness,
+    required this.repeatDays,
+    required this.originalChanges,
+    required this.intentSummary,
+  });
 }
 
 final pendingCalendarProvider =
@@ -324,6 +496,7 @@ Rules:
 • For relative dates like "next week", "this weekend", "tomorrow", etc., calculate the actual calendar dates from today's date (provided below) and list EACH date explicitly.
 • "next week" means the 7 days of the following Monday–Sunday week. "nightly" or "every night" means every day in the range.
 • For ranges (e.g. "every Friday in April 2026", "nightly next week"), include one entry PER matching day.
+• If the request is a uniform recurring pattern (same pattern, color, and time across every matching day), you MAY additionally include a top-level field "recurringIntent": true to signal that the changes array represents a single recurring routine. This is OPTIONAL — the changes array must still be populated with one entry per matching day as above. Use "recurringIntent": true for prompts like "every night this week", "nightly through Sunday", "every weekday for the next two weeks". Do NOT use it for distinct one-offs like "blue on December 25" or "red and green on Christmas Eve".
 • For "off" / "turn off": set color to null and brightness to 0.
 • onTime / offTime use 24-hour format ("18:00", "23:30"). Use "sunset" or "$sunsetTime" for sunset, "sunrise" or "$sunriseTime" for sunrise. null is also valid.
 • Today's sunset is $sunsetTime and sunrise is $sunriseTime in the user's timezone ($timezone). Use these exact times when the user says "sunset" or "sunrise".
@@ -463,6 +636,149 @@ Rules:
         changes: const [],
       );
     }
-    return PendingCalendarChanges(message: message, changes: changes);
+
+    // Optional Claude hint: when the model judges the request to be a
+    // uniform recurring pattern it may set top-level recurringIntent:true.
+    // This lowers the detector's entry-count threshold so borderline
+    // 2-entry cases collapse when the natural-language signal was strong.
+    final claudeFlag = parsed['recurringIntent'] == true;
+    final intent = _detectRecurringIntent(
+      changes,
+      claudeFlaggedRecurring: claudeFlag,
+    );
+    if (intent != null) {
+      debugPrint('📅 LuminaCalendar: recurring intent detected '
+          '(${intent.intentSummary}) — '
+          'will route to ScheduleItem write on confirm');
+    }
+    return PendingCalendarChanges(
+      message: message,
+      changes: changes,
+      recurringIntent: intent,
+    );
+  }
+
+  /// Detects whether [changes] represents a single recurring intent
+  /// (e.g. "warm white every night this week") rather than a series of
+  /// distinct date overrides ("blue on December 25").
+  ///
+  /// Returns a [RecurringIntent] when the rules below match, or null when
+  /// the entries should be written as per-day CalendarEntry overrides.
+  ///
+  /// Rules (evaluated in order):
+  ///   1. UNIFORM CONSECUTIVE DAYS — ≥3 entries on consecutive calendar
+  ///      days with identical pattern/color/time/brightness.
+  ///   2. SAME-WEEKDAY REPETITION — ≥3 entries all on the same weekday
+  ///      with identical fields.
+  ///   3. WEEKDAY-ONLY or WEEKEND-ONLY — ≥5 entries entirely within
+  ///      Mon-Fri (collapses to Mon-Fri repeat) or entirely within
+  ///      Sat-Sun (collapses to Sat-Sun repeat) with identical fields.
+  ///   4. FALLBACK — null.
+  ///
+  /// When [claudeFlaggedRecurring] is true, the minimum entry threshold
+  /// for rules 1 and 2 drops to 2 — Claude's natural-language judgment
+  /// lets a borderline 2-entry case collapse. Rule 3's 5-entry threshold
+  /// stays put; that pattern is already strong enough not to need hints.
+  static RecurringIntent? _detectRecurringIntent(
+    List<CalendarEntry> entries, {
+    bool claudeFlaggedRecurring = false,
+  }) {
+    final minEntries = claudeFlaggedRecurring ? 2 : 3;
+    if (entries.length < minEntries) return null;
+
+    // All entries must agree on the lighting payload for a collapse to
+    // be safe — different colors/patterns per day means the user wanted
+    // distinct one-offs, not a routine.
+    final first = entries.first;
+    final allIdentical = entries.every((e) =>
+        e.patternName == first.patternName &&
+        e.color == first.color &&
+        e.onTime == first.onTime &&
+        e.offTime == first.offTime &&
+        e.brightness == first.brightness);
+    if (!allIdentical) return null;
+
+    // Parse dateKeys to DateTimes once and keep them sorted.
+    final dated = <DateTime>[];
+    for (final e in entries) {
+      final d = DateTime.tryParse(e.dateKey);
+      if (d == null) return null; // unparseable dateKey aborts detection
+      dated.add(d);
+    }
+    dated.sort();
+
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // RULE 1 — consecutive days
+    bool consecutive = true;
+    for (int i = 1; i < dated.length; i++) {
+      if (dated[i].difference(dated[i - 1]).inDays != 1) {
+        consecutive = false;
+        break;
+      }
+    }
+    if (consecutive) {
+      final days = dated.map((d) => dayLabels[d.weekday - 1]).toSet();
+      return RecurringIntent(
+        patternName: first.patternName,
+        color: first.color,
+        onTime: first.onTime,
+        offTime: first.offTime,
+        brightness: first.brightness,
+        repeatDays: days,
+        originalChanges: entries,
+        intentSummary: '${entries.length} consecutive days',
+      );
+    }
+
+    // RULE 2 — same weekday repetition
+    final weekdays = dated.map((d) => d.weekday).toSet();
+    if (weekdays.length == 1) {
+      final dayLabel = dayLabels[weekdays.first - 1];
+      return RecurringIntent(
+        patternName: first.patternName,
+        color: first.color,
+        onTime: first.onTime,
+        offTime: first.offTime,
+        brightness: first.brightness,
+        repeatDays: {dayLabel},
+        originalChanges: entries,
+        intentSummary: '${entries.length} ${dayLabel}s',
+      );
+    }
+
+    // RULE 3 — weekday-only (Mon-Fri) or weekend-only (Sat-Sun), ≥5 entries
+    if (entries.length >= 5) {
+      const weekdayInts = {1, 2, 3, 4, 5};
+      const weekendInts = {6, 7};
+      final allWeekday = dated.every((d) => weekdayInts.contains(d.weekday));
+      final allWeekend = dated.every((d) => weekendInts.contains(d.weekday));
+      if (allWeekday) {
+        return RecurringIntent(
+          patternName: first.patternName,
+          color: first.color,
+          onTime: first.onTime,
+          offTime: first.offTime,
+          brightness: first.brightness,
+          repeatDays: const {'Mon', 'Tue', 'Wed', 'Thu', 'Fri'},
+          originalChanges: entries,
+          intentSummary: 'every weekday (${entries.length} entries)',
+        );
+      }
+      if (allWeekend) {
+        return RecurringIntent(
+          patternName: first.patternName,
+          color: first.color,
+          onTime: first.onTime,
+          offTime: first.offTime,
+          brightness: first.brightness,
+          repeatDays: const {'Sat', 'Sun'},
+          originalChanges: entries,
+          intentSummary: 'every weekend (${entries.length} entries)',
+        );
+      }
+    }
+
+    return null;
   }
 }

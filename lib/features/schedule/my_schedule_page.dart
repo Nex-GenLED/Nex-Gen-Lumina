@@ -637,7 +637,11 @@ Future<void> _showPendingPreviewSheet(
 
     final ok = await ref
         .read(calendarScheduleProvider.notifier)
-        .applyEntries(pending.changes, resolution: resolution);
+        .applyEntries(
+          pending.changes,
+          resolution: resolution,
+          recurringIntent: pending.recurringIntent,
+        );
     if (pending.changes.isNotEmpty) {
       ref.read(selectedCalendarDateProvider.notifier).state =
           pending.changes.first.dateKey;
