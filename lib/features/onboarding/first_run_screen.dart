@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -75,7 +76,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Row(
-                children: List.generate(2, (i) {
+                children: List.generate(3, (i) {
                   return Expanded(
                     child: Container(
                       height: 3,
@@ -113,6 +114,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
                 onPageChanged: (page) => setState(() => _currentPage = page),
                 children: [
                   _buildWelcomePage(firstName),
+                  _buildLocationPermissionPage(),
                   _buildCompletionPage(),
                 ],
               ),
@@ -267,7 +269,158 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
     }
   }
 
-  // ── Page 2: Completion ──
+  // ── Page 2: Location Permission ──
+
+  Widget _buildLocationPermissionPage() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: NexGenPalette.gunmetal90,
+              border: Border.all(color: NexGenPalette.line),
+            ),
+            child: const Icon(Icons.location_on_outlined, size: 56, color: NexGenPalette.cyan),
+          ),
+          const SizedBox(height: 40),
+          const Text(
+            'Welcome Home Detection',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Lumina uses your location to detect when you\'re on your home '
+            'WiFi network — this lets your app control lights locally without '
+            'going through the cloud, and powers Welcome Home automation '
+            'when enabled.\n\n'
+            'Location is only used while you\'re using the app. We don\'t '
+            'track your location or share it with anyone.',
+            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 48),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _requestLocationPermission,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Text(
+                'Allow Location Access',
+                style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: _skipLocation,
+            child: const Text(
+              'Skip for Now',
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _requestLocationPermission() async {
+    // Cross-platform: request whileInUse regardless of OS. iOS
+    // and Android each handle the native dialog correctly via
+    // permission_handler — no platform branching needed.
+    try {
+      final status = await Permission.locationWhenInUse.request();
+
+      if (mounted) {
+        switch (status) {
+          case PermissionStatus.granted:
+            // Success — silently proceed
+            debugPrint('[FirstRun] Location granted');
+            break;
+          case PermissionStatus.permanentlyDenied:
+            // Show a non-blocking dialog with Settings affordance
+            await _showPermanentlyDeniedDialog();
+            break;
+          case PermissionStatus.denied:
+          case PermissionStatus.restricted:
+          case PermissionStatus.limited:
+          case PermissionStatus.provisional:
+            // Surface a non-blocking message
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Some features like home network detection '
+                  'won\'t work without location access. You can '
+                  'enable it later in Settings.',
+                ),
+                duration: Duration(seconds: 4),
+              ),
+            );
+            break;
+        }
+      }
+    } catch (e, st) {
+      debugPrint('[FirstRun] Location request error: $e\n$st');
+    }
+
+    // Advance regardless of permission result — graceful degradation
+    if (mounted) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  Future<void> _showPermanentlyDeniedDialog() async {
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Location Permission Disabled'),
+        content: const Text(
+          'You\'ve previously denied location access. To enable '
+          'home network detection and Welcome Home automation, '
+          'open Settings and grant location access.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Maybe Later'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _skipLocation() {
+    debugPrint('[FirstRun] User skipped location prompt');
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  // ── Page 3: Completion ──
 
   Widget _buildCompletionPage() {
     return Padding(
