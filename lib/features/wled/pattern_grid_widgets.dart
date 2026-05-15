@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/game_day/live_scoring_prompt.dart';
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
 class LibraryNodeGrid extends StatelessWidget {
@@ -29,8 +30,14 @@ class LibraryNodeGrid extends StatelessWidget {
   /// Override the default folder card aspect ratio (width / height).
   /// Higher values produce shorter cards.
   final double? folderAspectRatio;
+  /// When non-null, this grid is being rendered inside the Game Day
+  /// picker. Folder taps will push a new LibraryBrowserScreen via
+  /// the root Navigator (preserving the dashboard branch back stack)
+  /// and forward teamSlug into the constructor so the Game Day
+  /// persistence path continues working at depth.
+  final String? teamSlug;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio});
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug});
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +66,7 @@ class LibraryNodeGrid extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
               height: 44,
-              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug),
             ),
           );
         },
@@ -78,7 +85,7 @@ class LibraryNodeGrid extends StatelessWidget {
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient);
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug);
       },
     );
   }
@@ -90,8 +97,13 @@ class LibraryNodeCard extends StatelessWidget {
   final int? index;
   final Color? parentAccent;
   final List<Color>? parentGradient;
+  /// Propagated from LibraryNodeGrid. When non-null, folder taps push
+  /// a new LibraryBrowserScreen via the root Navigator (preserving
+  /// the Game Day dashboard branch) and forward teamSlug so design
+  /// taps at depth continue to persist via saveDesign.
+  final String? teamSlug;
 
-  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient});
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug});
 
   IconData _iconForNode() {
     final id = node.id;
@@ -468,10 +480,27 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': accentColor.toARGB32(),
-          });
+          if (teamSlug != null) {
+            // Game Day mount: push via the root navigator so the
+            // dashboard-branch back stack (and back-arrow-to-Game-Day
+            // per Item #64) is preserved, and forward teamSlug so the
+            // persistence path survives at depth.
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: accentColor,
+                  teamSlug: teamSlug,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': accentColor.toARGB32(),
+            });
+          }
         },
         borderRadius: BorderRadius.circular(10),
         child: Container(
@@ -547,12 +576,26 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': accentColor.toARGB32(),
-            'gradient0': gradientColors[0].toARGB32(),
-            'gradient1': gradientColors[1].toARGB32(),
-          });
+          if (teamSlug != null) {
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: accentColor,
+                  parentGradient: gradientColors,
+                  teamSlug: teamSlug,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': accentColor.toARGB32(),
+              'gradient0': gradientColors[0].toARGB32(),
+              'gradient1': gradientColors[1].toARGB32(),
+            });
+          }
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -678,12 +721,27 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': primaryColor.toARGB32(),
-            'gradient0': primaryColor.toARGB32(),
-            'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
-          });
+          if (teamSlug != null) {
+            final gradientSecond = (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6);
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: primaryColor,
+                  parentGradient: [primaryColor, gradientSecond],
+                  teamSlug: teamSlug,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': primaryColor.toARGB32(),
+              'gradient0': primaryColor.toARGB32(),
+              'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
+            });
+          }
         },
         borderRadius: BorderRadius.circular(10),
         splashColor: primaryColor.withValues(alpha: 0.08),

@@ -421,7 +421,14 @@ class _KelvinReferenceChart extends StatelessWidget {
 class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
+  /// Defensive Game Day plumbing. Currently unreachable in Game Day —
+  /// _CompactPatternItemCard is private and only constructed by
+  /// ThemeSelectionScreen, which is itself Explore-only. The parameter
+  /// is kept in place so if a future Game Day flow routes through this
+  /// card (e.g. a team-themed sub-category surface), saveDesign already
+  /// fires from _handleTap / _applyWithColor without further changes.
   final String? teamSlug;
+  // ignore: unused_element_parameter
   const _CompactPatternItemCard({required this.item, required this.themeColors, this.teamSlug});
 
   static String _effectDisplayName(int effectId) {

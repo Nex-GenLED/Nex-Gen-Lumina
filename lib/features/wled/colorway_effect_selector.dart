@@ -20,15 +20,25 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final LibraryNode paletteNode;
 
+  /// When non-null, this selector is operating inside the Game Day
+  /// picker. Committing a pattern (via [_applyPattern]) will persist
+  /// the design to the team's GameDayAutopilotConfig via saveDesign.
+  /// Preview-apply (the debounced [_sendToWled] path) is intentionally
+  /// NOT wired to saveDesign — that path fires on every knob twist
+  /// and would otherwise spam Firestore with intermediate states.
+  final String? teamSlug;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
+    this.teamSlug,
   });
 
   @override
@@ -246,6 +256,32 @@ class _ColorwayEffectSelectorPageState
         appliedToDevice = currentState.connected;
       } catch (e) {
         debugPrint('Pattern apply failed (device offline?): $e');
+      }
+
+      // Game Day persistence — when teamSlug is set, this selector is
+      // operating as a Game Day design picker, so persist the choice
+      // to the team's GameDayAutopilotConfig via the existing
+      // saveDesign provider method. The displayed design name matches
+      // the local-preview label used below ("<palette> - <effect>") so
+      // the Game Day card label is consistent with what the user just
+      // saw committed.
+      if (widget.teamSlug != null) {
+        try {
+          final designName = '${widget.paletteNode.name} - $effectName';
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: widget.teamSlug!,
+                designName: designName,
+                wledPayload: payload,
+                effectId: fxId,
+                speed: speed,
+                intensity: intensity,
+                brightness: (payload['bri'] as num?)?.toInt() ?? 200,
+              );
+        } catch (e, st) {
+          debugPrint('[GameDayPicker/Colorway] saveDesign failed: $e\n$st');
+        }
       }
     }
 

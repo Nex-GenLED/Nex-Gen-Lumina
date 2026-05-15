@@ -789,8 +789,20 @@ class AppRouter {
                         parentNavigatorKey: _rootNavigatorKey,
                         pageBuilder: (context, state) {
                           final nodeId = state.pathParameters['nodeId']!;
+                          // Game Day pushes nodeIds in the form 'team_<teamSlug>'.
+                          // Extract the team slug so LibraryBrowserScreen can route
+                          // design taps through GameDayAutopilotNotifier.saveDesign.
+                          // If the nodeId doesn't carry the team_ prefix (defensive
+                          // — shouldn't happen for this route), fall back to null so
+                          // the picker behaves like the Explore mount.
+                          final String? teamSlug = nodeId.startsWith('team_')
+                              ? nodeId.substring('team_'.length)
+                              : null;
                           return NoTransitionPage(
-                            child: LibraryBrowserScreen(nodeId: nodeId),
+                            child: LibraryBrowserScreen(
+                              nodeId: nodeId,
+                              teamSlug: teamSlug,
+                            ),
                           );
                         },
                       ),
