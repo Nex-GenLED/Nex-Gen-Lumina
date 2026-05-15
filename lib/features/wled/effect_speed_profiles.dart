@@ -248,37 +248,37 @@ const List<EffectSpeedProfile> _allProfiles = [
 
   // ─── Chase effects ─────────────────────────────────────────────────────
   // 13: Theater
-  EffectSpeedProfile(effectId: 13, rawMin: 10, rawMax: 210, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 13, rawMin: 10, rawMax: 230, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 14: Theater Rainbow
-  EffectSpeedProfile(effectId: 14, rawMin: 10, rawMax: 210, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 14, rawMin: 10, rawMax: 230, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 15: Running
-  EffectSpeedProfile(effectId: 15, rawMin: 10, rawMax: 210, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Run speed'),
+  EffectSpeedProfile(effectId: 15, rawMin: 10, rawMax: 230, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Run speed'),
   // 16: Saw
-  EffectSpeedProfile(effectId: 16, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Saw speed'),
+  EffectSpeedProfile(effectId: 16, rawMin: 10, rawMax: 220, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Saw speed'),
   // 27: Android
-  EffectSpeedProfile(effectId: 27, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 27, rawMin: 10, rawMax: 220, rawDefault: 55, rawRecommendedMax: 170, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 28: Chase
-  EffectSpeedProfile(effectId: 28, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 28, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 29: Chase Random
-  EffectSpeedProfile(effectId: 29, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 29, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 30: Chase Rainbow
-  EffectSpeedProfile(effectId: 30, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 30, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 31: Chase Flash
-  EffectSpeedProfile(effectId: 31, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 31, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 32: Chase Flash Rnd
-  EffectSpeedProfile(effectId: 32, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 32, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 37: Chase 2
-  EffectSpeedProfile(effectId: 37, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 37, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 50: Two Dots
-  EffectSpeedProfile(effectId: 50, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 50, rawMin: 10, rawMax: 220, rawDefault: 55, rawRecommendedMax: 170, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 52: Running Dual
-  EffectSpeedProfile(effectId: 52, rawMin: 10, rawMax: 210, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Run speed'),
+  EffectSpeedProfile(effectId: 52, rawMin: 10, rawMax: 230, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Run speed'),
   // 54: Chase 3
-  EffectSpeedProfile(effectId: 54, rawMin: 10, rawMax: 220, rawDefault: 60, rawRecommendedMax: 160, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 54, rawMin: 10, rawMax: 230, rawDefault: 60, rawRecommendedMax: 190, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
   // 64: Juggle
-  EffectSpeedProfile(effectId: 64, rawMin: 10, rawMax: 210, rawDefault: 55, rawRecommendedMax: 150, curveType: SpeedCurveType.logarithmic, label: 'Juggle speed'),
+  EffectSpeedProfile(effectId: 64, rawMin: 10, rawMax: 230, rawDefault: 55, rawRecommendedMax: 180, curveType: SpeedCurveType.logarithmic, label: 'Juggle speed'),
   // 78: Railway
-  EffectSpeedProfile(effectId: 78, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Rail speed'),
+  EffectSpeedProfile(effectId: 78, rawMin: 10, rawMax: 220, rawDefault: 55, rawRecommendedMax: 170, curveType: SpeedCurveType.logarithmic, label: 'Rail speed'),
   // 92: Sinelon
   EffectSpeedProfile(effectId: 92, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Sweep speed'),
   // 93: Sinelon Dual
@@ -286,7 +286,7 @@ const List<EffectSpeedProfile> _allProfiles = [
   // 94: Sinelon Rainbow
   EffectSpeedProfile(effectId: 94, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Sweep speed'),
   // 111: Chunchun
-  EffectSpeedProfile(effectId: 111, rawMin: 10, rawMax: 200, rawDefault: 55, rawRecommendedMax: 140, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
+  EffectSpeedProfile(effectId: 111, rawMin: 10, rawMax: 220, rawDefault: 55, rawRecommendedMax: 170, curveType: SpeedCurveType.logarithmic, label: 'Chase speed'),
 
   // ─── Scanner effects ───────────────────────────────────────────────────
   // 10: Scan
