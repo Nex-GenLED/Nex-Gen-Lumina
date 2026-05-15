@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
@@ -38,7 +39,8 @@ class MainScaffold extends ConsumerStatefulWidget {
   ConsumerState<MainScaffold> createState() => _MainScaffoldState();
 }
 
-class _MainScaffoldState extends ConsumerState<MainScaffold> {
+class _MainScaffoldState extends ConsumerState<MainScaffold>
+    with WidgetsBindingObserver {
   bool _tourChecked = false;
 
   void _onTap(int index) {
@@ -64,6 +66,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // Only start geofence monitoring if location permission is already
       // granted. Never prompt on launch — the dialog is shown contextually
@@ -89,10 +92,28 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Force-refresh the persisted Firebase ID token so the background
+      // workers have a valid token after the user re-foregrounds the app.
+      // The token TTL is ~1 hour; on resume after a long idle window the
+      // cached token may already be expired.
+      unawaited(refreshSyncIdToken(ref));
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     ref.watch(autoConnectControllerProvider);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
+    ref.watch(syncIdTokenPersistenceKeepAliveProvider);
 
     final isSimpleMode = ref.watch(simpleModeProvider);
     final luminaState = ref.watch(luminaSheetProvider);

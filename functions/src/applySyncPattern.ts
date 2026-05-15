@@ -13,7 +13,15 @@
  *   - ESP32 Bridge Mode (no webhookUrl): bridge polls the queue locally.
  *   - Webhook Mode (webhookUrl set):     trigger POSTs to the user's URL.
  *
- * Request data envelope:
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ * Background isolates cannot use the Firebase Functions SDK, so they POST
+ * directly to this URL with `Authorization: Bearer <idToken>`.
+ *
+ * Request body — accepts BOTH shapes for backward compatibility:
+ *   - { data: { ...envelope } }  (legacy callable-shape; current clients)
+ *   - { ...envelope }            (flat; new clients)
+ *
+ * Envelope:
  *   {
  *     payload:        Record<string, unknown>,  // WLED JSON
  *     initiatorUid:   string,                   // host UID — commands are
@@ -26,7 +34,7 @@
  *                                               // is all of host's controllers
  *   }
  *
- * Returns: { ok: true, commandCount: N }
+ * Returns (flat 200 body): { ok: true, commandCount: N }
  *
  * Deployment:
  *   cd functions
@@ -34,7 +42,7 @@
  *   firebase deploy --only functions:applySyncPattern
  */
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 
 interface ApplyPatternRequest {
@@ -46,9 +54,38 @@ interface ApplyPatternRequest {
   controllerIds?: string[];
 }
 
-export const applySyncPattern = onCall(
-  { maxInstances: 10 },
-  async (request) => {
+export const applySyncPattern = onRequest(
+  { maxInstances: 10, cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed; use POST." });
+      return;
+    }
+
+    // ── Manual auth verification ──────────────────────────────────────
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({
+        error: "Missing or malformed Authorization header (expected Bearer).",
+      });
+      return;
+    }
+    const idToken = authHeader.substring("Bearer ".length).trim();
+    let decoded: admin.auth.DecodedIdToken;
+    try {
+      decoded = await admin.auth().verifyIdToken(idToken);
+    } catch (err) {
+      console.warn("applySyncPattern: token verification failed", err);
+      res.status(401).json({ error: "Invalid or expired ID token" });
+      return;
+    }
+
+    // ── Body parsing (accept both `{data: ...}` and flat) ─────────────
+    const rawBody = (req.body ?? {}) as Record<string, unknown>;
+    const envelope: ApplyPatternRequest = (rawBody.data !== undefined
+      ? (rawBody.data as ApplyPatternRequest)
+      : (rawBody as unknown as ApplyPatternRequest));
+
     const {
       payload,
       initiatorUid,
@@ -56,19 +93,26 @@ export const applySyncPattern = onCall(
       sessionId,
       source,
       controllerIds,
-    } = request.data as ApplyPatternRequest;
+    } = envelope;
 
     if (!initiatorUid) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Missing required field: initiatorUid."
-      );
+      res
+        .status(400)
+        .json({ error: "Missing required field: initiatorUid." });
+      return;
     }
     if (!payload || typeof payload !== "object") {
-      throw new HttpsError(
-        "invalid-argument",
-        "Missing or invalid field: payload (expected JSON object)."
-      );
+      res.status(400).json({
+        error: "Missing or invalid field: payload (expected JSON object).",
+      });
+      return;
+    }
+
+    if (decoded.uid !== initiatorUid) {
+      res
+        .status(403)
+        .json({ error: "Token UID does not match initiatorUid" });
+      return;
     }
 
     const db = admin.firestore();
@@ -86,10 +130,10 @@ export const applySyncPattern = onCall(
         .doc(initiatorUid)
         .get();
       if (!memberDoc.exists) {
-        throw new HttpsError(
-          "permission-denied",
-          "Initiator is not a member of the named sync group."
-        );
+        res.status(403).json({
+          error: "Initiator is not a member of the named sync group.",
+        });
+        return;
       }
     }
 
@@ -103,7 +147,7 @@ export const applySyncPattern = onCall(
       .doc(initiatorUid)
       .collection("controllers");
 
-    let targets: { id: string; ip: string }[] = [];
+    const targets: { id: string; ip: string }[] = [];
 
     if (controllerIds && controllerIds.length > 0) {
       const docs = await Promise.all(
@@ -130,7 +174,8 @@ export const applySyncPattern = onCall(
       console.warn(
         `applySyncPattern: no target controllers for ${initiatorUid}`
       );
-      return { ok: true, commandCount: 0 };
+      res.status(200).json({ ok: true, commandCount: 0 });
+      return;
     }
 
     // ── Enqueue one RemoteCommand per controller ──────────────────────
@@ -165,6 +210,6 @@ export const applySyncPattern = onCall(
         `groupId=${groupId || "-"}, sessionId=${sessionId || "-"})`
     );
 
-    return { ok: true, commandCount: targets.length };
+    res.status(200).json({ ok: true, commandCount: targets.length });
   }
 );

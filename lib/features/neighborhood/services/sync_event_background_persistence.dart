@@ -23,6 +23,8 @@ const _kSyncUserUidKey = 'bg_sync_user_uid';
 const _kSyncControllerIpsKey = 'bg_sync_controller_ips';
 const _kSyncActiveSessionKey = 'bg_sync_active_session';
 const _kSyncHostFailoverTsKey = 'bg_sync_host_failover_ts';
+const _kSyncIdTokenKey = 'bg_sync_id_token';
+const _kSyncIdTokenExpiresAtKey = 'bg_sync_id_token_expires_at';
 
 /// Serializable subset of SyncEvent for background service consumption.
 /// Avoids pulling in Firestore dependencies in the background isolate.
@@ -35,6 +37,7 @@ class BackgroundSyncEventConfig {
   final String? espnTeamId;
   final String? teamId;
   final DateTime? scheduledTime;
+  final DateTime? scheduledEndTime;
   final List<int> repeatDays;
   final bool isEnabled;
   final String category;
@@ -62,6 +65,7 @@ class BackgroundSyncEventConfig {
     this.espnTeamId,
     this.teamId,
     this.scheduledTime,
+    this.scheduledEndTime,
     this.repeatDays = const [],
     this.isEnabled = true,
     this.category = 'gameDay',
@@ -92,6 +96,7 @@ class BackgroundSyncEventConfig {
         'espnTeamId': espnTeamId,
         'teamId': teamId,
         'scheduledTime': scheduledTime?.toIso8601String(),
+        'scheduledEndTime': scheduledEndTime?.toIso8601String(),
         'repeatDays': repeatDays,
         'isEnabled': isEnabled,
         'category': category,
@@ -120,6 +125,9 @@ class BackgroundSyncEventConfig {
       teamId: json['teamId'],
       scheduledTime: json['scheduledTime'] != null
           ? DateTime.tryParse(json['scheduledTime'])
+          : null,
+      scheduledEndTime: json['scheduledEndTime'] != null
+          ? DateTime.tryParse(json['scheduledEndTime'])
           : null,
       repeatDays: List<int>.from(json['repeatDays'] ?? []),
       isEnabled: json['isEnabled'] ?? true,
@@ -151,6 +159,7 @@ class BackgroundSyncEventConfig {
       espnTeamId: event.espnTeamId,
       teamId: event.teamId,
       scheduledTime: event.scheduledTime,
+      scheduledEndTime: event.scheduledEndTime,
       repeatDays: event.repeatDays,
       isEnabled: event.isEnabled,
       category: event.category.name,
@@ -354,4 +363,45 @@ Future<DateTime?> loadHostFailoverTimestamp() async {
 Future<void> clearHostFailoverTimestamp() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove(_kSyncHostFailoverTsKey);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FIREBASE ID TOKEN PERSISTENCE
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The background isolate has no FirebaseAuth — it cannot mint or refresh
+// tokens. The foreground app writes the current user's ID token here on
+// every auth state change and on app resume, and the background workers
+// read it before posting to the onRequest Cloud Functions.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Persist the current user's Firebase ID token for background HTTPS
+/// calls to onRequest Cloud Functions. Token is short-lived (1 hour)
+/// but is refreshed by the foreground on each app foreground event.
+Future<void> saveSyncIdToken(String? token, {DateTime? expiresAt}) async {
+  final prefs = await SharedPreferences.getInstance();
+  if (token == null) {
+    await prefs.remove(_kSyncIdTokenKey);
+    await prefs.remove(_kSyncIdTokenExpiresAtKey);
+  } else {
+    await prefs.setString(_kSyncIdTokenKey, token);
+    if (expiresAt != null) {
+      await prefs.setString(
+        _kSyncIdTokenExpiresAtKey,
+        expiresAt.toIso8601String(),
+      );
+    }
+  }
+}
+
+Future<String?> loadSyncIdToken() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncIdTokenKey);
+}
+
+Future<DateTime?> loadSyncIdTokenExpiresAt() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_kSyncIdTokenExpiresAtKey);
+  if (raw == null) return null;
+  return DateTime.tryParse(raw);
 }

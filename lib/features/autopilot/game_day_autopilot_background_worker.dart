@@ -491,11 +491,21 @@ class GameDayAutopilotBackgroundWorker {
       debugPrint('[GameDayBg] No user UID — cannot dispatch pattern');
       return;
     }
+    final idToken = await loadSyncIdToken();
+    if (idToken == null) {
+      debugPrint(
+        '[GameDayBg] No ID token persisted — skipping applySyncPattern',
+      );
+      return;
+    }
 
     try {
       final response = await http.post(
         Uri.parse('$_functionsBaseUrl/applySyncPattern'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'data': {
             'groupId': '',

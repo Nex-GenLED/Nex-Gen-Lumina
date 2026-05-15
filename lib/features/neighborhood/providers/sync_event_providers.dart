@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app_providers.dart';
 import '../models/sync_event.dart';
 import '../neighborhood_providers.dart';
 import '../services/autopilot_sync_trigger.dart';
@@ -363,5 +366,68 @@ Future<void> _syncEventsToBackground(
     );
   } catch (e) {
     debugPrint('[SyncTriggerController] Failed to sync to background: $e');
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ID Token Background Persistence
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The background isolate has no FirebaseAuth — it cannot mint or refresh
+// tokens. The foreground watches auth state and persists the current
+// user's ID token to SharedPreferences. Background workers read it before
+// every onRequest Cloud Function call. The token is short-lived (1 hour);
+// it gets refreshed on auth state change and on app resume.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Side-effect provider: watches auth state and persists the current user's
+/// Firebase ID token (plus its expiration) so background workers can attach
+/// `Authorization: Bearer <token>` when calling the onRequest Cloud Functions.
+///
+/// Kept alive by [syncIdTokenPersistenceKeepAliveProvider].
+final _syncIdTokenPersistenceProvider = Provider<void>((ref) {
+  final authAsync = ref.watch(authStateProvider);
+  authAsync.whenData((user) {
+    if (user == null) {
+      unawaited(saveSyncIdToken(null));
+      return;
+    }
+    unawaited(_persistTokenForUser(user));
+  });
+});
+
+/// Public keep-alive — watch from a top-level widget (main_scaffold.dart).
+final syncIdTokenPersistenceKeepAliveProvider = Provider<void>((ref) {
+  ref.watch(_syncIdTokenPersistenceProvider);
+});
+
+Future<void> _persistTokenForUser(User user) async {
+  try {
+    final token = await user.getIdToken();
+    final result = await user.getIdTokenResult();
+    await saveSyncIdToken(token, expiresAt: result.expirationTime);
+  } catch (e) {
+    debugPrint('[SyncIdToken] Failed to persist token: $e');
+  }
+}
+
+/// Force-refresh the persisted ID token. Call on app resume so the
+/// background workers have a fresh token after the user re-foregrounds
+/// the app following a long idle period.
+Future<void> refreshSyncIdToken(WidgetRef ref) async {
+  try {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      await saveSyncIdToken(null);
+      return;
+    }
+    final token = await user.getIdToken(true);
+    final result = await user.getIdTokenResult();
+    await saveSyncIdToken(token, expiresAt: result.expirationTime);
+  } catch (e) {
+    debugPrint('[SyncIdToken] refreshSyncIdToken failed: $e');
   }
 }

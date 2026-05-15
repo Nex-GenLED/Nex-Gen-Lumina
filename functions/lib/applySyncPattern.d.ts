@@ -13,7 +13,15 @@
  *   - ESP32 Bridge Mode (no webhookUrl): bridge polls the queue locally.
  *   - Webhook Mode (webhookUrl set):     trigger POSTs to the user's URL.
  *
- * Request data envelope:
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ * Background isolates cannot use the Firebase Functions SDK, so they POST
+ * directly to this URL with `Authorization: Bearer <idToken>`.
+ *
+ * Request body — accepts BOTH shapes for backward compatibility:
+ *   - { data: { ...envelope } }  (legacy callable-shape; current clients)
+ *   - { ...envelope }            (flat; new clients)
+ *
+ * Envelope:
  *   {
  *     payload:        Record<string, unknown>,  // WLED JSON
  *     initiatorUid:   string,                   // host UID — commands are
@@ -26,14 +34,11 @@
  *                                               // is all of host's controllers
  *   }
  *
- * Returns: { ok: true, commandCount: N }
+ * Returns (flat 200 body): { ok: true, commandCount: N }
  *
  * Deployment:
  *   cd functions
  *   npm run build
  *   firebase deploy --only functions:applySyncPattern
  */
-export declare const applySyncPattern: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    ok: boolean;
-    commandCount: number;
-}>, unknown>;
+export declare const applySyncPattern: import("firebase-functions/v2/https").HttpsFunction;

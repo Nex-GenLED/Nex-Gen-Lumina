@@ -13,27 +13,15 @@
  * This runs server-side because the background isolate cannot use Riverpod
  * or Firestore listeners — it only has SharedPreferences and HTTP.
  *
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ *
+ * Request body — accepts BOTH `{data: {...}}` (legacy callable-shape) and
+ * flat shapes. Returns a flat 200 body — no callable-protocol `{result:}`
+ * wrapping.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
  *   firebase deploy --only functions:initiateSyncSession
  */
-export declare const initiateSyncSession: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    success: boolean;
-    message: string;
-    sessionId?: undefined;
-    participantCount?: undefined;
-    hostUid?: undefined;
-} | {
-    success: boolean;
-    sessionId: string;
-    message: string;
-    participantCount?: undefined;
-    hostUid?: undefined;
-} | {
-    success: boolean;
-    sessionId: string;
-    participantCount: number;
-    hostUid: any;
-    message?: undefined;
-}>, unknown>;
+export declare const initiateSyncSession: import("firebase-functions/v2/https").HttpsFunction;

@@ -5,19 +5,14 @@
  * Handles the 30-second dissolution warning, marks session as completed,
  * and sends FCM notifications to all participants.
  *
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ *
+ * Request body — accepts BOTH `{data: {...}}` (legacy callable-shape) and
+ * flat shapes. Returns a flat 200 body — no `{result:}` wrapping.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
  *   firebase deploy --only functions:endSyncSession
  */
-export declare const endSyncSession: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
-    success: boolean;
-    message: string;
-    sessionId?: undefined;
-    participantCount?: undefined;
-} | {
-    success: boolean;
-    sessionId: string;
-    participantCount: number;
-    message?: undefined;
-}>, unknown>;
+export declare const endSyncSession: import("firebase-functions/v2/https").HttpsFunction;

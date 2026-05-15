@@ -463,6 +463,32 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     }
   }
 
+  /// Toggle the score celebration flash for a team. Writes
+  /// score_celebration_enabled to Firestore. Used by the Live Scoring
+  /// switch on the GameDay team card.
+  Future<void> setLiveScoring({
+    required String teamSlug,
+    required bool enabled,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to change live scoring.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'score_celebration_enabled': enabled,
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
   /// Remove a team entirely from the user's Game Day: strips it from the
   /// profile's `sports_team_priority` / `sports_teams` arrays (the source
   /// of truth for My Teams) and deletes the matching game_day_autopilot

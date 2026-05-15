@@ -473,23 +473,32 @@ class SyncEventBackgroundWorker {
     String? gameId,
   }) async {
     try {
-      // Use Firebase Cloud Functions callable URL
       // The background isolate can't use FirebaseFunctions SDK directly,
-      // so we use a direct HTTP call with the user's ID token.
+      // so we POST to the onRequest endpoint with an Authorization header
+      // sourced from the foreground-persisted ID token.
       final userUid = await loadSyncUserUid();
       if (userUid == null) {
         debugPrint('[SyncBgWorker] No user UID — cannot call Cloud Function');
         return null;
       }
+      final idToken = await loadSyncIdToken();
+      if (idToken == null) {
+        debugPrint(
+          '[SyncBgWorker] No ID token persisted — skipping initiateSync',
+        );
+        return null;
+      }
 
-      // Use Cloud Functions callable endpoint
       final client = http.Client();
       try {
         final response = await client.post(
           Uri.parse(
             '$_functionsBaseUrl/initiateSyncSession',
           ),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
           body: jsonEncode({
             'data': {
               'groupId': groupId,
@@ -502,8 +511,7 @@ class SyncEventBackgroundWorker {
 
         if (response.statusCode == 200) {
           final result = jsonDecode(response.body) as Map<String, dynamic>;
-          final data = result['result'] as Map<String, dynamic>?;
-          return data?['sessionId'] as String?;
+          return result['sessionId'] as String?;
         } else {
           debugPrint(
             '[SyncBgWorker] Cloud Function error: ${response.statusCode}',
@@ -526,6 +534,42 @@ class SyncEventBackgroundWorker {
     BackgroundActiveSession session,
     List<BackgroundSyncEventConfig> configs,
   ) async {
+    // ── Scheduled end-time enforcement ───────────────────────────────────
+    // Applies to BOTH scheduled-time and game-start sessions: if the event
+    // has a scheduledEndTime that has now passed, end the session even if
+    // the (optional) game is still in progress.
+    final endingConfigs =
+        configs.where((c) => c.id == session.syncEventId).toList();
+    if (endingConfigs.isNotEmpty) {
+      final endConfig = endingConfigs.first;
+      if (endConfig.scheduledEndTime != null &&
+          DateTime.now().isAfter(endConfig.scheduledEndTime!)) {
+        debugPrint('[SyncBgWorker] Scheduled end time reached for '
+            '"${endConfig.name}" — ending session');
+        await _callEndSessionFunction(
+          groupId: session.groupId,
+          sessionId: session.sessionId,
+        );
+        await clearActiveSession();
+        _lastKnownGameStates.clear();
+        _service.invoke('syncSessionEnded', {
+          'sessionId': session.sessionId,
+          'groupId': session.groupId,
+        });
+        // Apply post-event behavior: explicit turnOff sends an off command;
+        // returnToAutopilot / stayOn fall through to the regular post-end
+        // path handled by the foreground (no extra payload needed here).
+        if (endConfig.postEventBehavior == 'turnOff') {
+          await _applyPatternToControllers(
+            {'on': false},
+            groupId: session.groupId,
+            sessionId: session.sessionId,
+          );
+        }
+        return;
+      }
+    }
+
     if (session.gameId == null) return; // Not a game-day session
 
     final config = configs.where((c) => c.id == session.syncEventId);
@@ -640,6 +684,13 @@ class SyncEventBackgroundWorker {
     try {
       final userUid = await loadSyncUserUid();
       if (userUid == null) return;
+      final idToken = await loadSyncIdToken();
+      if (idToken == null) {
+        debugPrint(
+          '[SyncBgWorker] No ID token persisted — skipping endSession',
+        );
+        return;
+      }
 
       final client = http.Client();
       try {
@@ -647,7 +698,10 @@ class SyncEventBackgroundWorker {
           Uri.parse(
             '$_functionsBaseUrl/endSyncSession',
           ),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
           body: jsonEncode({
             'data': {
               'groupId': groupId,
@@ -718,11 +772,21 @@ class SyncEventBackgroundWorker {
       debugPrint('[SyncBgWorker] No host UID — cannot dispatch pattern');
       return;
     }
+    final idToken = await loadSyncIdToken();
+    if (idToken == null) {
+      debugPrint(
+        '[SyncBgWorker] No ID token persisted — skipping applySyncPattern',
+      );
+      return;
+    }
 
     try {
       final response = await http.post(
         Uri.parse('$_functionsBaseUrl/applySyncPattern'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'data': {
             'groupId': groupId,
@@ -922,6 +986,11 @@ Future<void> _quickTrigger(
       ? config.groupId
       : await loadSyncGroupId();
   if (userUid == null || groupId == null) return;
+  final idToken = await loadSyncIdToken();
+  if (idToken == null) {
+    debugPrint('[SyncBgQuick] No ID token persisted — skipping quick trigger');
+    return;
+  }
 
   try {
     final client = http.Client();
@@ -930,7 +999,10 @@ Future<void> _quickTrigger(
         Uri.parse(
           '$_functionsBaseUrl/initiateSyncSession',
         ),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'data': {
             'groupId': groupId,
@@ -943,8 +1015,7 @@ Future<void> _quickTrigger(
 
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body) as Map<String, dynamic>;
-        final data = result['result'] as Map<String, dynamic>?;
-        final sessionId = data?['sessionId'] as String?;
+        final sessionId = result['sessionId'] as String?;
         if (sessionId != null) {
           await saveActiveSession(BackgroundActiveSession(
             sessionId: sessionId,
@@ -975,6 +1046,13 @@ Future<void> _quickScoreCheck(
 ) async {
   final hostUid = await loadSyncUserUid();
   if (hostUid == null) return;
+  final idToken = await loadSyncIdToken();
+  if (idToken == null) {
+    debugPrint(
+      '[SyncBgQuick] No ID token persisted — skipping quick score apply',
+    );
+    return;
+  }
 
   final payload = <String, dynamic>{
     'on': true,
@@ -992,7 +1070,10 @@ Future<void> _quickScoreCheck(
   try {
     final response = await http.post(
       Uri.parse('$_functionsBaseUrl/applySyncPattern'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      },
       body: jsonEncode({
         'data': {
           'groupId': session.groupId,
@@ -1018,6 +1099,13 @@ Future<void> _quickScoreCheck(
 Future<void> _quickEndSession(BackgroundActiveSession session) async {
   final userUid = await loadSyncUserUid();
   if (userUid == null) return;
+  final idToken = await loadSyncIdToken();
+  if (idToken == null) {
+    debugPrint('[SyncBgQuick] No ID token persisted — skipping quick end');
+    // Still clear local session state so we don't loop forever.
+    await clearActiveSession();
+    return;
+  }
 
   try {
     final client = http.Client();
@@ -1026,7 +1114,10 @@ Future<void> _quickEndSession(BackgroundActiveSession session) async {
         Uri.parse(
           '$_functionsBaseUrl/endSyncSession',
         ),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
         body: jsonEncode({
           'data': {
             'groupId': session.groupId,

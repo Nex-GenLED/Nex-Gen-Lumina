@@ -433,10 +433,29 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       return;
     }
 
+    // Capture messenger up-front because the toggleAutopilot await below
+    // can unmount this widget before we get to show the result snackbar.
+    final messenger = ScaffoldMessenger.of(context);
     final ok = await repo.applyJson(effectivePayload);
     if (!context.mounted) return;
 
     if (ok) {
+      // Ensure autopilot is enabled so the background worker creates a session
+      // for this team. This is what lets score celebrations fire after a manual
+      // "Light Up Now" — without it, _sessions[teamSlug] stays null in the
+      // background worker and ScoreAlertEvents are silently dropped.
+      if (!config.enabled) {
+        try {
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .toggleAutopilot(teamSlug: config.teamSlug, enabled: true);
+        } catch (e, st) {
+          debugPrint(
+              '[GameDay] Light Up Now: enable autopilot failed: $e\n$st');
+          // Non-fatal — lights are already lit. Live scoring just won't fire.
+        }
+      }
+
       // Set the Now Playing label so the home dashboard reflects the
       // game-day apply rather than falling through to the raw WLED
       // effect name. Uses shortTeamName to avoid wrapping (e.g.
@@ -445,7 +464,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           '${config.shortTeamName} Game Day', ref.read(wledStateProvider));
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       SnackBar(
         content: Text(
           ok
@@ -460,7 +479,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // Pop back to whatever pushed this screen so the user immediately
     // sees the Now Playing change on the home dashboard. No-op when the
     // screen sits at the root (e.g. opened as a tab destination).
-    if (ok && context.canPop()) {
+    if (ok && context.mounted && context.canPop()) {
       context.pop();
     }
   }
@@ -518,19 +537,12 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
 
   void _toggleLiveScoring(
       WidgetRef ref, GameDayAutopilotConfig config, bool value) {
-    ref.read(gameDayAutopilotNotifierProvider.notifier).toggleAutopilot(
-      teamSlug: config.teamSlug,
-      enabled: config.enabled,
-    );
-    ref.read(gameDayAutopilotNotifierProvider.notifier).saveDesign(
-      teamSlug: config.teamSlug,
-      designName: config.savedDesignName ?? config.designLabel,
-      wledPayload: config.savedDesignPayload ?? {},
-      effectId: config.effectId,
-      speed: config.speed,
-      intensity: config.intensity,
-      brightness: config.brightness,
-    );
+    ref
+        .read(gameDayAutopilotNotifierProvider.notifier)
+        .setLiveScoring(teamSlug: config.teamSlug, enabled: value)
+        .catchError((e, st) {
+      debugPrint('[GameDay] setLiveScoring failed: $e\n$st');
+    });
   }
 
   Future<void> _toggleAutopilot(

@@ -198,6 +198,7 @@ class SyncEvent {
   final PostEventBehavior postEventBehavior;
   final Map<String, PatternRef> participantOverrides;
   final DateTime? scheduledTime;
+  final DateTime? scheduledEndTime;
   final List<int> repeatDays; // 1=Mon..7=Sun, empty = one-time
   final String createdBy;
   final DateTime createdAt;
@@ -232,6 +233,7 @@ class SyncEvent {
     this.postEventBehavior = PostEventBehavior.returnToAutopilot,
     this.participantOverrides = const {},
     this.scheduledTime,
+    this.scheduledEndTime,
     this.repeatDays = const [],
     required this.createdBy,
     required this.createdAt,
@@ -282,6 +284,7 @@ class SyncEvent {
           PostEventBehaviorX.fromJson(data['postEventBehavior']),
       participantOverrides: _parseOverrides(data['participantOverrides']),
       scheduledTime: (data['scheduledTime'] as Timestamp?)?.toDate(),
+      scheduledEndTime: (data['scheduledEndTime'] as Timestamp?)?.toDate(),
       repeatDays: List<int>.from(data['repeatDays'] ?? []),
       createdBy: data['createdBy'] ?? '',
       createdAt:
@@ -313,6 +316,9 @@ class SyncEvent {
       ),
       'scheduledTime':
           scheduledTime != null ? Timestamp.fromDate(scheduledTime!) : null,
+      'scheduledEndTime': scheduledEndTime != null
+          ? Timestamp.fromDate(scheduledEndTime!)
+          : null,
       'repeatDays': repeatDays,
       'createdBy': createdBy,
       'createdAt': Timestamp.fromDate(createdAt),
@@ -341,6 +347,7 @@ class SyncEvent {
     PostEventBehavior? postEventBehavior,
     Map<String, PatternRef>? participantOverrides,
     DateTime? scheduledTime,
+    DateTime? scheduledEndTime,
     List<int>? repeatDays,
     String? createdBy,
     DateTime? createdAt,
@@ -366,6 +373,7 @@ class SyncEvent {
       postEventBehavior: postEventBehavior ?? this.postEventBehavior,
       participantOverrides: participantOverrides ?? this.participantOverrides,
       scheduledTime: scheduledTime ?? this.scheduledTime,
+      scheduledEndTime: scheduledEndTime ?? this.scheduledEndTime,
       repeatDays: repeatDays ?? this.repeatDays,
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,

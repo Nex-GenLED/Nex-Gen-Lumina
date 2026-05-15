@@ -14,6 +14,12 @@
  * This runs server-side because the background isolate cannot use Riverpod
  * or Firestore listeners — it only has SharedPreferences and HTTP.
  *
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ *
+ * Request body — accepts BOTH `{data: {...}}` (legacy callable-shape) and
+ * flat shapes. Returns a flat 200 body — no callable-protocol `{result:}`
+ * wrapping.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
@@ -56,17 +62,53 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.initiateSyncSession = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
-exports.initiateSyncSession = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
-    // Auth is optional for background service calls (uses initiatorUid)
-    const { groupId, eventId, gameId, initiatorUid } = request.data;
+exports.initiateSyncSession = (0, https_1.onRequest)({ maxInstances: 10, cors: false }, async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed; use POST." });
+        return;
+    }
+    // ── Manual auth verification ──────────────────────────────────────
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({
+            error: "Missing or malformed Authorization header (expected Bearer).",
+        });
+        return;
+    }
+    const idToken = authHeader.substring("Bearer ".length).trim();
+    let decoded;
+    try {
+        decoded = await admin.auth().verifyIdToken(idToken);
+    }
+    catch (err) {
+        console.warn("initiateSyncSession: token verification failed", err);
+        res.status(401).json({ error: "Invalid or expired ID token" });
+        return;
+    }
+    // ── Body parsing (accept both shapes) ─────────────────────────────
+    const rawBody = (req.body ?? {});
+    const envelope = (rawBody.data !== undefined
+        ? rawBody.data
+        : rawBody);
+    const { groupId, eventId, gameId, initiatorUid } = envelope;
     if (!groupId || !eventId || !initiatorUid) {
-        throw new https_1.HttpsError("invalid-argument", "Missing required fields: groupId, eventId, initiatorUid.");
+        res.status(400).json({
+            error: "Missing required fields: groupId, eventId, initiatorUid.",
+        });
+        return;
+    }
+    if (decoded.uid !== initiatorUid) {
+        res
+            .status(403)
+            .json({ error: "Token UID does not match initiatorUid" });
+        return;
     }
     const db = admin.firestore();
     // ── Validate group exists ─────────────────────────────────────────
     const groupDoc = await db.collection("neighborhoods").doc(groupId).get();
     if (!groupDoc.exists) {
-        throw new https_1.HttpsError("not-found", "Neighborhood group not found.");
+        res.status(404).json({ error: "Neighborhood group not found." });
+        return;
     }
     const groupData = groupDoc.data();
     // ── Validate event exists and is enabled ──────────────────────────
@@ -77,11 +119,13 @@ exports.initiateSyncSession = (0, https_1.onCall)({ maxInstances: 10 }, async (r
         .doc(eventId)
         .get();
     if (!eventDoc.exists) {
-        throw new https_1.HttpsError("not-found", "Sync event not found.");
+        res.status(404).json({ error: "Sync event not found." });
+        return;
     }
     const eventData = eventDoc.data();
     if (!eventData.isEnabled) {
-        return { success: false, message: "Event is disabled." };
+        res.status(200).json({ success: false, message: "Event is disabled." });
+        return;
     }
     // ── Check for existing active session ─────────────────────────────
     const activeSessions = await db
@@ -92,11 +136,12 @@ exports.initiateSyncSession = (0, https_1.onCall)({ maxInstances: 10 }, async (r
         .limit(1)
         .get();
     if (!activeSessions.empty) {
-        return {
+        res.status(200).json({
             success: false,
             sessionId: activeSessions.docs[0].id,
             message: "Active session already exists.",
-        };
+        });
+        return;
     }
     // ── Resolve participants ──────────────────────────────────────────
     const membersSnap = await db
@@ -137,7 +182,10 @@ exports.initiateSyncSession = (0, https_1.onCall)({ maxInstances: 10 }, async (r
         participants.push(uid);
     }
     if (participants.length === 0) {
-        return { success: false, message: "No eligible participants." };
+        res
+            .status(200)
+            .json({ success: false, message: "No eligible participants." });
+        return;
     }
     // ── Determine host ────────────────────────────────────────────────
     const creatorUid = groupData.creatorUid;
@@ -238,11 +286,11 @@ exports.initiateSyncSession = (0, https_1.onCall)({ maxInstances: 10 }, async (r
     }
     console.log(`Session ${sessionRef.id} created for event ${eventId} ` +
         `with ${participants.length} participants`);
-    return {
+    res.status(200).json({
         success: true,
         sessionId: sessionRef.id,
         participantCount: participants.length,
         hostUid,
-    };
+    });
 });
 //# sourceMappingURL=initiateSyncSession.js.map

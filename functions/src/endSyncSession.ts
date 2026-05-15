@@ -5,13 +5,18 @@
  * Handles the 30-second dissolution warning, marks session as completed,
  * and sends FCM notifications to all participants.
  *
+ * Transport: onRequest (raw HTTPS) with manual ID-token verification.
+ *
+ * Request body — accepts BOTH `{data: {...}}` (legacy callable-shape) and
+ * flat shapes. Returns a flat 200 body — no `{result:}` wrapping.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
  *   firebase deploy --only functions:endSyncSession
  */
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 
 interface EndSessionRequest {
@@ -20,17 +25,52 @@ interface EndSessionRequest {
   initiatorUid: string;
 }
 
-export const endSyncSession = onCall(
-  { maxInstances: 10 },
-  async (request) => {
-    const { groupId, sessionId, initiatorUid } =
-      request.data as EndSessionRequest;
+export const endSyncSession = onRequest(
+  { maxInstances: 10, cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed; use POST." });
+      return;
+    }
+
+    // ── Manual auth verification ──────────────────────────────────────
+    const authHeader = req.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({
+        error: "Missing or malformed Authorization header (expected Bearer).",
+      });
+      return;
+    }
+    const idToken = authHeader.substring("Bearer ".length).trim();
+    let decoded: admin.auth.DecodedIdToken;
+    try {
+      decoded = await admin.auth().verifyIdToken(idToken);
+    } catch (err) {
+      console.warn("endSyncSession: token verification failed", err);
+      res.status(401).json({ error: "Invalid or expired ID token" });
+      return;
+    }
+
+    // ── Body parsing (accept both shapes) ─────────────────────────────
+    const rawBody = (req.body ?? {}) as Record<string, unknown>;
+    const envelope: EndSessionRequest = (rawBody.data !== undefined
+      ? (rawBody.data as EndSessionRequest)
+      : (rawBody as unknown as EndSessionRequest));
+
+    const { groupId, sessionId, initiatorUid } = envelope;
 
     if (!groupId || !sessionId || !initiatorUid) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Missing required fields: groupId, sessionId, initiatorUid."
-      );
+      res.status(400).json({
+        error: "Missing required fields: groupId, sessionId, initiatorUid.",
+      });
+      return;
+    }
+
+    if (decoded.uid !== initiatorUid) {
+      res
+        .status(403)
+        .json({ error: "Token UID does not match initiatorUid" });
+      return;
     }
 
     const db = admin.firestore();
@@ -44,12 +84,16 @@ export const endSyncSession = onCall(
 
     const sessionDoc = await sessionRef.get();
     if (!sessionDoc.exists) {
-      throw new HttpsError("not-found", "Session not found.");
+      res.status(404).json({ error: "Session not found." });
+      return;
     }
 
     const sessionData = sessionDoc.data()!;
     if (sessionData.status === "completed" || sessionData.status === "cancelled") {
-      return { success: true, message: "Session already ended." };
+      res
+        .status(200)
+        .json({ success: true, message: "Session already ended." });
+      return;
     }
 
     const participants: string[] = sessionData.activeParticipantUids || [];
@@ -155,11 +199,11 @@ export const endSyncSession = onCall(
 
     console.log(`Session ${sessionId} completed for group ${groupId}`);
 
-    return {
+    res.status(200).json({
       success: true,
       sessionId,
       participantCount: participants.length,
-    };
+    });
   }
 );
 
