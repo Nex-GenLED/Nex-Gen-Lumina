@@ -183,3 +183,6 @@ android/.gradle/
 # so `flutter clean` can't wipe it. Required for Play Console crash
 # de-obfuscation; never commit (large + per-build) and never delete locally.
 debug-info-archive/
+
+# Tablet/device log dumps
+pulla-logs/
