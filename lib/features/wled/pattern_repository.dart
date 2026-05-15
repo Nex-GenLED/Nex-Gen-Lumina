@@ -1302,6 +1302,11 @@ class PatternRepository {
     final categoryId = _findRootCategoryId(node.id);
 
     // Static variant — Solid Pattern (fx 83)
+    // NOTE: pal omitted intentionally — testing whether pal: 5 was
+    // overriding the col array on fx 83 and causing the rendering to
+    // collapse to a uniform color. If this fix works, this comment
+    // becomes the documentation. If not, restore pal: 5 and try fx 84
+    // "Solid Pattern Tri" instead.
     items.add(PatternItem(
       id: 'gen_${node.id}_static',
       name: '${node.name} – Static',
@@ -1318,7 +1323,6 @@ class PatternRepository {
             'grp': bandWidth,
             'spc': 0,
             'sx': 0,
-            'pal': 5,
           }
         ],
       },
@@ -1341,7 +1345,6 @@ class PatternRepository {
             'grp': bandWidth,
             'spc': 0,
             'sx': 100,
-            'pal': 5,
           }
         ],
       },

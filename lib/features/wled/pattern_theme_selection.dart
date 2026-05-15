@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets
@@ -174,7 +175,16 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
   final Color? parentAccent;
   final List<Color>? parentGradient;
 
-  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient});
+  /// When non-null, the picker is operating in Game Day mode. Tapping
+  /// a design will both apply it via WLED and persist it to the
+  /// GameDayAutopilotConfig for [teamSlug] via the saveDesign method
+  /// on gameDayAutopilotNotifierProvider. When null, the picker is
+  /// operating as a general library browser (Explore mount) and design
+  /// taps only apply to lights without persisting to any Game Day
+  /// config.
+  final String? teamSlug;
+
+  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient, this.teamSlug});
 
   @override
   ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
@@ -270,20 +280,23 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                             setState(() => _isPaletteView = true);
                           }
                         });
-                        return ColorwayEffectSelectorPage(paletteNode: node);
+                        return ColorwayEffectSelectorPage(
+                          paletteNode: node,
+                          teamSlug: widget.teamSlug,
+                        );
                       }
                       if (widget.nodeId == LibraryCategoryIds.architectural) {
                         return Column(
                           children: [
                             const _KelvinReferenceChart(),
-                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2)),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug)),
                           ],
                         );
                       }
-                      return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
+                      return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug);
                     },
                     loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
+                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug),
                   );
                 },
                 loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
@@ -408,7 +421,8 @@ class _KelvinReferenceChart extends StatelessWidget {
 class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
-  const _CompactPatternItemCard({required this.item, required this.themeColors});
+  final String? teamSlug;
+  const _CompactPatternItemCard({required this.item, required this.themeColors, this.teamSlug});
 
   static String _effectDisplayName(int effectId) {
     const names = {
@@ -580,6 +594,41 @@ class _CompactPatternItemCard extends ConsumerWidget {
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       _updateLocalState(ref);
+
+      // Game Day persistence — when teamSlug is set, this picker is
+      // operating as a Game Day design picker, so persist the choice
+      // to the team's GameDayAutopilotConfig via the existing
+      // saveDesign provider method. The Firestore write triggers a
+      // stream emission on gameDayAutopilotConfigsProvider which
+      // rebuilds gameDayTeamsProvider and refreshes the Game Day card.
+      if (teamSlug != null) {
+        try {
+          final seg = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
+              ? (payload['seg'] as List).first as Map
+              : <String, dynamic>{};
+          final effectId = (seg['fx'] as num?)?.toInt() ?? 0;
+          final speed = (seg['sx'] as num?)?.toInt() ?? 128;
+          final intensity = (seg['ix'] as num?)?.toInt() ?? 128;
+          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
+
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: teamSlug!,
+                designName: item.name,
+                wledPayload: payload,
+                effectId: effectId,
+                speed: speed,
+                intensity: intensity,
+                brightness: brightness,
+              );
+        } catch (e, st) {
+          debugPrint('[GameDayPicker] saveDesign failed: $e\n$st');
+          // Non-fatal — the lights are already showing the design.
+          // The card label just won't refresh until next pick.
+        }
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
@@ -630,6 +679,34 @@ class _CompactPatternItemCard extends ConsumerWidget {
       if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
+
+      // Game Day persistence — see _handleTap for full rationale.
+      if (teamSlug != null) {
+        try {
+          final segPersist = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
+              ? (payload['seg'] as List).first as Map
+              : <String, dynamic>{};
+          final effectId = (segPersist['fx'] as num?)?.toInt() ?? 0;
+          final speed = (segPersist['sx'] as num?)?.toInt() ?? 128;
+          final intensity = (segPersist['ix'] as num?)?.toInt() ?? 128;
+          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
+
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: teamSlug!,
+                designName: item.name,
+                wledPayload: payload,
+                effectId: effectId,
+                speed: speed,
+                intensity: intensity,
+                brightness: brightness,
+              );
+        } catch (e, st) {
+          debugPrint('[GameDayPicker] saveDesign failed (with color): $e\n$st');
+        }
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
