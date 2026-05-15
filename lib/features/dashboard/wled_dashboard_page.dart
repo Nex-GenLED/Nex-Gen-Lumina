@@ -7,8 +7,6 @@ import 'dart:ui';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -116,10 +114,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
   Timer? _skyRefreshTimer;
-  final TextEditingController _luminaCtrl = TextEditingController();
-  bool _luminaLoading = false;
-  bool _luminaListening = false;
-  late final stt.SpeechToText _luminaSpeech;
 
   _SkyTheme get _currentSkyTheme => _getSkyTheme(DateTime.now());
 
@@ -144,7 +138,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   @override
   void initState() {
     super.initState();
-    _luminaSpeech = stt.SpeechToText();
     _skyRefreshTimer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => setState(() {}),
@@ -154,8 +147,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
   @override
   void dispose() {
-    _luminaCtrl.dispose();
-    _luminaSpeech.stop();
     _skyRefreshTimer?.cancel();
     super.dispose();
   }
@@ -413,7 +404,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 ],
               ),
             _buildHeroSection(context, ref, state, profileAsync),
-            _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
             // Design Studio + Neighborhood Sync — side by side
@@ -642,147 +632,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         onSelected: (newIp) {
           ref.read(selectedDeviceIpProvider.notifier).state = newIp;
         },
-      ),
-    );
-  }
-
-  void _toggleLuminaVoice() {
-    if (_luminaListening) {
-      _luminaSpeech.stop();
-      setState(() => _luminaListening = false);
-      return;
-    }
-    _luminaSpeech.initialize().then((available) {
-      if (!available || !mounted) return;
-      setState(() => _luminaListening = true);
-      _luminaSpeech.listen(
-        onResult: (result) {
-          setState(() {
-            _luminaCtrl.text = result.recognizedWords;
-            if (result.finalResult) _luminaListening = false;
-          });
-        },
-        listenMode: stt.ListenMode.confirmation,
-        pauseFor: const Duration(seconds: 2),
-        partialResults: true,
-      );
-    });
-  }
-
-  Future<void> _submitLuminaCommand() async {
-    final text = _luminaCtrl.text.trim();
-    if (text.isEmpty || _luminaLoading) return;
-    setState(() => _luminaLoading = true);
-    try {
-      final result = await LuminaBrain.chat(ref, text);
-      if (mounted && result.isNotEmpty) {
-        // If the result looks like a pattern name (short, no markdown), set as active preset
-        if (result.length < 60 && !result.contains('\n') && !result.startsWith('{')) {
-          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(result, ref.read(wledStateProvider));
-        }
-      }
-    } catch (e) {
-      debugPrint('Lumina command error: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _luminaLoading = false);
-        _luminaCtrl.clear();
-      }
-    }
-  }
-
-  Widget _buildLuminaBar(BuildContext context, WidgetRef ref) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            NexGenPalette.cyan.withValues(alpha: 0.08),
-            NexGenPalette.violet.withValues(alpha: 0.06),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3), width: 1),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [NexGenPalette.violet, NexGenPalette.cyan]),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.4), blurRadius: 8),
-              ],
-            ),
-            child: const Icon(Icons.auto_awesome_rounded, color: Colors.black, size: 14),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _luminaCtrl,
-              minLines: 1,
-              maxLines: 2,
-              style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
-              decoration: InputDecoration(
-                hintText: LuminaBrain.contextualPlaceholder(),
-                hintStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 4),
-              ),
-              onSubmitted: (_) => _submitLuminaCommand(),
-            ),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: _toggleLuminaVoice,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _luminaListening
-                    ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.06),
-                border: Border.all(
-                  color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.line,
-                ),
-              ),
-              child: Icon(
-                _luminaListening ? Icons.mic : Icons.mic_none,
-                size: 16,
-                color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.violet,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          _luminaLoading
-              ? const SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: Padding(
-                    padding: EdgeInsets.all(6),
-                    child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
-                  ),
-                )
-              : GestureDetector(
-                  onTap: _submitLuminaCommand,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      color: NexGenPalette.cyan,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.black),
-                  ),
-                ),
-        ],
       ),
     );
   }
