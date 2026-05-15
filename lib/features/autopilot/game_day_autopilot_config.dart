@@ -160,8 +160,8 @@ class GameDayAutopilotConfig {
     this.designMode = AutopilotDesignMode.fallback,
     this.savedDesignName,
     this.savedDesignPayload,
-    this.effectId = 0,
-    this.speed = 128,
+    this.effectId = 52,
+    this.speed = 160,
     this.intensity = 128,
     this.brightness = 200,
     this.scoreCelebrationEnabled = true,
@@ -221,9 +221,9 @@ class GameDayAutopilotConfig {
     const names = {
       0: 'Solid', 2: 'Breathe', 12: 'Fade',
       28: 'Chase', 38: 'Fire', 39: 'Fireworks',
-      17: 'Twinkle', 20: 'Sparkle', 41: 'Running',
-      43: 'Chase', 46: 'Lightning', 80: 'Twinklefox',
-      83: 'Pattern', 87: 'Glitter',
+      17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
+      43: 'Chase', 46: 'Lightning', 52: 'Running',
+      80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
     };
     return names[effectId] ?? 'Custom';
   }
@@ -276,8 +276,8 @@ class GameDayAutopilotConfig {
       savedDesignName: data['saved_design_name'] as String?,
       savedDesignPayload:
           data['saved_design_payload'] as Map<String, dynamic>?,
-      effectId: (data['effect_id'] as num?)?.toInt() ?? 0,
-      speed: (data['speed'] as num?)?.toInt() ?? 128,
+      effectId: (data['effect_id'] as num?)?.toInt() ?? 52,
+      speed: (data['speed'] as num?)?.toInt() ?? 160,
       intensity: (data['intensity'] as num?)?.toInt() ?? 128,
       brightness: (data['brightness'] as num?)?.toInt() ?? 200,
       scoreCelebrationEnabled:

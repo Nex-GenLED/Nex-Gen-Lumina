@@ -5,7 +5,7 @@
 // variety across games when designVariety is rotating or random.
 //
 // Six designs cover a spectrum from subtle to dramatic:
-//   1. Solid Primary     — classic, always-works baseline
+//   1. Team Colors       — Running Dual (fx 52) showing both colors
 //   2. Solid Secondary   — alternate team color as main
 //   3. Chase Primary→Secondary — motion, team-branded
 //   4. Breathe Primary   — subtle pulsing atmosphere
@@ -50,17 +50,17 @@ class TeamDesignCatalog {
     final s = _rgbw(secondary);
 
     return [
-      // 1. Solid Primary
+      // 1. Team Colors — Running Dual (fx 52) showing both team colors
       TeamDesign(
-        name: '$teamName Solid',
-        effectId: 0,
-        speed: 128,
+        name: '$teamName Colors',
+        effectId: 52,
+        speed: 160,
         intensity: 128,
         colorGroupSize: 1,
         wledPayload: _buildPayload(
-          effectId: 0,
+          effectId: 52,
           colors: [p, s],
-          speed: 128,
+          speed: 160,
           intensity: 128,
           brightness: brightness,
         ),
