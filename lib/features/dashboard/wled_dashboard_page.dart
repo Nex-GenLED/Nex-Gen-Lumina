@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
@@ -433,7 +434,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 children: [
                   _buildGameDayButton(context, ref),
                   const SizedBox(width: 12),
-                  if (audioSupported)
+                  // Audio Mode hidden in release builds pending v1.0.1 rework
+                  // (named effect catalog + design selector + sensitivity defaults).
+                  // The capability detector continues running so the v1.0.1 work
+                  // can use it without re-plumbing.
+                  if (kDebugMode && audioSupported)
                     _FeatureButton(
                       icon: Icons.graphic_eq_rounded,
                       label: 'Audio Mode',
