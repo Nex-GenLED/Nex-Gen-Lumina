@@ -47,6 +47,7 @@ dependencies:
   signature: ^5.4.0
   syncfusion_flutter_signaturepad: ^24.1.41
   timezone: ^0.9.0
+  flutter_timezone: ^4.1.0
 
 dev_dependencies:
   flutter_test:

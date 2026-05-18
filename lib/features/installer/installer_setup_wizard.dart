@@ -818,6 +818,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         displayName: customerInfo.name,
         phoneNumber: customerInfo.phone,
         address: '${customerInfo.address}\n${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}',
+        latitude: customerInfo.latitude,
+        longitude: customerInfo.longitude,
+        timeZone: customerInfo.ianaTimezone,
         ownerId: userId,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -881,8 +884,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             'address':
                 '${customerInfo.address}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}'
                     .trim(),
-            'lat': 0.0,
-            'lng': 0.0,
+            'lat': customerInfo.latitude ?? 0.0,
+            'lng': customerInfo.longitude ?? 0.0,
             'controller_id': '',
             'business_hours_id': '',
             'schedule_id': '',

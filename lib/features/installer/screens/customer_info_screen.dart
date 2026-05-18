@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -34,6 +35,16 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
   bool _emailIsUnique = false;
   Timer? _emailDebouncer;
 
+  // Geocoded coords + IANA timezone captured at address-selection time.
+  // Null until the installer picks a Google Places suggestion AND the
+  // place-details / FlutterTimezone calls succeed. Manual address typing
+  // leaves these null — backfillUserLocations recovers those at the
+  // Cloud Function level.
+  double? _selectedLatitude;
+  double? _selectedLongitude;
+  String? _selectedPlaceId;
+  String? _selectedIanaTimezone;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +58,10 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
     _stateController.text = existingInfo.state;
     _zipController.text = existingInfo.zipCode;
     _notesController.text = existingInfo.notes;
+    _selectedLatitude = existingInfo.latitude;
+    _selectedLongitude = existingInfo.longitude;
+    _selectedPlaceId = existingInfo.placeId;
+    _selectedIanaTimezone = existingInfo.ianaTimezone;
 
     // If email already exists, validate it
     if (existingInfo.email.isNotEmpty) {
@@ -115,7 +130,10 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
     });
   }
 
-  /// Auto-fill city, state, and zip when an address is selected
+  /// Auto-fill city, state, and zip when an address is selected.
+  /// Also captures lat/lon (via Places Details) and the installer device's
+  /// IANA timezone so the customer's user-doc downstream has the geo data
+  /// it needs for astronomical scheduling, geofencing, and Game Day timing.
   void _onAddressSelected(AddressSuggestion suggestion) {
     // Update address field with street address
     _addressController.text = suggestion.streetAddress;
@@ -138,6 +156,18 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
       // fetch it from Place Details API
       _fetchPostcode(suggestion.placeId!);
     }
+
+    // Capture placeId for backfill / re-fetch, then resolve coords +
+    // timezone. Photon fallback returns real lat/lon inline; Google
+    // returns 0/0 until we fetch Place Details separately.
+    _selectedPlaceId = suggestion.placeId;
+    if (suggestion.lat != 0 || suggestion.lon != 0) {
+      _selectedLatitude = suggestion.lat;
+      _selectedLongitude = suggestion.lon;
+    } else if (suggestion.placeId != null) {
+      _fetchPlaceLocation(suggestion.placeId!);
+    }
+    _captureLocalTimezone();
   }
 
   /// Fetch postcode from Google Places Details for the selected place.
@@ -147,6 +177,37 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
     if (postcode != null && mounted) {
       final zip = postcode.replaceAll(RegExp(r'\D'), '');
       _zipController.text = zip.length > 5 ? zip.substring(0, 5) : zip;
+    }
+  }
+
+  /// Fetch lat/lon from Google Places Details for the selected place.
+  /// Failure leaves the coords null — the customer's user-doc will be
+  /// written without them and recovered by backfillUserLocations.
+  Future<void> _fetchPlaceLocation(String placeId) async {
+    final geocoder = ref.read(geocodingServiceProvider);
+    final location = await geocoder.fetchPlaceLocation(placeId);
+    if (location != null && mounted) {
+      setState(() {
+        _selectedLatitude = location.lat;
+        _selectedLongitude = location.lon;
+      });
+    }
+  }
+
+  /// Capture the installer device's IANA timezone (e.g. "America/Chicago").
+  /// The installer is at the customer's site at install time, so the
+  /// device's local zone IS the customer's zone. Failure is non-fatal —
+  /// the user can correct via profile-edit later.
+  Future<void> _captureLocalTimezone() async {
+    try {
+      final tz = await FlutterTimezone.getLocalTimezone();
+      if (tz.isNotEmpty && mounted) {
+        setState(() {
+          _selectedIanaTimezone = tz;
+        });
+      }
+    } catch (e) {
+      debugPrint('CustomerInfoScreen: FlutterTimezone failed: $e');
     }
   }
 
@@ -204,6 +265,10 @@ class _CustomerInfoScreenState extends ConsumerState<CustomerInfoScreen> {
         state: _stateController.text.trim(),
         zipCode: _zipController.text.trim(),
         notes: _notesController.text.trim(),
+        latitude: _selectedLatitude,
+        longitude: _selectedLongitude,
+        placeId: _selectedPlaceId,
+        ianaTimezone: _selectedIanaTimezone,
       );
 
       // Record activity

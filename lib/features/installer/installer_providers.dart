@@ -325,6 +325,24 @@ class CustomerInfo {
   final String zipCode;
   final String notes;
 
+  /// Latitude resolved from the Google Places selection. Null when the
+  /// installer typed the address manually or the place-details fetch failed.
+  /// Consumed by [UserModel.latitude] writes and the installations doc.
+  final double? latitude;
+
+  /// Longitude resolved from the Google Places selection. Null in the same
+  /// fallback cases as [latitude].
+  final double? longitude;
+
+  /// Google Places placeId for the selected address. Retained for backfill
+  /// and re-fetch flows.
+  final String? placeId;
+
+  /// IANA timezone (e.g. "America/Chicago") sampled from the installer's
+  /// device at the moment of address selection. Null when
+  /// FlutterTimezone.getLocalTimezone() fails.
+  final String? ianaTimezone;
+
   const CustomerInfo({
     this.name = '',
     this.email = '',
@@ -334,6 +352,10 @@ class CustomerInfo {
     this.state = '',
     this.zipCode = '',
     this.notes = '',
+    this.latitude,
+    this.longitude,
+    this.placeId,
+    this.ianaTimezone,
   });
 
   CustomerInfo copyWith({
@@ -345,6 +367,10 @@ class CustomerInfo {
     String? state,
     String? zipCode,
     String? notes,
+    double? latitude,
+    double? longitude,
+    String? placeId,
+    String? ianaTimezone,
   }) {
     return CustomerInfo(
       name: name ?? this.name,
@@ -355,6 +381,10 @@ class CustomerInfo {
       state: state ?? this.state,
       zipCode: zipCode ?? this.zipCode,
       notes: notes ?? this.notes,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      placeId: placeId ?? this.placeId,
+      ianaTimezone: ianaTimezone ?? this.ianaTimezone,
     );
   }
 
@@ -368,6 +398,10 @@ class CustomerInfo {
       'state': state,
       'zipCode': zipCode,
       'notes': notes,
+      'latitude': latitude,
+      'longitude': longitude,
+      'placeId': placeId,
+      'ianaTimezone': ianaTimezone,
     };
   }
 
@@ -381,6 +415,10 @@ class CustomerInfo {
       state: map['state'] as String? ?? '',
       zipCode: map['zipCode'] as String? ?? '',
       notes: map['notes'] as String? ?? '',
+      latitude: (map['latitude'] as num?)?.toDouble(),
+      longitude: (map['longitude'] as num?)?.toDouble(),
+      placeId: map['placeId'] as String?,
+      ianaTimezone: map['ianaTimezone'] as String?,
     );
   }
 

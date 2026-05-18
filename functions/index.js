@@ -79,6 +79,12 @@ exports.sendInstallReminders = sendInstallReminders;
 const { mintStaffToken } = require("./lib/staffAuth");
 exports.mintStaffToken = mintStaffToken;
 
+// One-shot admin tool: backfills lat/lon/time_zone for /users docs that
+// were created before the installer-flow geo capture landed. Requires
+// the admin custom claim on the caller's account.
+const { backfillUserLocations } = require("./lib/backfillUserLocations");
+exports.backfillUserLocations = backfillUserLocations;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

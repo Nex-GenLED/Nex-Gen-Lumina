@@ -240,6 +240,40 @@ class GeocodingService {
     return [];
   }
 
+  /// Fetch latitude/longitude from Google Places Details API using a place
+  /// ID. Mirrors [fetchPlacePostcode] but with `location` fieldMask. Returns
+  /// null on any error (HTTP failure, missing location field, malformed
+  /// response). Callers should treat null as "coordinates unavailable" and
+  /// fall back gracefully — never throws.
+  Future<({double lat, double lon})?> fetchPlaceLocation(String placeId) async {
+    try {
+      final uri = Uri.parse('https://places.googleapis.com/v1/places/$placeId');
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(uri);
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      req.headers.set('X-Goog-Api-Key', _googleApiKey);
+      req.headers.set('X-Goog-FieldMask', 'location');
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final location = data['location'] as Map<String, dynamic>?;
+        final latRaw = location?['latitude'];
+        final lonRaw = location?['longitude'];
+        if (latRaw is num && lonRaw is num) {
+          return (lat: latRaw.toDouble(), lon: lonRaw.toDouble());
+        }
+      } else {
+        debugPrint('GeocodingService: fetchPlaceLocation status ${res.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('GeocodingService: Place location error $e');
+    }
+    return null;
+  }
+
   /// Fetch postal code from Google Places Details API using a place ID.
   Future<String?> fetchPlacePostcode(String placeId) async {
     try {
