@@ -85,6 +85,14 @@ exports.mintStaffToken = mintStaffToken;
 const { backfillUserLocations } = require("./lib/backfillUserLocations");
 exports.backfillUserLocations = backfillUserLocations;
 
+// One-shot admin tool: backfills dealer_code on /users docs by joining
+// from /installations.primary_user_id -> /users.uid, copying
+// /installations.dealer_code onto the user doc. Required so installer
+// PIN sessions can find pre-fix customers via the per-dealer rule clause
+// on /users. Requires the admin custom claim on the caller's account.
+const { backfillUserDealerCodes } = require("./lib/backfillUserDealerCodes");
+exports.backfillUserDealerCodes = backfillUserDealerCodes;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

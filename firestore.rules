@@ -145,8 +145,21 @@ service cloud.firestore {
 
     // User profiles - private to each user, but readable by media/dealer/admin roles
     match /users/{userId} {
-      // Media users can read any user profile for content creation
-      allow read: if canReadUserData(userId);
+      // Media users can read any user profile for content creation;
+      // admin/owner staff sessions can read globally for support/audit;
+      // installer/salesperson staff sessions can read ONLY user docs
+      // whose dealer_code matches the caller's dealerCode claim. The
+      // last clause is caller-and-resource scoped — query-level reads
+      // therefore require a matching .where('dealer_code', ==, X)
+      // filter; without it Firestore denies the list (this is the
+      // intended enforcement, not a bug). Customers with no dealer_code
+      // (self-registered, legacy) are intentionally invisible to PIN
+      // sessions and only visible via canReadUserData or admin/owner.
+      allow read: if canReadUserData(userId)
+                  || hasAdminOrOwnerClaim()
+                  || (request.auth != null &&
+                      request.auth.token.get('role', '') in ['installer', 'salesperson'] &&
+                      resource.data.get('dealer_code', '') == request.auth.token.get('dealerCode', ''));
 
       // SECURITY: On create, enforce owner_id matches auth uid
       // OR any authenticated user (installer setup creates customer profiles;

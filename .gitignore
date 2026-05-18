@@ -108,6 +108,7 @@ coverage/
 .env.*
 *.keystore
 *service-account*.json
+*mint-admin.json
 *firebase-adminsdk*.json
 **/key.properties
 

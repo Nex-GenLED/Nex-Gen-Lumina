@@ -134,6 +134,16 @@ class UserModel {
   /// Preferred dealer contact for sales requests and quotes
   final String? dealerEmail;
 
+  /// 2-digit dealer code identifying which dealer "owns" this customer.
+  /// Set by the installer wizard at install time (from
+  /// session.dealer.dealerCode) and recovered by backfillUserDealerCodes
+  /// for installer-onboarded customers that pre-date the field. Drives
+  /// per-dealer scoping in the installer customer-search rule on
+  /// /users/{userId}. Null for self-registered users and any account
+  /// not affiliated with a dealer — those are intentionally invisible
+  /// to installer PIN sessions.
+  final String? dealerCode;
+
   // Remote Access configuration
   /// URL for cloud relay webhook (Dynamic DNS pointing to home network)
   final String? webhookUrl;
@@ -303,6 +313,7 @@ class UserModel {
     this.communityPatternSharing = false,
     this.analyticsEnabled = true,
     String? dealerEmail,
+    this.dealerCode,
     String? webhookUrl,
     String? homeSsid,
     this.homeSsidEncrypted,
@@ -419,6 +430,7 @@ class UserModel {
       communityPatternSharing: (json['community_pattern_sharing'] as bool?) ?? false,
       analyticsEnabled: (json['analytics_enabled'] as bool?) ?? true,
       dealerEmail: json['dealer_email'] as String?,
+      dealerCode: json['dealer_code'] as String?,
       webhookUrl: json['webhook_url'] as String?,
       homeSsid: json['home_ssid'] as String?,
       homeSsidEncrypted: json['home_ssid_encrypted'] as String?,
@@ -571,6 +583,7 @@ class UserModel {
       'community_pattern_sharing': communityPatternSharing,
       'analytics_enabled': analyticsEnabled,
       'dealer_email': dealerEmail,
+      if (dealerCode != null) 'dealer_code': dealerCode,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
       'home_ssid_encrypted': homeSsidEncrypted,
@@ -657,6 +670,7 @@ class UserModel {
     bool? communityPatternSharing,
     bool? analyticsEnabled,
     String? dealerEmail,
+    String? dealerCode,
     String? webhookUrl,
     String? homeSsid,
     String? homeSsidEncrypted,
@@ -739,6 +753,7 @@ class UserModel {
       communityPatternSharing: communityPatternSharing ?? this.communityPatternSharing,
       analyticsEnabled: analyticsEnabled ?? this.analyticsEnabled,
       dealerEmail: dealerEmail ?? this.dealerEmail,
+      dealerCode: dealerCode ?? this.dealerCode,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       homeSsid: homeSsid ?? this.homeSsid,
       homeSsidEncrypted: homeSsidEncrypted ?? this.homeSsidEncrypted,

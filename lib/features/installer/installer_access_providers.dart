@@ -79,9 +79,22 @@ class CustomerSearchHit {
 /// Firestore prefix queries are case-sensitive; the search only matches
 /// values that begin with [query]. Each individual query is capped at 10
 /// results.
-Future<List<CustomerSearchHit>> searchCustomers(String query) async {
+///
+/// [dealerCode] MUST be the active installer session's
+/// `session.dealer.dealerCode`. It's added as the leading `.where()` filter
+/// on every query because the firestore.rules read clause for installer/
+/// salesperson staff sessions matches `resource.data.dealer_code ==
+/// auth.token.dealerCode`. Without the matching client-side filter,
+/// Firestore denies the entire list query (caller-and-resource scoped
+/// rules require the query shape to prove it can't return out-of-scope
+/// docs). Empty [dealerCode] returns no hits without firing the query.
+Future<List<CustomerSearchHit>> searchCustomers(
+  String query, {
+  required String dealerCode,
+}) async {
   final trimmed = query.trim();
   if (trimmed.isEmpty) return const [];
+  if (dealerCode.isEmpty) return const [];
 
   final users = FirebaseFirestore.instance.collection('users');
   final end = '$trimmed';
@@ -89,16 +102,19 @@ Future<List<CustomerSearchHit>> searchCustomers(String query) async {
   // Three parallel prefix queries — name, email, address. Each capped at 10.
   final results = await Future.wait([
     users
+        .where('dealer_code', isEqualTo: dealerCode)
         .where('display_name', isGreaterThanOrEqualTo: trimmed)
         .where('display_name', isLessThan: end)
         .limit(10)
         .get(),
     users
+        .where('dealer_code', isEqualTo: dealerCode)
         .where('email', isGreaterThanOrEqualTo: trimmed)
         .where('email', isLessThan: end)
         .limit(10)
         .get(),
     users
+        .where('dealer_code', isEqualTo: dealerCode)
         .where('address', isGreaterThanOrEqualTo: trimmed)
         .where('address', isLessThan: end)
         .limit(10)

@@ -828,6 +828,13 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         installationRole: InstallationRole.primary,
         primaryUserId: userId,
         linkedAt: DateTime.now(),
+        // Per-dealer scoping for /users read rule + customer search.
+        // The email-already-in-use branch above sets isExistingAccount=true
+        // and reuses the existing customer's uid; the set(merge:true) at
+        // the bottom of this block then merges dealer_code into the
+        // existing user doc — converting self-registered customers into
+        // dealer-affiliated ones on installer link.
+        dealerCode: session.dealer.dealerCode,
         // Auto-Pilot preferences from installer handoff
         sportsTeams: draft?.sportsTeams ?? const [],
         sportsTeamPriority: draft?.sportsTeams ?? const [],

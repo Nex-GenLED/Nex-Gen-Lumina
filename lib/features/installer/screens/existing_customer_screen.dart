@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Search/select screen for installers entering an existing customer's
@@ -62,7 +63,15 @@ class _ExistingCustomerScreenState
       _searchError = null;
     });
     try {
-      final hits = await searchCustomers(value);
+      // Per-dealer scoping: the rules clause for installer/salesperson
+      // staff sessions requires resource.data.dealer_code to match the
+      // caller's dealerCode claim, so the query MUST filter by it. The
+      // session is set on PIN entry; if it's null the installer was
+      // signed out mid-search and this resolves to no hits.
+      final session = ref.read(installerSessionProvider);
+      final dealerCode = session?.dealer.dealerCode ?? '';
+      final hits =
+          await searchCustomers(value, dealerCode: dealerCode);
       if (!mounted || _query.trim() != value) return;
       setState(() {
         _results = hits;
