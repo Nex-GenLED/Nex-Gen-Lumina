@@ -499,7 +499,7 @@ Rules:
 • If the request is a uniform recurring pattern (same pattern, color, and time across every matching day), you MAY additionally include a top-level field "recurringIntent": true to signal that the changes array represents a single recurring routine. This is OPTIONAL — the changes array must still be populated with one entry per matching day as above. Use "recurringIntent": true for prompts like "every night this week", "nightly through Sunday", "every weekday for the next two weeks". Do NOT use it for distinct one-offs like "blue on December 25" or "red and green on Christmas Eve".
 • For "off" / "turn off": set color to null and brightness to 0.
 • onTime / offTime use 24-hour format ("18:00", "23:30"). Use "sunset" or "$sunsetTime" for sunset, "sunrise" or "$sunriseTime" for sunrise. null is also valid.
-• Today's sunset is $sunsetTime and sunrise is $sunriseTime in the user's timezone ($timezone). Use these exact times when the user says "sunset" or "sunrise".
+• Today's sunset is $sunsetTime local clock time. Today's sunrise is $sunriseTime local clock time. Use exactly these clock-time values when the user says "sunset" or "sunrise" — DO NOT convert or adjust for timezone. The user's timezone is $timezone (informational only; the sunset and sunrise values above are already correct local clock time).
 • "brightness" is 0–100.
 • Common patterns and their hex colors:
     Warm White #FFE8C0 | Ocean Pulse #00C2FF | Ember Glow #FF6B35
@@ -547,6 +547,13 @@ Rules:
     final absHours = tzOffset.inHours.abs().toString().padLeft(2, '0');
     final absMinutes = (tzOffset.inMinutes.abs() % 60).toString().padLeft(2, '0');
     final timezone = '$tzName (UTC$sign$absHours:$absMinutes)';
+
+    // Diagnostic trace for sunset/sunrise issues. Captures the exact values
+    // substituted into the AI prompt + the device's timezone offset so
+    // forensic analysis can pinpoint whether a wrong on-time came from
+    // SunUtils, the prompt, or the model.
+    debugPrint('📅 Astronomy: sunset=$sunsetTime sunrise=$sunriseTime tz=$timezone');
+    debugPrint('📅 Device offset: ${today.timeZoneOffset} (${today.timeZoneOffset.inHours}h) zone=${today.timeZoneName}');
 
     final prefix = _buildPrefix(
       sunsetTime: sunsetTime,
@@ -708,6 +715,29 @@ Rules:
     dated.sort();
 
     const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // RULE 0 — Trust Claude's explicit recurring flag.
+    // The decomposition heuristics below require structural regularity
+    // (consecutive days, same weekday, all weekdays, etc.) — but
+    // "this week" or "next week" can legitimately span weekdays AND
+    // weekends in any gap pattern Claude chose. When Claude explicitly
+    // flagged the response as recurring AND all entries have identical
+    // fields, collapse to whichever days actually appear instead of
+    // insisting on structural regularity. The identical-fields invariant
+    // has been enforced above before this point.
+    if (claudeFlaggedRecurring) {
+      final days = dated.map((d) => dayLabels[d.weekday - 1]).toSet();
+      return RecurringIntent(
+        patternName: first.patternName,
+        color: first.color,
+        onTime: first.onTime,
+        offTime: first.offTime,
+        brightness: first.brightness,
+        repeatDays: days,
+        originalChanges: entries,
+        intentSummary: 'recurring on ${days.join('/')} (Claude-flagged)',
+      );
+    }
 
     // RULE 1 — consecutive days
     bool consecutive = true;
