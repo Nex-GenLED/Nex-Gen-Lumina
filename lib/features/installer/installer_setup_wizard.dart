@@ -682,33 +682,59 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         await FirebaseAuth.instance.signInAnonymously();
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
-          // Account already exists — try to look up the existing user doc.
-          // This query may fail with PERMISSION_DENIED if the current
-          // session is anonymous (anonymous users can't query /users by
-          // email per firestore.rules). In that case, fall through to
-          // the placeholder path — the customer's real uid will be
-          // resolved when they sign in with their existing password.
+          // Account already exists — look up the existing user doc to
+          // recover their real uid. The /users read rule for staff
+          // installer/salesperson sessions is caller-and-resource
+          // scoped on dealer_code, so the query MUST filter by
+          // dealer_code or Firestore denies the entire list. Uses the
+          // (dealer_code, email) composite index deployed in a848f25.
+          //
+          // Empty results and query failures are HARD errors here —
+          // the previous behavior silently fabricated a placeholder
+          // uid, which orphaned the entire install (controllers,
+          // /installations doc, and user merge all wrote against a
+          // throwaway uid that the real customer's account never
+          // referenced). Fail loud so the installer can correct the
+          // input or escalate.
           try {
+            final dealerCode = session.dealer.dealerCode;
+
             final existingQuery = await FirebaseFirestore.instance
                 .collection('users')
+                .where('dealer_code', isEqualTo: dealerCode)
                 .where('email', isEqualTo: customerInfo.email.trim().toLowerCase())
                 .limit(1)
                 .get();
-            if (existingQuery.docs.isNotEmpty) {
-              userId = existingQuery.docs.first.id;
-              isExistingAccount = true;
-            } else {
-              final placeholderRef = FirebaseFirestore.instance.collection('users').doc();
-              userId = placeholderRef.id;
-              isExistingAccount = true;
-              debugPrint('Installer: Auth account exists without Firestore doc, using placeholder $userId');
+
+            if (existingQuery.docs.isEmpty) {
+              // No customer matches both email AND dealer_code in this
+              // dealer's scope. Either a typo, a customer registered
+              // under a different dealer, or a self-registered customer
+              // with no dealer association — none of which the installer
+              // can resolve in-app today.
+              if (mounted) setState(() => _isProcessing = false);
+              _showError(
+                'No existing customer matches this email under your dealer code. '
+                'Double-check the email. If they\'re a Nex-Gen customer through '
+                'another dealer or self-registered without an installer, contact '
+                'support to associate them with your account before continuing.',
+              );
+              return;
             }
-          } catch (queryError) {
-            // Permission denied or network error — use a placeholder.
-            final placeholderRef = FirebaseFirestore.instance.collection('users').doc();
-            userId = placeholderRef.id;
+
+            userId = existingQuery.docs.first.id;
             isExistingAccount = true;
-            debugPrint('Installer: Could not query existing user ($queryError), using placeholder $userId');
+          } catch (queryError) {
+            // Query itself failed (permission denied, network, etc.).
+            // Do NOT silently create a placeholder — that orphans the
+            // install. Fail loud so the installer can retry or escalate.
+            debugPrint('Installer: Customer lookup failed: $queryError');
+            if (mounted) setState(() => _isProcessing = false);
+            _showError(
+              'Unable to verify customer account. Check your network '
+              'connection and retry. If the issue persists, contact support.',
+            );
+            return;
           }
         } else {
           rethrow;
