@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/models/controller_type.dart';
@@ -41,9 +42,18 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
     });
 
     try {
+      // Customer's lat/lon/timezone live on the installer-wizard provider
+      // until the customer user-doc is created at wizard end. Reading from
+      // currentUserProfileProvider here would return the installer's own
+      // profile (signed in via staff-PIN custom token). The pusher silently
+      // skips the time/location step when any field is null.
+      final customerInfo = ref.read(installerCustomerInfoProvider);
       final pushed = await pushDefaultsForControllerType(
         ip,
         ControllerType.skikbily, // Use the SKIKBILY profile for all types.
+        latitude: customerInfo.latitude,
+        longitude: customerInfo.longitude,
+        ianaTimezone: customerInfo.ianaTimezone,
       );
       setState(() {
         _applying = false;
@@ -65,6 +75,39 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
         builder: (_) => const HardwareConfigScreen(),
       ),
     );
+  }
+
+  /// Confirms before skipping hardware config. Silent skip previously
+  /// produced installs whose schedules fired at the wrong time (no
+  /// location set) and whose lights mismatched the strip's color order —
+  /// surface those consequences so the installer makes an informed call.
+  Future<void> _confirmSkip() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Skip controller configuration?'),
+        content: const Text(
+          'Your lights and schedules need controller setup to work '
+          'correctly. Without it:\n\n'
+          '• Lights may not turn on or show the wrong colors\n'
+          '• Schedules will fire at the wrong time (no location set)\n\n'
+          'You can configure this later from System → Hardware.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Skip anyway'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      widget.onNext();
+    }
   }
 
   @override
@@ -122,7 +165,7 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
             subtitle:
                 'Use whatever the controller is already configured for. '
                 'You can come back to this from System → Hardware.',
-            onTap: _applying ? null : widget.onNext,
+            onTap: _applying ? null : _confirmSkip,
             trailing: const Icon(Icons.chevron_right, color: Colors.white54),
           ),
 

@@ -17,7 +17,43 @@ class WledConfigPushResult {
     this.errorMessage,
     this.warnings = const [],
   });
+
+  /// Soft-success: the operation was a no-op because the inputs were
+  /// missing. Surfaces the reason as a single warning so callers can log
+  /// it but doesn't fail the parent flow.
+  factory WledConfigPushResult.skipped(String reason) =>
+      WledConfigPushResult(success: true, warnings: [reason]);
+
+  /// Soft-success: the write succeeded but a post-write check flagged a
+  /// concern (e.g. readback mismatch). Caller decides whether to retry.
+  factory WledConfigPushResult.warning(String message) =>
+      WledConfigPushResult(success: true, warnings: [message]);
 }
+
+/// Maps IANA timezone names to WLED's `if.ntp.tz` integer enum.
+///
+/// Source: WLED ntp.cpp TZ_TABLE. The list is intentionally narrow — only
+/// continental-US + AK/HI/AZ are covered because that's where Lumina
+/// installs go today. Anything outside this set falls back to
+/// [kWledTzUtc]; the controller's clock will run on UTC and astronomical
+/// events will be off by the local offset. Add new entries as install
+/// regions expand; do not invent enum values that don't exist in the WLED
+/// firmware's TZ_TABLE — the device silently ignores unknown indices.
+const Map<String, int> kWledTzByIana = <String, int>{
+  'America/New_York': 4, // TZ_US_EASTERN  (EST/EDT)
+  'America/Chicago': 5, // TZ_US_CENTRAL  (CST/CDT)
+  'America/Denver': 6, // TZ_US_MOUNTAIN (MST/MDT)
+  'America/Phoenix': 7, // TZ_US_ARIZONA  (MST, no DST)
+  'America/Los_Angeles': 8, // TZ_US_PACIFIC  (PST/PDT)
+  'America/Anchorage': 20, // TZ_ANCHORAGE   (AKST/AKDT)
+  'Pacific/Honolulu': 18, // TZ_HAWAII      (HST, no DST)
+};
+
+/// WLED's "no zone" / fallback index — clock runs on UTC.
+const int kWledTzUtc = 0;
+
+/// Resolves the WLED tz enum for an IANA name. Unknown names map to UTC.
+int wledTzForIana(String? iana) => kWledTzByIana[iana] ?? kWledTzUtc;
 
 /// Pushes NGL-standard WLED defaults for a given [ControllerType] to the
 /// device at [controllerIp].
@@ -28,8 +64,11 @@ class WledConfigPushResult {
 /// are configured manually by the dealer.
 Future<WledConfigPushResult> pushDefaultsForControllerType(
   String controllerIp,
-  ControllerType type,
-) async {
+  ControllerType type, {
+  double? latitude,
+  double? longitude,
+  String? ianaTimezone,
+}) async {
   // The SKIKBILY profile (SK6812 RGBW / GRBW / 100 px per channel) is the
   // Lumina standard — we now apply it across all controller types. Existing
   // GPIO pin assignments are preserved by reading the device's current
@@ -129,6 +168,23 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
     warnings.add('mDNS rename failed: ${idResult.errorMessage}');
   }
 
+  // 3.5. Push NTP + lat/lon so the controller's clock and astronomical
+  //      events (sunrise/sunset/twilight schedules) are anchored to the
+  //      customer's actual location. Failure is a warning — install
+  //      continues. The push is a no-op when any of the three fields is
+  //      null (e.g. legacy users completing onboarding before Phase 1).
+  final tlResult = await pushTimeLocation(
+    controllerIp,
+    latitude: latitude,
+    longitude: longitude,
+    ianaTimezone: ianaTimezone,
+  );
+  if (!tlResult.success) {
+    warnings.add('time/location push failed: ${tlResult.errorMessage}');
+  } else if (tlResult.warnings.isNotEmpty) {
+    warnings.addAll(tlResult.warnings);
+  }
+
   // 4. Apply state-level defaults (brightness cap + sync off).
   //    Each call is isolated so one failure doesn't block the other.
   try {
@@ -147,6 +203,94 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   }
 
   return WledConfigPushResult(success: true, warnings: warnings);
+}
+
+/// Pushes the customer's home coordinates and WLED tz enum into the
+/// controller's `if.ntp.*` block. Called as a step inside
+/// [pushDefaultsForControllerType] during install, and as the body of the
+/// "Re-sync Configuration" action on the Manage Controllers screen for
+/// already-installed devices.
+///
+/// Returns [WledConfigPushResult.skipped] when any of lat/lon/iana is
+/// null — the caller's parent flow continues unchanged.
+///
+/// CRITICAL: `if.ntp.offset` is ADDITIVE to the `tz` enum on the device.
+/// We send offset:0 so the enum is the sole source of truth; stacking
+/// them double-shifts the clock.
+Future<WledConfigPushResult> pushTimeLocation(
+  String controllerIp, {
+  required double? latitude,
+  required double? longitude,
+  required String? ianaTimezone,
+  bool verifyAfterWrite = true,
+}) async {
+  if (latitude == null || longitude == null || ianaTimezone == null) {
+    return WledConfigPushResult.skipped('time/location data missing');
+  }
+
+  final tz = wledTzForIana(ianaTimezone);
+  final payload = <String, dynamic>{
+    'if': {
+      'ntp': {
+        'en': true,
+        'host': '0.wled.pool.ntp.org',
+        'tz': tz,
+        'offset': 0,
+        'ampm': false,
+        'ln': longitude,
+        'lt': latitude,
+      },
+    },
+  };
+
+  final result = await _postConfig(controllerIp, payload);
+  if (!result.success) return result;
+
+  if (!verifyAfterWrite) return result;
+
+  // Best-effort readback. The write returned 2xx; if verification can't
+  // reach the device or the device returns an unparseable body, we trust
+  // the write and return success. Only a clear mismatch on the fields we
+  // just set surfaces as a warning.
+  try {
+    final cfg = await _fetchRawConfig(controllerIp);
+    if (cfg != null) {
+      final ntp = (cfg['if'] as Map?)?['ntp'] as Map?;
+      if (ntp == null ||
+          ntp['tz'] != tz ||
+          (ntp['lt'] as num?)?.toDouble() != latitude ||
+          (ntp['ln'] as num?)?.toDouble() != longitude) {
+        return WledConfigPushResult.warning(
+          'time/location write reported success but readback mismatch',
+        );
+      }
+    }
+  } catch (_) {
+    // Soft-fail — write already returned 2xx.
+  }
+
+  return result;
+}
+
+/// Fetches the raw `/json/cfg` Map from the controller. Used by
+/// [pushTimeLocation] for readback verification of fields not exposed by
+/// the typed [WledService.getConfig] (which only parses `hw.led.*`).
+/// Returns null on any error.
+Future<Map<String, dynamic>?> _fetchRawConfig(String ip) async {
+  try {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final req = await client.getUrl(Uri.parse('http://$ip/json/cfg'));
+    req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    final res = await req.close().timeout(const Duration(seconds: 15));
+    final body = await res.transform(utf8.decoder).join();
+    client.close(force: true);
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return jsonDecode(body) as Map<String, dynamic>;
+    }
+  } catch (e) {
+    debugPrint('[WledConfig] _fetchRawConfig exception: $e');
+  }
+  return null;
 }
 
 /// Posts a JSON config payload to `/json/cfg` and returns a

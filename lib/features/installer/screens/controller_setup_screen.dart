@@ -1340,7 +1340,20 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     setState(() => _pushingDefaults.add(controller.id));
 
     final ctrlType = _controllerTypes[controller.id] ?? ControllerType.genericWled;
-    final result = await pushDefaultsForControllerType(controller.ip, ctrlType);
+    // During the installer-driven flow we read from installerCustomerInfoProvider
+    // — the customer's user-doc isn't created until the wizard's final step.
+    // Reading currentUserProfileProvider here would return the installer's
+    // own profile (signed in via staff-PIN custom token), which is wrong.
+    // pushDefaultsForControllerType silently skips the time/location step
+    // when any field is null.
+    final customerInfo = ref.read(installerCustomerInfoProvider);
+    final result = await pushDefaultsForControllerType(
+      controller.ip,
+      ctrlType,
+      latitude: customerInfo.latitude,
+      longitude: customerInfo.longitude,
+      ianaTimezone: customerInfo.ianaTimezone,
+    );
 
     if (!mounted) return;
     setState(() => _pushingDefaults.remove(controller.id));
