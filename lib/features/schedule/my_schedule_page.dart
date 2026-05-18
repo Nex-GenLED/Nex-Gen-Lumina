@@ -1008,6 +1008,10 @@ class _DayHeroCard extends ConsumerWidget {
                 brightnessPercent: brightness,
                 source: sourceLabel,
                 timeFormat: timeFormat,
+                ref: ref,
+                calEntry: calEntry,
+                recurringItem: calEntry == null ? recurringFirst : null,
+                dateKey: dateKey,
               )
           : null,
       child: ClipRRect(
@@ -1405,7 +1409,18 @@ void _showScheduleDetailSheet(
   required int? brightnessPercent,
   required String source,
   String timeFormat = '12h',
+  WidgetRef? ref,
+  CalendarEntry? calEntry,
+  ScheduleItem? recurringItem,
+  String? dateKey,
 }) {
+  // The delete affordance is only meaningful when we have both a ref to
+  // mutate state through and an actual entry to remove. The recurring
+  // card surfaces its own delete button on the schedule list, so we only
+  // wire delete here for the calendar day-detail path that's missing it.
+  final canDelete =
+      ref != null && (calEntry != null || recurringItem != null);
+
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
@@ -1502,10 +1517,145 @@ void _showScheduleDetailSheet(
             value: source,
             color: NexGenPalette.textMedium,
           ),
+          if (canDelete) ...[
+            const SizedBox(height: 16),
+            Divider(color: NexGenPalette.line, height: 1),
+            const SizedBox(height: 8),
+            _DeleteEntryButton(
+              ref: ref,
+              calEntry: calEntry,
+              recurringItem: recurringItem,
+              dateKey: dateKey,
+              sheetContext: ctx,
+            ),
+          ],
         ],
       ),
     ),
   );
+}
+
+class _DeleteEntryButton extends StatelessWidget {
+  final WidgetRef ref;
+  final CalendarEntry? calEntry;
+  final ScheduleItem? recurringItem;
+  final String? dateKey;
+  final BuildContext sheetContext;
+
+  const _DeleteEntryButton({
+    required this.ref,
+    required this.calEntry,
+    required this.recurringItem,
+    required this.dateKey,
+    required this.sheetContext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // calEntry takes precedence: removing the one-off override reveals
+    // the recurring fallback (if any) on the next render.
+    final isCalEntry = calEntry != null;
+    final label = isCalEntry ? 'Delete This Day' : 'Delete Recurring Schedule';
+
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.red.shade300,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+        label: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        onPressed: () => _confirmAndDelete(sheetContext),
+      ),
+    );
+  }
+
+  Future<void> _confirmAndDelete(BuildContext ctx) async {
+    final String title;
+    final String body;
+    if (calEntry != null) {
+      title = 'Delete this day?';
+      final friendlyDate = _friendlyDate(dateKey);
+      body = friendlyDate != null
+          ? 'Delete the entry for $friendlyDate? '
+              "The lights won't change on this day."
+          : "Delete this day's entry? The lights won't change on this day.";
+    } else {
+      final otherDays = (recurringItem?.repeatDays.length ?? 1) - 1;
+      title = 'Delete recurring schedule?';
+      body = otherDays > 0
+          ? 'This will delete the recurring schedule and affect $otherDays '
+              'other ${otherDays == 1 ? 'day' : 'days'}. Continue?'
+          : 'This will delete the recurring schedule. Continue?';
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              foregroundColor: Colors.red.shade300,
+            ),
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!ctx.mounted) return;
+
+    final messenger = ScaffoldMessenger.maybeOf(ctx);
+    bool ok = false;
+    if (calEntry != null && dateKey != null) {
+      ok = await ref
+          .read(calendarScheduleProvider.notifier)
+          .removeEntry(dateKey!);
+    } else if (recurringItem != null) {
+      ref.read(schedulesProvider.notifier).remove(recurringItem!.id);
+      ok = true;
+    }
+
+    if (ctx.mounted) {
+      Navigator.of(ctx).pop();
+    }
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Entry deleted' : 'Could not delete entry'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  String? _friendlyDate(String? key) {
+    if (key == null) return null;
+    try {
+      final d = DateTime.parse(key);
+      const weekdays = [
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+        'Friday', 'Saturday', 'Sunday',
+      ];
+      const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December',
+      ];
+      return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class _DetailRow extends StatelessWidget {
