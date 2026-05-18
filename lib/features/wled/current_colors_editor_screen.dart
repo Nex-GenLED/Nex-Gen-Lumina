@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/current_colors_provider.dart';
 import 'package:nexgen_command/features/wled/widgets/neon_color_wheel.dart';
@@ -467,10 +468,9 @@ class _ColorPickerModalState extends State<_ColorPickerModal> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + navBarTotalHeight(context)),
+        child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Handle bar
@@ -570,7 +570,6 @@ class _ColorPickerModalState extends State<_ColorPickerModal> {
             ],
           ),
         ),
-      ),
     );
   }
 }

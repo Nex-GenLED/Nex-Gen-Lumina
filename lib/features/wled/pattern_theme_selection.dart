@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
@@ -733,7 +734,7 @@ class _SolidColorPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + navBarTotalHeight(context)),
       decoration: BoxDecoration(
         color: NexGenPalette.gunmetal90,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),

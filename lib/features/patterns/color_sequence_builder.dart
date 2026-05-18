@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/widgets/neon_color_wheel.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -190,10 +191,9 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + navBarTotalHeight(context)),
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // Handle bar
@@ -316,7 +316,6 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
             ),
           ],
         ),
-      ),
     );
   }
 }
