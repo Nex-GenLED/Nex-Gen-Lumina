@@ -56,9 +56,6 @@ enum AutopilotVarietyMode {
   /// Cycle through the team's design catalog in order.
   /// Default for new autopilot configs.
   rotating,
-
-  /// Deterministic random pick per game (seeded by game date).
-  random,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,9 +121,14 @@ class GameDayAutopilotConfig {
   /// How pre-game designs rotate across games.
   /// - fixed: use the same design (saved or fallback) for every game
   /// - rotating: cycle through the team design catalog in order
-  /// - random: pick a deterministic random design per game (seeded by
-  ///   game date so repeat views match)
   final AutopilotVarietyMode designVariety;
+
+  /// User preference for design dynamism: 0.0 = static, 1.0 =
+  /// fast motion. Currently persisted and surfaced in UI but
+  /// not yet consumed by autopilot's design selection.
+  /// TODO(v1.0.1): wire into game_day_autopilot_service.dart
+  /// _selectDesign to weight effect choices by motion preference.
+  final double motionStyle;
 
   /// Lead-time-before-game override in minutes. When null, defaults to 30.
   /// Applies to all future games for this team unless overridden by a
@@ -156,7 +158,7 @@ class GameDayAutopilotConfig {
     required this.sport,
     required this.primaryColorValue,
     required this.secondaryColorValue,
-    this.enabled = true,
+    this.enabled = false,
     this.designMode = AutopilotDesignMode.fallback,
     this.savedDesignName,
     this.savedDesignPayload,
@@ -167,6 +169,7 @@ class GameDayAutopilotConfig {
     this.scoreCelebrationEnabled = true,
     this.skipDayGames = true,
     this.designVariety = AutopilotVarietyMode.rotating,
+    this.motionStyle = 0.5,
     this.leadTimeMinutesOverride,
     this.onTimeOverride,
     this.offTimeOverride,
@@ -254,6 +257,7 @@ class GameDayAutopilotConfig {
         'score_celebration_enabled': scoreCelebrationEnabled,
         'skip_day_games': skipDayGames,
         'design_variety': designVariety.name,
+        'motion_style': motionStyle,
         if (leadTimeMinutesOverride != null)
           'lead_time_minutes_override': leadTimeMinutesOverride,
         if (onTimeOverride != null) 'on_time_override': onTimeOverride,
@@ -271,7 +275,7 @@ class GameDayAutopilotConfig {
       primaryColorValue: (data['primary_color'] as num?)?.toInt() ?? 0xFF000000,
       secondaryColorValue:
           (data['secondary_color'] as num?)?.toInt() ?? 0xFFFFFFFF,
-      enabled: data['enabled'] as bool? ?? true,
+      enabled: data['enabled'] as bool? ?? false,
       designMode: _parseDesignMode(data['design_mode'] as String?),
       savedDesignName: data['saved_design_name'] as String?,
       savedDesignPayload:
@@ -284,6 +288,7 @@ class GameDayAutopilotConfig {
           data['score_celebration_enabled'] as bool? ?? true,
       skipDayGames: data['skip_day_games'] as bool? ?? true,
       designVariety: _parseVarietyMode(data['design_variety'] as String?),
+      motionStyle: (data['motion_style'] as num?)?.toDouble() ?? 0.5,
       leadTimeMinutesOverride:
           (data['lead_time_minutes_override'] as num?)?.toInt(),
       onTimeOverride: data['on_time_override'] as String?,
@@ -305,6 +310,7 @@ class GameDayAutopilotConfig {
     bool? scoreCelebrationEnabled,
     bool? skipDayGames,
     AutopilotVarietyMode? designVariety,
+    double? motionStyle,
     int? leadTimeMinutesOverride,
     String? onTimeOverride,
     String? offTimeOverride,
@@ -329,6 +335,7 @@ class GameDayAutopilotConfig {
           scoreCelebrationEnabled ?? this.scoreCelebrationEnabled,
       skipDayGames: skipDayGames ?? this.skipDayGames,
       designVariety: designVariety ?? this.designVariety,
+      motionStyle: motionStyle ?? this.motionStyle,
       leadTimeMinutesOverride:
           leadTimeMinutesOverride ?? this.leadTimeMinutesOverride,
       onTimeOverride: onTimeOverride ?? this.onTimeOverride,

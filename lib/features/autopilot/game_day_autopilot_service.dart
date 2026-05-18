@@ -674,12 +674,6 @@ class GameDayAutopilotService {
 
       case AutopilotVarietyMode.rotating:
         return TeamDesignCatalog.selectForRotation(catalog, gameIndex);
-
-      case AutopilotVarietyMode.random:
-        return TeamDesignCatalog.selectForRandom(
-          catalog,
-          game.scheduledDate.millisecondsSinceEpoch ~/ 1000,
-        );
     }
   }
 

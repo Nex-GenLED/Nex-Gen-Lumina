@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -84,12 +86,10 @@ class GameDayScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   ...teamEntries.map((entry) => Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: _TeamCard(
-                          entry: entry,
-                          canDelete: teamEntries.length > 1,
-                        ),
+                        child: _TeamCard(entry: entry),
                       )),
-                ],
+                ] else
+                  _buildEmptyTeamsState(),
 
                 // Add a team button
                 const SizedBox(height: 8),
@@ -105,6 +105,44 @@ class GameDayScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 _JoinCrewCard(),
               ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyTeamsState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: NexGenPalette.cyan.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.sports_rounded,
+              size: 36, color: NexGenPalette.cyan.withValues(alpha: 0.6)),
+          const SizedBox(height: 12),
+          const Text(
+            'No teams added yet',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: NexGenPalette.textHigh,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Tap the + button below to add your first team.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: NexGenPalette.textMedium,
+              height: 1.4,
             ),
           ),
         ],
@@ -173,16 +211,22 @@ class GameDayScreen extends ConsumerWidget {
 
 class _TeamCard extends ConsumerStatefulWidget {
   final GameDayTeamEntry entry;
-  final bool canDelete;
 
-  const _TeamCard({required this.entry, this.canDelete = true});
+  const _TeamCard({required this.entry});
 
   @override
   ConsumerState<_TeamCard> createState() => _TeamCardState();
 }
 
 class _TeamCardState extends ConsumerState<_TeamCard> {
-  bool _settingsExpanded = false;
+  Timer? _motionStyleDebounce;
+  double? _motionStyleLocal;
+
+  @override
+  void dispose() {
+    _motionStyleDebounce?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -264,31 +308,37 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                 const SizedBox(width: 4),
                 IconButton(
                   icon: const Icon(Icons.delete_outline, size: 20),
-                  color: widget.canDelete
-                      ? NexGenPalette.textMedium
-                      : NexGenPalette.textMedium.withValues(alpha: 0.3),
-                  tooltip: widget.canDelete
-                      ? 'Remove team'
-                      : 'Add another team before removing this one.',
+                  color: NexGenPalette.textMedium,
+                  tooltip: 'Remove team',
                   visualDensity: VisualDensity.compact,
-                  onPressed: widget.canDelete
-                      ? () => _confirmRemove(context, ref, config)
-                      : () => ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Add another team before removing this one.',
-                              ),
-                              duration: Duration(seconds: 2),
-                            ),
-                          ),
+                  onPressed: () => _confirmRemove(context, ref, config),
                 ),
               ],
             ),
           ),
 
+          // ── Light Up Now (immediate, standalone action) ──
+          // Sits above the config rows so it stays accessible regardless
+          // of the Autopilot toggle state.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _activateNow(context, ref, config),
+                icon: const Icon(Icons.bolt_rounded, color: Colors.black),
+                label: const Text('Light Up Now'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _lightUpButtonColor(config),
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ),
+          ),
+
           // ── Config section ──
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Column(
               children: [
                 // Design row
@@ -318,7 +368,11 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                 const Divider(
                     height: 24, color: NexGenPalette.line),
 
-                // Autopilot toggle
+                // ── Autopilot Settings ─────────────────────────────────
+                // Primary Autopilot ON/OFF toggle. Dependent controls
+                // below are greyed out (Opacity + IgnorePointer) when
+                // off — still visible so the user can see what autopilot
+                // will configure.
                 _ToggleRow(
                   icon: Icons.auto_mode_rounded,
                   label: 'Autopilot',
@@ -329,27 +383,17 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                       : (val) => _toggleAutopilot(context, ref, config, val),
                 ),
 
-                // Expandable settings — only when autopilot is enabled
-                if (config.enabled && !entry.isCrewMember) ...[
+                if (!entry.isCrewMember) ...[
                   const SizedBox(height: 4),
-                  _buildSettingsExpander(context, ref, config),
-                ],
-
-                // ── Light Up Now (immediate, manual one-off) ──
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => _activateNow(context, ref, config),
-                    icon: const Icon(Icons.bolt_rounded, color: Colors.black),
-                    label: const Text('Light Up Now'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _lightUpButtonColor(config),
-                      foregroundColor: Colors.black,
+                  AnimatedOpacity(
+                    opacity: config.enabled ? 1.0 : 0.4,
+                    duration: const Duration(milliseconds: 200),
+                    child: IgnorePointer(
+                      ignoring: !config.enabled,
+                      child: _buildSettingsContent(context, ref, config),
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
+                ],
               ],
             ),
           ),
@@ -576,56 +620,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     }
   }
 
-  // ── Settings expander ──────────────────────────────────────────────
-
-  Widget _buildSettingsExpander(
-    BuildContext context,
-    WidgetRef ref,
-    GameDayAutopilotConfig config,
-  ) {
-    return Column(
-      children: [
-        const Divider(height: 24, color: NexGenPalette.line),
-        InkWell(
-          onTap: () => setState(() => _settingsExpanded = !_settingsExpanded),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                Icon(Icons.tune_rounded,
-                    size: 18, color: NexGenPalette.cyan),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    'Autopilot Settings',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: NexGenPalette.textMedium,
-                    ),
-                  ),
-                ),
-                AnimatedRotation(
-                  turns: _settingsExpanded ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(Icons.expand_more,
-                      size: 20, color: NexGenPalette.textMedium),
-                ),
-              ],
-            ),
-          ),
-        ),
-        AnimatedCrossFade(
-          firstChild: const SizedBox.shrink(),
-          secondChild: _buildSettingsContent(context, ref, config),
-          crossFadeState: _settingsExpanded
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 200),
-        ),
-      ],
-    );
-  }
+  // ── Settings content (always visible; greyed by parent when autopilot off) ─
 
   Widget _buildSettingsContent(
     BuildContext context,
@@ -633,7 +628,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     GameDayAutopilotConfig config,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -694,12 +689,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           _buildVarietyRadio(ref, config, AutopilotVarietyMode.rotating,
               'Rotate through team designs'),
           _buildVarietyRadio(ref, config, AutopilotVarietyMode.fixed,
-              'Same pattern every game'),
-          _buildVarietyRadio(ref, config, AutopilotVarietyMode.random,
-              'Random team design'),
+              'Same pattern each game'),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 3. Lead time
+          // 3. Motion style slider (storage-only for now; see config TODO)
+          _buildMotionStyleSlider(ref, config),
+          const Divider(height: 16, color: NexGenPalette.line),
+
+          // 4. Lead time
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -722,7 +719,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 4. Refresh schedule button
+          // 5. Refresh schedule button
           Center(
             child: TextButton.icon(
               onPressed: () async {
@@ -752,6 +749,81 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMotionStyleSlider(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) {
+    final value = _motionStyleLocal ?? config.motionStyle;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Icon(Icons.speed_rounded,
+                  size: 18, color: NexGenPalette.cyan),
+              const SizedBox(width: 10),
+              const Text(
+                'Motion style',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: NexGenPalette.textMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 20, right: 4),
+          child: Slider(
+            value: value.clamp(0.0, 1.0),
+            min: 0.0,
+            max: 1.0,
+            activeColor: NexGenPalette.cyan,
+            inactiveColor:
+                NexGenPalette.textMedium.withValues(alpha: 0.3),
+            onChanged: (v) => setState(() => _motionStyleLocal = v),
+            onChangeEnd: (v) {
+              _motionStyleDebounce?.cancel();
+              _motionStyleDebounce =
+                  Timer(const Duration(milliseconds: 300), () {
+                ref
+                    .read(gameDayAutopilotNotifierProvider.notifier)
+                    .setMotionStyle(teamSlug: config.teamSlug, value: v)
+                    .catchError((e, st) {
+                  debugPrint('[GameDay] setMotionStyle failed: $e\n$st');
+                });
+              });
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 28, right: 16, bottom: 4),
+          child: Row(
+            children: [
+              Text(
+                'Static',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.7),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Fast Motion',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1731,9 +1803,11 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       debugPrint('[GameDay] Adding team: $slug (${team.teamName})');
+      // Add the team with autopilot OFF — user must explicitly opt in
+      // via the Autopilot toggle on the team card.
       await ref
           .read(gameDayAutopilotNotifierProvider.notifier)
-          .toggleAutopilot(teamSlug: slug, enabled: true);
+          .toggleAutopilot(teamSlug: slug, enabled: false);
 
       if (!context.mounted) return;
       Navigator.pop(context);

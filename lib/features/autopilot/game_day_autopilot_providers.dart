@@ -489,6 +489,31 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     });
   }
 
+  /// Persist the motion-style slider value (0.0 = static, 1.0 = fast).
+  /// Storage-only for now — see GameDayAutopilotConfig.motionStyle TODO.
+  Future<void> setMotionStyle({
+    required String teamSlug,
+    required double value,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to change motion style.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'motion_style': value.clamp(0.0, 1.0),
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
   /// Remove a team entirely from the user's Game Day: strips it from the
   /// profile's `sports_team_priority` / `sports_teams` arrays (the source
   /// of truth for My Teams) and deletes the matching game_day_autopilot

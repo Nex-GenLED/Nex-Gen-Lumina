@@ -160,9 +160,7 @@ class TeamDesignCatalog {
   }
 
   /// Select a design using a deterministic seed (e.g. game date hash).
-  ///
-  /// For [AutopilotVarietyMode.random]: same seed always returns the
-  /// same design so repeat views of the same game day match.
+  /// Same seed always returns the same design so repeat views match.
   static TeamDesign selectForRandom(
     List<TeamDesign> catalog,
     int seed,
