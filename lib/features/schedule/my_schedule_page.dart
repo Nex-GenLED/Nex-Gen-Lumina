@@ -89,10 +89,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
 
   // Last successful schedule sync timestamp — drives the "Synced Xm ago"
   // label on the AppBar Sync button so users can tell at a glance whether
-  // a recent edit landed on the controller. Updated by both manual Sync
-  // taps and the auto-sync that fires on schedulesProvider changes.
+  // a recent edit landed on the controller. Updated by manual Sync taps;
+  // background auto-syncs (driven by SchedulesNotifier) refresh
+  // lastScheduleSyncResultProvider, which _SyncStatusRow surfaces below.
   DateTime? _lastSyncTime;
-  bool _autoSyncing = false;
 
   @override
   void initState() {
@@ -138,41 +138,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     });
   }
 
-  // ── Auto-sync to controller on schedule changes ──────────────────────────
-  //
-  // Fired from a ref.listen on schedulesProvider whenever the saved schedule
-  // list changes. Runs in the background — never blocks the UI. Failures
-  // surface as a snackbar pointing the user back at the manual Sync button.
-  void _triggerAutoSync(List<ScheduleItem> schedules) {
-    if (_autoSyncing) return;
-    _autoSyncing = true;
-    final svc = ref.read(scheduleSyncServiceProvider);
-    svc.syncAll(ref, schedules).then((result) {
-      if (!mounted) return;
-      if (result.success) {
-        setState(() => _lastSyncTime = DateTime.now());
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Schedule sync failed — tap Sync to retry'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    }).catchError((e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Schedule sync failed — tap Sync to retry'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 3),
-        ),
-      );
-    }).whenComplete(() {
-      _autoSyncing = false;
-    });
-  }
+  // Auto-sync now lives in SchedulesNotifier — every mutation method
+  // triggers a debounced WLED push, so this widget-scoped listener is
+  // no longer needed. The manual Sync button below remains for
+  // user-driven re-sync.
 
   String _formatSyncAge(DateTime t) {
     final diff = DateTime.now().difference(t);
@@ -180,27 +149,6 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
-  }
-
-  // Detect a meaningful change in the schedules list — id set, enabled state,
-  // or core fields. Used to skip the initial fire-immediately emission of
-  // schedulesProvider so we don't auto-sync on screen open.
-  bool _schedulesChanged(List<ScheduleItem>? prev, List<ScheduleItem> next) {
-    if (prev == null) return false;
-    if (prev.length != next.length) return true;
-    for (var i = 0; i < prev.length; i++) {
-      final a = prev[i];
-      final b = next[i];
-      if (a.id != b.id ||
-          a.enabled != b.enabled ||
-          a.timeLabel != b.timeLabel ||
-          a.offTimeLabel != b.offTimeLabel ||
-          a.actionLabel != b.actionLabel ||
-          a.repeatDays.join(',') != b.repeatDays.join(',')) {
-        return true;
-      }
-    }
-    return false;
   }
 
   // ── Week range label ──
@@ -232,14 +180,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     final calEntries = ref.watch(calendarScheduleProvider);
     final pending    = ref.watch(pendingCalendarProvider);
 
-    // Auto-sync to controller whenever schedules actually change.
-    // Skips the initial fire (prev == null) so opening the screen does
-    // not trigger a sync — only real edits do.
-    ref.listen<List<ScheduleItem>>(schedulesProvider, (prev, next) {
-      if (_schedulesChanged(prev, next)) {
-        _triggerAutoSync(next);
-      }
-    });
+    // Auto-sync now lives in SchedulesNotifier — every mutation triggers
+    // a debounced WLED push from the notifier, regardless of which screen
+    // is mounted. The manual Sync button below remains as the user's
+    // escape hatch for forcing an immediate re-push.
 
     final userAsync  = ref.watch(currentUserProfileProvider);
     final user       = userAsync.maybeWhen(data: (u) => u, orElse: () => null);
@@ -261,9 +205,12 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
         actions: [
           TextButton.icon(
             onPressed: () async {
+              // Route through SchedulesNotifier so the manual sync uses
+              // the same path as the debounced auto-sync — bypassing the
+              // debounce for an immediate /json/cfg push.
               final result = await ref
-                  .read(scheduleSyncServiceProvider)
-                  .syncAll(ref, schedules);
+                  .read(schedulesProvider.notifier)
+                  .runSyncNow();
               if (!context.mounted) return;
               final messenger = ScaffoldMessenger.of(context);
               if (!result.success) {

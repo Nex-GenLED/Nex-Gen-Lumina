@@ -130,7 +130,11 @@ class ScheduleSyncService {
   ///    the device knows when to trigger each preset.
   ///
   /// Returns a [ScheduleSyncResult] with details about the sync operation.
-  Future<ScheduleSyncResult> syncAll(WidgetRef ref, List<ScheduleItem> schedules) async {
+  ///
+  /// Accepts a [Ref] (provider-side) rather than [WidgetRef] so the
+  /// notifier-driven auto-sync can call this directly. Both ref types
+  /// expose the same `.read()` surface used inside this method.
+  Future<ScheduleSyncResult> syncAll(Ref ref, List<ScheduleItem> schedules) async {
     // Records the result so the schedule screen can show a status row.
     ScheduleSyncResult finish(ScheduleSyncResult result) {
       ref.read(lastScheduleSyncResultProvider.notifier).state = result;
@@ -163,6 +167,31 @@ class ScheduleSyncService {
     // Step 1: Assign preset IDs and save presets to device
     final List<ScheduleItem> updatedSchedules = [];
     final List<String> presetErrors = [];
+
+    // Universal ON/OFF presets — saved on every sync so OFF timers
+    // (hardcoded `macro: 2` in buildCfgPayload below) and the legacy
+    // _presetForAction fallback ("Turn On" → preset 1) always have
+    // valid targets. WLED retains presets across reboots, but psave
+    // is idempotent — overwriting in place is safe and cheap.
+    // Failures here are logged via presetErrors but do not abort the
+    // sync; per-schedule presets and the timer push still proceed.
+    final savedOn = await repo.savePreset(
+      presetId: 1,
+      state: {'on': true, 'bri': 200},
+      presetName: 'NGL On',
+    );
+    if (!savedOn) {
+      presetErrors.add('Failed to save preset 1 (NGL On)');
+    }
+    final savedOff = await repo.savePreset(
+      presetId: 2,
+      state: {'on': false},
+      presetName: 'NGL Off',
+    );
+    if (!savedOff) {
+      presetErrors.add('Failed to save preset 2 (NGL Off)');
+    }
+
     int nextPresetId = _firstSchedulePresetId;
 
     for (final schedule in enabled) {
@@ -250,7 +279,7 @@ class ScheduleSyncService {
 
   /// Legacy sync method for backward compatibility.
   /// Prefer using [syncAll] which returns detailed results.
-  Future<bool> syncAllLegacy(WidgetRef ref, List<ScheduleItem> schedules) async {
+  Future<bool> syncAllLegacy(Ref ref, List<ScheduleItem> schedules) async {
     final result = await syncAll(ref, schedules);
     return result.success;
   }

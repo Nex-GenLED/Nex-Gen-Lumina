@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 
@@ -35,8 +38,68 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// suppress stream-listener overwrites to prevent flash-back-to-old-data.
   bool _isMutating = false;
 
+  /// Debounces WLED sync after schedule mutations. A burst of writes
+  /// (autopilot 7-day fan-out, batched manual edits) coalesces into a
+  /// single /json/cfg push.
+  Timer? _syncDebounceTimer;
+
   SchedulesNotifier(this._ref) : super([]) {
     _init();
+  }
+
+  @override
+  void dispose() {
+    _syncDebounceTimer?.cancel();
+    super.dispose();
+  }
+
+  // ─── WLED sync wiring ──────────────────────────────────────────
+  //
+  // Auto-sync to the controller lives here (not in any widget) so every
+  // schedule mutation — Lumina chat, autopilot, calendar collapse,
+  // manual entry — reaches WLED without the user navigating to My
+  // Schedule. The widget-scoped ref.listen previously in
+  // _MySchedulePageState was torn down whenever that page wasn't
+  // mounted, so schedules created from other surfaces never pushed.
+
+  /// Schedule a WLED sync ~800ms after the most recent mutation.
+  /// Each call cancels the previous timer so back-to-back writes
+  /// (autopilot 7-day fan-out, rapid manual edits) collapse into one
+  /// /json/cfg push. Sync failures are logged but never rethrown —
+  /// a controller-side problem must never block the Firestore write.
+  void _triggerWledSync() {
+    _syncDebounceTimer?.cancel();
+    _syncDebounceTimer = Timer(const Duration(milliseconds: 800), _runWledSync);
+  }
+
+  /// Immediate sync — bypasses the debounce. Used by the manual
+  /// Sync button in My Schedule (the user's escape hatch when they
+  /// want to force a push without waiting on the 800ms coalesce).
+  Future<ScheduleSyncResult> runSyncNow() async {
+    _syncDebounceTimer?.cancel();
+    return _runWledSync();
+  }
+
+  Future<ScheduleSyncResult> _runWledSync() async {
+    try {
+      final ref = _ref;
+      final service = ref.read(scheduleSyncServiceProvider);
+      final result = await service.syncAll(ref, state);
+      if (result.success) {
+        debugPrint(
+            'SchedulesNotifier: WLED sync OK — ${state.length} schedules pushed');
+      } else {
+        debugPrint(
+            'SchedulesNotifier: WLED sync failed — ${result.error ?? "unknown"}');
+      }
+      return result;
+    } catch (e) {
+      debugPrint('SchedulesNotifier: WLED sync threw — $e');
+      return ScheduleSyncResult(
+        success: false,
+        error: 'Sync exception: $e',
+      );
+    }
   }
 
   Future<void> _init() async {
@@ -172,6 +235,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).updateSchedule(userId, schedule);
       debugPrint('Schedule $id toggled to $value and saved');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist toggle — reverting: $e');
       state = oldState;
@@ -216,6 +280,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).addSchedule(userId, item);
       debugPrint('Schedule added and saved: ${item.id}');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist add — reverting: $e');
       state = oldState;
@@ -245,6 +310,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).removeSchedule(userId, id);
       debugPrint('Schedule removed and saved: $id');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist remove — reverting: $e');
       state = oldState;
@@ -274,6 +340,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).updateSchedule(userId, item);
       debugPrint('Schedule updated and saved: ${item.id}');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist update — reverting: $e');
       state = oldState;
@@ -303,6 +370,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).saveSchedules(userId, schedules);
       debugPrint('All schedules replaced and saved: ${schedules.length} items');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist replaceAll — reverting: $e');
       state = oldState;
@@ -369,6 +437,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       await _ref.read(userServiceProvider).saveSchedules(userId, merged);
       debugPrint(
           'Added ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
+      _triggerWledSync();
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist addAll — reverting: $e');
       state = oldState;
