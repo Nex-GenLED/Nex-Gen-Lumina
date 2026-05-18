@@ -509,92 +509,23 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
     final selectedIp = ref.watch(selectedDeviceIpProvider);
 
-    ControllerInfo? selectedController;
-    if (selectedIp != null && controllers.isNotEmpty) {
-      selectedController = controllers.cast<ControllerInfo?>().firstWhere(
-        (c) => c?.ip == selectedIp,
-        orElse: () => null,
-      );
-    }
-
     if (controllers.isEmpty) return const SizedBox.shrink();
-
-    final displayName = selectedController?.name ??
-        selectedController?.ip ??
-        (selectedIp ?? 'Select Controller');
 
     return Padding(
       padding: const EdgeInsets.only(right: 4),
       child: PopupMenuButton<String>(
-        tooltip: 'Select Controller',
+        tooltip: state.connected ? 'Controller online' : 'Controller offline',
         offset: const Offset(0, 40),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         color: NexGenPalette.gunmetal90,
-        child: Container(
+        child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.5)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Builder(builder: (_) {
-                final isRemote = ref.watch(isRemoteModeProvider);
-                final bridgeOk = ref.watch(bridgeReachableProvider) == true;
-                // Three states:
-                //   local + connected        → cyan
-                //   remote + bridge reachable → teal (bridge active)
-                //   anything else             → red (offline)
-                final Color dotColor;
-                if (state.connected) {
-                  dotColor = isRemote
-                      ? const Color(0xFF26A69A) // teal — connected via bridge
-                      : NexGenPalette.cyan;     // cyan — local
-                } else if (isRemote && bridgeOk) {
-                  dotColor = const Color(0xFF26A69A); // teal — bridge confirmed
-                } else {
-                  dotColor = Colors.red.withValues(alpha: 0.8);
-                }
-                return Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
-                );
-              }),
-              const SizedBox(width: 5),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 120),
-                child: Builder(builder: (_) {
-                  final isRemote = ref.watch(isRemoteModeProvider);
-                  final bridgeOk = ref.watch(bridgeReachableProvider) == true;
-                  final String label;
-                  final Color textColor;
-                  if (state.connected) {
-                    label = isRemote ? '$displayName (bridge)' : displayName;
-                    textColor = Colors.white;
-                  } else if (isRemote && bridgeOk) {
-                    label = '$displayName (bridge)';
-                    textColor = Colors.white70;
-                  } else {
-                    label = displayName;
-                    textColor = Colors.grey;
-                  }
-                  return Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: textColor,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  );
-                }),
-              ),
-              if (controllers.length > 1) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white70),
-              ],
-            ],
+          child: Icon(
+            Icons.bolt_rounded,
+            size: 22,
+            color: state.connected
+                ? NexGenPalette.cyan
+                : NexGenPalette.textMedium,
           ),
         ),
         itemBuilder: (context) => controllers.map((controller) {
