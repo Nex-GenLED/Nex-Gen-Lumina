@@ -25,8 +25,11 @@
  *     require('firebase-admin').auth().setCustomUserClaims('<UID>', {admin: true})"
  * or via a one-shot script in functions/ with the admin SDK.
  *
- * Configuration: requires GOOGLE_MAPS_API_KEY in functions/.env with both
- * Geocoding API and Time Zone API enabled in Google Cloud Console.
+ * Configuration: requires GOOGLE_MAPS_API_KEY in Google Cloud Secret
+ * Manager (set via `firebase functions:secrets:set GOOGLE_MAPS_API_KEY`)
+ * with both Geocoding API and Time Zone API enabled in Google Cloud
+ * Console. The function declares the secret in its onCall `secrets`
+ * option so the runtime auto-mounts it for `.value()` to resolve.
  *
  * Manual invocation (Tyler runs this once after deploy):
  *   Firebase Console → Functions → backfillUserLocations → Test the
@@ -50,13 +53,13 @@
  */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineString } from "firebase-functions/params";
+import { defineSecret } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
-const googleMapsApiKey = defineString("GOOGLE_MAPS_API_KEY");
+const googleMapsApiKey = defineSecret("GOOGLE_MAPS_API_KEY");
 
 interface GeocodeOutcome {
   latitude: number;
@@ -73,7 +76,7 @@ interface BackfillResult {
 }
 
 export const backfillUserLocations = onCall(
-  { region: "us-central1", timeoutSeconds: 540, memory: "512MiB" },
+  { region: "us-central1", timeoutSeconds: 540, memory: "512MiB", secrets: [googleMapsApiKey] },
   async (request): Promise<BackfillResult> => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Sign-in required");
@@ -89,7 +92,7 @@ export const backfillUserLocations = onCall(
     if (!apiKey || apiKey === "") {
       throw new HttpsError(
         "failed-precondition",
-        "GOOGLE_MAPS_API_KEY not configured in functions/.env"
+        "GOOGLE_MAPS_API_KEY not set in Google Cloud Secret Manager"
       );
     }
 

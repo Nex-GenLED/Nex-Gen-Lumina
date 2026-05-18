@@ -25,8 +25,11 @@
  *     require('firebase-admin').auth().setCustomUserClaims('<UID>', {admin: true})"
  * or via a one-shot script in functions/ with the admin SDK.
  *
- * Configuration: requires GOOGLE_MAPS_API_KEY in functions/.env with both
- * Geocoding API and Time Zone API enabled in Google Cloud Console.
+ * Configuration: requires GOOGLE_MAPS_API_KEY in Google Cloud Secret
+ * Manager (set via `firebase functions:secrets:set GOOGLE_MAPS_API_KEY`)
+ * with both Geocoding API and Time Zone API enabled in Google Cloud
+ * Console. The function declares the secret in its onCall `secrets`
+ * option so the runtime auto-mounts it for `.value()` to resolve.
  *
  * Manual invocation (Tyler runs this once after deploy):
  *   Firebase Console → Functions → backfillUserLocations → Test the

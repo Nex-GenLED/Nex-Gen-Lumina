@@ -26,8 +26,11 @@
  *     require('firebase-admin').auth().setCustomUserClaims('<UID>', {admin: true})"
  * or via a one-shot script in functions/ with the admin SDK.
  *
- * Configuration: requires GOOGLE_MAPS_API_KEY in functions/.env with both
- * Geocoding API and Time Zone API enabled in Google Cloud Console.
+ * Configuration: requires GOOGLE_MAPS_API_KEY in Google Cloud Secret
+ * Manager (set via `firebase functions:secrets:set GOOGLE_MAPS_API_KEY`)
+ * with both Geocoding API and Time Zone API enabled in Google Cloud
+ * Console. The function declares the secret in its onCall `secrets`
+ * option so the runtime auto-mounts it for `.value()` to resolve.
  *
  * Manual invocation (Tyler runs this once after deploy):
  *   Firebase Console → Functions → backfillUserLocations → Test the
@@ -89,8 +92,8 @@ const params_1 = require("firebase-functions/params");
 const firebase_functions_1 = require("firebase-functions");
 const admin = __importStar(require("firebase-admin"));
 // admin.initializeApp() is called in index.js — do not call again here.
-const googleMapsApiKey = (0, params_1.defineString)("GOOGLE_MAPS_API_KEY");
-exports.backfillUserLocations = (0, https_1.onCall)({ region: "us-central1", timeoutSeconds: 540, memory: "512MiB" }, async (request) => {
+const googleMapsApiKey = (0, params_1.defineSecret)("GOOGLE_MAPS_API_KEY");
+exports.backfillUserLocations = (0, https_1.onCall)({ region: "us-central1", timeoutSeconds: 540, memory: "512MiB", secrets: [googleMapsApiKey] }, async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError("unauthenticated", "Sign-in required");
     }
@@ -99,7 +102,7 @@ exports.backfillUserLocations = (0, https_1.onCall)({ region: "us-central1", tim
     }
     const apiKey = googleMapsApiKey.value();
     if (!apiKey || apiKey === "") {
-        throw new https_1.HttpsError("failed-precondition", "GOOGLE_MAPS_API_KEY not configured in functions/.env");
+        throw new https_1.HttpsError("failed-precondition", "GOOGLE_MAPS_API_KEY not set in Google Cloud Secret Manager");
     }
     const db = admin.firestore();
     const result = {
