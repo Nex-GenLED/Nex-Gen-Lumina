@@ -927,6 +927,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── Calendar Lease Feature Flag (Item #61 Workstream B) ──
+    // config/calendar_leases.liveWritesEnabled gates whether the
+    // CalendarEntryLeaseManager actually writes to WLED controllers
+    // (defaults to false). Console-only writes — the flag is a
+    // safety mechanism, not a user-facing setting. Read is open to
+    // any authenticated user so the StreamProvider can pick up
+    // flips without restart.
+    //
+    // Bootstrap-on-first-launch (bootstrapCalendarLeaseFlagDoc in
+    // lib/features/schedule/calendar_lease_feature_flag.dart) needs
+    // to be able to create the doc with default values, so an
+    // authenticated-user create path is allowed when the document
+    // doesn't already exist. Subsequent writes (the flip itself)
+    // are console-only.
+    match /config/calendar_leases {
+      allow read: if request.auth != null;
+      // Bootstrap-only create: any authenticated user can create the
+      // doc with liveWritesEnabled=false (safe default). Subsequent
+      // updates and deletes are console-only.
+      allow create: if request.auth != null &&
+                       request.resource.data.liveWritesEnabled == false;
+      allow update, delete: if false;
+    }
+
     // ── Sales Jobs ───────────────────────────────────────────────
     match /sales_jobs/{jobId} {
       function isJobStakeholder() {

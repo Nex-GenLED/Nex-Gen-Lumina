@@ -64,6 +64,7 @@ void main() {
     int scheduleSlotDemand = 0,
     List<CalendarEntry> entries = const [],
     DateTime? now,
+    bool liveWritesEnabled = true,
   }) {
     final repo = _FakeWledRepository();
     final container = ProviderContainer(overrides: [
@@ -71,6 +72,11 @@ void main() {
           .overrideWith((_) => scheduleSlotDemand),
       calendarLeaseEntriesProvider.overrideWith((_) => entries),
       wledRepositoryProvider.overrideWithValue(repo),
+      // Default-ON in unit tests so Prompt 3/4 assertions that count
+      // savePreset / applyConfig calls keep working. Tests that
+      // exercise the flag-off path override this explicitly.
+      calendarLeaseLiveWritesEnabledSyncProvider
+          .overrideWithValue(liveWritesEnabled),
     ]);
     addTearDown(container.dispose);
     final manager = container.read(calendarEntryLeaseManagerProvider);

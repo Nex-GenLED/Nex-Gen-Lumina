@@ -40,12 +40,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/utils/async_lock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -122,6 +125,20 @@ final calendarLeaseScheduleUpdaterProvider =
   return (item) async {
     await ref.read(schedulesProvider.notifier).update(item);
   };
+});
+
+/// Sync adapter over [calendarLeaseLiveWritesEnabledProvider] so the
+/// manager can `.read()` a synchronous bool without AsyncValue
+/// plumbing at every call site, and tests can `.overrideWithValue(...)`
+/// without awaiting the upstream stream's first emission.
+///
+/// Production reads pass through to the stream provider; an initial
+/// AsyncLoading state resolves to `false` (safe default).
+@visibleForTesting
+final calendarLeaseLiveWritesEnabledSyncProvider = Provider<bool>((ref) {
+  return ref
+      .watch(calendarLeaseLiveWritesEnabledProvider)
+      .maybeWhen(data: (v) => v, orElse: () => false);
 });
 
 /// Callable that forces an immediate WLED re-sync, bypassing the
@@ -208,6 +225,19 @@ enum LeaseOutcome {
   /// Entry's offTime already passed by the time the lease was attempted.
   /// Skip — nothing to fire.
   alreadyExpired,
+
+  /// WLED preset write failed when live writes were enabled. The
+  /// in-memory registry has been rolled back so the manager state
+  /// stays consistent. Caller may surface a "couldn't save to
+  /// controller" banner. Distinct from [noFreeSlots] — slot was
+  /// available; the controller round-trip itself failed.
+  ///
+  /// Note: applyConfig (timer-slot push) failure AFTER a successful
+  /// savePreset does NOT roll back the registry — the preset is
+  /// orphaned on the controller; the next sweep retries the timer
+  /// write. That path returns [leased] with the lease record
+  /// populated.
+  writeFailed,
 }
 
 class CalendarEntryLease {
@@ -341,6 +371,8 @@ class LeaseResult {
       LeaseResult(outcome: LeaseOutcome.invalidEntry, errorMessage: reason);
   factory LeaseResult.alreadyExpired() =>
       const LeaseResult(outcome: LeaseOutcome.alreadyExpired);
+  factory LeaseResult.writeFailed(String reason) =>
+      LeaseResult(outcome: LeaseOutcome.writeFailed, errorMessage: reason);
 }
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
@@ -352,6 +384,19 @@ class CalendarEntryLeaseManager {
 
   /// In-memory registry. Keyed by CalendarEntry.dateKey.
   final Map<String, CalendarEntryLease> _activeLeases = {};
+
+  /// Decision 8 — single manager-wide write lock prevents
+  /// sweep-vs-create races. The 5-min sweep and the lease-on-create
+  /// path both potentially mutate WLED's cfg.timers. Serializing
+  /// them through this lock eliminates the brief window (~100 ms)
+  /// where a re-enabled ScheduleItem and a new lease could both
+  /// claim the same slot.
+  ///
+  /// WLED writes are infrequent enough that contention is a
+  /// non-issue. Hand-rolled [AsyncLock] (commit 10345c1) used
+  /// instead of the `synchronized` package to keep the dependency
+  /// surface flat.
+  final AsyncLock _wledWriteLock = AsyncLock();
 
   Future<void>? _initializeFuture;
   bool _initialized = false;
@@ -388,16 +433,40 @@ class CalendarEntryLeaseManager {
   }
 
   Future<void> _initializeImpl() async {
+    debugPrint('$_kLogPrefix initialize START');
     try {
       await _loadFromPrefs();
     } catch (e) {
       debugPrint('$_kLogPrefix initialize: load failed — $e');
+    }
+    // Best-effort bootstrap of the feature-flag doc so the Firestore
+    // console has something to edit on first install. Failure is
+    // logged but never blocks initialize (e.g. offline at boot).
+    try {
+      await bootstrapCalendarLeaseFlagDoc();
+    } catch (e) {
+      debugPrint('$_kLogPrefix initialize: flag-doc bootstrap failed — $e');
     }
     _initialized = true;
     try {
       await sweepExpiredLeases();
     } catch (e) {
       debugPrint('$_kLogPrefix initialize: initial sweep failed — $e');
+    }
+    final liveEnabled = _readLiveWritesEnabled();
+    debugPrint('$_kLogPrefix initialize END '
+        '(loaded ${_activeLeases.length} leases, live writes = $liveEnabled)');
+  }
+
+  /// Synchronous read of the feature flag. Defaults to false during
+  /// the StreamProvider's loading window or any error — safe.
+  bool _readLiveWritesEnabled() {
+    try {
+      return _ref.read(calendarLeaseLiveWritesEnabledSyncProvider);
+    } catch (e) {
+      debugPrint('$_kLogPrefix _readLiveWritesEnabled threw — $e '
+          '(defaulting to false)');
+      return false;
     }
   }
 
@@ -414,6 +483,15 @@ class CalendarEntryLeaseManager {
   /// against re-creation of the same dateKey — re-running on an
   /// already-leased entry updates the payload in place.
   Future<LeaseResult> handleEntryCreated(CalendarEntry entry) async {
+    debugPrint(
+        '$_kLogPrefix handleEntryCreated CALLED for ${entry.dateKey}');
+    final result = await _handleEntryCreatedImpl(entry);
+    debugPrint('$_kLogPrefix handleEntryCreated OUTCOME ${result.outcome} '
+        'for ${entry.dateKey}');
+    return result;
+  }
+
+  Future<LeaseResult> _handleEntryCreatedImpl(CalendarEntry entry) async {
     // Holiday entries are bundled defaults; user/autopilot/auto can lease.
     if (entry.type == CalendarEntryType.holiday) {
       return LeaseResult.outsideWindow();
@@ -464,7 +542,18 @@ class CalendarEntryLeaseManager {
       );
       _activeLeases[entry.dateKey] = updated;
       await _saveToPrefs();
-      await _writeLeaseToWled(updated);
+      final attempt = await _writeLeaseToWled(updated);
+      if (attempt == _WriteAttempt.savePresetFailed) {
+        // Rollback — preset write failed, lease never reached controller.
+        // Restore the prior lease record so the manager's view of the
+        // controller stays accurate.
+        _activeLeases[entry.dateKey] = existing;
+        await _saveToPrefs();
+        debugPrint('$_kLogPrefix update rolled back for ${entry.dateKey} '
+            '— savePreset failed');
+        return LeaseResult.writeFailed(
+            'savePreset failed for preset ${updated.presetId}');
+      }
       debugPrint('$_kLogPrefix updated ${entry.dateKey} '
           '(slot=${updated.slotIndex}, preset=${updated.presetId})');
       return LeaseResult.updated(updated);
@@ -495,7 +584,19 @@ class CalendarEntryLeaseManager {
     );
     _activeLeases[entry.dateKey] = lease;
     await _saveToPrefs();
-    await _writeLeaseToWled(lease);
+    final attempt = await _writeLeaseToWled(lease);
+    if (attempt == _WriteAttempt.savePresetFailed) {
+      // Rollback — preset write failed before timer write was attempted.
+      _activeLeases.remove(entry.dateKey);
+      await _saveToPrefs();
+      debugPrint('$_kLogPrefix lease rolled back for ${entry.dateKey} '
+          '— savePreset failed');
+      return LeaseResult.writeFailed(
+          'savePreset failed for preset $presetId');
+    }
+    // success | applyConfigFailed | noRepo | flagOff — keep the lease
+    // in registry. applyConfigFailed: orphan preset on controller; the
+    // periodic sweep retries.
     debugPrint('$_kLogPrefix leased ${entry.dateKey} '
         '(slot=$slotIndex, preset=$presetId, '
         'expires=${expiresAt.toIso8601String()})');
@@ -566,6 +667,8 @@ class CalendarEntryLeaseManager {
   /// registry mutations are synchronous and ordered.
   Future<void> sweepExpiredLeases() async {
     final now = nowProvider();
+    debugPrint(
+        '$_kLogPrefix sweep START (registry size = ${_activeLeases.length})');
     final expiredKeys = <String>[];
     for (final entry in _activeLeases.entries) {
       if (!entry.value.expiresAt.isAfter(now)) {
@@ -576,6 +679,10 @@ class CalendarEntryLeaseManager {
     for (final key in expiredKeys) {
       final lease = _activeLeases.remove(key);
       if (lease != null) {
+        // `_writeZeroedSlot` checks the feature flag internally and
+        // short-circuits when off. The registry mutation above runs
+        // regardless so the manager's view stays consistent across
+        // app sessions even when live writes are disabled.
         await _writeZeroedSlot(lease.slotIndex);
         debugPrint('$_kLogPrefix swept-expired $key (slot=${lease.slotIndex})');
       }
@@ -591,7 +698,7 @@ class CalendarEntryLeaseManager {
     // mutation. Performs the update via the testable updater fn so
     // tests can verify the call without constructing the real
     // SchedulesNotifier.
-    bool anyReenabled = false;
+    int evictionsCleared = 0;
     try {
       final schedules = _ref.read(calendarLeaseSchedulesProvider);
       final updater = _ref.read(calendarLeaseScheduleUpdaterProvider);
@@ -603,7 +710,7 @@ class CalendarEntryLeaseManager {
         // historical values.
         try {
           await updater(item.copyWith(clearDisabledUntil: true));
-          anyReenabled = true;
+          evictionsCleared++;
           debugPrint(
               '$_kLogPrefix swept-reenabled ${item.id} (was disabledUntil=$until)');
         } catch (e) {
@@ -620,7 +727,7 @@ class CalendarEntryLeaseManager {
     // already trigger the debounced auto-sync, but the sync-now call
     // collapses the 800 ms wait to zero, important for users editing
     // schedules on the My Schedule page during the sweep tick.
-    if (anyReenabled) {
+    if (evictionsCleared > 0) {
       try {
         final trigger = _ref.read(calendarLeaseScheduleSyncTriggerProvider);
         await trigger();
@@ -636,9 +743,12 @@ class CalendarEntryLeaseManager {
       allEntries = _ref.read(calendarLeaseEntriesProvider);
     } catch (e) {
       debugPrint('$_kLogPrefix sweep: entries lookup failed — $e');
+      debugPrint('$_kLogPrefix sweep END (expired=${expiredKeys.length}, '
+          'promoted=0, evictions cleared=$evictionsCleared)');
       return;
     }
 
+    int promoted = 0;
     for (final entry in allEntries) {
       if (_activeLeases.containsKey(entry.dateKey)) continue;
       if (entry.type == CalendarEntryType.holiday) continue;
@@ -646,12 +756,18 @@ class CalendarEntryLeaseManager {
       // Best-effort promotion — failure surfaces in debug logs only;
       // the sweep itself must not throw.
       try {
-        await handleEntryCreated(entry);
+        final r = await handleEntryCreated(entry);
+        if (r.outcome == LeaseOutcome.leased ||
+            r.outcome == LeaseOutcome.updated) {
+          promoted++;
+        }
       } catch (e) {
         debugPrint(
             '$_kLogPrefix sweep: promotion failed for ${entry.dateKey} — $e');
       }
     }
+    debugPrint('$_kLogPrefix sweep END (expired=${expiredKeys.length}, '
+        'promoted=$promoted, evictions cleared=$evictionsCleared)');
   }
 
   // ─── Window detection ───────────────────────────────────────────
@@ -835,63 +951,110 @@ class CalendarEntryLeaseManager {
 
   // ─── WLED writes ────────────────────────────────────────────────
 
-  /// Push a single lease to WLED: save its preset, then write a
-  /// timers.ins entry at the assigned slot pointing macro=presetId
-  /// with the single-date dow mask.
+  /// Push a single lease to WLED: save its preset, then write the
+  /// merged cfg.timers payload (ScheduleItems + leases) with the
+  /// new entry's slot in place.
   ///
-  /// Writes the full `timers.ins` array built from all active leases
-  /// (Workstream B owns slots [scheduleDemand..7] for now). Prompt 5
-  /// extends this to include ScheduleItem-derived timers in the same
-  /// payload so a unified push doesn't clobber recurring schedules.
-  Future<bool> _writeLeaseToWled(CalendarEntryLease lease) async {
-    final repo = _readRepo();
-    if (repo == null) {
-      debugPrint('$_kLogPrefix _writeLeaseToWled: no repo — lease ${lease.dateKey} '
-          'registered but device not updated. Next sweep retries.');
-      return false;
-    }
-    try {
-      final presetOk = await repo.savePreset(
-        presetId: lease.presetId,
-        state: lease.wledPayload,
-        presetName: 'Lease ${lease.dateKey}',
+  /// Gated by the [calendarLeaseLiveWritesEnabledProvider] feature
+  /// flag — when off, returns [_WriteAttempt.flagOff] without
+  /// touching the controller. Serialized through [_wledWriteLock]
+  /// against [_writeZeroedSlot] and [sweepExpiredLeases].
+  Future<_WriteAttempt> _writeLeaseToWled(CalendarEntryLease lease) async {
+    final liveEnabled = _readLiveWritesEnabled();
+    if (!liveEnabled) {
+      debugPrint(
+        '$_kLogPrefix live writes DISABLED via feature flag — would '
+        'write lease ${lease.dateKey} (slot=${lease.slotIndex}, '
+        'preset=${lease.presetId}) but skipping actual /json/cfg + '
+        '/json/state writes',
       );
-      if (!presetOk) {
-        debugPrint('$_kLogPrefix savePreset failed for ${lease.dateKey}');
-        return false;
-      }
-      final cfgOk = await repo.applyConfig(_buildLeaseTimersPayload());
-      if (!cfgOk) {
-        debugPrint('$_kLogPrefix applyConfig failed for ${lease.dateKey}');
-      }
-      return cfgOk;
-    } catch (e) {
-      debugPrint('$_kLogPrefix _writeLeaseToWled exception: $e');
-      return false;
+      return _WriteAttempt.flagOff;
     }
+    return _wledWriteLock.synchronized(() async {
+      final repo = _readRepo();
+      if (repo == null) {
+        debugPrint(
+          '$_kLogPrefix _writeLeaseToWled: no repo — lease ${lease.dateKey} '
+          'registered but device not updated. Next sweep retries.',
+        );
+        return _WriteAttempt.noRepo;
+      }
+      try {
+        final presetOk = await repo.savePreset(
+          presetId: lease.presetId,
+          state: lease.wledPayload,
+          presetName: 'Lease ${lease.dateKey}',
+        );
+        if (!presetOk) {
+          debugPrint(
+            '$_kLogPrefix savePreset failed for lease ${lease.dateKey} '
+            'preset=${lease.presetId} — aborting timer write',
+          );
+          return _WriteAttempt.savePresetFailed;
+        }
+        final cfgOk = await repo.applyConfig(_buildMergedCfgPayload());
+        if (!cfgOk) {
+          debugPrint(
+            '$_kLogPrefix applyConfig failed for lease ${lease.dateKey} '
+            '— preset ${lease.presetId} still exists on controller but '
+            'timer slot not set. Logged for cleanup sweep retry.',
+          );
+          return _WriteAttempt.applyConfigFailed;
+        }
+        debugPrint(
+          '$_kLogPrefix WROTE lease ${lease.dateKey} to controller '
+          '(slot=${lease.slotIndex}, preset=${lease.presetId})',
+        );
+        return _WriteAttempt.success;
+      } catch (e) {
+        debugPrint('$_kLogPrefix _writeLeaseToWled exception: $e');
+        // Treat as savePreset failure for rollback purposes — we
+        // don't know which stage failed, but the conservative choice
+        // is to assume the controller state is inconsistent and
+        // roll back the in-memory record. The next sweep + retry
+        // will re-attempt.
+        return _WriteAttempt.savePresetFailed;
+      }
+    });
   }
 
   /// Defensive zero-write on lease expiry / deletion. Re-sends the
-  /// timers.ins array WITHOUT the removed lease so any stale entry
-  /// the firmware retained gets cleared.
+  /// merged timers payload WITHOUT the removed lease so any stale
+  /// entry the firmware retained gets cleared.
+  ///
+  /// Gated by the [calendarLeaseLiveWritesEnabledProvider] feature
+  /// flag — when off, returns true without touching the controller.
+  /// Serialized through [_wledWriteLock].
   Future<bool> _writeZeroedSlot(int slotIndex) async {
-    final repo = _readRepo();
-    if (repo == null) {
-      debugPrint('$_kLogPrefix _writeZeroedSlot: no repo — slot $slotIndex '
-          'not cleared. Next sweep retries.');
-      return false;
+    final liveEnabled = _readLiveWritesEnabled();
+    if (!liveEnabled) {
+      debugPrint(
+        '$_kLogPrefix live writes DISABLED via feature flag — would '
+        'zero-write slot $slotIndex but skipping actual /json/cfg',
+      );
+      return true;
     }
-    try {
-      final ok = await repo.applyConfig(_buildLeaseTimersPayload());
-      if (!ok) {
+    return _wledWriteLock.synchronized(() async {
+      final repo = _readRepo();
+      if (repo == null) {
         debugPrint(
-            '$_kLogPrefix _writeZeroedSlot: applyConfig failed for slot $slotIndex');
+          '$_kLogPrefix _writeZeroedSlot: no repo — slot $slotIndex '
+          'not cleared. Next sweep retries.',
+        );
+        return false;
       }
-      return ok;
-    } catch (e) {
-      debugPrint('$_kLogPrefix _writeZeroedSlot exception: $e');
-      return false;
-    }
+      try {
+        final ok = await repo.applyConfig(_buildMergedCfgPayload());
+        if (!ok) {
+          debugPrint('$_kLogPrefix _writeZeroedSlot: applyConfig failed '
+              'for slot $slotIndex');
+        }
+        return ok;
+      } catch (e) {
+        debugPrint('$_kLogPrefix _writeZeroedSlot exception: $e');
+        return false;
+      }
+    });
   }
 
   /// Build a /json/cfg payload from the active lease registry.
@@ -900,10 +1063,10 @@ class CalendarEntryLeaseManager {
   /// registry transform — no upstream provider read, no missing-entry
   /// race.
   ///
-  /// IMPORTANT: this payload OVERWRITES the device's full timers.ins
-  /// array. Until Prompt 5 merges with ScheduleSyncService, calling
-  /// applyConfig here clears ScheduleItem-derived timers. Tests assert
-  /// the shape; production wire-up is deferred.
+  /// IMPORTANT: this returns ONLY the lease-derived timers. Use
+  /// [_buildMergedCfgPayload] for the full payload that includes
+  /// ScheduleItem-derived timers — that's what's pushed to the
+  /// controller in production.
   Map<String, dynamic> _buildLeaseTimersPayload() {
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
@@ -918,6 +1081,44 @@ class CalendarEntryLeaseManager {
     return {
       'timers': {
         'ins': ins,
+      },
+    };
+  }
+
+  /// Build the full cfg.timers.ins payload merging:
+  ///   1. ScheduleItem-driven timers (enabled, non-evicted) from
+  ///      [ScheduleSyncService.buildCfgPayload]
+  ///   2. Lease-driven timers from [_buildLeaseTimersPayload]
+  ///
+  /// Slot non-collision is guaranteed by [_allocateFreeSlotIndex]
+  /// which counts ScheduleItem demand before allocating. This method
+  /// just renders the merged view.
+  ///
+  /// WLED honors only the first 8 entries in `ins`. If schedule
+  /// demand + lease count > 8 in production state drift (e.g., user
+  /// added schedules after a lease was allocated), entries beyond
+  /// the 8th silently fall off the controller — not handled here;
+  /// the slot-allocation logic upstream prevents it under normal
+  /// flows.
+  Map<String, dynamic> _buildMergedCfgPayload() {
+    List<ScheduleItem> schedules;
+    try {
+      schedules = _ref.read(calendarLeaseSchedulesProvider);
+    } catch (e) {
+      debugPrint('$_kLogPrefix _buildMergedCfgPayload: schedules read '
+          'failed — $e (falling back to lease-only payload)');
+      return _buildLeaseTimersPayload();
+    }
+    const scheduleSync = ScheduleSyncService();
+    final schedulePayload = scheduleSync.buildCfgPayload(schedules);
+    final schedTimers =
+        (schedulePayload['timers'] as Map?)?['ins'] as List? ?? const [];
+    final leasePayload = _buildLeaseTimersPayload();
+    final leaseTimers =
+        (leasePayload['timers'] as Map?)?['ins'] as List? ?? const [];
+    return {
+      'timers': {
+        'ins': [...schedTimers, ...leaseTimers],
       },
     };
   }
@@ -1032,4 +1233,33 @@ final calendarEntryLeaseManagerProvider =
 
   return manager;
 });
+
+/// Internal result type from [CalendarEntryLeaseManager._writeLeaseToWled].
+/// Differentiates rollback-required failures (savePreset) from
+/// orphan-preset failures (applyConfig) and skip paths
+/// (flagOff/noRepo).
+enum _WriteAttempt {
+  /// savePreset + applyConfig both succeeded — lease landed on the
+  /// controller; in-memory registry stays in place.
+  success,
+
+  /// savePreset failed — preset never reached the controller. The
+  /// caller MUST roll back the in-memory registry so it stays
+  /// consistent with the device.
+  savePresetFailed,
+
+  /// savePreset succeeded but applyConfig failed — preset is now
+  /// orphaned on the controller (timer slot doesn't point to it).
+  /// Caller should NOT roll back; the periodic sweep retries the
+  /// timer write.
+  applyConfigFailed,
+
+  /// No WLED repository available (offline / no controller selected).
+  /// Caller keeps the lease in registry — next sweep retries.
+  noRepo,
+
+  /// Feature flag is off — no controller traffic occurred. Caller
+  /// keeps the lease in registry for when the flag flips.
+  flagOff,
+}
 

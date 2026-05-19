@@ -138,6 +138,38 @@ class WledService implements WledRepository {
   bool? _supportsRgbwCache;
   List<String> _simSegNames = ['Front', 'Roof', 'Garage'];
 
+  // ─── Test-only simulation capture / injection ───────────────────
+  //
+  // Populated only when _simulate is true (mock host) so integration
+  // tests can assert what would have reached a live controller and
+  // inject failure paths without monkey-patching the HTTP layer.
+
+  /// Most recent /json/cfg payload received in simulation mode.
+  /// Integration tests inspect this to verify timer-slot encoding
+  /// (dow mask, hour, macro preset ID) reaches the controller in
+  /// the expected shape.
+  @visibleForTesting
+  Map<String, dynamic>? lastSimulatedConfigPayload;
+
+  /// Most recent simulated savePreset call. Tests check presetId +
+  /// state-shape parity with what the lease manager intended.
+  @visibleForTesting
+  ({int presetId, Map<String, dynamic> state, String? presetName})?
+      lastSimulatedPresetSave;
+
+  /// Force simulated savePreset() to return false. Default true.
+  /// Used by integration tests covering the "savePreset failure:
+  /// applyConfig not attempted, lease registry rolled back" path.
+  @visibleForTesting
+  bool simulateSavePresetReturns = true;
+
+  /// Force simulated _postConfig() (applyConfig) to return false.
+  /// Default true. Used by the partial-failure test covering
+  /// "applyConfig failure: savePreset preset still on controller
+  /// (orphan), lease registry not rolled back".
+  @visibleForTesting
+  bool simulateApplyConfigReturns = true;
+
   // Local simulation state (used when host is 'mock' or '127.0.0.1')
   bool _simOn = true;
   int _simBri = 180;
@@ -335,9 +367,11 @@ class WledService implements WledRepository {
 
   Future<bool> _postConfig(Map<String, dynamic> data) async {
     if (_simulate) {
-      // Accept and store nothing in simulation; just acknowledge success.
+      // Capture for test inspection then acknowledge success (unless
+      // the failure-injection flag is flipped by an integration test).
+      lastSimulatedConfigPayload = data;
       debugPrint('📤 WLED /json/cfg (simulated): ${jsonEncode(data)}');
-      return true;
+      return simulateApplyConfigReturns;
     }
     try {
       final body = jsonEncode(data);
@@ -620,8 +654,13 @@ class WledService implements WledRepository {
     }
 
     if (_simulate) {
+      lastSimulatedPresetSave = (
+        presetId: presetId,
+        state: state,
+        presetName: presetName,
+      );
       debugPrint('📤 WLED savePreset (simulated): preset $presetId');
-      return true;
+      return simulateSavePresetReturns;
     }
 
     try {
