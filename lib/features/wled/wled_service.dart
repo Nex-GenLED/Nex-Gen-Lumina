@@ -676,25 +676,41 @@ class WledService implements WledRepository {
         payload['n'] = presetName;
       }
 
+      final body = jsonEncode(payload);
+      final bodyBytes = utf8.encode(body);
+
       debugPrint('📤 WLED savePreset: Saving to preset $presetId');
-      debugPrint('   Payload: ${jsonEncode(payload)}');
+      debugPrint('   Payload: $body');
 
-      final response = await http.post(
-        _uri('/json/state'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(_uri('/json/state'));
+      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      // Explicit Content-Length keeps the request out of Dart HttpClient's
+      // chunked transfer-encoding path. WLED 0.15.x on ESP32_Ethernet builds
+      // silently drops chunked POSTs to /json/state — the controller returns
+      // 200 OK but never persists the preset, so the UI thinks the save
+      // succeeded while the preset slot stays empty and downstream schedule
+      // macros fire blank. _postConfig was migrated for the same reason
+      // (Item #61 Workstream B); savePreset closes the matching gap on the
+      // preset-write path. Do NOT "simplify" this back to http.post.
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
 
-      debugPrint('📥 WLED savePreset response: ${response.statusCode}');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final resBody = await res.transform(utf8.decoder).join();
+      client.close(force: true);
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
+      debugPrint('📥 WLED savePreset response: ${res.statusCode}');
+      if (resBody.isNotEmpty) debugPrint('   Body: $resBody');
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
         debugPrint('✅ WLED preset $presetId saved successfully');
         // Drop the cached preset-name map so the next Now Playing lookup
         // picks up the newly saved name.
         _presetNamesCache = null;
         return true;
       }
-      debugPrint('❌ WLED savePreset error ${response.statusCode}: ${response.body}');
+      debugPrint('❌ WLED savePreset error ${res.statusCode}: $resBody');
     } catch (e) {
       debugPrint('❌ WLED savePreset exception: $e');
     }
