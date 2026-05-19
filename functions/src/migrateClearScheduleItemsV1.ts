@@ -52,6 +52,27 @@ const MIGRATION_DOC_PATH =
 // tracking doc write that follows the user-doc updates.
 const BATCH_SIZE = 400;
 
+/**
+ * AUTH MODEL
+ *
+ * This callable requires one of:
+ *   1. An email on the kMigrationAdminAllowlist (currently:
+ *      honeycutt.tylerg@gmail.com — Tyler's Firebase Auth account)
+ *   2. An email ending with @nex-genled.com (case-insensitive)
+ *
+ * Update kMigrationAdminAllowlist if additional admin accounts
+ * need invocation rights before @Nex-GenLED.com Firebase Auth
+ * identities are provisioned.
+ *
+ * The function is intended for one-time invocation to clear
+ * production ScheduleItems after the Item #72 dow fix. Idempotency
+ * tracking at config/migrations/items/migrateClearScheduleItemsV1
+ * prevents accidental re-runs.
+ */
+const kMigrationAdminAllowlist = new Set<string>([
+  "honeycutt.tylerg@gmail.com",
+]);
+
 export const migrateClearScheduleItemsV1 = onCall(
   {
     region: "us-central1",
@@ -62,17 +83,44 @@ export const migrateClearScheduleItemsV1 = onCall(
   },
   async (request) => {
     // ── Auth gate ────────────────────────────────────────────────
-    const callerEmail = request.auth?.token?.email as string | undefined;
-    if (
-      !callerEmail ||
-      !callerEmail.toLowerCase().endsWith("@nex-genled.com")
-    ) {
+    //
+    // Accept the caller if EITHER their email is on the explicit
+    // allowlist (kMigrationAdminAllowlist above) OR their email
+    // ends with @nex-genled.com. The allowlist exists because
+    // @Nex-GenLED.com isn't yet wired as a Firebase Auth identity
+    // provider — only as an outbound email domain — so the founder
+    // account (Tyler's Gmail) needs explicit recognition. Domain
+    // check is preserved for future admins once the @Nex-GenLED.com
+    // identity provider is provisioned.
+    const callerEmail = (
+      request.auth?.token?.email as string | undefined
+    )?.toLowerCase();
+
+    const isAllowlisted =
+      callerEmail != null && kMigrationAdminAllowlist.has(callerEmail);
+
+    const isNexGenLedDomain =
+      callerEmail != null && callerEmail.endsWith("@nex-genled.com");
+
+    if (!isAllowlisted && !isNexGenLedDomain) {
       throw new HttpsError(
         "permission-denied",
-        "migrateClearScheduleItemsV1 requires an @nex-genled.com " +
-          "authenticated caller.",
+        "migrateClearScheduleItemsV1 requires an authenticated " +
+          "caller on the admin allowlist or the @Nex-GenLED.com " +
+          "domain.",
       );
     }
+
+    // Resolved (lowercased) email used downstream in the audit log
+    // and the completion-doc triggeredBy field. Non-null at this
+    // point because both branches above required callerEmail != null.
+    const resolvedCallerEmail = callerEmail as string;
+
+    console.log(
+      `migrateClearScheduleItemsV1: auth passed for ` +
+        `${resolvedCallerEmail} (allowlist=${isAllowlisted}, ` +
+        `domain=${isNexGenLedDomain})`,
+    );
 
     const db = admin.firestore();
     const migrationDoc = db.doc(MIGRATION_DOC_PATH);
@@ -132,7 +180,7 @@ export const migrateClearScheduleItemsV1 = onCall(
     await migrationDoc.set({
       completed: true,
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      triggeredBy: callerEmail,
+      triggeredBy: resolvedCallerEmail,
       usersAffected,
       totalSchedulesCleared,
       errors,
