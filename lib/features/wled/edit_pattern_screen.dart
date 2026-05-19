@@ -6,6 +6,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -106,8 +107,9 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       final repo = ref.read(wledRepositoryProvider);
       if (repo != null) {
         final totalPixels = await repo.getTotalLedCount() ?? 150;
+        final presetId = presetIdForUserPattern(updatedPattern.id);
         await repo.savePreset(
-          presetId: updatedPattern.id.hashCode.abs() % 250 + 1,
+          presetId: presetId,
           state: updatedPattern.toWledPayload(totalPixels),
           presetName: updatedPattern.name,
         );
