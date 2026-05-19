@@ -16,6 +16,7 @@ import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
@@ -114,6 +115,16 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
     ref.watch(syncIdTokenPersistenceKeepAliveProvider);
+    // Item #61 Workstream B — eager-read the lease manager at shell
+    // mount so manager.initialize() (and bootstrapCalendarLeaseFlagDoc)
+    // fires on cold launch instead of waiting for the user's first
+    // CalendarEntry create. Prompt 5 verification diagnosed this as
+    // a missed read: only applyEntries / _handleNoFreeSlotsForEntry
+    // referenced the provider in production, both lazy. MainScaffold
+    // is post-auth (so the Firestore bootstrap write has a uid) and
+    // stays mounted across tab switches, making it the natural
+    // keep-alive site alongside the four existing watches above.
+    ref.watch(calendarEntryLeaseManagerProvider);
 
     final isSimpleMode = ref.watch(simpleModeProvider);
     final luminaState = ref.watch(luminaSheetProvider);
