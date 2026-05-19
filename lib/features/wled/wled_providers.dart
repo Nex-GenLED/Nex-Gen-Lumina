@@ -159,7 +159,15 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   final connectivityStatus = ref.watch(wledConnectivityStatusProvider).maybeWhen(
     data: (status) {
       // Cache every successful emission for use during future loading gaps.
-      ref.read(_lastConnectivityStatusProvider.notifier).state = status;
+      // Defer to a microtask so the mutation lands AFTER this provider's
+      // build completes — Riverpod forbids providers from mutating other
+      // providers during their own initialization (debug-only assertion,
+      // fired 8x per cold launch). Microtasks drain before the next event
+      // loop iteration, so no listener can observe stale state visibly.
+      // Item #68.
+      Future.microtask(() {
+        ref.read(_lastConnectivityStatusProvider.notifier).state = status;
+      });
       return status;
     },
     orElse: () => ref.read(_lastConnectivityStatusProvider),
