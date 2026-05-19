@@ -79,6 +79,46 @@ class CalendarEntry {
     final dateKey = json['date'] as String?;
     if (dateKey == null || dateKey.isEmpty) return null;
 
+    // Item #61 Decision 6 — defensive against malformed AI responses.
+    // Must be strict YYYY-MM-DD with zero-padding. '2026-3-1' is
+    // rejected; '2026-03-01' is accepted. Without this, a Claude
+    // response that drops a zero corrupts the calendar map's key,
+    // making the entry unmatchable by selectedCalendarDateProvider
+    // lookups and orphaning the row in Firestore.
+    final dateKeyRegex = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+    if (!dateKeyRegex.hasMatch(dateKey)) {
+      debugPrint(
+        'CalendarEntry.fromAiJson: rejecting malformed dateKey '
+        '"$dateKey" — must be strict YYYY-MM-DD',
+      );
+      return null;
+    }
+    // Regex passes for '2026-13-45'; verify the date actually exists.
+    // DateTime.parse accepts ISO-8601 strings strictly enough here.
+    DateTime? parsed;
+    try {
+      parsed = DateTime.parse(dateKey);
+    } catch (e) {
+      debugPrint(
+        'CalendarEntry.fromAiJson: dateKey "$dateKey" matches format '
+        'but is not a valid date',
+      );
+      return null;
+    }
+    // DateTime.parse rolls over invalid days/months (e.g. '2026-02-30'
+    // becomes 2026-03-02). Round-trip check rejects rollover.
+    final roundTrip =
+        '${parsed.year.toString().padLeft(4, '0')}-'
+        '${parsed.month.toString().padLeft(2, '0')}-'
+        '${parsed.day.toString().padLeft(2, '0')}';
+    if (roundTrip != dateKey) {
+      debugPrint(
+        'CalendarEntry.fromAiJson: dateKey "$dateKey" parsed to '
+        '"$roundTrip" — rollover indicates invalid calendar date',
+      );
+      return null;
+    }
+
     Color? color;
     final colorStr = json['color'] as String?;
     if (colorStr != null && colorStr.startsWith('#') && colorStr.length == 7) {

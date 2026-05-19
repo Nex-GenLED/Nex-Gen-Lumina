@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -240,6 +241,37 @@ class CalendarScheduleNotifier
       if (!ok) {
         debugPrint('❌ applyEntries: Firestore write failed');
       }
+
+      // Item #61 Workstream B — surface each saved entry to the lease
+      // manager so date-specific overrides within the 48 h window reach
+      // the WLED timer slots. Holidays are bundled defaults and never lease.
+      // A lease failure must NOT roll back the Firestore write: the
+      // calendar display is the source of truth; the lease is just the
+      // firing mechanism. A visible entry without a lease is recoverable
+      // (next sweep or eviction UX), a missing entry is not.
+      if (ok) {
+        final leaseManager =
+            _ref.read(calendarEntryLeaseManagerProvider);
+        for (final entry in entries) {
+          if (entry.type == CalendarEntryType.holiday) continue;
+          try {
+            final result = await leaseManager.handleEntryCreated(entry);
+            if (result.outcome == LeaseOutcome.noFreeSlots) {
+              // Eviction UX is Prompt 4. For now, surface a debug
+              // warning — the entry is still saved + visible on the
+              // calendar; it just won't fire on the controller until
+              // a slot frees up.
+              debugPrint(
+                'CalendarLease: No free slot for ${entry.dateKey} — '
+                'entry saved but will not fire. Eviction UX pending '
+                'Prompt 4.',
+              );
+            }
+          } catch (e) {
+            debugPrint('CalendarLease: handleEntryCreated failed: $e');
+          }
+        }
+      }
       return ok;
     } catch (e) {
       debugPrint('❌ applyEntries: $e');
@@ -352,6 +384,18 @@ class CalendarScheduleNotifier
   Future<bool> removeEntry(String dateKey) async {
     final next = Map<String, CalendarEntry>.from(state)..remove(dateKey);
     state = next;
+
+    // Item #61 Workstream B — release any active lease for this date.
+    // Fire-and-forget; release failure is logged but never blocks the
+    // Firestore delete. Runs before the uid guard so a delete made
+    // while signed-out still clears the controller-side timer.
+    try {
+      await _ref
+          .read(calendarEntryLeaseManagerProvider)
+          .handleEntryDeleted(dateKey);
+    } catch (e) {
+      debugPrint('CalendarLease: handleEntryDeleted failed: $e');
+    }
 
     final uid = _userId;
     if (uid == null) return false;
