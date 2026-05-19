@@ -185,5 +185,12 @@ android/.gradle/
 # de-obfuscation; never commit (large + per-build) and never delete locally.
 debug-info-archive/
 
+# Last Android release versionCode marker — written by build.sh after a
+# successful build_android_release run. Pre-flight check refuses to
+# rebuild the same versionCode (Play Console rejects duplicates and
+# Android has no auto-bumper, unlike iOS via codemagic.yaml). Lives
+# outside /build/ so `flutter clean` can't wipe the protection.
+.android-versioncode-state
+
 # Tablet/device log dumps
 pulla-logs/
