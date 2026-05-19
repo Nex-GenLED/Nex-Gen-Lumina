@@ -354,7 +354,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
               const SizedBox(height: 8),
               Text('\u2022 Total LEDs: $totalLeds'),
               const Text('\u2022 LED Type: SK6812 RGBW'),
-              const Text('\u2022 Color Order: GRB (important!)'),
+              const Text('\u2022 Color Order: RGB (important!)'),
               const SizedBox(height: 8),
               const Text('Per-port configuration:', style: TextStyle(fontWeight: FontWeight.w600)),
               ...ledBuses.map((bus) => Padding(
@@ -375,7 +375,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Setting Color Order to GRB fixes color accuracy issues (green/red swap).',
+                        'Setting Color Order to RGB matches the Lumina default and fixes color accuracy issues.',
                         style: TextStyle(fontSize: 13),
                       ),
                     ),
@@ -642,7 +642,7 @@ class _AdvancedPowerSettings extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Type $ledType - GRB+W Color Order',
+                            'Type $ledType - RGB Color Order',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],

@@ -137,7 +137,7 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
             icon: Icons.check_circle_outline,
             title: 'Apply Nex-Gen Standard',
             subtitle:
-                'SK6812 / WS2814 RGBW · GRBW order · 100 px per channel · '
+                'SK6812 / WS2814 RGBW · RGB order · 100 px per channel · '
                 'preserves existing GPIO pins',
             onTap: _applying ? null : _applyStandard,
             trailing: _applying

@@ -94,8 +94,15 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
 
   const int pixelsPerChannel = 100;
   const int channelCount = 4;
-  const int ledType = 22; // SK6812 RGBW
-  const int colorOrder = 6; // GRBW — required for SK6812 RGBW (LED type 22)
+  // Unified with hardware_config_screen.dart (the manual editor) which uses
+  // type 30. Per WLED busses.cpp, type 30 is SK6812 RGBW in current builds;
+  // type 22 was the older SK6812 RGBW mapping the pusher used to ship.
+  const int ledType = 30; // SK6812 RGBW
+  // WLED standard color-order enum is 3-letter only (0=GRB, 1=RGB, 2=BRG,
+  // 3=RBG, 4=BGR, 5=GBR). For RGBW bus types (22, 30, 31) WLED appends the
+  // W channel automatically — so order=1 on a type-30 bus sends R→G→B→W,
+  // which is the Lumina default ("RGB" in WLED's UI dropdown).
+  const int colorOrder = 1; // RGB (W appended automatically on RGBW bus type)
   // SKIKBILY hardware always has 4 channels. A fresh WLED ships with one
   // default bus, so we can't size the new config from the old one — we
   // always emit 4 buses. Pin assignments come from the existing config

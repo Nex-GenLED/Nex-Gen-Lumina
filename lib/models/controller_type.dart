@@ -68,7 +68,7 @@ extension ControllerTypeExtension on ControllerType {
 
   String get defaultLedType => 'SK6812';
 
-  String get defaultColorOrder => 'GRBW';
+  String get defaultColorOrder => 'RGB';
 
   bool get supportsEthernet {
     switch (this) {
