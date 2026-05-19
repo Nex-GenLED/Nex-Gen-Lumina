@@ -41,6 +41,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -73,7 +74,7 @@ const String _kLogPrefix = 'CalendarLease:';
 // [CalendarScheduleNotifier]. Production reads flow through the upstream
 // providers untouched.
 
-/// Slot demand from currently-enabled ScheduleItems.
+/// Slot demand from currently-enabled, non-evicted ScheduleItems.
 ///
 /// Treats each enabled ScheduleItem as occupying one timer slot. Real
 /// [ScheduleSyncService.buildCfgPayload] can consume 1–2 slots per
@@ -83,10 +84,17 @@ const String _kLogPrefix = 'CalendarLease:';
 /// the slot range; over-allocation (counting fewer slots than reality)
 /// would have the lease manager overwrite ScheduleItem slots, which is
 /// strictly worse.
+///
+/// Excludes [ScheduleItem.isCurrentlyEvicted] items so the lease
+/// manager's free-slot count agrees with what `buildCfgPayload`
+/// actually writes (Item #61 Workstream B eviction filter must match
+/// on both sides of the pipe — divergence would re-introduce silent
+/// slot overwrites).
 final calendarLeaseScheduleSlotDemandProvider = Provider<int>((ref) {
   final schedules = ref.watch(schedulesProvider);
-  final enabled = schedules.where((s) => s.enabled).length;
-  return enabled.clamp(0, kWledMaxTimerSlots);
+  final demand =
+      schedules.where((s) => s.enabled && !s.isCurrentlyEvicted).length;
+  return demand.clamp(0, kWledMaxTimerSlots);
 });
 
 /// All CalendarEntries the sweep should consider for newly-imminent
@@ -95,6 +103,84 @@ final calendarLeaseEntriesProvider = Provider<List<CalendarEntry>>((ref) {
   final map = ref.watch(calendarScheduleProvider);
   return map.values.toList(growable: false);
 });
+
+/// All current ScheduleItems — used by the sweep to detect items
+/// whose `disabledUntil` has passed and needs clearing. Indirected
+/// for testability.
+final calendarLeaseSchedulesProvider = Provider<List<ScheduleItem>>((ref) {
+  return ref.watch(schedulesProvider);
+});
+
+/// Callable that applies a ScheduleItem update through the canonical
+/// notifier (which fires the debounced WLED sync). Indirected so tests
+/// can replace this with a no-network fake without constructing the
+/// real [SchedulesNotifier].
+typedef ScheduleUpdaterFn = Future<void> Function(ScheduleItem item);
+
+final calendarLeaseScheduleUpdaterProvider =
+    Provider<ScheduleUpdaterFn>((ref) {
+  return (item) async {
+    await ref.read(schedulesProvider.notifier).update(item);
+  };
+});
+
+/// Callable that forces an immediate WLED re-sync, bypassing the
+/// 800 ms debounce. Used by the sweep when soft-evicted items
+/// re-enable so the freed-then-re-occupied slot reaches the
+/// controller without waiting for the next mutation. Indirected for
+/// testability.
+typedef ScheduleSyncTriggerFn = Future<void> Function();
+
+final calendarLeaseScheduleSyncTriggerProvider =
+    Provider<ScheduleSyncTriggerFn>((ref) {
+  return () async {
+    await ref.read(schedulesProvider.notifier).runSyncNow();
+  };
+});
+
+/// Count how many times the given ScheduleItem would fire during the
+/// half-open window `[from, until)`, considering its repeatDays mask
+/// and timeLabel. Counts ON events only.
+///
+/// Used by the eviction picker to annotate each item with "pauses N
+/// fires" so the user chooses intentionally.
+///
+/// Edge convention: each calendar day where `appliesToDay(item, day)`
+/// is true contributes one fire if the day intersects the window —
+/// boundary precision (whether the time-of-day falls inside the
+/// window on partial-boundary days) is intentionally NOT honored.
+/// Good enough for UX annotation; precise simulation would require
+/// resolving sunset/sunrise per day, which isn't worth the complexity
+/// for a count label.
+int fireCountDuringWindow({
+  required ScheduleItem item,
+  required DateTime from,
+  required DateTime until,
+}) {
+  if (!from.isBefore(until)) return 0;
+  final days = item.repeatDays.map((d) => d.toLowerCase()).toList();
+  final daily = days.any((d) => d.contains('daily'));
+  bool firesOn(int weekday) {
+    if (daily) return true;
+    // weekday: 1=Mon..7=Sun
+    const labels = ['', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    final target = labels[weekday];
+    return days.any((d) => d.startsWith(target));
+  }
+
+  // Iterate each calendar day touched by [from, until). Use the date
+  // floor of `from` so a window starting at 14:00 still counts a fire
+  // earlier the same day if applicable — UX annotation, not strict
+  // simulation.
+  var cursor = DateTime(from.year, from.month, from.day);
+  final endFloor = DateTime(until.year, until.month, until.day);
+  int count = 0;
+  while (!cursor.isAfter(endFloor)) {
+    if (firesOn(cursor.weekday)) count++;
+    cursor = cursor.add(const Duration(days: 1));
+  }
+  return count;
+}
 
 // ─── Models ──────────────────────────────────────────────────────────────────
 
@@ -283,6 +369,14 @@ class CalendarEntryLeaseManager {
   List<CalendarEntryLease> get activeLeases =>
       List.unmodifiable(_activeLeases.values);
 
+  /// Compute when a lease for [entry] would expire (entry's offTime
+  /// resolved to a real DateTime, with overnight wrap if offTime <
+  /// onTime). Returns null when the entry's onTime/offTime are
+  /// missing or unparseable. Used by the eviction picker to label
+  /// the lease window.
+  DateTime? computeLeaseExpiry(CalendarEntry entry) =>
+      _computeExpiresAt(entry);
+
   /// Initialize on app start. Loads persisted leases, runs an initial
   /// sweep, scans current CalendarEntries for newly-imminent ones.
   ///
@@ -408,6 +502,56 @@ class CalendarEntryLeaseManager {
     return LeaseResult.leased(lease);
   }
 
+  /// Apply soft eviction by setting `disabledUntil` on the chosen
+  /// ScheduleItem, then retry lease creation for the pending entry.
+  ///
+  /// Sequence:
+  ///   1. Update the ScheduleItem via the canonical notifier (which
+  ///      fires the debounced WLED sync — the freed slot reaches the
+  ///      controller without explicit coordination because
+  ///      [ScheduleSyncService.buildCfgPayload] honors
+  ///      `isCurrentlyEvicted`).
+  ///   2. Re-call [handleEntryCreated] for the entry. The slot-demand
+  ///      provider now reports one fewer slot, so allocation succeeds.
+  ///
+  /// Idempotent — calling twice with the same arguments produces the
+  /// same end state. If [itemToEvict.disabledUntil] is already ≥
+  /// [evictUntil], the update is a no-op shape (the notifier still
+  /// records the write, but the device-side state is unchanged).
+  ///
+  /// If the eviction succeeds but the re-attempted lease still fails
+  /// for an unrelated reason (e.g. invalidEntry surfaced by re-read,
+  /// preset pool exhausted), the eviction is NOT rolled back. The
+  /// recurring schedule stays paused per the user's explicit pick;
+  /// the failure outcome is returned so the caller can surface a
+  /// banner. A rolled-back eviction would silently re-enable a
+  /// schedule the user just told us to pause — strictly worse UX.
+  Future<LeaseResult> applyEvictionAndLease({
+    required CalendarEntry entry,
+    required ScheduleItem itemToEvict,
+    required DateTime evictUntil,
+  }) async {
+    final ScheduleUpdaterFn updater;
+    try {
+      updater = _ref.read(calendarLeaseScheduleUpdaterProvider);
+    } catch (e) {
+      debugPrint('$_kLogPrefix applyEvictionAndLease: '
+          'updater lookup failed — $e');
+      return LeaseResult.invalidEntry('schedule updater unavailable');
+    }
+    try {
+      await updater(itemToEvict.copyWith(disabledUntil: evictUntil));
+    } catch (e) {
+      debugPrint(
+          '$_kLogPrefix applyEvictionAndLease: schedule update failed — $e');
+      return LeaseResult.invalidEntry('eviction write failed');
+    }
+    // Now retry the lease. The slot-demand provider re-reads
+    // schedulesProvider through Riverpod reactivity, so the freed
+    // slot is visible to _allocateFreeSlotIndex.
+    return handleEntryCreated(entry);
+  }
+
   /// Release any active lease for [dateKey].
   Future<void> handleEntryDeleted(String dateKey) async {
     final lease = _activeLeases.remove(dateKey);
@@ -439,6 +583,50 @@ class CalendarEntryLeaseManager {
 
     if (expiredKeys.isNotEmpty) {
       await _saveToPrefs();
+    }
+
+    // Clear `disabledUntil` on any ScheduleItem whose soft-eviction
+    // expiry just passed. Triggers a re-sync so the freed item
+    // reaches the controller without waiting for the next user-driven
+    // mutation. Performs the update via the testable updater fn so
+    // tests can verify the call without constructing the real
+    // SchedulesNotifier.
+    bool anyReenabled = false;
+    try {
+      final schedules = _ref.read(calendarLeaseSchedulesProvider);
+      final updater = _ref.read(calendarLeaseScheduleUpdaterProvider);
+      for (final item in schedules) {
+        final until = item.disabledUntil;
+        if (until == null) continue;
+        if (until.isAfter(now)) continue;
+        // Expired — clear the field so it doesn't accumulate stale
+        // historical values.
+        try {
+          await updater(item.copyWith(clearDisabledUntil: true));
+          anyReenabled = true;
+          debugPrint(
+              '$_kLogPrefix swept-reenabled ${item.id} (was disabledUntil=$until)');
+        } catch (e) {
+          debugPrint(
+              '$_kLogPrefix sweep: re-enable failed for ${item.id} — $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('$_kLogPrefix sweep: re-enable scan failed — $e');
+    }
+
+    // If any item was re-enabled, force an immediate WLED sync so the
+    // controller picks up the restored timer entry. Updates above
+    // already trigger the debounced auto-sync, but the sync-now call
+    // collapses the 800 ms wait to zero, important for users editing
+    // schedules on the My Schedule page during the sweep tick.
+    if (anyReenabled) {
+      try {
+        final trigger = _ref.read(calendarLeaseScheduleSyncTriggerProvider);
+        await trigger();
+      } catch (e) {
+        debugPrint('$_kLogPrefix sweep: sync trigger failed — $e');
+      }
     }
 
     // Promote entries that have entered the window since last sweep.

@@ -46,7 +46,14 @@ class ScheduleSyncService {
   /// 1. ON timer - triggers the pattern/action
   /// 2. OFF timer - turns lights off (if offTimeLabel is set)
   Map<String, dynamic> buildCfgPayload(List<ScheduleItem> schedules) {
-    final enabled = schedules.where((s) => s.enabled).toList(growable: false);
+    // Eviction (Item #61 Workstream B): items soft-evicted by a
+    // CalendarEntry lease are filtered here so the freed slot is
+    // genuinely free on the controller side. Re-enable is automatic —
+    // the CalendarEntryLeaseManager periodic sweep clears the field
+    // once disabledUntil passes.
+    final enabled = schedules
+        .where((s) => s.enabled && !s.isCurrentlyEvicted)
+        .toList(growable: false);
     final List<Map<String, dynamic>> timers = [];
 
     for (final s in enabled) {

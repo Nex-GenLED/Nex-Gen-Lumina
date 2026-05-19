@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -847,6 +848,509 @@ void main() {
       final callsBefore = h.repo.applyConfigCalls.length;
       await h.manager.handleEntryDeleted('9999-12-31');
       expect(h.repo.applyConfigCalls.length, callsBefore);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: ScheduleItem.isCurrentlyEvicted (Prompt 4)
+  // ────────────────────────────────────────────────────────────────
+  group('ScheduleItem.isCurrentlyEvicted', () {
+    ScheduleItem itemWith({DateTime? disabledUntil}) => ScheduleItem(
+          id: 'test',
+          timeLabel: '7:00 PM',
+          repeatDays: const ['Daily'],
+          actionLabel: 'Warm White',
+          enabled: true,
+          disabledUntil: disabledUntil,
+        );
+
+    test('disabledUntil null returns false', () {
+      expect(itemWith().isCurrentlyEvicted, isFalse);
+    });
+
+    test('disabledUntil 5 minutes ago returns false', () {
+      final past = DateTime.now().subtract(const Duration(minutes: 5));
+      expect(itemWith(disabledUntil: past).isCurrentlyEvicted, isFalse);
+    });
+
+    test('disabledUntil 5 minutes from now returns true', () {
+      final future = DateTime.now().add(const Duration(minutes: 5));
+      expect(itemWith(disabledUntil: future).isCurrentlyEvicted, isTrue);
+    });
+
+    test('disabledUntil exactly now treats as expired (re-enabled)', () {
+      // Boundary convention: `disabledUntil > now` only. An exactly-
+      // equal timestamp resolves as expired (the more permissive
+      // interpretation, documented on the getter).
+      final now = DateTime.now();
+      expect(itemWith(disabledUntil: now).isCurrentlyEvicted, isFalse);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: fireCountDuringWindow (Prompt 4)
+  // ────────────────────────────────────────────────────────────────
+  group('fireCountDuringWindow', () {
+    ScheduleItem item({required List<String> days, String time = '7:00 PM'}) =>
+        ScheduleItem(
+          id: 'x',
+          timeLabel: time,
+          repeatDays: days,
+          actionLabel: 'Warm White',
+          enabled: true,
+        );
+
+    test('Daily item, 48h window starting Tuesday → returns 3', () {
+      // Tue noon → Thu noon: touches Tue, Wed, Thu = 3 days.
+      // Edge convention documented in the helper: each calendar day
+      // touched by the window counts.
+      final from = DateTime(2026, 5, 19, 12, 0); // Tuesday
+      final until = from.add(const Duration(hours: 48));
+      final c = fireCountDuringWindow(
+        item: item(days: const ['Daily']),
+        from: from,
+        until: until,
+      );
+      expect(c, 3);
+    });
+
+    test('Mondays only, window Tuesday→Thursday → returns 0', () {
+      final from = DateTime(2026, 5, 19, 12, 0); // Tue
+      final until = DateTime(2026, 5, 21, 12, 0); // Thu
+      final c = fireCountDuringWindow(
+        item: item(days: const ['Mon']),
+        from: from,
+        until: until,
+      );
+      expect(c, 0);
+    });
+
+    test('Mondays only, window Sunday→Tuesday → returns 1', () {
+      final from = DateTime(2026, 5, 17, 12, 0); // Sun
+      final until = DateTime(2026, 5, 19, 12, 0); // Tue
+      final c = fireCountDuringWindow(
+        item: item(days: const ['Mon']),
+        from: from,
+        until: until,
+      );
+      expect(c, 1);
+    });
+
+    test('Sat+Sun, 48h window starting Friday → returns 2', () {
+      final from = DateTime(2026, 5, 22, 12, 0); // Fri
+      final until = from.add(const Duration(hours: 48));
+      final c = fireCountDuringWindow(
+        item: item(days: const ['Sat', 'Sun']),
+        from: from,
+        until: until,
+      );
+      expect(c, 2);
+    });
+
+    test('zero-length window returns 0', () {
+      final t = DateTime(2026, 5, 19);
+      final c = fireCountDuringWindow(
+        item: item(days: const ['Daily']),
+        from: t,
+        until: t,
+      );
+      expect(c, 0);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: applyEvictionAndLease (Prompt 4)
+  // ────────────────────────────────────────────────────────────────
+  group('applyEvictionAndLease', () {
+    test('happy path — eviction frees slot, lease succeeds', () async {
+      // Setup: 8 schedules occupy all slots. Updater simulates the
+      // slot freeing by reducing demand by one.
+      final demandHolder = StateProvider<int>((_) => 8);
+      final updaterCalls = <ScheduleItem>[];
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider
+            .overrideWith((ref) => ref.watch(demandHolder)),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue(const []),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
+          return (item) async {
+            updaterCalls.add(item);
+            ref.read(demandHolder.notifier).state = 7;
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+
+      final entry = buildEntry(
+        dateKey: dateKeyFor(fixedNow),
+        onTime: '18:00',
+        offTime: '22:00',
+      );
+      final evictTarget = ScheduleItem(
+        id: 'evict-me',
+        timeLabel: '6:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'Warm White',
+        enabled: true,
+      );
+      final evictUntil = manager.computeLeaseExpiry(entry)!;
+
+      final result = await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: evictUntil,
+      );
+      expect(result.outcome, LeaseOutcome.leased);
+      expect(updaterCalls.length, 1);
+      expect(updaterCalls.first.id, 'evict-me');
+      expect(updaterCalls.first.disabledUntil, evictUntil);
+    });
+
+    test('idempotent — second call same arguments produces same end state',
+        () async {
+      final demandHolder = StateProvider<int>((_) => 8);
+      final updaterCalls = <ScheduleItem>[];
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider
+            .overrideWith((ref) => ref.watch(demandHolder)),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue(const []),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
+          return (item) async {
+            updaterCalls.add(item);
+            ref.read(demandHolder.notifier).state = 7;
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+
+      final entry = buildEntry(
+        dateKey: dateKeyFor(fixedNow),
+        onTime: '18:00',
+        offTime: '22:00',
+      );
+      final evictTarget = ScheduleItem(
+        id: 'evict-me',
+        timeLabel: '6:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'Warm White',
+        enabled: true,
+      );
+      final evictUntil = manager.computeLeaseExpiry(entry)!;
+
+      final r1 = await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: evictUntil,
+      );
+      final r2 = await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: evictUntil,
+      );
+      expect(r1.outcome, LeaseOutcome.leased);
+      expect(r2.outcome, LeaseOutcome.updated);
+      // Same slot + preset across both calls.
+      expect(r1.lease!.slotIndex, r2.lease!.slotIndex);
+      expect(r1.lease!.presetId, r2.lease!.presetId);
+    });
+
+    test('eviction target carries disabledUntil exactly equal to evictUntil',
+        () async {
+      final demandHolder = StateProvider<int>((_) => 8);
+      final updaterCalls = <ScheduleItem>[];
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider
+            .overrideWith((ref) => ref.watch(demandHolder)),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue(const []),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
+          return (item) async {
+            updaterCalls.add(item);
+            ref.read(demandHolder.notifier).state = 7;
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+
+      final entry = buildEntry(
+        dateKey: dateKeyFor(fixedNow),
+        onTime: '18:00',
+        offTime: '22:00',
+      );
+      final evictTarget = ScheduleItem(
+        id: 'x',
+        timeLabel: '6:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+      );
+      final evictUntil = DateTime(2026, 5, 19, 22, 0);
+      await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: evictUntil,
+      );
+      expect(updaterCalls.single.disabledUntil, evictUntil);
+    });
+
+    test(
+        'eviction succeeds but lease still fails — eviction NOT rolled back',
+        () async {
+      // Demand stays at 8 even after eviction (simulating an
+      // unrelated lease failure such as preset pool exhaustion). The
+      // eviction write IS recorded; the lease attempt returns
+      // noFreeSlots; the manager does NOT roll back.
+      final demandHolder = StateProvider<int>((_) => 8);
+      final updaterCalls = <ScheduleItem>[];
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider
+            .overrideWith((ref) => ref.watch(demandHolder)),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue(const []),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
+          return (item) async {
+            updaterCalls.add(item);
+            // Demand DOES NOT drop — simulates an unrelated failure.
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+
+      final entry = buildEntry(
+        dateKey: dateKeyFor(fixedNow),
+        onTime: '18:00',
+        offTime: '22:00',
+      );
+      final evictTarget = ScheduleItem(
+        id: 'x',
+        timeLabel: '6:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+      );
+      final result = await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: DateTime(2026, 5, 19, 22, 0),
+      );
+      expect(result.outcome, LeaseOutcome.noFreeSlots);
+      // Eviction write recorded — NOT rolled back. The recurring
+      // schedule stays paused per the user's explicit pick.
+      expect(updaterCalls.length, 1);
+    });
+
+    test('updater throws — returns invalidEntry, no lease attempted',
+        () async {
+      final demandHolder = StateProvider<int>((_) => 8);
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider
+            .overrideWith((ref) => ref.watch(demandHolder)),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue(const []),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
+          return (item) async {
+            throw Exception('simulated network failure');
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+
+      final entry = buildEntry(
+        dateKey: dateKeyFor(fixedNow),
+        onTime: '18:00',
+        offTime: '22:00',
+      );
+      final evictTarget = ScheduleItem(
+        id: 'x',
+        timeLabel: '6:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+      );
+      final result = await manager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: evictTarget,
+        evictUntil: DateTime(2026, 5, 19, 22, 0),
+      );
+      expect(result.outcome, LeaseOutcome.invalidEntry);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: sweepExpiredLeases re-enables expired evictions (Prompt 4)
+  // ────────────────────────────────────────────────────────────────
+  group('sweepExpiredLeases re-enables expired evictions', () {
+    test('ScheduleItem with disabledUntil in past has field cleared',
+        () async {
+      final past = fixedNow.subtract(const Duration(hours: 1));
+      final evicted = ScheduleItem(
+        id: 'evicted',
+        timeLabel: '7:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+        disabledUntil: past,
+      );
+      final updaterCalls = <ScheduleItem>[];
+      bool syncFired = false;
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue([evicted]),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((_) {
+          return (item) async {
+            updaterCalls.add(item);
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider.overrideWithValue(
+          () async {
+            syncFired = true;
+          },
+        ),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+      // `initialize` runs one sweep — ignore its updater calls so we
+      // only assert against the explicit sweep below. (The overridden
+      // schedules provider is static, so the init sweep sees the same
+      // expired item and would otherwise double-count.)
+      updaterCalls.clear();
+      syncFired = false;
+
+      await manager.sweepExpiredLeases();
+      expect(updaterCalls.length, 1);
+      expect(updaterCalls.single.id, 'evicted');
+      expect(updaterCalls.single.disabledUntil, isNull);
+      expect(syncFired, isTrue);
+    });
+
+    test('ScheduleItem with disabledUntil in future is not touched',
+        () async {
+      final future = fixedNow.add(const Duration(hours: 6));
+      final evicted = ScheduleItem(
+        id: 'still-paused',
+        timeLabel: '7:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+        disabledUntil: future,
+      );
+      final updaterCalls = <ScheduleItem>[];
+      bool syncFired = false;
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider.overrideWithValue([evicted]),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((_) {
+          return (item) async {
+            updaterCalls.add(item);
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider.overrideWithValue(
+          () async {
+            syncFired = true;
+          },
+        ),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+      updaterCalls.clear();
+      syncFired = false;
+
+      await manager.sweepExpiredLeases();
+      expect(updaterCalls, isEmpty);
+      expect(syncFired, isFalse);
+    });
+
+    test('mixed: one expired, one future — only the expired is cleared',
+        () async {
+      final past = fixedNow.subtract(const Duration(hours: 1));
+      final future = fixedNow.add(const Duration(hours: 6));
+      final expiredItem = ScheduleItem(
+        id: 'expired',
+        timeLabel: '7:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'WW',
+        enabled: true,
+        disabledUntil: past,
+      );
+      final activeItem = ScheduleItem(
+        id: 'still-paused',
+        timeLabel: '8:00 PM',
+        repeatDays: const ['Daily'],
+        actionLabel: 'Aurora',
+        enabled: true,
+        disabledUntil: future,
+      );
+      final updaterCalls = <ScheduleItem>[];
+      final repo = _FakeWledRepository();
+      final container = ProviderContainer(overrides: [
+        calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
+        calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesProvider
+            .overrideWithValue([expiredItem, activeItem]),
+        calendarLeaseScheduleUpdaterProvider.overrideWith((_) {
+          return (item) async {
+            updaterCalls.add(item);
+          };
+        }),
+        calendarLeaseScheduleSyncTriggerProvider
+            .overrideWithValue(() async {}),
+        wledRepositoryProvider.overrideWithValue(repo),
+      ]);
+      addTearDown(container.dispose);
+      final manager = container.read(calendarEntryLeaseManagerProvider);
+      manager.nowProvider = () => fixedNow;
+      await manager.initialize();
+      updaterCalls.clear();
+
+      await manager.sweepExpiredLeases();
+      expect(updaterCalls.length, 1);
+      expect(updaterCalls.single.id, 'expired');
     });
   });
 }

@@ -37,6 +37,16 @@ class ScheduleItem {
   /// Requires a controller with onboard microphone support (NGL-CTRL-P1).
   final bool? useAudioReactive;
 
+  /// Soft-eviction marker. When non-null and in the future, this
+  /// schedule is treated as if it were `enabled: false` by
+  /// [ScheduleSyncService.buildCfgPayload] and the lease manager's
+  /// slot-demand calculation. Used by Item #61 Workstream B's
+  /// eviction picker to free a WLED timer slot for an incoming
+  /// CalendarEntry lease without removing the recurring schedule
+  /// outright. After the timestamp passes the field is cleared by
+  /// the lease manager's periodic sweep.
+  final DateTime? disabledUntil;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -47,6 +57,7 @@ class ScheduleItem {
     this.wledPayload,
     this.presetId,
     this.useAudioReactive,
+    this.disabledUntil,
   });
 
   /// Returns true if this schedule has an off time configured.
@@ -54,6 +65,22 @@ class ScheduleItem {
 
   /// Returns true if this schedule has a WLED payload to apply.
   bool get hasWledPayload => wledPayload != null && wledPayload!.isNotEmpty;
+
+  /// Whether this schedule is currently soft-evicted by a
+  /// [CalendarEntryLeaseManager] eviction. Returns false if
+  /// [disabledUntil] is null or in the past.
+  ///
+  /// Boundary convention: `disabledUntil > DateTime.now()` only —
+  /// an exactly-equal timestamp is treated as expired (re-enabled).
+  /// The 1-second resolution of `DateTime.now()` plus the
+  /// 5-minute periodic sweep means equal-to-now is effectively
+  /// never hit in practice; this convention picks the more
+  /// permissive interpretation when it does.
+  bool get isCurrentlyEvicted {
+    final until = disabledUntil;
+    if (until == null) return false;
+    return until.isAfter(DateTime.now());
+  }
 
   ScheduleItem copyWith({
     String? id,
@@ -68,6 +95,8 @@ class ScheduleItem {
     int? presetId,
     bool clearPresetId = false,
     bool? useAudioReactive,
+    DateTime? disabledUntil,
+    bool clearDisabledUntil = false,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -79,6 +108,8 @@ class ScheduleItem {
         wledPayload: clearWledPayload ? null : (wledPayload ?? this.wledPayload),
         presetId: clearPresetId ? null : (presetId ?? this.presetId),
         useAudioReactive: useAudioReactive ?? this.useAudioReactive,
+        disabledUntil:
+            clearDisabledUntil ? null : (disabledUntil ?? this.disabledUntil),
       );
 
   Map<String, dynamic> toJson() => {
@@ -91,6 +122,8 @@ class ScheduleItem {
         if (wledPayload != null) 'wledPayload': jsonEncode(wledPayload),
         if (presetId != null) 'presetId': presetId,
         if (useAudioReactive != null) 'useAudioReactive': useAudioReactive,
+        if (disabledUntil != null)
+          'disabledUntil': disabledUntil!.toIso8601String(),
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -105,7 +138,19 @@ class ScheduleItem {
             : json['wledPayload'] as Map<String, dynamic>?,
         presetId: json['presetId'] as int?,
         useAudioReactive: json['useAudioReactive'] as bool?,
+        // Defensive parse — absence, non-string, or invalid ISO 8601
+        // all collapse to null so a corrupt field can't crash boot.
+        disabledUntil: _tryParseDisabledUntil(json['disabledUntil']),
       );
+
+  static DateTime? _tryParseDisabledUntil(dynamic raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      return DateTime.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   String toString() => describeIdentity(this);

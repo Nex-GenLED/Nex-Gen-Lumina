@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
+import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -257,14 +258,11 @@ class CalendarScheduleNotifier
           try {
             final result = await leaseManager.handleEntryCreated(entry);
             if (result.outcome == LeaseOutcome.noFreeSlots) {
-              // Eviction UX is Prompt 4. For now, surface a debug
-              // warning — the entry is still saved + visible on the
-              // calendar; it just won't fire on the controller until
-              // a slot frees up.
-              debugPrint(
-                'CalendarLease: No free slot for ${entry.dateKey} — '
-                'entry saved but will not fire. Eviction UX pending '
-                'Prompt 4.',
+              // Prompt 4 — Option-C user-driven eviction. Surface a
+              // request to the UI listener; await the user's pick.
+              await _handleNoFreeSlotsForEntry(
+                entry: entry,
+                leaseManager: leaseManager,
               );
             }
           } catch (e) {
@@ -354,6 +352,65 @@ class CalendarScheduleNotifier
     } catch (e) {
       debugPrint('❌ _writeAsScheduleItem: $e');
       return false;
+    }
+  }
+
+  /// Prompt 4 — Option-C eviction handler. Surfaces an
+  /// [EvictionRequest] to the UI listener and awaits the user's pick;
+  /// on a non-null pick, runs [CalendarEntryLeaseManager.applyEvictionAndLease].
+  ///
+  /// Cancellation (user dismissed the picker) leaves the entry in
+  /// Firestore but without a lease — debug-logged for diagnostics.
+  /// The entry remains visible on the calendar; a subsequent sweep
+  /// or eviction-cancellation banner (out of scope) can re-attempt.
+  Future<void> _handleNoFreeSlotsForEntry({
+    required CalendarEntry entry,
+    required CalendarEntryLeaseManager leaseManager,
+  }) async {
+    final leaseUntil = leaseManager.computeLeaseExpiry(entry);
+    if (leaseUntil == null) {
+      debugPrint(
+          'CalendarLease: noFreeSlots for ${entry.dateKey} but '
+          'lease-expiry uncomputable — skipping eviction prompt');
+      return;
+    }
+    final completer = Completer<ScheduleItem?>();
+    final request = EvictionRequest(
+      entry: entry,
+      leaseUntil: leaseUntil,
+      completer: completer,
+    );
+    _ref.read(pendingEvictionRequestProvider.notifier).state = request;
+    ScheduleItem? choice;
+    try {
+      choice = await completer.future;
+    } catch (e) {
+      debugPrint('CalendarLease: eviction completer threw — $e');
+      return;
+    }
+    if (choice == null) {
+      debugPrint(
+          'CalendarLease: User cancelled eviction for ${entry.dateKey} '
+          '— entry will not fire');
+      return;
+    }
+    try {
+      final result = await leaseManager.applyEvictionAndLease(
+        entry: entry,
+        itemToEvict: choice,
+        evictUntil: leaseUntil,
+      );
+      if (result.outcome == LeaseOutcome.leased ||
+          result.outcome == LeaseOutcome.updated) {
+        debugPrint(
+            'CalendarLease: Lease created after eviction for ${entry.dateKey}');
+      } else {
+        debugPrint(
+            'CalendarLease: applyEvictionAndLease returned ${result.outcome} '
+            'for ${entry.dateKey} — eviction landed but lease failed');
+      }
+    } catch (e) {
+      debugPrint('CalendarLease: applyEvictionAndLease threw — $e');
     }
   }
 

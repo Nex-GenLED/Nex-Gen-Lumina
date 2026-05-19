@@ -14,6 +14,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/eviction_picker_dialog.dart';
+import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
@@ -179,6 +181,36 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     final selectedKey= ref.watch(selectedCalendarDateProvider);
     final calEntries = ref.watch(calendarScheduleProvider);
     final pending    = ref.watch(pendingCalendarProvider);
+
+    // Item #61 Workstream B — Option-C eviction picker bridge.
+    // CalendarScheduleNotifier.applyEntries pushes an EvictionRequest
+    // here when an incoming entry has no free WLED slot. We show the
+    // picker, complete the request's completer with the user's pick
+    // (or null), and clear the provider so subsequent requests fire.
+    ref.listen<EvictionRequest?>(pendingEvictionRequestProvider,
+        (previous, next) async {
+      if (next == null) return;
+      if (next.completer.isCompleted) return;
+      ScheduleItem? choice;
+      try {
+        choice = await showEvictionPicker(
+          context: context,
+          incomingEntry: next.entry,
+          leaseUntil: next.leaseUntil,
+        );
+      } catch (e) {
+        debugPrint('EvictionPicker: dialog threw — $e');
+        choice = null;
+      }
+      if (!next.completer.isCompleted) {
+        next.completer.complete(choice);
+      }
+      // Clear after resolving so subsequent noFreeSlots requests can
+      // re-trigger the listener.
+      if (ref.read(pendingEvictionRequestProvider) == next) {
+        ref.read(pendingEvictionRequestProvider.notifier).state = null;
+      }
+    });
 
     // Auto-sync now lives in SchedulesNotifier — every mutation triggers
     // a debounced WLED push from the notifier, regardless of which screen
