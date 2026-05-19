@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
@@ -37,7 +38,11 @@ class ScheduleSyncService {
   /// - hour: int 0-23 (or 24 for sunrise, 25 for sunset)
   /// - min: int 0-59 (or offset -59 to +59 for sunrise/sunset)
   /// - macro: int - preset ID to activate (1-250), 0 = off command
-  /// - dow: int - day of week bitmask (bit 0=Sun, bit 6=Sat), 127=daily
+  /// - dow: int - day of week bitmask. WLED firmware uses
+  ///   Monday=bit 0 through Sunday=bit 6; 127 = daily. See
+  ///   [wled_dow.dart] for the canonical conversion helpers.
+  ///   (Item #72 — corrected 2026-05-19 from prior wrong Sun=bit 0
+  ///   assumption that caused timers to fire one weekday late.)
   /// - start/end: for time ranges (optional)
   ///
   /// WLED supports up to 8 timers in the "ins" array.
@@ -314,45 +319,11 @@ class ScheduleSyncService {
     return const _ParsedTime(hour: 0, minute: 0);
   }
 
-  int _computeDowMask(List<String> days) {
-    if (days.any((d) => d.toLowerCase().contains('daily'))) return 127;
-    int mask = 0;
-    for (final d in days) {
-      switch (d.toLowerCase()) {
-        case 'sun':
-        case 'sunday':
-          mask |= 1; // bit0
-          break;
-        case 'mon':
-        case 'monday':
-          mask |= 2; // bit1
-          break;
-        case 'tue':
-        case 'tues':
-        case 'tuesday':
-          mask |= 4; // bit2
-          break;
-        case 'wed':
-        case 'wednesday':
-          mask |= 8; // bit3
-          break;
-        case 'thu':
-        case 'thurs':
-        case 'thursday':
-          mask |= 16; // bit4
-          break;
-        case 'fri':
-        case 'friday':
-          mask |= 32; // bit5
-          break;
-        case 'sat':
-        case 'saturday':
-          mask |= 64; // bit6
-          break;
-      }
-    }
-    return mask;
-  }
+  /// Compute the WLED dow bitmask for a list of weekday names.
+  /// Delegates to the centralized [wledDowMaskForDayList] helper.
+  /// See [wled_dow.dart] for the canonical Mon=bit 0..Sun=bit 6
+  /// convention (Item #72 — corrected 2026-05-19).
+  int _computeDowMask(List<String> days) => wledDowMaskForDayList(days);
 
   /// Maps an action label to a WLED preset ID.
   ///

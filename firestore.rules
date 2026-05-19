@@ -951,6 +951,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Migration tracking (Item #72 and future migrations) ──
+    // config/migrations/items/{migrationId} tracks one-time migration
+    // completion. Cloud Functions (admin SDK) write; no client writes.
+    // Reads are auth-only so the admin UI / Firebase console can see
+    // completion status without enabling client-side mutation.
+    match /config/migrations/items/{migrationId} {
+      allow read: if request.auth != null;
+      allow write: if false; // admin SDK only
+    }
+
     // ── Sales Jobs ───────────────────────────────────────────────
     match /sales_jobs/{jobId} {
       function isJobStakeholder() {

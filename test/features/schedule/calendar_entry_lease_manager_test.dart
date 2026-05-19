@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -160,33 +161,42 @@ void main() {
 
   // ────────────────────────────────────────────────────────────────
   // Group: _singleDateDowMask
+  //
+  // Expected values reference the kWledDow* constants from wled_dow.dart
+  // (Mon=bit 0..Sun=bit 6 per WLED firmware). Item #72 corrected this
+  // from the prior wrong Sun=bit 0 assumption on 2026-05-19.
   // ────────────────────────────────────────────────────────────────
   group('_singleDateDowMask', () {
-    test('Sunday date returns 1 (bit 0)', () async {
+    test('Sunday date returns kWledDowSunday (bit 6)', () async {
       final h = buildHarness();
       await h.manager.initialize();
       // 2026-01-04 is a Sunday.
-      expect(h.manager.singleDateDowMaskForTest('2026-01-04'), 1);
+      expect(h.manager.singleDateDowMaskForTest('2026-01-04'),
+          kWledDowSunday);
     });
 
-    test('Monday date returns 2 (bit 1)', () async {
+    test('Monday date returns kWledDowMonday (bit 0)', () async {
       final h = buildHarness();
       await h.manager.initialize();
       // 2026-01-05 is a Monday.
-      expect(h.manager.singleDateDowMaskForTest('2026-01-05'), 2);
+      expect(h.manager.singleDateDowMaskForTest('2026-01-05'),
+          kWledDowMonday);
     });
 
-    test('Saturday date returns 64 (bit 6)', () async {
+    test('Saturday date returns kWledDowSaturday (bit 5)', () async {
       final h = buildHarness();
       await h.manager.initialize();
       // 2026-01-10 is a Saturday.
-      expect(h.manager.singleDateDowMaskForTest('2026-01-10'), 64);
+      expect(h.manager.singleDateDowMaskForTest('2026-01-10'),
+          kWledDowSaturday);
     });
 
-    test('2026-05-19 (Tuesday) returns 4 (bit 2)', () async {
+    test('2026-05-19 (Tuesday) returns kWledDowTuesday (bit 1)',
+        () async {
       final h = buildHarness();
       await h.manager.initialize();
-      expect(h.manager.singleDateDowMaskForTest('2026-05-19'), 4);
+      expect(h.manager.singleDateDowMaskForTest('2026-05-19'),
+          kWledDowTuesday);
     });
 
     test('weekday match is consistent with DateTime.weekday', () async {
@@ -194,13 +204,13 @@ void main() {
       await h.manager.initialize();
       // Cross-check every day of one week.
       final cases = <String, int>{
-        '2026-01-04': 1, // Sun
-        '2026-01-05': 2, // Mon
-        '2026-01-06': 4, // Tue
-        '2026-01-07': 8, // Wed
-        '2026-01-08': 16, // Thu
-        '2026-01-09': 32, // Fri
-        '2026-01-10': 64, // Sat
+        '2026-01-04': kWledDowSunday,
+        '2026-01-05': kWledDowMonday,
+        '2026-01-06': kWledDowTuesday,
+        '2026-01-07': kWledDowWednesday,
+        '2026-01-08': kWledDowThursday,
+        '2026-01-09': kWledDowFriday,
+        '2026-01-10': kWledDowSaturday,
       };
       cases.forEach((dateKey, expected) {
         expect(

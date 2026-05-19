@@ -93,6 +93,16 @@ exports.backfillUserLocations = backfillUserLocations;
 const { backfillUserDealerCodes } = require("./lib/backfillUserDealerCodes");
 exports.backfillUserDealerCodes = backfillUserDealerCodes;
 
+// One-time WLED dow off-by-one fix migration (Item #72). Clears every
+// user's `schedules` array so the production fleet starts clean on the
+// corrected Mon=bit 0 convention. Idempotent — tracks completion in
+// config/migrations/items/migrateClearScheduleItemsV1. Gated to
+// @nex-genled.com authenticated callers. Must be invoked manually via
+// Firebase Console or `firebase functions:shell` after the new build
+// is in production.
+const { migrateClearScheduleItemsV1 } = require("./lib/migrateClearScheduleItemsV1");
+exports.migrateClearScheduleItemsV1 = migrateClearScheduleItemsV1;
+
 const db = admin.firestore();
 
 // Define the OpenAI API key parameter (reads from .env file)

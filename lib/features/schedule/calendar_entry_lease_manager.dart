@@ -45,6 +45,7 @@ import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -272,7 +273,8 @@ class CalendarEntryLease {
   /// WLED timer minute, 0-59.
   final int wledMin;
 
-  /// WLED dow bitmask for the lease's single date (Sun=bit0..Sat=bit6).
+  /// WLED dow bitmask for the lease's single date. See [wled_dow.dart]
+  /// for the canonical Mon=bit 0..Sun=bit 6 convention (Item #72).
   final int dowMask;
 
   const CalendarEntryLease({
@@ -932,10 +934,14 @@ class CalendarEntryLeaseManager {
 
   // ─── Single-date dow ────────────────────────────────────────────
 
-  /// Compute the dow bitmask for the given dateKey. Returns 0 when
-  /// dateKey doesn't parse. WLED dow is bit 0=Sun..bit 6=Sat; Dart's
-  /// `DateTime.weekday` is 1=Mon..7=Sun, so Sunday gets the special
-  /// case to keep bit 0.
+  /// Compute the WLED dow bitmask for a single calendar date.
+  /// Delegates to the centralized [wledDowMaskForWeekday] helper which
+  /// encodes the correct Mon=bit 0 convention. Returns 0 when dateKey
+  /// doesn't parse — caller must validate dateKey separately.
+  ///
+  /// Fixed 2026-05-19 (Item #72) — previously assumed Sun=bit 0 which
+  /// caused every non-Daily timer to fire one weekday late on the
+  /// controller.
   @visibleForTesting
   int singleDateDowMaskForTest(String dateKey) =>
       _singleDateDowMask(dateKey);
@@ -943,10 +949,7 @@ class CalendarEntryLeaseManager {
   int _singleDateDowMask(String dateKey) {
     final dt = DateTime.tryParse(dateKey);
     if (dt == null) return 0;
-    // weekday: 1=Mon, 2=Tue, ..., 6=Sat, 7=Sun
-    // wled bit: 0=Sun, 1=Mon, 2=Tue, ..., 6=Sat
-    if (dt.weekday == DateTime.sunday) return 1; // bit 0
-    return 1 << dt.weekday;
+    return wledDowMaskForWeekday(dt.weekday);
   }
 
   // ─── WLED writes ────────────────────────────────────────────────

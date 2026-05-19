@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,14 +35,13 @@ void main() {
         '${d.day.toString().padLeft(2, '0')}';
   }
 
-  /// Expected dow bitmask for today (must be computed at runtime —
-  /// hardcoding breaks the test the next time it runs on a different
-  /// weekday).
-  int todayDowMask() {
-    final wd = DateTime.now().weekday;
-    if (wd == DateTime.sunday) return 1; // bit 0
-    return 1 << wd;
-  }
+  /// Expected dow bitmask for today, computed at runtime via the
+  /// canonical [wledDowMaskForWeekday] helper (Mon=bit 0..Sun=bit 6
+  /// per WLED firmware). Hardcoding breaks across days; reusing the
+  /// helper guarantees the test asserts the same convention the
+  /// production write path emits — and any future change to that
+  /// convention fails fast at the source of truth.
+  int todayDowMask() => wledDowMaskForWeekday(DateTime.now().weekday);
 
   /// CalendarEntry guaranteed to land within the 48 h lease window.
   /// Uses 30 min from now → 90 min from now so window math holds
