@@ -455,9 +455,11 @@ class CalendarEntryLeaseManager {
     } catch (e) {
       debugPrint('$_kLogPrefix initialize: initial sweep failed — $e');
     }
-    final liveEnabled = _readLiveWritesEnabled();
+    final initialLiveEnabledSnapshot = _readLiveWritesEnabled();
     debugPrint('$_kLogPrefix initialize END '
-        '(loaded ${_activeLeases.length} leases, live writes = $liveEnabled)');
+        '(loaded ${_activeLeases.length} leases, '
+        'live writes initial snapshot = $initialLiveEnabledSnapshot — '
+        'authoritative value will arrive via Firestore stream emission)');
   }
 
   /// Synchronous read of the feature flag. Defaults to false during
