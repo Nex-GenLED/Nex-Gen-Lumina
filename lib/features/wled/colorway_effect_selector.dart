@@ -22,6 +22,26 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 
+/// Compose a richer Now Playing label for the Colorway / Architectural
+/// Apply path. Stopgap for the current single-string `activePresetLabelProvider`
+/// model — the systemic fix (NowPlayingContext struct + migration of all
+/// 12 Apply paths) is tracked as Item #81 for v1.0.1.
+///
+/// Returns `"{parent name} {parent description}, {palette name}"` when the
+/// parent has both, or `"{parent name}, {palette name}"` when description is
+/// null/empty. Falls back to the bare palette name when the parent is null
+/// or has an empty name.
+@visibleForTesting
+String composeColorwayLabel(LibraryNode paletteNode, LibraryNode? parentNode) {
+  final paletteName = paletteNode.name;
+  if (parentNode == null || parentNode.name.isEmpty) return paletteName;
+  final desc = parentNode.description;
+  final parentLabel = (desc != null && desc.isNotEmpty)
+      ? '${parentNode.name} $desc'
+      : parentNode.name;
+  return '$parentLabel, $paletteName';
+}
+
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
@@ -295,6 +315,23 @@ class _ColorwayEffectSelectorPageState
       colorGroupSize: colorGroup,
       spacing: spacing,
     );
+
+    // Write the Now Playing label so displayPatternNameProvider's Priority 2
+    // wins over Priority 3 (the WledStateModel.effectName leak above, which
+    // shows "1 On 2 Off - Solid" instead of richer context). The leaf node
+    // name alone (e.g. "1 On 2 Off") is uninformative without the parent
+    // kelvin/color folder, so compose "<parent>, <leaf>" — e.g.
+    // "3500K Soft White, 1 On 2 Off". Item #81 (v1.0.1) replaces this with
+    // a structured NowPlayingContext for all Apply paths.
+    final parentId = widget.paletteNode.parentId;
+    LibraryNode? parentNode;
+    if (parentId != null) {
+      parentNode = await ref.read(patternRepositoryProvider).getNodeById(parentId);
+    }
+    final composedLabel = composeColorwayLabel(widget.paletteNode, parentNode);
+    ref
+        .read(activePresetLabelProvider.notifier)
+        .setLabelWithFingerprint(composedLabel, ref.read(wledStateProvider));
 
     // Show feedback with offline awareness
     if (mounted) {
