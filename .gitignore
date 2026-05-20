@@ -197,3 +197,12 @@ pulla-logs/
 
 # Release-build staging artifacts (large signed AABs / IPAs awaiting upload)
 submission_artifacts/
+
+# Session log captures (Pulla smoke tests, diagnostic runs)
+logs/
+
+# Marketing content (sell sheets, how-to guides, Playwright screenshot scripts)
+marketing/
+
+# Cloud Functions TypeScript build output
+functions/lib/
