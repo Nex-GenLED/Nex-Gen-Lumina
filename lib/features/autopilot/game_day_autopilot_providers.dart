@@ -260,6 +260,38 @@ final teamAutopilotConfigProvider =
 // Notifier: CRUD operations + evaluation loop
 // ---------------------------------------------------------------------------
 
+/// Builds the list of enabled configs that should have calendar entries
+/// populated for a just-toggled team. The just-written config is spliced in
+/// directly so the populate path can't drop it due to Firestore stream lag.
+///
+/// Logic:
+///   1. Take every enabled config from the stream EXCEPT the just-toggled
+///      team's (to avoid double-populating it).
+///   2. Append the just-written config if it was provided and is enabled
+///      (this is the freshly-written value, so it's guaranteed current —
+///      it overrides any stale stream snapshot for this slug).
+///   3. If no just-written config was provided, fall back to the stream's
+///      value for this team (covers callers that don't have the fresh
+///      config in hand).
+///
+/// The result is the set of teams to write calendar entries for. Pure
+/// function — extracted for unit-testability without standing up the full
+/// notifier + Firestore graph.
+@visibleForTesting
+List<GameDayAutopilotConfig> computeEnabledConfigsForTeam({
+  required String teamSlug,
+  required List<GameDayAutopilotConfig> streamConfigs,
+  required GameDayAutopilotConfig? justWrittenConfig,
+}) {
+  return <GameDayAutopilotConfig>[
+    ...streamConfigs.where((c) => c.enabled && c.teamSlug != teamSlug),
+    if (justWrittenConfig != null && justWrittenConfig.enabled)
+      justWrittenConfig
+    else
+      ...streamConfigs.where((c) => c.enabled && c.teamSlug == teamSlug),
+  ];
+}
+
 class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Timer? _evaluationTimer;
   Timer? _refreshTimer;
@@ -384,11 +416,31 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     final existing = await docRef.get();
     final now = DateTime.now();
 
+    // Build a snapshot of what we just wrote so the populate path doesn't
+    // depend on the Firestore stream propagating before it reads. This
+    // closes the stream-lag race that previously caused silent early-
+    // return when enabling a second team.
+    GameDayAutopilotConfig? freshConfig;
+
     if (existing.exists) {
       await docRef.update({
         'enabled': enabled,
         'updated_at': Timestamp.fromDate(now),
       });
+      // Reconstruct the fresh config from the stream's stale snapshot +
+      // the field we just changed. If the stream doesn't yet know about
+      // the team (extremely unlikely since the doc exists), fall through
+      // with null and the populate path will use its stream fallback.
+      final streamConfigs = ref
+              .read(gameDayAutopilotConfigsProvider)
+              .valueOrNull ??
+          const <GameDayAutopilotConfig>[];
+      final stale = streamConfigs
+          .where((c) => c.teamSlug == teamSlug)
+          .firstOrNull;
+      if (stale != null) {
+        freshConfig = stale.copyWith(enabled: enabled, updatedAt: now);
+      }
     } else {
       // Create a new config from kTeamColors.
       final team = kTeamColors[teamSlug];
@@ -399,7 +451,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
             teamSlug, 'teamSlug', 'Unknown team — not in kTeamColors');
       }
 
-      final config = GameDayAutopilotConfig(
+      freshConfig = GameDayAutopilotConfig(
         teamSlug: teamSlug,
         teamName: team.teamName,
         espnTeamId: team.espnTeamId,
@@ -410,7 +462,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         createdAt: now,
         updatedAt: now,
       );
-      await docRef.set(config.toFirestore());
+      await docRef.set(freshConfig.toFirestore());
 
       // Profile is the source of truth for My Teams on the Game Day screen.
       // Record this explicit user selection there so it survives cache
@@ -425,11 +477,11 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       return;
     }
 
-    // If enabling, populate the calendar with upcoming games.
-    // Force-bypass the 7-day gate — the user just opted in for this team,
-    // they expect to see calendar entries appear, even if some other team
-    // regenerated within the last week.
-    _populateCalendarInBackground(teamSlug, force: true);
+    // If enabling, populate the calendar with upcoming games for ALL
+    // enabled teams (not just this one — see Item #80). Passing
+    // [freshConfig] lets the splice path bypass any Firestore stream lag
+    // so the just-toggled team is guaranteed to be in the populate set.
+    _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
   }
 
   /// Append [teamName] to the user's profile `sports_team_priority` and
@@ -585,29 +637,34 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     await profileRef.set(updates, SetOptions(merge: true));
   }
 
-  /// Fire-and-forget calendar population for a team. Errors are logged
-  /// but don't surface to the caller. Pass `force: true` to bypass the
-  /// 7-day refresh gate (e.g. when the user just toggled autopilot on
-  /// for a brand new team and there's no history yet).
-  void _populateCalendarInBackground(String teamSlug, {bool force = false}) {
+  /// Fire-and-forget calendar population after a team toggle. Always runs
+  /// (no 7-day gate) — the user just made an explicit change and expects
+  /// to see the calendar reflect it. Errors are logged but don't surface
+  /// to the caller.
+  ///
+  /// Iterates ALL enabled teams, not just the just-toggled one, so
+  /// enabling a second team doesn't wipe the first team's entries (the
+  /// pre-Item-#80 single-team replace semantics caused that regression).
+  ///
+  /// Pass [justWrittenConfig] when the caller has the freshly-written
+  /// config in hand — the splice path uses it directly, bypassing the
+  /// Firestore stream-lag race that previously caused silent early-return.
+  void _populateCalendarInBackground(
+    String teamSlug, {
+    GameDayAutopilotConfig? justWrittenConfig,
+  }) {
     Future(() async {
       try {
-        if (!_shouldRegenerateGameDay(force: force)) return;
-
-        final configs =
-            ref.read(gameDayAutopilotConfigsProvider).valueOrNull ?? [];
-        final config =
-            configs.where((c) => c.teamSlug == teamSlug).firstOrNull;
-        if (config == null) return;
-
-        await _clearFutureGameDayCalendarEntries();
-
-        final service = ref.read(gameDayAutopilotServiceProvider);
-        final count = await service.populateCalendarForTeam(config);
-        debugPrint('[GameDayAutopilot] Background calendar populate: '
-            '$count entries for $teamSlug');
-
-        await _writeGameDayLastGenerated();
+        final streamConfigs = ref
+                .read(gameDayAutopilotConfigsProvider)
+                .valueOrNull ??
+            const <GameDayAutopilotConfig>[];
+        final enabledConfigs = computeEnabledConfigsForTeam(
+          teamSlug: teamSlug,
+          streamConfigs: streamConfigs,
+          justWrittenConfig: justWrittenConfig,
+        );
+        await _doPopulateCalendars(enabledConfigs);
       } catch (e) {
         debugPrint('[GameDayAutopilot] Background populate failed: $e');
       }
@@ -621,21 +678,49 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   /// Game Day screen — pass `force: true` to bypass the gate.
   Future<void> refreshAllCalendars({bool force = false}) async {
     if (!_shouldRegenerateGameDay(force: force)) return;
-
     final configs = ref.read(enabledAutopilotConfigsProvider);
-    if (configs.isEmpty) return;
+    await _doPopulateCalendars(configs);
+  }
+
+  /// Shared implementation of "clear all future autopilot rows, then write
+  /// fresh entries for every enabled team." Used by both
+  /// [_populateCalendarInBackground] (post-toggle, with optional splice)
+  /// and [refreshAllCalendars] (post-gate, stream-only). Per-team failures
+  /// are isolated — one team's exception does not skip its siblings.
+  Future<void> _doPopulateCalendars(
+    List<GameDayAutopilotConfig> enabledConfigs,
+  ) async {
+    if (enabledConfigs.isEmpty) {
+      debugPrint('[GameDayAutopilot] No enabled configs to populate');
+      return;
+    }
+
+    debugPrint(
+        '[GameDayAutopilot] Populating calendar for '
+        '${enabledConfigs.length} enabled team(s): '
+        '${enabledConfigs.map((c) => c.teamSlug).join(", ")}');
 
     await _clearFutureGameDayCalendarEntries();
 
     final service = ref.read(gameDayAutopilotServiceProvider);
-    for (final config in configs) {
+    var totalEntries = 0;
+    final failedTeams = <String>[];
+    for (final config in enabledConfigs) {
       try {
-        await service.populateCalendarForTeam(config);
+        final count = await service.populateCalendarForTeam(config);
+        totalEntries += count;
+        debugPrint('[GameDayAutopilot] Wrote $count entries '
+            'for ${config.teamSlug}');
       } catch (e) {
-        debugPrint('[GameDayAutopilot] refreshAllCalendars failed for '
+        debugPrint('[GameDayAutopilot] Failed to populate '
             '${config.teamSlug}: $e');
+        failedTeams.add(config.teamSlug);
       }
     }
+
+    debugPrint('[GameDayAutopilot] Populate complete — '
+        'total entries = $totalEntries, '
+        'failed teams = ${failedTeams.isEmpty ? "none" : failedTeams.join(",")}');
 
     await _writeGameDayLastGenerated();
   }
@@ -749,11 +834,34 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
     await docRef.update(updates);
 
-    // Re-populate calendar with new settings.
-    // Force-bypass the 7-day gate — the user just changed settings (lead
-    // time, design variety, on/off override) and expects to see the
-    // calendar reflect them immediately.
-    _populateCalendarInBackground(teamSlug, force: true);
+    // Splice the freshly-written field values into the stream snapshot so
+    // the populate path uses the latest settings even if the Firestore
+    // stream hasn't yet propagated. Null params leave the existing field
+    // unchanged (copyWith treats null as "keep current").
+    GameDayAutopilotConfig? freshConfig;
+    final streamConfigs = ref
+            .read(gameDayAutopilotConfigsProvider)
+            .valueOrNull ??
+        const <GameDayAutopilotConfig>[];
+    final stale = streamConfigs
+        .where((c) => c.teamSlug == teamSlug)
+        .firstOrNull;
+    if (stale != null) {
+      freshConfig = stale.copyWith(
+        skipDayGames: skipDayGames,
+        designVariety: designVariety,
+        leadTimeMinutesOverride: leadTimeMinutesOverride,
+        onTimeOverride: onTimeOverride,
+        offTimeOverride: offTimeOverride,
+        updatedAt: DateTime.now(),
+      );
+    }
+
+    // Re-populate calendar with new settings for ALL enabled teams (see
+    // Item #80). The user just changed this team's settings and expects to
+    // see the calendar reflect them immediately, but we must not wipe
+    // other teams' entries in the process.
+    _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
   }
 
   /// Save a custom design for a team's autopilot.
