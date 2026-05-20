@@ -526,8 +526,11 @@ class AutopilotSettingsService {
     String? ianaTimezone,
     String timeFormat = '12h',
   }) {
-    // Resolve display time in the user's timezone
-    final localTime = _toLocalTime(item.scheduledTime, ianaTimezone);
+    // item.scheduledTime is already local — produced by SunUtils.sunsetLocal()
+    // / SunUtils.sunriseLocal() / AutopilotScheduler._resolveScheduledTime.
+    // _ensureLocal is a no-op for already-local values; we call it for
+    // defensive uniformity across all call sites (Item #79).
+    final localTime = _ensureLocal(item.scheduledTime, ianaTimezone);
 
     // Format time label
     String timeLabel = _formatTime(localTime, timeFormat);
@@ -569,32 +572,11 @@ class AutopilotSettingsService {
     );
   }
 
-  /// Convert a UTC time to the user's IANA timezone, falling back to device local.
-  ///
-  /// Defensively re-flags the input as UTC when it isn't already — protects
-  /// against upstream code that strips the `isUtc` flag during JSON
-  /// serialization or model copyWith. Without this guard, a non-UTC input
-  /// would either pass through `.toLocal()` as a no-op (showing UTC time
-  /// labelled as local) or get a wrong offset applied by `tz.TZDateTime.from`.
-  DateTime _toLocalTime(DateTime utcTime, String? ianaTimezone) {
-    // Ensure the time is treated as UTC before converting
-    final asUtc = utcTime.isUtc
-        ? utcTime
-        : DateTime.utc(
-            utcTime.year, utcTime.month, utcTime.day,
-            utcTime.hour, utcTime.minute, utcTime.second,
-          );
-
-    if (ianaTimezone == null || ianaTimezone.isEmpty) {
-      return asUtc.toLocal();
-    }
-    try {
-      final location = tz.getLocation(ianaTimezone);
-      return tz.TZDateTime.from(asUtc, location);
-    } catch (_) {
-      return asUtc.toLocal();
-    }
-  }
+  /// Returns a DateTime in the user's local timezone, regardless of whether
+  /// the input was already local or UTC. Delegates to the top-level
+  /// [ensureLocalTime] pure function so the logic is independently testable.
+  DateTime _ensureLocal(DateTime time, String? ianaTimezone) =>
+      ensureLocalTime(time, ianaTimezone);
 
   /// Format time as "h:mm AM/PM" (12h) or "HH:mm" (24h).
   String _formatTime(DateTime dt, String timeFormat) {
@@ -835,3 +817,36 @@ final autopilotSyncEventsEnabledProvider = Provider<bool>((ref) {
   final autoDetectGames = ref.watch(autoDetectGameDaysProvider);
   return autopilotOn && autoDetectGames;
 });
+
+// ── Timezone helper (Item #79) ───────────────────────────────────────────
+
+/// Returns a DateTime in the device's local timezone, regardless of whether
+/// the input was UTC or already local.
+///
+/// If [time] is already local (`isUtc == false`), it's returned unchanged —
+/// no conversion. The prior implementation incorrectly rebuilt local
+/// DateTimes as UTC via `DateTime.utc(...)` then converted back to local;
+/// that subtracted the timezone offset from every value and is the Item #79
+/// root cause. Do not restore that behavior.
+///
+/// If [time] is UTC, converts to local time using the provided IANA timezone
+/// if available, falling back to `DateTime.toLocal()` if the IANA name isn't
+/// recognized.
+///
+/// [ianaTimezone] is preserved as a hint for future integration with the
+/// `timezone` package; it's only consulted when [time] is UTC.
+@visibleForTesting
+DateTime ensureLocalTime(DateTime time, String? ianaTimezone) {
+  if (!time.isUtc) {
+    return time;
+  }
+  if (ianaTimezone == null || ianaTimezone.isEmpty) {
+    return time.toLocal();
+  }
+  try {
+    final location = tz.getLocation(ianaTimezone);
+    return tz.TZDateTime.from(time, location);
+  } catch (_) {
+    return time.toLocal();
+  }
+}
