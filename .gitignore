@@ -194,3 +194,6 @@ debug-info-archive/
 
 # Tablet/device log dumps
 pulla-logs/
+
+# Release-build staging artifacts (large signed AABs / IPAs awaiting upload)
+submission_artifacts/
