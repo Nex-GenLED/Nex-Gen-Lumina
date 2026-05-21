@@ -42,6 +42,13 @@ List<int> safeRGBW(List<int> color) {
 /// When [channels] is provided, each segment entry gets `start`/`stop` values
 /// from the corresponding hardware bus, so WLED targets the correct LED range.
 ///
+/// Each expanded seg is emitted with `'on': true` (channel-2-dark fix —
+/// matches the semantics of [buildParticipatingSegArray]). Inline dashboard
+/// builders put `'on'` at the top level of the payload, not inside the seg
+/// map, so without this a channel left in `on:false` on the controller
+/// stays dark even after a dashboard apply. Targeting a channel implies it
+/// must be lit; we set `'on': true` explicitly per seg.
+///
 /// This is a pure function with no side effects — safe to call from any
 /// provider or widget.
 Map<String, dynamic> applyChannelFilter(
@@ -59,9 +66,10 @@ Map<String, dynamic> applyChannelFilter(
   template.remove('id'); // strip hardcoded ID so each copy gets its own
   template.remove('start');
   template.remove('stop');
+  template.remove('on'); // overridden below — channel-2-dark fix forces on:true
 
   final expandedSegs = channelIds.map((id) {
-    final s = <String, dynamic>{'id': id, ...template};
+    final s = <String, dynamic>{'id': id, ...template, 'on': true};
     // Look up bus range — set start/stop so WLED targets the correct LEDs
     for (final ch in channels) {
       if (ch.id == id) {
