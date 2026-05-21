@@ -55,14 +55,6 @@ class GameDayAutopilotBackgroundWorker {
   /// every mutation.
   final Map<String, BackgroundAutopilotSession> _sessions = {};
 
-  /// Controller IPs received from the UI isolate. No longer read directly
-  /// — fanout now goes through the applySyncPattern Cloud Function, which
-  /// resolves controllers from Firestore. Field retained because the
-  /// cross-isolate updateControllerIps API is still wired in
-  /// sports_background_service.dart.
-  // ignore: unused_field
-  List<String> _controllerIps = const [];
-
   bool _disposed = false;
 
   GameDayAutopilotBackgroundWorker({
@@ -71,19 +63,11 @@ class GameDayAutopilotBackgroundWorker {
   })  : _espnApi = espnApi,
         _scheduleService = scheduleService;
 
-  /// Start monitoring. Loads any persisted sessions and controller IPs.
+  /// Start monitoring. Loads any persisted sessions.
   Future<void> startMonitoring() async {
     debugPrint('[GameDayBg] startMonitoring');
     _sessions.clear();
     _sessions.addAll(await loadGameDaySessions());
-    _controllerIps = await loadGameDayControllerIps();
-  }
-
-  /// Update controller IPs (called when the foreground sends an update
-  /// via service.invoke('updateIps')).
-  void updateControllerIps(List<String> ips) {
-    _controllerIps = ips;
-    unawaited(saveGameDayControllerIps(ips));
   }
 
   /// Whether this worker has any work to do. If false, sports background

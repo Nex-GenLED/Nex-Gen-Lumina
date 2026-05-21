@@ -43,7 +43,6 @@ class SyncEventBackgroundWorker {
   final Map<String, Timer> _eventTimers = {};
   final Map<String, GameState> _lastKnownGameStates = {};
   bool _isMonitoring = false;
-  List<String> _controllerIps = [];
 
   SyncEventBackgroundWorker(this._service, this._espnApi);
 
@@ -66,11 +65,6 @@ class SyncEventBackgroundWorker {
     _eventTimers.clear();
     _lastKnownGameStates.clear();
     debugPrint('[SyncBgWorker] Stopped sync event monitoring');
-  }
-
-  /// Update controller IPs (received from UI isolate).
-  void updateControllerIps(List<String> ips) {
-    _controllerIps = ips;
   }
 
   /// Called by the sports alert pipeline when a [ScoreAlertEvent] fires.
@@ -116,11 +110,6 @@ class SyncEventBackgroundWorker {
         // No sync events to monitor — schedule next check in 5 min
         _scheduleNextPoll(const Duration(minutes: 5));
         return;
-      }
-
-      // Load controller IPs if not yet received from UI
-      if (_controllerIps.isEmpty) {
-        _controllerIps = await loadSyncControllerIps();
       }
 
       // Daily season schedule reconciliation for "every home game" events

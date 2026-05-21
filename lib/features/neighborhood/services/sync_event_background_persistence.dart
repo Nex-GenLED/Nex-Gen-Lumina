@@ -20,7 +20,6 @@ const _kSyncGroupIdKey = 'bg_sync_group_id';
 const _kSyncHostUidKey = 'bg_sync_host_uid';
 const _kSyncBackupHostUidKey = 'bg_sync_backup_host_uid';
 const _kSyncUserUidKey = 'bg_sync_user_uid';
-const _kSyncControllerIpsKey = 'bg_sync_controller_ips';
 const _kSyncActiveSessionKey = 'bg_sync_active_session';
 const _kSyncHostFailoverTsKey = 'bg_sync_host_failover_ts';
 const _kSyncIdTokenKey = 'bg_sync_id_token';
@@ -263,12 +262,6 @@ Future<void> saveSyncHostInfo({
   }
 }
 
-/// Save controller IPs for direct WLED commands from background.
-Future<void> saveSyncControllerIps(List<String> ips) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setStringList(_kSyncControllerIpsKey, ips);
-}
-
 /// Mark that an active session was started (background or foreground).
 Future<void> saveActiveSession(BackgroundActiveSession session) async {
   final prefs = await SharedPreferences.getInstance();
@@ -329,12 +322,6 @@ Future<String?> loadSyncHostUid() async {
 Future<String?> loadSyncBackupHostUid() async {
   final prefs = await SharedPreferences.getInstance();
   return prefs.getString(_kSyncBackupHostUidKey);
-}
-
-/// Load controller IPs.
-Future<List<String>> loadSyncControllerIps() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getStringList(_kSyncControllerIpsKey) ?? [];
 }
 
 /// Load active session info.

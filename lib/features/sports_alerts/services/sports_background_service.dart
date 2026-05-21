@@ -114,12 +114,11 @@ void _onStart(ServiceInstance service) async {
   );
   await gameDayWorker.startMonitoring();
 
-  // Listen for IP updates from the UI isolate.
+  // Listen for IP updates from the UI isolate. The local controllerIps
+  // list feeds AlertTriggerService below (direct-IP sports alerts).
   final updateIpsSub = service.on('updateIps').listen((data) {
     if (data != null && data['ips'] is List) {
       controllerIps = List<String>.from(data['ips'] as List);
-      syncWorker.updateControllerIps(controllerIps);
-      gameDayWorker.updateControllerIps(controllerIps);
     }
   });
 

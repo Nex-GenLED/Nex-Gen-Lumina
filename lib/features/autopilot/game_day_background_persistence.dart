@@ -23,7 +23,6 @@ const _kSessionsKey = 'bg_gameday_sessions';
 const _kUserPriorityKey = 'bg_gameday_user_priority';
 const _kUserLocationKey = 'bg_gameday_user_location';
 const _kUserPreferredStylesKey = 'bg_gameday_preferred_styles';
-const _kControllerIpsKey = 'bg_gameday_controller_ips';
 const _kUserUidKey = 'bg_gameday_user_uid';
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -340,12 +339,6 @@ Future<void> saveUserPreferredStyles(List<String> styles) async {
   await prefs.setStringList(_kUserPreferredStylesKey, styles);
 }
 
-/// Save controller IPs for direct WLED commands from background.
-Future<void> saveGameDayControllerIps(List<String> ips) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setStringList(_kControllerIpsKey, ips);
-}
-
 /// Save current user UID.
 Future<void> saveGameDayUserUid(String? uid) async {
   final prefs = await SharedPreferences.getInstance();
@@ -420,12 +413,6 @@ Future<BackgroundUserLocation?> loadUserLocation() async {
 Future<List<String>> loadUserPreferredStyles() async {
   final prefs = await SharedPreferences.getInstance();
   return prefs.getStringList(_kUserPreferredStylesKey) ?? const [];
-}
-
-/// Load controller IPs.
-Future<List<String>> loadGameDayControllerIps() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getStringList(_kControllerIpsKey) ?? const [];
 }
 
 /// Load current user UID.
