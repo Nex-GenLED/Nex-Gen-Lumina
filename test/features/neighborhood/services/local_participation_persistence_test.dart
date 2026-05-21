@@ -16,6 +16,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    // Bundle 3b.2: the persistence file now maintains an in-memory
+    // cache; reset between tests so each test gets a cold cache.
+    resetParticipationCacheForTest();
   });
 
   group('local participating-channels persistence', () {

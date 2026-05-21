@@ -281,6 +281,63 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
   await prefs.setString(_kSyncHostFailoverTsKey, ts.toIso8601String());
 }
 
+// ─── Participating-channels in-memory cache ─────────────────────────────
+// The chokepoint at WledService.applyJson / CloudRelayRepository.applyJson
+// reads this on every apply (audit #4 / Bundle 3b.2). Per-apply
+// SharedPreferences reads would slow slider drags / audio-reactive paths,
+// so we cache the resolved list in module-level memory:
+//
+//   - getCachedParticipatingChannels()  — lazy-load on first call; cached
+//                                         thereafter. Returns Future<List<int>?>;
+//                                         only the first call awaits disk.
+//   - saveLocalParticipatingChannels()  — updates the cache synchronously
+//                                         before the async SharedPreferences
+//                                         write, so the cache and persisted
+//                                         value cannot diverge.
+//   - resetParticipationCacheForTest()  — clears state between unit tests.
+//
+// ISOLATE NOTE: Dart isolates have independent module-level memory. The
+// foreground and (future) background isolate each maintain their own
+// cache. The Bundle 4 background path will lazy-load identically; if the
+// foreground updates participation while the background is running, the
+// background's cache stays stale until a separate invalidation mechanism
+// is added in Bundle 4 (likely per-poll-cycle reload).
+List<int>? _cachedParticipating;
+bool _cachedParticipatingLoaded = false;
+
+/// Returns the cached participating-channels list, lazy-loading from
+/// SharedPreferences on first call. Cheap on every subsequent call.
+///
+/// Semantics match [loadLocalParticipatingChannels]:
+///   - `null`  → no preference set / cold-start cache (chokepoint will
+///               pass payloads through unchanged).
+///   - `[]`    → explicit "no channels" (chokepoint still passes through;
+///               skip-apply belongs upstream).
+///   - `[..]`  → explicit set (chokepoint expands broadcast-intent
+///               payloads to these channel ids).
+Future<List<int>?> getCachedParticipatingChannels() async {
+  if (!_cachedParticipatingLoaded) {
+    _cachedParticipating = await loadLocalParticipatingChannels();
+    _cachedParticipatingLoaded = true;
+  }
+  return _cachedParticipating;
+}
+
+/// Synchronous peek at the cache. Returns null if the cache has not been
+/// warmed yet (the chokepoint should never block applyJson on a load —
+/// callers that have not warmed the cache simply get a pass-through
+/// payload from [expandForParticipation], matching legacy behavior).
+List<int>? peekCachedParticipatingChannels() {
+  return _cachedParticipatingLoaded ? _cachedParticipating : null;
+}
+
+/// Test helper: clear the cache so each test starts cold.
+@visibleForTesting
+void resetParticipationCacheForTest() {
+  _cachedParticipating = null;
+  _cachedParticipatingLoaded = false;
+}
+
 /// Persist the LOCAL user's participating channel indices for the
 /// background isolate. Shared by the sync worker and the game-day
 /// worker — both apply on behalf of the local user to the local
@@ -307,6 +364,13 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
 /// cold-start state for users who have never opened the picker and
 /// whose foreground has not yet seeded the key.
 Future<void> saveLocalParticipatingChannels(List<int>? channels) async {
+  // Update the in-memory cache FIRST (synchronously) so the chokepoint at
+  // applyJson sees the new value immediately — even if the SharedPrefs
+  // write below hasn't completed yet. This is the cache-invalidation hook
+  // referenced in [getCachedParticipatingChannels].
+  _cachedParticipating = channels == null ? null : List<int>.from(channels);
+  _cachedParticipatingLoaded = true;
+
   final prefs = await SharedPreferences.getInstance();
   if (channels == null) {
     await prefs.remove(_kLocalParticipatingChannelsKey);

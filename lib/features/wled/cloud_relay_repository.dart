@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -214,7 +215,14 @@ class CloudRelayRepository implements WledRepository {
 
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
-    return _executeBool('applyJson', normalizeWledPayload(payload));
+    // Audit #4 chokepoint — same shape as WledService.applyJson. See
+    // its docstring for the two-step pipeline (normalize then expand
+    // for participation). Both repos MUST behave identically so local
+    // and relay paths produce the same per-channel result.
+    final participating = await getCachedParticipatingChannels();
+    final normalized = normalizeWledPayload(payload);
+    final expanded = expandForParticipation(normalized, participating);
+    return _executeBool('applyJson', expanded);
   }
 
   @override
