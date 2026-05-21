@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/analytics_models.dart';
 
 /// Service for aggregating anonymized analytics across all users.
