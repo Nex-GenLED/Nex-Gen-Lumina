@@ -27,7 +27,6 @@ import '../sports_alerts/models/game_event.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
-import '../wled/wled_payload_utils.dart';
 import 'game_day_autopilot_config.dart';
 import 'team_design_catalog.dart';
 
@@ -780,10 +779,20 @@ class GameDayAutopilotService {
 
   // ── Internal: WLED payload ─────────────────────────────────────────────
 
+  /// Test-only entry point for `_applyDesign`. Used by Bundle 3b.3c
+  /// regression tests to assert that an empty seg array prevents the
+  /// `onApplyPayload` invocation.
+  @visibleForTesting
+  void applyDesignForTest(DesignSelection design) => _applyDesign(design);
+
   void _applyDesign(DesignSelection design) {
-    // Skip-apply when participation resolved to empty (explicit "no
-    // channels" — see buildParticipatingSegArray contract). Equivalent
-    // to the sync engine's skip-apply path.
+    // Skip-apply when participation resolved to explicit empty. The
+    // applyJson chokepoint ([expandForParticipation], rule 2) passes
+    // empty participation THROUGH — it never emits seg:[] on its own —
+    // so this caller-side gate is the active mechanism that prevents an
+    // unfiltered broadcast to seg 0 when the user opts out of all
+    // channels. _buildWledPayload produces `seg: []` in exactly that
+    // case (participating != null && participating.isEmpty).
     final seg = design.wledPayload['seg'];
     if (seg is List && seg.isEmpty) {
       debugPrint(
@@ -806,37 +815,29 @@ class GameDayAutopilotService {
     final colorSlots =
         colors.map((c) => <int>[...c, 0]).toList(); // Add W=0 for RGBW
 
-    // When the provider has resolved participating channels, build one
-    // seg entry per channel with per-seg 'on':true (channel-2-dark fix).
-    // When participating is null (provider not wired, or legacy install)
-    // fall back to the historical single-seg shape with no id — WLED
-    // applies it to seg 0 implicitly. Bundle 4 wires the background
-    // path; once that lands, the null fallback should be rare in
-    // practice (the foreground writes the resolved list and the bg
-    // reads it via SharedPreferences).
-    if (participating == null) {
-      return {
-        'on': true,
-        'bri': brightness.clamp(0, 255),
-        'seg': [
-          {
-            'fx': effectId,
-            'sx': speed,
-            'ix': intensity,
-            'pal': 0,
-            'col': colorSlots,
-          },
-        ],
-      };
-    }
+    // Bundle 3b.3c: the applyJson chokepoint
+    // ([expandForParticipation] in wled_payload_utils.dart) reads the
+    // persisted participation list and rule-7-expands a single-seg-no-
+    // id-with-fx payload per participating channel. We emit that shape
+    // here and let the chokepoint do the per-channel duplication.
+    //
+    // EXCEPT for the explicit-empty case (participating != null &&
+    // participating.isEmpty): rule 2 of the chokepoint passes empty
+    // participation THROUGH (it never emits seg:[]), so we must emit
+    // `seg: []` here. _applyDesign then skip-applies — see the comment
+    // on _applyDesign for why that gate is active, not dead.
+    final segs = (participating != null && participating.isEmpty)
+        ? <Map<String, dynamic>>[]
+        : <Map<String, dynamic>>[
+            {
+              'fx': effectId,
+              'sx': speed,
+              'ix': intensity,
+              'pal': 0,
+              'col': colorSlots,
+            },
+          ];
 
-    final segs = buildParticipatingSegArray(
-      participatingChannelIds: participating,
-      effectId: effectId,
-      speed: speed,
-      intensity: intensity,
-      colorSlots: colorSlots,
-    );
     return {
       'on': true,
       'bri': brightness.clamp(0, 255),

@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/roofline_segment.dart';
 import '../design/roofline_config_providers.dart';
-import '../wled/wled_payload_utils.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
 import 'neighborhood_models.dart';
@@ -320,6 +319,13 @@ class NeighborhoodSyncEngine {
     }
   }
 
+  /// Test-only entry point for `_executePattern`. Used by Bundle 3b.3c
+  /// regression tests to assert the empty-participation skip-apply
+  /// path and the post-removal single-seg-no-id payload shape.
+  @visibleForTesting
+  Future<void> executePatternForTest(SyncCommand command) =>
+      _executePattern(command);
+
   /// Executes the pattern on the local WLED device.
   Future<void> _executePattern(SyncCommand command) async {
     debugPrint('Executing sync pattern: ${command.patternName}');
@@ -387,18 +393,22 @@ class NeighborhoodSyncEngine {
         return;
       }
 
-      final segs = buildParticipatingSegArray(
-        participatingChannelIds: participating,
-        effectId: memberPattern.effectId,
-        speed: memberPattern.speed,
-        intensity: memberPattern.intensity,
-        colorSlots: colorArrays.take(3).toList(),
-      );
-
+      // Build single-seg-no-id with fx. The applyJson chokepoint
+      // ([expandForParticipation] in wled_payload_utils.dart) reads the
+      // persisted cache and rule-7-expands this entry per participating
+      // channel id. Empty-participation skip-apply happens above; we
+      // never reach this builder with an empty list.
       final payload = {
         'on': true,
         'bri': memberPattern.brightness,
-        'seg': segs,
+        'seg': [
+          {
+            'fx': memberPattern.effectId,
+            'sx': memberPattern.speed,
+            'ix': memberPattern.intensity,
+            'col': colorArrays.take(3).toList(),
+          },
+        ],
       };
 
       final success = await wledRepo.applyJson(payload);
