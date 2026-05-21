@@ -19,6 +19,7 @@ import '../../app_providers.dart';
 import '../../models/roofline_segment.dart';
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
+import '../neighborhood/services/path1_game_day_snapshot.dart';
 import '../neighborhood/services/sync_event_background_persistence.dart';
 import '../schedule/calendar_entry.dart';
 import '../schedule/calendar_providers.dart';
@@ -286,6 +287,25 @@ final teamAutopilotConfigProvider =
     },
     orElse: () => null,
   );
+});
+
+/// Convergence-Phase-1B read path: Path 2 reads a team's canonical
+/// Path 1 [GameDayAutopilotConfig] as a [Path1GameDaySnapshot].
+///
+/// Returns `null` when no Path 1 config exists for the team — Path 2
+/// uses that signal to deep-link the user into Path 1 setup before
+/// allowing a host broadcast. A disabled config still returns a non-
+/// null snapshot with `autopilotEnabled = false`, so the UI can show
+/// the existing design preview and offer an enable action.
+///
+/// Additive — no caller wires this into the UI yet. Phase 2 of the
+/// Game Day convergence rewires the Sync→Complement→Game Day flow to
+/// read from this provider instead of constructing an in-memory
+/// GameDaySyncConfig.
+final path1GameDaySnapshotProvider =
+    Provider.family<Path1GameDaySnapshot?, String>((ref, teamSlug) {
+  final config = ref.watch(teamAutopilotConfigProvider(teamSlug));
+  return Path1GameDaySnapshot.fromConfigOrNull(config);
 });
 
 // ---------------------------------------------------------------------------
