@@ -24,6 +24,7 @@ const _kSyncActiveSessionKey = 'bg_sync_active_session';
 const _kSyncHostFailoverTsKey = 'bg_sync_host_failover_ts';
 const _kSyncIdTokenKey = 'bg_sync_id_token';
 const _kSyncIdTokenExpiresAtKey = 'bg_sync_id_token_expires_at';
+const _kLocalParticipatingChannelsKey = 'bg_local_participating_channels';
 
 /// Serializable subset of SyncEvent for background service consumption.
 /// Avoids pulling in Firestore dependencies in the background isolate.
@@ -280,6 +281,43 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
   await prefs.setString(_kSyncHostFailoverTsKey, ts.toIso8601String());
 }
 
+/// Persist the LOCAL user's participating channel indices for the
+/// background isolate. Shared by the sync worker and the game-day
+/// worker — both apply on behalf of the local user to the local
+/// user's own controllers, so a single key is sufficient.
+///
+/// Semantics (must match the model layer in
+/// [NeighborhoodMember.participatingChannelIndices] and
+/// [GameDayAutopilotConfig.participatingChannelIndices]):
+///
+///   - `null`  → clears the key. On the next load the background
+///               worker reads null and falls back to all-channels
+///               (its safe default — the isolate cannot run the
+///               isPrimary resolver because it has no
+///               RooflineConfiguration access).
+///   - `[]`    → explicit "no channels participate". Persisted as
+///               an empty stringlist so load can distinguish it
+///               from null.
+///   - `[..]`  → explicit set, persisted verbatim (no implicit sort
+///               — the foreground writes the resolved list which is
+///               already sorted by the resolver).
+///
+/// In normal operation the foreground runs the isPrimary default
+/// resolver and writes the RESOLVED list here. Null is the
+/// cold-start state for users who have never opened the picker and
+/// whose foreground has not yet seeded the key.
+Future<void> saveLocalParticipatingChannels(List<int>? channels) async {
+  final prefs = await SharedPreferences.getInstance();
+  if (channels == null) {
+    await prefs.remove(_kLocalParticipatingChannelsKey);
+  } else {
+    await prefs.setStringList(
+      _kLocalParticipatingChannelsKey,
+      channels.map((i) => i.toString()).toList(),
+    );
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // LOAD FUNCTIONS (called from background isolate)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -350,6 +388,19 @@ Future<DateTime?> loadHostFailoverTimestamp() async {
 Future<void> clearHostFailoverTimestamp() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove(_kSyncHostFailoverTsKey);
+}
+
+/// Load the LOCAL user's participating channel indices. Returns null
+/// if no preference has been set (cold-start / never-configured); the
+/// background worker treats null as "fall back to all-channels."
+/// Returns an empty list when the user has explicitly opted out of
+/// all channels. See [saveLocalParticipatingChannels] for the full
+/// null/empty/list semantics.
+Future<List<int>?> loadLocalParticipatingChannels() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getStringList(_kLocalParticipatingChannelsKey);
+  if (raw == null) return null;
+  return raw.map(int.parse).toList();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
