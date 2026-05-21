@@ -304,6 +304,13 @@ class NeighborhoodMember {
   final MemberParticipationStatus participationStatus;
   final List<String> optedOutScheduleIds;
 
+  /// Channel indices that participate in sync/Game Day shows for this
+  /// member's controller. `null` means "no explicit choice" — the
+  /// default-participation policy in [resolveParticipatingChannels]
+  /// applies. An empty list `[]` means the user explicitly opted out
+  /// of all channels. Read by the apply path, not stored verbatim.
+  final List<int>? participatingChannelIndices;
+
   const NeighborhoodMember({
     required this.oderId,
     required this.displayName,
@@ -316,10 +323,12 @@ class NeighborhoodMember {
     required this.lastSeen,
     this.participationStatus = MemberParticipationStatus.active,
     this.optedOutScheduleIds = const [],
+    this.participatingChannelIndices,
   });
 
   factory NeighborhoodMember.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final rawParticipating = data['participatingChannelIndices'];
     return NeighborhoodMember(
       oderId: doc.id,
       displayName: data['displayName'] ?? 'Unknown Home',
@@ -332,6 +341,9 @@ class NeighborhoodMember {
       lastSeen: (data['lastSeen'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participationStatus: MemberParticipationStatusExtension.fromJson(data['participationStatus']),
       optedOutScheduleIds: List<String>.from(data['optedOutScheduleIds'] ?? []),
+      participatingChannelIndices: rawParticipating is List
+          ? rawParticipating.map((e) => (e as num).toInt()).toList()
+          : null,
     );
   }
 
@@ -347,6 +359,8 @@ class NeighborhoodMember {
       'lastSeen': Timestamp.fromDate(lastSeen),
       'participationStatus': participationStatus.toJson(),
       'optedOutScheduleIds': optedOutScheduleIds,
+      if (participatingChannelIndices != null)
+        'participatingChannelIndices': participatingChannelIndices,
     };
   }
 
@@ -362,6 +376,8 @@ class NeighborhoodMember {
     DateTime? lastSeen,
     MemberParticipationStatus? participationStatus,
     List<String>? optedOutScheduleIds,
+    List<int>? participatingChannelIndices,
+    bool clearParticipatingChannelIndices = false,
   }) {
     return NeighborhoodMember(
       oderId: oderId ?? this.oderId,
@@ -375,6 +391,9 @@ class NeighborhoodMember {
       lastSeen: lastSeen ?? this.lastSeen,
       participationStatus: participationStatus ?? this.participationStatus,
       optedOutScheduleIds: optedOutScheduleIds ?? this.optedOutScheduleIds,
+      participatingChannelIndices: clearParticipatingChannelIndices
+          ? null
+          : (participatingChannelIndices ?? this.participatingChannelIndices),
     );
   }
 
