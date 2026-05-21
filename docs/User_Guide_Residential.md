@@ -649,40 +649,9 @@ If you enable Game Day for a team and there's still a game today whose start tim
 
 ---
 
-## 18. Voice assistants
+## 18. Voice assistants (not yet available)
 
-Hands-free control through Siri, Google Assistant, or Alexa.
-
-### Apple Siri (iPhone)
-
-1. **System → Settings → Voice Assistant Guide**
-2. Follow the Siri Shortcuts setup
-3. Try:
-   - "Hey Siri, turn on my lights"
-   - "Hey Siri, set my lights to warm white"
-   - "Hey Siri, dim the lights to 50 percent"
-
-### Google Assistant (Android)
-
-1. **System → Settings → Voice Assistant Guide**
-2. Follow the Google Assistant setup
-3. Try:
-   - "Hey Google, set my lights to warm white"
-   - "Hey Google, turn off the patio lights"
-   - "Hey Google, brighten my lights"
-
-### Amazon Alexa
-
-1. Enable the **Lumina Smart Home Skill** in the Alexa app
-2. Link your Lumina account when prompted
-3. Try:
-   - "Alexa, turn on the patio lights"
-   - "Alexa, set the front lights to blue"
-   - "Alexa, dim the lights to 30 percent"
-
-### Home Assistant
-
-Advanced integration is available if you run Home Assistant. See **System → Settings → Voice Assistant Guide** for setup.
+Voice integration with Siri, Google Assistant, and Alexa is built into Lumina's architecture but has **not yet been verified** and is not available for use. It may not function until a future release — please do not rely on voice control. This section will be updated with setup instructions once voice control is tested and released.
 
 ---
 
