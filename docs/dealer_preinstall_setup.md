@@ -76,7 +76,7 @@ Controller hardware (per install plan / site survey):
   Max power draw (calc):        _____ W @ 12V  (0.3W per LED @ full white as rough estimate)
 ```
 
-**Avoid GPIO 0, 3, 12** on ESP32 boards — strapping pins, unreliable for RGBW LED data. The Dig-Octa brainboard's channel-to-pin map already accounts for this.
+**Trust the QuinLED Dig-Octa channel-to-GPIO map** (Section 9 / Appendix B). The board's designers validated GPIO 0, 1, 2, 3 for LED data despite their strapping/UART role. If WLED's UI flags them red, that warning is expected and safe to dismiss on Dig-Octa hardware. The canonical map is: LED 1=GPIO 0, LED 2=GPIO 1, LED 3=GPIO 2, LED 4=GPIO 3, LED 5=GPIO 4, LED 6=GPIO 5, LED 7=GPIO 13, LED 8=GPIO 21.
 
 ---
 
@@ -383,21 +383,19 @@ When in doubt, use these defaults:
 | Apply preset on boot | 0 (none) | App controls state |
 | Turn LEDs on at boot | OFF | Avoid surprise blast |
 
-**Pin avoidance**: GPIO 0, 3, 12 on ESP32 are strapping pins — avoid for LED data lines. The Dig-Octa brainboard's channel-to-pin mapping already accounts for this; if you're wiring a generic ESP32 board, use GPIO 2, 4, 5, 13-19, 21-23, 25-27, 32-33 for safe LED data.
+**Pin guidance**: On the QuinLED Dig-Octa Brainboard-32-8L the channel-to-GPIO map is fixed and validated by QuinLED — use the table below as-is, including LED 1=GPIO 0, LED 2=GPIO 1, LED 4=GPIO 3 (strapping/UART pins that are safe on this board). If you're wiring a **generic** ESP32 board instead, GPIO 2, 4, 5, 13–19, 21–23, 25–27, 32–33 are reliable for LED data; UART0 (GPIO 1, 3) and GPIO 12 require care on bare ESP32s.
 
-**Channel-to-pin map (Dig-Octa)**:
-| Channel label | GPIO |
-|---|---|
-| Ch 1 | 2 |
-| Ch 2 | 1 |
-| Ch 3 | (TBD — check brainboard silkscreen) |
-| Ch 4 | (TBD) |
-| Ch 5 | 12 ⚠ avoid for RGBW |
-| Ch 6 | (TBD) |
-| Ch 7 | (TBD) |
-| Ch 8 | (TBD) |
-
-> Confirm against the physical brainboard markings — Dig-Octa labeling varies by revision.
+**Channel-to-pin map (QuinLED Dig-Octa Brainboard-32-8L)**:
+| Channel | GPIO | Notes |
+|---|---|---|
+| LED 1 | 0  | Strapping pin — works on Dig-Octa |
+| LED 2 | 1  | UART TX0 — UART logging unavailable when LED 2 is in use |
+| LED 3 | 2  | Strapping pin |
+| LED 4 | 3  | UART RX0 |
+| LED 5 | 4  | General-purpose, reliable |
+| LED 6 | 5  | General-purpose, reliable |
+| LED 7 | 13 | General-purpose, reliable |
+| LED 8 | 21 | Shares I2C SCL bus — avoid pairing with I2C peripherals |
 
 ---
 

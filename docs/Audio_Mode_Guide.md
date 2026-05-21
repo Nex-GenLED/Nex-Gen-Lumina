@@ -28,6 +28,8 @@ body_class: guide
 
 # Nex-Gen Lumina — Audio Mode
 
+> Note: The in-app Audio Mode interface is in active development; some controls may change before release.
+
 Turn your lights into the best part of the party. Audio Mode listens to whatever's playing in the room and makes your Nex-Gen lights dance along — bass hits, melody sweeps, gentle pulses for quieter moments. It's all happening in real time, and no setup is required if you have a Nex-Gen controller.
 
 ## What you'll need
