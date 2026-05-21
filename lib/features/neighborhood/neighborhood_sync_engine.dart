@@ -4,9 +4,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/roofline_segment.dart';
+import '../design/roofline_config_providers.dart';
+import '../wled/wled_payload_utils.dart';
 import '../wled/wled_providers.dart';
+import '../wled/zone_providers.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
+import 'services/channel_participation_resolver.dart';
+import 'services/sync_event_background_persistence.dart';
 
 /// Engine that handles timing calculations and sync execution for neighborhood groups.
 ///
@@ -333,35 +339,66 @@ class NeighborhoodSyncEngine {
       // complement mode color overrides, or falls back to global fields)
       final memberPattern = command.getPatternForMember(memberId);
 
-      // Build WLED JSON payload with member-specific pattern
+      // Build WLED JSON payload with member-specific pattern.
+      // Colors → RGBW (W=0); col slots are passed verbatim into every
+      // participating seg entry.
       final colorArrays = memberPattern.colors.map((c) {
         final r = (c >> 16) & 0xFF;
         final g = (c >> 8) & 0xFF;
         final b = c & 0xFF;
-        return [r, g, b];
+        return <int>[r, g, b, 0];
       }).toList();
 
-      // Ensure we have at least one color
       if (colorArrays.isEmpty) {
-        colorArrays.add([255, 255, 255]);
+        colorArrays.add([255, 255, 255, 0]);
+      }
+      while (colorArrays.length < 3) {
+        colorArrays.add([0, 0, 0, 0]);
       }
 
-      // Pad to 3 colors if needed (WLED expects up to 3)
-      while (colorArrays.length < 3) {
-        colorArrays.add([0, 0, 0]);
+      // Resolve participating channels for the LOCAL user.
+      // Default policy (when the member has no explicit pick): channels
+      // with at least one isPrimary segment; falls back to all-channels
+      // if no roofline configuration exists (untraced install). See
+      // resolveParticipatingChannels for the full contract.
+      final rooflineAsync = _ref.read(currentRooflineConfigProvider);
+      final segments = rooflineAsync.maybeWhen(
+        data: (c) => c?.segments ?? const <RooflineSegment>[],
+        orElse: () => const <RooflineSegment>[],
+      );
+      final deviceChannelIds =
+          _ref.read(deviceChannelsProvider).map((c) => c.id).toList();
+      final participating = resolveParticipatingChannels(
+        explicit: currentMember?.participatingChannelIndices,
+        segments: segments,
+        allDeviceChannelIds: deviceChannelIds,
+      );
+
+      // Persist the resolved list for the background isolate (Bundle 4
+      // will read this; Bundle 3 only writes it). Fire-and-forget.
+      unawaited(saveLocalParticipatingChannels(participating));
+
+      if (participating.isEmpty) {
+        debugPrint(
+          'Sync skip-apply: no participating channels for this member '
+          '(explicit=${currentMember?.participatingChannelIndices}, '
+          'segments=${segments.length}, deviceChannels=$deviceChannelIds)',
+        );
+        return;
       }
+
+      final segs = buildParticipatingSegArray(
+        participatingChannelIds: participating,
+        effectId: memberPattern.effectId,
+        speed: memberPattern.speed,
+        intensity: memberPattern.intensity,
+        colorSlots: colorArrays.take(3).toList(),
+      );
 
       final payload = {
         'on': true,
         'bri': memberPattern.brightness,
-        'seg': [
-          {
-            'fx': memberPattern.effectId,
-            'sx': memberPattern.speed,
-            'ix': memberPattern.intensity,
-            'col': colorArrays.take(3).toList(),
-          }
-        ],
+        'seg': segs,
       };
 
       final success = await wledRepo.applyJson(payload);

@@ -27,6 +27,7 @@ import '../sports_alerts/models/game_event.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../wled/wled_payload_utils.dart';
 import 'game_day_autopilot_config.dart';
 import 'team_design_catalog.dart';
 
@@ -171,6 +172,21 @@ class GameDayAutopilotService {
   /// if one exists. Used to check for user overrides that should win
   /// over autopilot-generated entries.
   CalendarEntry? Function(String dateKey)? onGetCalendarEntry;
+
+  /// Callback to resolve the LOCAL user's participating channels for a
+  /// given config (using the config's explicit picker choice + the
+  /// user's RooflineConfiguration + the device's bus list). The
+  /// provider layer fills this in by calling
+  /// [resolveParticipatingChannels] and persisting the result via
+  /// [saveLocalParticipatingChannels].
+  ///
+  /// When null (callback unwired) or when the callback itself returns
+  /// null, the service falls back to applying without per-channel
+  /// filtering — the legacy single-seg shape. This keeps the service
+  /// resilient if the provider isn't yet wired, and matches the
+  /// dormant-default semantics from Bundles 1-2.
+  List<int>? Function(GameDayAutopilotConfig config)?
+      onResolveParticipatingChannels;
 
   GameDayAutopilotService({
     required EspnApiService espnApi,
@@ -371,6 +387,15 @@ class GameDayAutopilotService {
     final colors = [primaryRgb, secondaryRgb];
 
     // Priority 1: User has a saved design.
+    // NOTE: saved-design payloads bypass _buildWledPayload — they ship
+    // verbatim from Firestore and may have any seg-array shape. They
+    // are therefore NOT participation-filtered in Bundle 3. Tracked as
+    // a known gap for the picker bundle: when the user picks a saved
+    // design AND has non-participating channels (e.g. patio), this
+    // branch may still light the excluded channels. Fix path: post-
+    // process the saved payload through the same buildParticipating-
+    // SegArray pipeline once we have a robust seg-template extractor
+    // for arbitrary saved designs (multi-seg, gradients, etc.).
     if (config.designMode == AutopilotDesignMode.saved &&
         config.savedDesignPayload != null) {
       debugPrint('[GameDayAutopilot] Design branch: SAVED for ${config.teamSlug}');
@@ -412,6 +437,7 @@ class GameDayAutopilotService {
           speed: speed,
           intensity: 180,
           brightness: config.brightness,
+          participating: onResolveParticipatingChannels?.call(config),
         ),
       );
     }
@@ -432,6 +458,7 @@ class GameDayAutopilotService {
         speed: 128,
         intensity: 128,
         brightness: config.brightness,
+        participating: onResolveParticipatingChannels?.call(config),
       ),
     );
   }
@@ -754,6 +781,17 @@ class GameDayAutopilotService {
   // ── Internal: WLED payload ─────────────────────────────────────────────
 
   void _applyDesign(DesignSelection design) {
+    // Skip-apply when participation resolved to empty (explicit "no
+    // channels" — see buildParticipatingSegArray contract). Equivalent
+    // to the sync engine's skip-apply path.
+    final seg = design.wledPayload['seg'];
+    if (seg is List && seg.isEmpty) {
+      debugPrint(
+        '[GameDayAutopilot] skip-apply: no participating channels '
+        '(design=${design.designName})',
+      );
+      return;
+    }
     onApplyPayload?.call(design.wledPayload);
   }
 
@@ -763,19 +801,46 @@ class GameDayAutopilotService {
     required int speed,
     required int intensity,
     required int brightness,
+    required List<int>? participating,
   }) {
+    final colorSlots =
+        colors.map((c) => <int>[...c, 0]).toList(); // Add W=0 for RGBW
+
+    // When the provider has resolved participating channels, build one
+    // seg entry per channel with per-seg 'on':true (channel-2-dark fix).
+    // When participating is null (provider not wired, or legacy install)
+    // fall back to the historical single-seg shape with no id — WLED
+    // applies it to seg 0 implicitly. Bundle 4 wires the background
+    // path; once that lands, the null fallback should be rare in
+    // practice (the foreground writes the resolved list and the bg
+    // reads it via SharedPreferences).
+    if (participating == null) {
+      return {
+        'on': true,
+        'bri': brightness.clamp(0, 255),
+        'seg': [
+          {
+            'fx': effectId,
+            'sx': speed,
+            'ix': intensity,
+            'pal': 0,
+            'col': colorSlots,
+          },
+        ],
+      };
+    }
+
+    final segs = buildParticipatingSegArray(
+      participatingChannelIds: participating,
+      effectId: effectId,
+      speed: speed,
+      intensity: intensity,
+      colorSlots: colorSlots,
+    );
     return {
       'on': true,
       'bri': brightness.clamp(0, 255),
-      'seg': [
-        {
-          'fx': effectId,
-          'sx': speed,
-          'ix': intensity,
-          'pal': 0,
-          'col': colors.map((c) => [...c, 0]).toList(), // Add W=0 for RGBW
-        }
-      ],
+      'seg': segs,
     };
   }
 

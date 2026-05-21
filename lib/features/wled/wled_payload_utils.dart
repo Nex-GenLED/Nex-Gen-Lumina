@@ -79,6 +79,54 @@ Map<String, dynamic> applyChannelFilter(
   return result;
 }
 
+/// Builds the per-channel `seg[]` array for a participation-scoped apply
+/// (Neighborhood Sync / Game Day). The SINGLE shared shape used by every
+/// sync + game-day apply site — both foreground (`_executePattern`,
+/// `_buildWledPayload`) and background (`_buildPatternPayload`,
+/// `_buildBasePayload` in Bundle 4). Keep it that way: divergence between
+/// sites is what makes audit #4-class bugs happen.
+///
+/// Contract (locked, validated by hardware probe on 192.168.1.250):
+/// - One seg entry per participating channel id.
+/// - Each entry sets `'on': true` per segment. Required: a segment left
+///   in `on:false` is NOT re-lit by a top-level `on:true` — the receiver
+///   silently ignores the off segment. Per-seg `'on': true` is the
+///   confirmed fix for the channel-2-dark class of bug.
+/// - No `start` / `stop` — WLED retains the install-time ranges set by
+///   `wled_config_pusher`. Sending them would risk re-introducing the
+///   Item #82 wrong-range stomp.
+/// - No `rev` — that's a separate bundle (the slot is reserved here so
+///   when rev lands it's added in ONE place, not four).
+/// - Non-participating channels are OMITTED, not turned off. A patio
+///   left on by the user for their own purposes stays on; the show only
+///   touches the channels the user opted in.
+/// - Empty `participatingChannelIds` → empty list. Callers MUST treat
+///   that as "skip the apply entirely" (do not POST an empty seg array).
+///
+/// `colorSlots` is passed verbatim — the caller is responsible for the
+/// RGBW shape (use [safeRGBW] for team / holiday colors). No deep-copy:
+/// `colorSlots` should be treated as immutable by the caller after this
+/// call.
+List<Map<String, dynamic>> buildParticipatingSegArray({
+  required List<int> participatingChannelIds,
+  required int effectId,
+  required int speed,
+  required int intensity,
+  required List<List<int>> colorSlots,
+}) {
+  return [
+    for (final ch in participatingChannelIds)
+      <String, dynamic>{
+        'id': ch,
+        'on': true,
+        'fx': effectId,
+        'sx': speed,
+        'ix': intensity,
+        'col': colorSlots,
+      },
+  ];
+}
+
 /// Normalizes a WLED JSON API payload to prevent segment state carry-over.
 ///
 /// WLED only updates fields explicitly included in a POST /json/state payload.
