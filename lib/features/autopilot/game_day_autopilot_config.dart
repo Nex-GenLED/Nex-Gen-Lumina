@@ -151,6 +151,14 @@ class GameDayAutopilotConfig {
   /// When this config was last modified.
   final DateTime updatedAt;
 
+  /// Channel indices that participate in this team's Game Day show for
+  /// the user's controller. `null` means "no explicit choice" — the
+  /// default-participation policy in [resolveParticipatingChannels]
+  /// applies. An empty list `[]` means the user explicitly opted out
+  /// of all channels for this team. Read by the apply path, not stored
+  /// verbatim.
+  final List<int>? participatingChannelIndices;
+
   const GameDayAutopilotConfig({
     required this.teamSlug,
     required this.teamName,
@@ -175,6 +183,7 @@ class GameDayAutopilotConfig {
     this.offTimeOverride,
     required this.createdAt,
     required this.updatedAt,
+    this.participatingChannelIndices,
   });
 
   Color get primaryColor => Color(primaryColorValue);
@@ -264,9 +273,12 @@ class GameDayAutopilotConfig {
         if (offTimeOverride != null) 'off_time_override': offTimeOverride,
         'created_at': Timestamp.fromDate(createdAt),
         'updated_at': Timestamp.fromDate(updatedAt),
+        if (participatingChannelIndices != null)
+          'participating_channel_indices': participatingChannelIndices,
       };
 
   factory GameDayAutopilotConfig.fromFirestore(Map<String, dynamic> data) {
+    final rawParticipating = data['participating_channel_indices'];
     return GameDayAutopilotConfig(
       teamSlug: data['team_slug'] as String? ?? '',
       teamName: data['team_name'] as String? ?? '',
@@ -295,6 +307,9 @@ class GameDayAutopilotConfig {
       offTimeOverride: data['off_time_override'] as String?,
       createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      participatingChannelIndices: rawParticipating is List
+          ? rawParticipating.map((e) => (e as num).toInt()).toList()
+          : null,
     );
   }
 
@@ -315,6 +330,8 @@ class GameDayAutopilotConfig {
     String? onTimeOverride,
     String? offTimeOverride,
     DateTime? updatedAt,
+    List<int>? participatingChannelIndices,
+    bool clearParticipatingChannelIndices = false,
   }) {
     return GameDayAutopilotConfig(
       teamSlug: teamSlug,
@@ -342,6 +359,9 @@ class GameDayAutopilotConfig {
       offTimeOverride: offTimeOverride ?? this.offTimeOverride,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      participatingChannelIndices: clearParticipatingChannelIndices
+          ? null
+          : (participatingChannelIndices ?? this.participatingChannelIndices),
     );
   }
 

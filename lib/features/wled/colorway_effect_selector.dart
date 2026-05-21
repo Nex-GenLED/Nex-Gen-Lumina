@@ -200,7 +200,11 @@ class _ColorwayEffectSelectorPageState
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('ColorwayEffectSelector preview apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
 
       await repo.applyJson(payload);
     });
@@ -267,9 +271,11 @@ class _ColorwayEffectSelectorPageState
 
       // Apply channel filter so all targeted segments receive the pattern
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) {
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('ColorwayEffectSelector apply: skip (U1 gate)');
+        return;
       }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
 
       try {
         await repo.applyJson(payload);

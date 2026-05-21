@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 
@@ -100,19 +101,63 @@ final isChannelFilterActiveProvider = Provider<bool>((ref) {
   return ref.watch(selectedChannelIdsProvider) != null;
 });
 
-/// Returns the effective list of channel (bus) IDs that should receive commands.
+/// Sync-readable participation list, exposed for Riverpod consumers.
 ///
-/// When the channel filter is `null` (all-channels mode), returns every known
-/// bus index. When the filter is active, returns only the IDs present in both
-/// the filter set and the device's bus list.
+/// Bridges the module-level [participationCacheNotifier] (Bundle 3b.2's
+/// in-memory cache) into Riverpod: any consumer that `ref.watch`es this
+/// rebuilds when [saveLocalParticipatingChannels] is called.
+///
+/// Returns:
+///   - `null`  → no preference set (cache cold, or never written) — the
+///               dashboard gate treats this as "all device channels
+///               participate" for backward compatibility.
+///   - `[]`    → explicit "no channels" — gate produces empty effective
+///               list and callers should skip-apply.
+///   - `[..]`  → explicit set — outer gate on [effectiveChannelIdsProvider].
+final participatingChannelIdsProvider = Provider<List<int>?>((ref) {
+  void listener() => ref.invalidateSelf();
+  participationCacheNotifier.addListener(listener);
+  ref.onDispose(() => participationCacheNotifier.removeListener(listener));
+  return peekCachedParticipatingChannels();
+});
+
+/// Returns the effective list of channel (bus) IDs that should receive
+/// dashboard apply commands.
+///
+/// U1 semantics (Bundle 3b.3b): participation is the OUTER gate; the
+/// selector narrows within it. Computation:
+///
+///   base = selector == null
+///            ? all device channel ids                     // "All Zones"
+///            : selector ∩ device channel ids              // explicit subset
+///   effective = participation == null
+///                 ? base                                  // no pref → unchanged
+///                 : base ∩ participation                  // gate non-participating
+///
+/// Empty effective → callers MUST skip-apply (never broadcast an empty
+/// seg array). "All Zones" means all PARTICIPATING zones, not all
+/// physical channels.
 final effectiveChannelIdsProvider = Provider<List<int>>((ref) {
   final filter = ref.watch(selectedChannelIdsProvider);
   final channels = ref.watch(deviceChannelsProvider);
-  if (filter == null || channels.isEmpty) {
-    return channels.map((c) => c.id).toList();
+  final participating = ref.watch(participatingChannelIdsProvider);
+
+  if (channels.isEmpty) return const <int>[];
+
+  // Start with the selector-narrowed set, or all device channels if no
+  // selector active.
+  Iterable<int> baseIds;
+  if (filter == null) {
+    baseIds = channels.map((c) => c.id);
+  } else {
+    baseIds = channels.where((c) => filter.contains(c.id)).map((c) => c.id);
   }
-  return channels
-      .where((c) => filter.contains(c.id))
-      .map((c) => c.id)
-      .toList();
+
+  // Apply participation gate. null = no preference, so don't narrow.
+  if (participating != null) {
+    final pSet = participating.toSet();
+    baseIds = baseIds.where(pSet.contains);
+  }
+
+  return baseIds.toList();
 });

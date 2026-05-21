@@ -172,6 +172,21 @@ class GameDayAutopilotService {
   /// over autopilot-generated entries.
   CalendarEntry? Function(String dateKey)? onGetCalendarEntry;
 
+  /// Callback to resolve the LOCAL user's participating channels for a
+  /// given config (using the config's explicit picker choice + the
+  /// user's RooflineConfiguration + the device's bus list). The
+  /// provider layer fills this in by calling
+  /// [resolveParticipatingChannels] and persisting the result via
+  /// [saveLocalParticipatingChannels].
+  ///
+  /// When null (callback unwired) or when the callback itself returns
+  /// null, the service falls back to applying without per-channel
+  /// filtering — the legacy single-seg shape. This keeps the service
+  /// resilient if the provider isn't yet wired, and matches the
+  /// dormant-default semantics from Bundles 1-2.
+  List<int>? Function(GameDayAutopilotConfig config)?
+      onResolveParticipatingChannels;
+
   GameDayAutopilotService({
     required EspnApiService espnApi,
     required GameScheduleService scheduleService,
@@ -371,6 +386,15 @@ class GameDayAutopilotService {
     final colors = [primaryRgb, secondaryRgb];
 
     // Priority 1: User has a saved design.
+    // NOTE: saved-design payloads bypass _buildWledPayload — they ship
+    // verbatim from Firestore and may have any seg-array shape. They
+    // are therefore NOT participation-filtered in Bundle 3. Tracked as
+    // a known gap for the picker bundle: when the user picks a saved
+    // design AND has non-participating channels (e.g. patio), this
+    // branch may still light the excluded channels. Fix path: post-
+    // process the saved payload through the same buildParticipating-
+    // SegArray pipeline once we have a robust seg-template extractor
+    // for arbitrary saved designs (multi-seg, gradients, etc.).
     if (config.designMode == AutopilotDesignMode.saved &&
         config.savedDesignPayload != null) {
       debugPrint('[GameDayAutopilot] Design branch: SAVED for ${config.teamSlug}');
@@ -412,6 +436,7 @@ class GameDayAutopilotService {
           speed: speed,
           intensity: 180,
           brightness: config.brightness,
+          participating: onResolveParticipatingChannels?.call(config),
         ),
       );
     }
@@ -432,6 +457,7 @@ class GameDayAutopilotService {
         speed: 128,
         intensity: 128,
         brightness: config.brightness,
+        participating: onResolveParticipatingChannels?.call(config),
       ),
     );
   }
@@ -753,7 +779,28 @@ class GameDayAutopilotService {
 
   // ── Internal: WLED payload ─────────────────────────────────────────────
 
+  /// Test-only entry point for `_applyDesign`. Used by Bundle 3b.3c
+  /// regression tests to assert that an empty seg array prevents the
+  /// `onApplyPayload` invocation.
+  @visibleForTesting
+  void applyDesignForTest(DesignSelection design) => _applyDesign(design);
+
   void _applyDesign(DesignSelection design) {
+    // Skip-apply when participation resolved to explicit empty. The
+    // applyJson chokepoint ([expandForParticipation], rule 2) passes
+    // empty participation THROUGH — it never emits seg:[] on its own —
+    // so this caller-side gate is the active mechanism that prevents an
+    // unfiltered broadcast to seg 0 when the user opts out of all
+    // channels. _buildWledPayload produces `seg: []` in exactly that
+    // case (participating != null && participating.isEmpty).
+    final seg = design.wledPayload['seg'];
+    if (seg is List && seg.isEmpty) {
+      debugPrint(
+        '[GameDayAutopilot] skip-apply: no participating channels '
+        '(design=${design.designName})',
+      );
+      return;
+    }
     onApplyPayload?.call(design.wledPayload);
   }
 
@@ -763,19 +810,38 @@ class GameDayAutopilotService {
     required int speed,
     required int intensity,
     required int brightness,
+    required List<int>? participating,
   }) {
+    final colorSlots =
+        colors.map((c) => <int>[...c, 0]).toList(); // Add W=0 for RGBW
+
+    // Bundle 3b.3c: the applyJson chokepoint
+    // ([expandForParticipation] in wled_payload_utils.dart) reads the
+    // persisted participation list and rule-7-expands a single-seg-no-
+    // id-with-fx payload per participating channel. We emit that shape
+    // here and let the chokepoint do the per-channel duplication.
+    //
+    // EXCEPT for the explicit-empty case (participating != null &&
+    // participating.isEmpty): rule 2 of the chokepoint passes empty
+    // participation THROUGH (it never emits seg:[]), so we must emit
+    // `seg: []` here. _applyDesign then skip-applies — see the comment
+    // on _applyDesign for why that gate is active, not dead.
+    final segs = (participating != null && participating.isEmpty)
+        ? <Map<String, dynamic>>[]
+        : <Map<String, dynamic>>[
+            {
+              'fx': effectId,
+              'sx': speed,
+              'ix': intensity,
+              'pal': 0,
+              'col': colorSlots,
+            },
+          ];
+
     return {
       'on': true,
       'bri': brightness.clamp(0, 255),
-      'seg': [
-        {
-          'fx': effectId,
-          'sx': speed,
-          'ix': intensity,
-          'pal': 0,
-          'col': colors.map((c) => [...c, 0]).toList(), // Add W=0 for RGBW
-        }
-      ],
+      'seg': segs,
     };
   }
 

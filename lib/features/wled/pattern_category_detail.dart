@@ -97,7 +97,11 @@ class _GradientPatternCard extends ConsumerWidget {
           try {
             var payload = data.toWledPayload();
             final channels = ref.read(effectiveChannelIdsProvider);
-            if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+            if (channels.isEmpty) {
+              debugPrint('PatternCategoryDetail apply: skip (U1 gate)');
+              return;
+            }
+            payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
             await repo.applyJson(payload);
             ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(data.name, ref.read(wledStateProvider));
             ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
@@ -233,7 +237,11 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
     try {
       var payload = _payloadFromCurrent();
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('PatternCategoryDetail _applyNow: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(_current.name, ref.read(wledStateProvider));
       if (toast && mounted) {
@@ -262,7 +270,11 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
           'seg': [{'grp': _current.grouping, 'spc': _current.spacing}]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternCategoryDetail layout apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       } catch (e) {
         debugPrint('Apply grp/spc failed: $e');
@@ -482,7 +494,11 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   try {
                     var palPayload = <String, dynamic>{'seg': [{'pal': seq}]};
                     final channels = ref.read(effectiveChannelIdsProvider);
-                    if (channels.isNotEmpty) palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
+                    if (channels.isEmpty) {
+                      debugPrint('PatternCategoryDetail palette apply: skip (U1 gate)');
+                      return;
+                    }
+                    palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
                     await repo.applyJson(palPayload);
                   } catch (e) {
                     debugPrint('Apply custom palette failed: $e');

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/controller_type.dart';
@@ -361,9 +362,26 @@ class WledService implements WledRepository {
     return false;
   }
 
-  /// Public helper to send an arbitrary WLED JSON payload to /json
-  Future<bool> applyJson(Map<String, dynamic> payload) =>
-      _postJson(normalizeWledPayload(payload));
+  /// Public helper to send an arbitrary WLED JSON payload to /json.
+  ///
+  /// Audit #4 chokepoint: every WLED apply (sync, game-day, scenes,
+  /// autopilot, AI, scheduled, voice, inline-built or saved-design
+  /// replay) flows through here. Two normalizers run in sequence:
+  ///
+  ///   1. [normalizeWledPayload] — legacy seg-state-carry-over guard
+  ///      (grp/spc/of defaults, RGBW validation).
+  ///   2. [expandForParticipation] — channel participation + per-seg
+  ///      on:true broadcast (Bundle 3b). Pass-through-by-default; only
+  ///      expands single-seg-no-id-with-fx payloads. Participating
+  ///      list is read from the in-memory cache (lazy-loaded once
+  ///      from the Bundle 2 SharedPreferences key; kept in sync
+  ///      whenever [saveLocalParticipatingChannels] writes).
+  Future<bool> applyJson(Map<String, dynamic> payload) async {
+    final participating = await getCachedParticipatingChannels();
+    final normalized = normalizeWledPayload(payload);
+    final expanded = expandForParticipation(normalized, participating);
+    return _postJson(expanded);
+  }
 
   Future<bool> _postConfig(Map<String, dynamic> data) async {
     if (_simulate) {

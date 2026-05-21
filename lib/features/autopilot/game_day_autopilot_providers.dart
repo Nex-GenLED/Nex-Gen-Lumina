@@ -16,6 +16,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_providers.dart';
+import '../../models/roofline_segment.dart';
+import '../design/roofline_config_providers.dart';
+import '../neighborhood/services/channel_participation_resolver.dart';
+import '../neighborhood/services/sync_event_background_persistence.dart';
 import '../schedule/calendar_entry.dart';
 import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
@@ -24,6 +28,7 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
 import '../wled/wled_providers.dart';
+import '../wled/zone_providers.dart';
 import 'autopilot_providers.dart';
 import 'game_day_autopilot_config.dart';
 import 'game_day_autopilot_service.dart';
@@ -133,6 +138,33 @@ final gameDayAutopilotServiceProvider =
     } catch (e) {
       debugPrint('[GameDayAutopilot] Failed to read preferred styles: $e');
       return const [];
+    }
+  };
+
+  svc.onResolveParticipatingChannels = (config) {
+    try {
+      final rooflineAsync = ref.read(currentRooflineConfigProvider);
+      final segments = rooflineAsync.maybeWhen(
+        data: (c) => c?.segments ?? const <RooflineSegment>[],
+        orElse: () => const <RooflineSegment>[],
+      );
+      final deviceChannelIds =
+          ref.read(deviceChannelsProvider).map((c) => c.id).toList();
+      final resolved = resolveParticipatingChannels(
+        explicit: config.participatingChannelIndices,
+        segments: segments,
+        allDeviceChannelIds: deviceChannelIds,
+      );
+      // Persist for the background isolate (Bundle 4 reads this).
+      // Fire-and-forget — never block payload construction on the
+      // SharedPreferences write.
+      unawaited(saveLocalParticipatingChannels(resolved));
+      return resolved;
+    } catch (e) {
+      debugPrint(
+        '[GameDayAutopilot] Failed to resolve participating channels: $e',
+      );
+      return null;
     }
   };
 

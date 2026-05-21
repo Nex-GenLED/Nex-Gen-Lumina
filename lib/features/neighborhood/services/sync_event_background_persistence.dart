@@ -24,6 +24,7 @@ const _kSyncActiveSessionKey = 'bg_sync_active_session';
 const _kSyncHostFailoverTsKey = 'bg_sync_host_failover_ts';
 const _kSyncIdTokenKey = 'bg_sync_id_token';
 const _kSyncIdTokenExpiresAtKey = 'bg_sync_id_token_expires_at';
+const _kLocalParticipatingChannelsKey = 'bg_local_participating_channels';
 
 /// Serializable subset of SyncEvent for background service consumption.
 /// Avoids pulling in Firestore dependencies in the background isolate.
@@ -280,6 +281,124 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
   await prefs.setString(_kSyncHostFailoverTsKey, ts.toIso8601String());
 }
 
+// ─── Participating-channels in-memory cache ─────────────────────────────
+// The chokepoint at WledService.applyJson / CloudRelayRepository.applyJson
+// reads this on every apply (audit #4 / Bundle 3b.2). Per-apply
+// SharedPreferences reads would slow slider drags / audio-reactive paths,
+// so we cache the resolved list in module-level memory:
+//
+//   - getCachedParticipatingChannels()  — lazy-load on first call; cached
+//                                         thereafter. Returns Future<List<int>?>;
+//                                         only the first call awaits disk.
+//   - saveLocalParticipatingChannels()  — updates the cache synchronously
+//                                         before the async SharedPreferences
+//                                         write, so the cache and persisted
+//                                         value cannot diverge.
+//   - participationCacheNotifier        — ValueNotifier that exposes the
+//                                         cache to Riverpod providers
+//                                         (Bundle 3b.3b — the dashboard
+//                                         gate watches this for reactivity).
+//   - resetParticipationCacheForTest()  — clears state between unit tests.
+//
+// ISOLATE NOTE: Dart isolates have independent module-level memory. The
+// foreground and (future) background isolate each maintain their own
+// cache. The Bundle 4 background path will lazy-load identically; if the
+// foreground updates participation while the background is running, the
+// background's cache stays stale until a separate invalidation mechanism
+// is added in Bundle 4 (likely per-poll-cycle reload).
+
+/// ValueNotifier exposing the participation cache. Riverpod providers
+/// listen to this (via addListener) to react when the cache changes —
+/// the dashboard's U1 participation gate (Bundle 3b.3b) rebuilds the
+/// effective-channel list whenever this fires.
+///
+/// Direct readers (the applyJson chokepoint, Bundle 3b.2) can also read
+/// `.value` synchronously, but should prefer the [peekCachedParticipatingChannels]
+/// / [getCachedParticipatingChannels] helpers since they handle the
+/// "loaded yet?" distinction.
+final ValueNotifier<List<int>?> participationCacheNotifier =
+    ValueNotifier<List<int>?>(null);
+
+bool _participationCacheLoaded = false;
+
+/// Returns the cached participating-channels list, lazy-loading from
+/// SharedPreferences on first call. Cheap on every subsequent call.
+///
+/// Semantics match [loadLocalParticipatingChannels]:
+///   - `null`  → no preference set / cold-start cache (chokepoint will
+///               pass payloads through unchanged).
+///   - `[]`    → explicit "no channels" (chokepoint still passes through;
+///               skip-apply belongs upstream).
+///   - `[..]`  → explicit set (chokepoint expands broadcast-intent
+///               payloads to these channel ids).
+Future<List<int>?> getCachedParticipatingChannels() async {
+  if (!_participationCacheLoaded) {
+    participationCacheNotifier.value = await loadLocalParticipatingChannels();
+    _participationCacheLoaded = true;
+  }
+  return participationCacheNotifier.value;
+}
+
+/// Synchronous peek at the cache. Returns null if the cache has not been
+/// warmed yet (the chokepoint should never block applyJson on a load —
+/// callers that have not warmed the cache simply get a pass-through
+/// payload from [expandForParticipation], matching legacy behavior).
+List<int>? peekCachedParticipatingChannels() {
+  return _participationCacheLoaded ? participationCacheNotifier.value : null;
+}
+
+/// Test helper: clear the cache so each test starts cold.
+@visibleForTesting
+void resetParticipationCacheForTest() {
+  participationCacheNotifier.value = null;
+  _participationCacheLoaded = false;
+}
+
+/// Persist the LOCAL user's participating channel indices for the
+/// background isolate. Shared by the sync worker and the game-day
+/// worker — both apply on behalf of the local user to the local
+/// user's own controllers, so a single key is sufficient.
+///
+/// Semantics (must match the model layer in
+/// [NeighborhoodMember.participatingChannelIndices] and
+/// [GameDayAutopilotConfig.participatingChannelIndices]):
+///
+///   - `null`  → clears the key. On the next load the background
+///               worker reads null and falls back to all-channels
+///               (its safe default — the isolate cannot run the
+///               isPrimary resolver because it has no
+///               RooflineConfiguration access).
+///   - `[]`    → explicit "no channels participate". Persisted as
+///               an empty stringlist so load can distinguish it
+///               from null.
+///   - `[..]`  → explicit set, persisted verbatim (no implicit sort
+///               — the foreground writes the resolved list which is
+///               already sorted by the resolver).
+///
+/// In normal operation the foreground runs the isPrimary default
+/// resolver and writes the RESOLVED list here. Null is the
+/// cold-start state for users who have never opened the picker and
+/// whose foreground has not yet seeded the key.
+Future<void> saveLocalParticipatingChannels(List<int>? channels) async {
+  // Update the in-memory cache FIRST (synchronously) so the chokepoint at
+  // applyJson sees the new value immediately — even if the SharedPrefs
+  // write below hasn't completed yet. ValueNotifier.value = ... also
+  // notifies UI listeners (Bundle 3b.3b's participation gate).
+  participationCacheNotifier.value =
+      channels == null ? null : List<int>.from(channels);
+  _participationCacheLoaded = true;
+
+  final prefs = await SharedPreferences.getInstance();
+  if (channels == null) {
+    await prefs.remove(_kLocalParticipatingChannelsKey);
+  } else {
+    await prefs.setStringList(
+      _kLocalParticipatingChannelsKey,
+      channels.map((i) => i.toString()).toList(),
+    );
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // LOAD FUNCTIONS (called from background isolate)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -350,6 +469,19 @@ Future<DateTime?> loadHostFailoverTimestamp() async {
 Future<void> clearHostFailoverTimestamp() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove(_kSyncHostFailoverTsKey);
+}
+
+/// Load the LOCAL user's participating channel indices. Returns null
+/// if no preference has been set (cold-start / never-configured); the
+/// background worker treats null as "fall back to all-channels."
+/// Returns an empty list when the user has explicitly opted out of
+/// all channels. See [saveLocalParticipatingChannels] for the full
+/// null/empty/list semantics.
+Future<List<int>?> loadLocalParticipatingChannels() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getStringList(_kLocalParticipatingChannelsKey);
+  if (raw == null) return null;
+  return raw.map(int.parse).toList();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
