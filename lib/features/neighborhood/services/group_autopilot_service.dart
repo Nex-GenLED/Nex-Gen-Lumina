@@ -3,7 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
+import '../../autopilot/game_day_autopilot_config.dart';
 import '../models/group_game_day_autopilot.dart';
+import 'group_autopilot_assembly.dart';
 
 /// Firestore service for Group Game Day Autopilot.
 ///
@@ -55,6 +57,40 @@ class GroupAutopilotService {
       '[GroupAutopilotService] Set group autopilot for $groupId '
       '(${optedIn.length} opted-in members)',
     );
+  }
+
+  /// Configure group autopilot for [groupId] from the host's Path 1
+  /// per-team [GameDayAutopilotConfig].
+  ///
+  /// Convergence-Phase-1B writer: this is the public entry point that
+  /// the host-side Game Day broadcast flow will call. It assembles the
+  /// group-shaped document via [buildGroupAutopilotFromPath1] (pure)
+  /// then persists via [setGroupAutopilot], which stamps in the current
+  /// opted-in member list.
+  ///
+  /// Returns the assembled config that was written (with the post-write
+  /// activeMemberIds + updatedAt that [setGroupAutopilot] applied).
+  ///
+  /// Throws [StateError] if the user is not authenticated.
+  Future<GroupGameDayAutopilot> configureForTeam({
+    required String groupId,
+    required GameDayAutopilotConfig sourceConfig,
+    DateTime? now,
+  }) async {
+    final uid = _uid;
+    if (uid == null) {
+      throw StateError(
+        'Cannot configure group autopilot: no authenticated user.',
+      );
+    }
+    final assembled = buildGroupAutopilotFromPath1(
+      sourceConfig: sourceConfig,
+      hostUserId: uid,
+      now: now ?? DateTime.now(),
+    );
+    await setGroupAutopilot(groupId, assembled);
+    // Re-read so the caller sees the activeMemberIds the writer stamped.
+    return await getGroupAutopilot(groupId) ?? assembled;
   }
 
   /// Disable group autopilot entirely (host or when host opts out).
