@@ -720,6 +720,16 @@ class SyncEventBackgroundWorker {
 
   // ── WLED Pattern Application ────────────────────────────────────────────
 
+  // Maximum channel/segment count to address in a Neighborhood Sync
+  // broadcast. Bounded by Lumina's hardware ceiling (QuinLED Dig-Octa
+  // = 8 channels). Each recipient controller applies the seg entries
+  // matching its own configured segment ids and silently ignores ids
+  // beyond its segment count (verified against shipped WLED firmware:
+  // out-of-range seg ids are discarded without creating phantom
+  // segments). No start/stop is sent — each controller keeps its own
+  // install-time segment ranges; the sync only updates fx/col/sx/ix.
+  static const int _kMaxSyncChannels = 8;
+
   /// Build a WLED apply-payload from pattern fields. RGBW format with W=0
   /// (Lumina relies on WLED's hardware gamma for white-channel mixing).
   Map<String, dynamic> _buildPatternPayload({
@@ -743,18 +753,20 @@ class SyncEventBackgroundWorker {
         colorSlots.add([0, 0, 0, 0]);
       }
     }
-    return {
-      'on': true,
-      'bri': brightness,
-      'seg': [
+    final segArray = <Map<String, dynamic>>[
+      for (int ch = 0; ch < _kMaxSyncChannels; ch++)
         {
-          'id': 0,
+          'id': ch,
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
           'col': colorSlots,
         },
-      ],
+    ];
+    return {
+      'on': true,
+      'bri': brightness,
+      'seg': segArray,
     };
   }
 
