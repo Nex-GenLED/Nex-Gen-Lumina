@@ -127,6 +127,110 @@ List<Map<String, dynamic>> buildParticipatingSegArray({
   ];
 }
 
+/// Apply-boundary chokepoint that expands a broadcast-intent payload into
+/// per-participating-channel seg entries, OR returns the payload unchanged
+/// when expansion is inappropriate.
+///
+/// Bundle 3 wired participation into two specific apply paths
+/// (`_executePattern` and `_buildWledPayload`). The wider audit (#4) found
+/// 20+ inline payload builders across the codebase using the legacy
+/// single-seg shape, each with the same channel-2-dark / patio-force-light
+/// bugs latent. This function is the single chokepoint approach: every
+/// `applyJson` flows through here (it's called by both `WledService` and
+/// `CloudRelayRepository` alongside [normalizeWledPayload]), regardless of
+/// which inline builder produced the payload OR whether the payload was
+/// replayed from a stored blob (`savedDesignPayload`, `wledPayload` fields,
+/// etc.).
+///
+/// Discriminator (ordered — each rule short-circuits):
+///
+///   1. `participating == null`        → pass through. Legacy behavior or
+///                                       "no preference set" — never expand
+///                                       without an explicit channel list.
+///   2. `participating.isEmpty`        → pass through. Caller's "explicit
+///                                       none" — they must skip-apply at
+///                                       their layer; this function never
+///                                       emits an empty seg array.
+///   3. No 'seg' key, or 'seg' not a   → pass through. Top-level-only
+///      List, or empty seg list           payloads ({'on':false}, {'bri':N},
+///                                       {'ps':N}, {'rb':true}, {'udpn':…})
+///                                       are not pattern broadcasts.
+///   4. `seg.length > 1`               → pass through. Caller built a
+///                                       multi-seg payload intentionally —
+///                                       either Bundle 3's
+///                                       [buildParticipatingSegArray]
+///                                       output (already per-channel) OR a
+///                                       pixel-range animation (rising
+///                                       tide, pulse burst —
+///                                       lumina_custom_effects.dart) with
+///                                       explicit start/stop. Either way,
+///                                       don't second-guess.
+///   5. `seg.first` has an 'id' key    → pass through. Explicitly-targeted
+///                                       single-seg apply (e.g. voice
+///                                       provider's {id:0, fx:0}). The
+///                                       caller meant THAT specific seg.
+///   6. `seg.first` has NO 'fx' key    → pass through. Partial-update
+///                                       payload — slider tweak emitting
+///                                       just {sx, ix, rev} or {grp, spc}.
+///                                       These apply to seg 0 implicitly,
+///                                       matching pre-Bundle-3 behavior;
+///                                       expanding could silently broadcast
+///                                       a slider drag to non-participating
+///                                       channels.
+///   7. otherwise (single-seg, no id,  → EXPAND. Replicate the seg entry
+///      has fx → broadcast intent)       once per participating channel id,
+///                                       each with `id: ch` and `on: true`
+///                                       added. Template fields (fx, sx,
+///                                       ix, col, pal, anything else) are
+///                                       preserved verbatim.
+///
+/// PURE FUNCTION: no I/O, no SharedPreferences read inside. The caller
+/// passes [participating] in; 3b.2 reads `loadLocalParticipatingChannels()`
+/// once at the call site (cached in memory) and forwards it here.
+///
+/// IDEMPOTENT: expansion produces multi-seg-with-ids, which rule 4 catches
+/// on any subsequent pass. Safe to call multiple times in any order.
+///
+/// Does NOT mutate the input payload — always returns a new map when
+/// expansion happens. Pass-through returns the same reference (no copy).
+Map<String, dynamic> expandForParticipation(
+  Map<String, dynamic> payload,
+  List<int>? participating,
+) {
+  // Rule 1: null participating → legacy/no pref.
+  if (participating == null) return payload;
+  // Rule 2: explicit empty → caller's "no channels" — skip-apply belongs
+  // upstream; don't emit an empty seg array here.
+  if (participating.isEmpty) return payload;
+
+  final seg = payload['seg'];
+  // Rule 3: no seg, non-list, or empty list → top-level-only payload.
+  if (seg is! List || seg.isEmpty) return payload;
+  // Rule 4: already multi-seg → caller built it that way intentionally.
+  if (seg.length > 1) return payload;
+
+  final first = seg.first;
+  if (first is! Map) return payload;
+  // Rule 5: explicit id on the single seg → targeted apply.
+  if (first.containsKey('id')) return payload;
+  // Rule 6: no fx → partial update (slider tweak), not a broadcast.
+  if (!first.containsKey('fx')) return payload;
+
+  // Rule 7: broadcast intent — expand.
+  final template = Map<String, dynamic>.from(first);
+  final expanded = <Map<String, dynamic>>[
+    for (final ch in participating)
+      <String, dynamic>{
+        ...template,
+        'id': ch,
+        'on': true,
+      },
+  ];
+  final result = Map<String, dynamic>.from(payload);
+  result['seg'] = expanded;
+  return result;
+}
+
 /// Normalizes a WLED JSON API payload to prevent segment state carry-over.
 ///
 /// WLED only updates fields explicitly included in a POST /json/state payload.
