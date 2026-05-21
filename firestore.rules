@@ -42,7 +42,7 @@ service cloud.firestore {
       // Only allow emails from verified dealer domains
       // Update this list with your authorized dealer domains
       return email == null ||
-             email.matches('.*@nexgenled.com') ||
+             email.matches('.*@nex-genled\\.com') ||
              email.matches('.*@authorized-dealer.com');
     }
 
