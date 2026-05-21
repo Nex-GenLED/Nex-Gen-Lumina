@@ -1173,9 +1173,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 );
                 var payload = pattern.toWledPayload();
                 final channels = ref.read(effectiveChannelIdsProvider);
-                if (channels.isNotEmpty) {
-                  payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+                if (channels.isEmpty) {
+                  debugPrint('Suggestion applyPattern: skip (U1 gate)');
+                  return;
                 }
+                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
                 final success = await repo.applyJson(payload);
                 if (success) {
                   try {
@@ -1239,9 +1241,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               }
               var payload = favorite.patternData;
               final channels = ref.read(effectiveChannelIdsProvider);
-              if (channels.isNotEmpty) {
-                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+              if (channels.isEmpty) {
+                debugPrint('Favorites apply: skip (U1 gate)');
+                return;
               }
+              payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
               final success = await repo.applyJson(payload);
               if (!mounted) return;
               if (success) {

@@ -40,6 +40,12 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     final selectedIds = ref.watch(selectedChannelIdsProvider);
     final isFiltered = selectedIds != null;
 
+    // U1 (Bundle 3b.3b): participation is the OUTER gate; channels not in
+    // the participation list are NOT selectable from the dashboard. null
+    // = no preference set, all device channels eligible (backward-safe).
+    final participating = ref.watch(participatingChannelIdsProvider);
+    final participatingSet = participating?.toSet();
+
     // Get roofline config for zone labels
     final rooflineConfig = ref.watch(currentRooflineConfigProvider).valueOrNull;
 
@@ -79,7 +85,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
             children: [
               _buildHeader(context, channels, selectedIds, hasZoneNames),
               if (_expanded)
-                _buildChannelChips(context, channels, selectedIds, zoneLabels, hasZoneNames),
+                _buildChannelChips(context, channels, selectedIds, zoneLabels, hasZoneNames, participatingSet),
             ],
           ),
         ),
@@ -164,6 +170,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     Set<int>? selectedIds,
     Map<int, String> zoneLabels,
     bool hasZoneNames,
+    Set<int>? participatingSet,
   ) {
     final isAllMode = selectedIds == null;
 
@@ -181,14 +188,23 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
               ref.read(selectedChannelIdsProvider.notifier).state = null;
             },
           ),
-          // Individual channel/zone chips
+          // Individual channel/zone chips. Non-participating channels (U1)
+          // render disabled — user can't target a channel that's been
+          // marked "not in shows" via the participation field.
           for (final ch in channels)
-            _buildChip(
-              label: zoneLabels[ch.id] ?? ch.name,
-              selected: isAllMode || selectedIds.contains(ch.id),
-              onTap: () => _toggleChannel(ch.id, channels, selectedIds),
-              channelColor: kChannelColors[ch.id % kChannelColors.length],
-            ),
+            Builder(builder: (_) {
+              final isParticipating =
+                  participatingSet == null || participatingSet.contains(ch.id);
+              return _buildChip(
+                label: zoneLabels[ch.id] ?? ch.name,
+                selected: isAllMode || selectedIds.contains(ch.id),
+                disabled: !isParticipating,
+                onTap: isParticipating
+                    ? () => _toggleChannel(ch.id, channels, selectedIds)
+                    : null,
+                channelColor: kChannelColors[ch.id % kChannelColors.length],
+              );
+            }),
         ],
       ),
     );
@@ -225,51 +241,73 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
   Widget _buildChip({
     required String label,
     required bool selected,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
     Color? channelColor,
+    bool disabled = false,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? (channelColor ?? NexGenPalette.cyan).withValues(alpha: 0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected
-                ? (channelColor ?? NexGenPalette.cyan)
-                : Colors.white.withValues(alpha: 0.2),
-            width: selected ? 1.5 : 1.0,
+    // Disabled (non-participating) chips render at low opacity, are not
+    // tappable, and don't show the selected highlight even if some
+    // upstream state would otherwise mark them selected. The semantic:
+    // this channel is NOT part of your shows, so it can't be targeted
+    // from the dashboard. To enable it, change participation (Bundle 5
+    // picker UI) — not here.
+    final effectiveColor = disabled
+        ? Colors.white.withValues(alpha: 0.25)
+        : (channelColor ?? NexGenPalette.cyan);
+    final showSelected = selected && !disabled;
+
+    return Opacity(
+      opacity: disabled ? 0.5 : 1.0,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: showSelected
+                ? effectiveColor.withValues(alpha: 0.15)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: showSelected
+                  ? effectiveColor
+                  : Colors.white.withValues(alpha: disabled ? 0.1 : 0.2),
+              width: showSelected ? 1.5 : 1.0,
+              style: disabled ? BorderStyle.solid : BorderStyle.solid,
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (channelColor != null) ...[
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: selected ? channelColor : channelColor.withValues(alpha: 0.4),
-                  shape: BoxShape.circle,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (channelColor != null) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: disabled
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : (showSelected
+                            ? channelColor
+                            : channelColor.withValues(alpha: 0.4)),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: showSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: disabled
+                      ? Colors.white38
+                      : (showSelected ? effectiveColor : Colors.white54),
+                  decoration: disabled ? TextDecoration.lineThrough : null,
+                  decorationColor: Colors.white38,
                 ),
               ),
-              const SizedBox(width: 6),
             ],
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected
-                    ? (channelColor ?? NexGenPalette.cyan)
-                    : Colors.white54,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

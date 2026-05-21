@@ -479,7 +479,11 @@ class MySavedDesignsSection extends ConsumerWidget {
     try {
       var payload = design.toWledPayload();
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('PatternLibrary design apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(design.name, ref.read(wledStateProvider));
 
@@ -749,7 +753,11 @@ class RecentPatternsSection extends ConsumerWidget {
         };
 
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternLibrary pattern apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       }
 

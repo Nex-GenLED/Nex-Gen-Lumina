@@ -294,6 +294,10 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
 //                                         before the async SharedPreferences
 //                                         write, so the cache and persisted
 //                                         value cannot diverge.
+//   - participationCacheNotifier        — ValueNotifier that exposes the
+//                                         cache to Riverpod providers
+//                                         (Bundle 3b.3b — the dashboard
+//                                         gate watches this for reactivity).
 //   - resetParticipationCacheForTest()  — clears state between unit tests.
 //
 // ISOLATE NOTE: Dart isolates have independent module-level memory. The
@@ -302,8 +306,20 @@ Future<void> saveHostFailoverTimestamp(DateTime ts) async {
 // foreground updates participation while the background is running, the
 // background's cache stays stale until a separate invalidation mechanism
 // is added in Bundle 4 (likely per-poll-cycle reload).
-List<int>? _cachedParticipating;
-bool _cachedParticipatingLoaded = false;
+
+/// ValueNotifier exposing the participation cache. Riverpod providers
+/// listen to this (via addListener) to react when the cache changes —
+/// the dashboard's U1 participation gate (Bundle 3b.3b) rebuilds the
+/// effective-channel list whenever this fires.
+///
+/// Direct readers (the applyJson chokepoint, Bundle 3b.2) can also read
+/// `.value` synchronously, but should prefer the [peekCachedParticipatingChannels]
+/// / [getCachedParticipatingChannels] helpers since they handle the
+/// "loaded yet?" distinction.
+final ValueNotifier<List<int>?> participationCacheNotifier =
+    ValueNotifier<List<int>?>(null);
+
+bool _participationCacheLoaded = false;
 
 /// Returns the cached participating-channels list, lazy-loading from
 /// SharedPreferences on first call. Cheap on every subsequent call.
@@ -316,11 +332,11 @@ bool _cachedParticipatingLoaded = false;
 ///   - `[..]`  → explicit set (chokepoint expands broadcast-intent
 ///               payloads to these channel ids).
 Future<List<int>?> getCachedParticipatingChannels() async {
-  if (!_cachedParticipatingLoaded) {
-    _cachedParticipating = await loadLocalParticipatingChannels();
-    _cachedParticipatingLoaded = true;
+  if (!_participationCacheLoaded) {
+    participationCacheNotifier.value = await loadLocalParticipatingChannels();
+    _participationCacheLoaded = true;
   }
-  return _cachedParticipating;
+  return participationCacheNotifier.value;
 }
 
 /// Synchronous peek at the cache. Returns null if the cache has not been
@@ -328,14 +344,14 @@ Future<List<int>?> getCachedParticipatingChannels() async {
 /// callers that have not warmed the cache simply get a pass-through
 /// payload from [expandForParticipation], matching legacy behavior).
 List<int>? peekCachedParticipatingChannels() {
-  return _cachedParticipatingLoaded ? _cachedParticipating : null;
+  return _participationCacheLoaded ? participationCacheNotifier.value : null;
 }
 
 /// Test helper: clear the cache so each test starts cold.
 @visibleForTesting
 void resetParticipationCacheForTest() {
-  _cachedParticipating = null;
-  _cachedParticipatingLoaded = false;
+  participationCacheNotifier.value = null;
+  _participationCacheLoaded = false;
 }
 
 /// Persist the LOCAL user's participating channel indices for the
@@ -366,10 +382,11 @@ void resetParticipationCacheForTest() {
 Future<void> saveLocalParticipatingChannels(List<int>? channels) async {
   // Update the in-memory cache FIRST (synchronously) so the chokepoint at
   // applyJson sees the new value immediately — even if the SharedPrefs
-  // write below hasn't completed yet. This is the cache-invalidation hook
-  // referenced in [getCachedParticipatingChannels].
-  _cachedParticipating = channels == null ? null : List<int>.from(channels);
-  _cachedParticipatingLoaded = true;
+  // write below hasn't completed yet. ValueNotifier.value = ... also
+  // notifies UI listeners (Bundle 3b.3b's participation gate).
+  participationCacheNotifier.value =
+      channels == null ? null : List<int>.from(channels);
+  _participationCacheLoaded = true;
 
   final prefs = await SharedPreferences.getInstance();
   if (channels == null) {

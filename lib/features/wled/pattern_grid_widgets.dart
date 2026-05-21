@@ -1672,7 +1672,11 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       if (!isCustomEffect) {
         var payload = preparedPayload;
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternGrid apply: skip (no effective channels — U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         final success = await repo.applyJson(payload);
 
         if (!success) {
@@ -1946,12 +1950,15 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), () async {
       final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        var payload = <String, dynamic>{'seg': [segUpdate]};
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+      if (repo == null) return;
+      var payload = <String, dynamic>{'seg': [segUpdate]};
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isEmpty) {
+        debugPrint('PatternGrid _applyChange: skip (U1 gate)');
+        return;
       }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      await repo.applyJson(payload);
     });
   }
 

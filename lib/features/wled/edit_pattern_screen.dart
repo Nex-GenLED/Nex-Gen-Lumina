@@ -88,7 +88,11 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     final totalPixels = await repo.getTotalLedCount() ?? 150;
     var payload = _pattern.toWledPayload(totalPixels);
     final channels = ref.read(effectiveChannelIdsProvider);
-    if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+    if (channels.isEmpty) {
+      debugPrint('EditPattern apply: skip (U1 gate)');
+      return;
+    }
+    payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
     await repo.applyJson(payload);
   }
 
