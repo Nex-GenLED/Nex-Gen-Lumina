@@ -143,6 +143,100 @@ void main() {
       );
     });
   });
+
+  group('isPreSyncSceneFresh', () {
+    final now = DateTime.utc(2026, 5, 22, 18, 0);
+
+    PreSyncScene scene({
+      String groupId = 'g1',
+      DateTime? capturedAt,
+    }) {
+      return PreSyncScene(
+        groupId: groupId,
+        wledPayload: const {'on': true},
+        activeLabel: null,
+        capturedAt: capturedAt ?? now.subtract(const Duration(minutes: 5)),
+      );
+    }
+
+    test('null scene → false (nothing to restore)', () {
+      expect(
+        isPreSyncSceneFresh(
+          scene: null,
+          activeGroupId: 'g1',
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test('matching groupId + recent capturedAt → true', () {
+      expect(
+        isPreSyncSceneFresh(
+          scene: scene(),
+          activeGroupId: 'g1',
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('groupId mismatch (snapshot from a different group) → false', () {
+      expect(
+        isPreSyncSceneFresh(
+          scene: scene(groupId: 'g1'),
+          activeGroupId: 'g2',
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+        'activeGroupId == null + scene.groupId non-null → false '
+        '(strict match; null is treated as a mismatch)', () {
+      expect(
+        isPreSyncSceneFresh(
+          scene: scene(groupId: 'g1'),
+          activeGroupId: null,
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test('capturedAt exactly at the staleness boundary → true (uses > not >=)',
+        () {
+      final captured = now.subtract(const Duration(hours: 12));
+      expect(
+        isPreSyncSceneFresh(
+          scene: scene(capturedAt: captured),
+          activeGroupId: 'g1',
+          now: now,
+          maxStaleness: const Duration(hours: 12),
+        ),
+        isTrue,
+      );
+    });
+
+    test('capturedAt 1ms past the staleness boundary → false', () {
+      final captured =
+          now.subtract(const Duration(hours: 12, milliseconds: 1));
+      expect(
+        isPreSyncSceneFresh(
+          scene: scene(capturedAt: captured),
+          activeGroupId: 'g1',
+          now: now,
+          maxStaleness: const Duration(hours: 12),
+        ),
+        isFalse,
+      );
+    });
+
+    test('default maxStaleness const is 12 hours', () {
+      expect(kPreSyncSceneMaxStaleness, const Duration(hours: 12));
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

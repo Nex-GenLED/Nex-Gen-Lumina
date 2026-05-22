@@ -25,6 +25,7 @@ import '../../../models/autopilot_schedule_item.dart';
 import '../../../services/autopilot_scheduler.dart';
 import '../../schedule/schedule_models.dart';
 import '../../schedule/schedule_providers.dart';
+import '../../wled/wled_repository.dart';
 import 'pre_sync_scene_snapshot.dart';
 
 /// Sealed result of [resolveCurrentMemberState] describing what each
@@ -115,16 +116,107 @@ final sustainedTeardownActionProvider =
 /// [resolveCurrentMemberState] + the composer provider.
 AutopilotScheduleItem? _currentAutopilotItem(Ref ref) {
   final scheduler = ref.watch(autopilotSchedulerProvider);
-  final items = scheduler.activeSchedule;
-  if (items.isEmpty) return null;
+  return currentAutopilotItemFor(
+    activeSchedule: scheduler.activeSchedule,
+    now: DateTime.now(),
+  );
+}
 
-  final now = DateTime.now();
+/// Pure helper: pick the latest-firing autopilot item whose
+/// `scheduledTime <= now` from [activeSchedule].
+///
+/// Returns null if no item has fired yet. Extracted from the
+/// provider above so the engine's teardown path can call it
+/// directly with a single [now] reference + so it's unit-testable
+/// without standing up the scheduler.
+AutopilotScheduleItem? currentAutopilotItemFor({
+  required List<AutopilotScheduleItem> activeSchedule,
+  required DateTime now,
+}) {
+  if (activeSchedule.isEmpty) return null;
   AutopilotScheduleItem? latest;
-  for (final item in items) {
+  for (final item in activeSchedule) {
     if (item.scheduledTime.isAfter(now)) continue;
     if (latest == null || item.scheduledTime.isAfter(latest.scheduledTime)) {
       latest = item;
     }
   }
   return latest;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Side-effecting orchestrator: composes freshness check + pure resolver +
+// per-tier apply + clear-on-consumption. Wired by [NeighborhoodSyncEngine]
+// at the listening→not-listening transition. Pure-callable in tests via
+// passed-in deps (repo + restorePresetLabel + clearPreSyncScene callbacks).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Run the Stop-Sync teardown for a single member.
+///
+/// Pipeline:
+///   1. Apply staleness gate to [preSyncScene] via [isPreSyncSceneFresh].
+///   2. Filter out schedule items without a wledPayload (preset-based
+///      schedules have nothing concrete to apply for teardown — they
+///      fall through to the next tier).
+///   3. Resolve the action via [resolveCurrentMemberState].
+///   4. Apply it via [repo.applyJson] — routes through the chokepoint
+///      so participation is respected on restore too.
+///   5. Restore the Now Playing label only for the [ApplyPreSyncScene]
+///      tier (mirrors Game Day's setLabelWithFingerprint pattern). When
+///      [scene.activeLabel] is null, the restorePresetLabel callback is
+///      still invoked with null — the engine's wiring may choose to
+///      no-op on null vs explicit clear.
+///   6. Call [clearPreSyncScene] so the next sync session captures fresh.
+///
+/// Returns the [MemberTeardownAction] that was executed (helpful for
+/// the engine's debug log and the test assertions).
+Future<MemberTeardownAction> executeMemberTeardown({
+  required ScheduleItem? activeSchedule,
+  required AutopilotScheduleItem? activeAutopilot,
+  required PreSyncScene? preSyncScene,
+  required String? activeGroupId,
+  required DateTime now,
+  required WledRepository repo,
+  required void Function(String? label) restorePresetLabel,
+  required void Function() clearPreSyncScene,
+  Duration maxStaleness = kPreSyncSceneMaxStaleness,
+}) async {
+  final freshScene = isPreSyncSceneFresh(
+    scene: preSyncScene,
+    activeGroupId: activeGroupId,
+    now: now,
+    maxStaleness: maxStaleness,
+  )
+      ? preSyncScene
+      : null;
+
+  // Preset-only schedules (no inline wledPayload) can't be re-applied
+  // here — the chokepoint needs a payload, not a preset id. Drop them
+  // so the resolver falls through to autopilot / scene / off.
+  final usableSchedule =
+      (activeSchedule != null && activeSchedule.hasWledPayload)
+          ? activeSchedule
+          : null;
+
+  final action = resolveCurrentMemberState(
+    activeSchedule: usableSchedule,
+    activeAutopilot: activeAutopilot,
+    preSyncScene: freshScene,
+  );
+
+  switch (action) {
+    case ApplySchedule(:final item):
+      // wledPayload non-null guaranteed by the usableSchedule filter.
+      await repo.applyJson(item.wledPayload!);
+    case ApplyAutopilot(:final item):
+      await repo.applyJson(item.wledPayload);
+    case ApplyPreSyncScene(:final scene):
+      await repo.applyJson(scene.wledPayload);
+      restorePresetLabel(scene.activeLabel);
+    case TurnOff():
+      await repo.applyJson(const <String, dynamic>{'on': false});
+  }
+
+  clearPreSyncScene();
+  return action;
 }

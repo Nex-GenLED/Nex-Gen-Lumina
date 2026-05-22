@@ -4,14 +4,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app_providers.dart';
 import '../../models/roofline_segment.dart';
+import '../../services/autopilot_scheduler.dart';
 import '../design/roofline_config_providers.dart';
+import '../schedule/schedule_providers.dart';
 import '../wled/wled_providers.dart';
+import '../wled/wled_repository.dart';
 import '../wled/zone_providers.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
 import 'services/channel_participation_resolver.dart';
+import 'services/pre_sync_scene_snapshot.dart';
 import 'services/sync_event_background_persistence.dart';
+import 'services/sync_teardown_resolver.dart';
 
 /// Engine that handles timing calculations and sync execution for neighborhood groups.
 ///
@@ -24,6 +30,18 @@ class NeighborhoodSyncEngine {
   ProviderSubscription<AsyncValue<SyncCommand?>>? _commandSubscription;
   Timer? _scheduledExecution;
   bool _isListening = false;
+
+  /// True once we've captured the pre-sync snapshot for this listening
+  /// session. Reset on startListening / stopListening so each new
+  /// session snapshots the member's then-current state on its first
+  /// applied command.
+  bool _hasCapturedThisSession = false;
+
+  /// True once at least one applyJson succeeded for this listening
+  /// session. Gates the teardown on stopListening — if no apply ever
+  /// fired (e.g. member was opted out / never received a command),
+  /// the device state was never sync-altered and we leave it alone.
+  bool _hasAppliedThisSession = false;
 
   NeighborhoodSyncEngine(this._ref);
 
@@ -246,6 +264,8 @@ class NeighborhoodSyncEngine {
     if (_isListening) return;
 
     _isListening = true;
+    _hasCapturedThisSession = false;
+    _hasAppliedThisSession = false;
     debugPrint('Starting neighborhood sync listener...');
 
     _commandSubscription = _ref.listen<AsyncValue<SyncCommand?>>(
@@ -265,13 +285,36 @@ class NeighborhoodSyncEngine {
   }
 
   /// Stops listening for sync commands.
+  ///
+  /// On a true listening→not-listening transition (i.e. when this
+  /// session actually applied something), dispatches the distributed
+  /// teardown via [_executeTeardown] BEFORE clearing the subscription
+  /// + timer. The teardown is fire-and-forget — it runs async against
+  /// the still-alive engine [_ref] (the engine Provider outlives any
+  /// single listening session). Subsequent stopListening calls on an
+  /// already-stopped engine no-op.
   void stopListening() {
+    if (!_isListening) return; // idempotent — only fire teardown on transition
     _isListening = false;
+
+    // Snapshot the apply gate before clearing, so the async teardown
+    // dispatch below cannot race with a re-entrant start/stop.
+    final shouldTeardown = _hasAppliedThisSession;
+    _hasCapturedThisSession = false;
+    _hasAppliedThisSession = false;
+
+    if (shouldTeardown) {
+      unawaited(_executeTeardown());
+    }
+
     _commandSubscription?.close();
     _commandSubscription = null;
     _scheduledExecution?.cancel();
     _scheduledExecution = null;
-    debugPrint('Stopped neighborhood sync listener');
+    debugPrint(
+      'Stopped neighborhood sync listener'
+      '${shouldTeardown ? ' (teardown dispatched)' : ''}',
+    );
   }
 
   /// Schedules local pattern execution based on the command's timing.
@@ -393,6 +436,20 @@ class NeighborhoodSyncEngine {
         return;
       }
 
+      // ── PRE-SYNC SCENE CAPTURE ─────────────────────────────────────
+      // First applicable command per listening session: snapshot the
+      // member's current WLED state BEFORE the apply, so Stop-Sync
+      // teardown can fall back to this state when no schedule item /
+      // autopilot item resolves. Awaited inline so the snapshot is
+      // guaranteed to reflect PRE-sync state (no race with the apply
+      // below). Failures are swallowed by capturePreSyncScene — a
+      // null snapshot just makes the teardown fall through to the off
+      // tier, which is the correct conservative behavior.
+      if (!_hasCapturedThisSession) {
+        _hasCapturedThisSession = true;
+        await _captureSnapshotForFirstCommand(command.groupId, wledRepo);
+      }
+
       // Build single-seg-no-id with fx. The applyJson chokepoint
       // ([expandForParticipation] in wled_payload_utils.dart) reads the
       // persisted cache and rule-7-expands this entry per participating
@@ -414,6 +471,13 @@ class NeighborhoodSyncEngine {
       final success = await wledRepo.applyJson(payload);
 
       if (success) {
+        // Mark this session as having sync-altered the device. The
+        // Stop-Sync teardown only fires when this flag is set —
+        // members whose participation gate skipped every apply leave
+        // the flag false, so stopListening doesn't tear down state
+        // that was never sync-altered.
+        _hasAppliedThisSession = true;
+
         debugPrint('Pattern applied successfully: ${memberPattern.name}');
         if (command.hasPerHouseAssignments) {
           debugPrint('Per-house assignment: effect=${memberPattern.effectId}, '
@@ -434,6 +498,125 @@ class NeighborhoodSyncEngine {
       debugPrint('Error executing sync pattern: $e');
     }
   }
+
+  /// First-command pre-sync scene capture. Awaited inline by
+  /// [_executePattern] so the snapshot reflects pre-apply state. The
+  /// helper itself swallows getState() errors and returns null on
+  /// failure — a null capture leaves [preSyncSceneProvider] untouched,
+  /// which makes the eventual teardown fall through to the off tier
+  /// (the conservative safe default).
+  Future<void> _captureSnapshotForFirstCommand(
+    String groupId,
+    WledRepository repo,
+  ) async {
+    final label = _ref.read(activePresetLabelProvider);
+    final scene = await capturePreSyncScene(
+      groupId: groupId,
+      repo: repo,
+      activeLabel: label,
+    );
+    if (scene == null) {
+      debugPrint('Pre-sync capture: null snapshot (offline / empty / error)');
+      return;
+    }
+    _ref.read(preSyncSceneProvider.notifier).state = scene;
+    debugPrint(
+      'Pre-sync capture: snapshot stored for $groupId '
+      '(label="${scene.activeLabel}", capturedAt=${scene.capturedAt.toIso8601String()})',
+    );
+  }
+
+  /// Distributed Stop-Sync teardown: each member resolves its own
+  /// correct state locally and applies it. Fired by [stopListening]
+  /// on the true listening→not-listening transition.
+  ///
+  /// Priority (locked by [resolveCurrentMemberState] and the
+  /// [executeMemberTeardown] orchestrator):
+  ///   1. active schedule item right now (with payload) → apply
+  ///   2. active autopilot item right now → apply
+  ///   3. fresh pre-sync scene captured at sync start → apply + label
+  ///   4. → off
+  ///
+  /// All applies route through [WledRepository.applyJson] → the
+  /// chokepoint, so participation is respected on restore (a
+  /// non-participating channel won't receive the restore payload).
+  /// The pre-sync scene is cleared after consumption so the next
+  /// session captures fresh.
+  Future<MemberTeardownAction?> _executeTeardown() async {
+    final repo = _ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      debugPrint('Teardown skip: no WLED repo');
+      return null;
+    }
+
+    final activeSchedule = _ref.read(currentScheduledActionProvider);
+    final scheduler = _ref.read(autopilotSchedulerProvider);
+    final activeAutopilot = currentAutopilotItemFor(
+      activeSchedule: scheduler.activeSchedule,
+      now: DateTime.now(),
+    );
+    final preSyncScene = _ref.read(preSyncSceneProvider);
+    final activeGroupId = _ref.read(activeNeighborhoodIdProvider);
+
+    try {
+      final action = await executeMemberTeardown(
+        activeSchedule: activeSchedule,
+        activeAutopilot: activeAutopilot,
+        preSyncScene: preSyncScene,
+        activeGroupId: activeGroupId,
+        now: DateTime.now(),
+        repo: repo,
+        restorePresetLabel: (label) {
+          if (label == null || label.isEmpty) return;
+          _ref
+              .read(activePresetLabelProvider.notifier)
+              .setLabelWithFingerprint(label, _ref.read(wledStateProvider));
+        },
+        clearPreSyncScene: () {
+          _ref.read(preSyncSceneProvider.notifier).state = null;
+        },
+      );
+      debugPrint('Sync teardown executed: ${action.runtimeType}');
+      return action;
+    } catch (e) {
+      debugPrint('Sync teardown failed: $e');
+      return null;
+    }
+  }
+
+  /// @visibleForTesting accessors so unit tests can drive the engine
+  /// without a full Riverpod-listen wire-up.
+
+  @visibleForTesting
+  bool get hasCapturedForTest => _hasCapturedThisSession;
+
+  @visibleForTesting
+  bool get hasAppliedForTest => _hasAppliedThisSession;
+
+  @visibleForTesting
+  bool get isListeningForTest => _isListening;
+
+  /// Flips the listening flag so tests can exercise the teardown branch
+  /// of [stopListening] without standing up a Riverpod listener.
+  @visibleForTesting
+  void setListeningForTest({required bool listening}) {
+    _isListening = listening;
+  }
+
+  /// Sets the applied flag so tests can simulate "this session did
+  /// apply something" without driving the full _executePattern path
+  /// (which depends on a lot of providers that aren't relevant to
+  /// teardown-specific assertions).
+  @visibleForTesting
+  void setHasAppliedForTest({required bool hasApplied}) {
+    _hasAppliedThisSession = hasApplied;
+  }
+
+  /// Direct test hook for the teardown — equivalent to calling
+  /// stopListening() with the apply gate true, but exposes the
+  /// resolved MemberTeardownAction so tests can assert it.
+  @visibleForTesting
+  Future<MemberTeardownAction?> executeTeardownForTest() => _executeTeardown();
 
   /// Disposes of resources.
   void dispose() {

@@ -88,5 +88,41 @@ Future<PreSyncScene?> capturePreSyncScene({
 ///
 /// One active group at a time, one snapshot at a time. Set to null
 /// when there is no active sync (or to clear after a teardown that
-/// consumed the snapshot). Mutated by the Phase 2 sync-start hook.
+/// consumed the snapshot). Mutated by the sync-start hook in
+/// [NeighborhoodSyncEngine] and cleared by the teardown executor.
 final preSyncSceneProvider = StateProvider<PreSyncScene?>((ref) => null);
+
+/// Default maximum staleness for a pre-sync snapshot before the
+/// teardown executor treats it as stale and falls through to the
+/// next priority tier.
+///
+/// 12 hours: longer than the longest reasonable single sync session
+/// (e.g. an all-night Christmas / July 4 broadcast — see PausedSessionState
+/// for the longForm session shape) but short enough to bail on
+/// day-after stale snapshots if the app was killed mid-session and a
+/// next-day stop is triggered against state that no longer reflects
+/// the user's actual "before sync" condition.
+const Duration kPreSyncSceneMaxStaleness = Duration(hours: 12);
+
+/// True when [scene] is fresh enough to be restored at teardown.
+///
+/// Stale criteria (any of these → returns false):
+///   • [scene] is null
+///   • [scene.groupId] mismatches the (possibly null) [activeGroupId] —
+///     guards against group-switch mid-session (snapshot from group A
+///     must not restore for group B)
+///   • [now] − [scene.capturedAt] > [maxStaleness]
+///
+/// Callers treat the scene as absent when this returns false and
+/// fall through to the next priority tier (autopilot → off).
+bool isPreSyncSceneFresh({
+  required PreSyncScene? scene,
+  required String? activeGroupId,
+  required DateTime now,
+  Duration maxStaleness = kPreSyncSceneMaxStaleness,
+}) {
+  if (scene == null) return false;
+  if (scene.groupId != activeGroupId) return false;
+  if (now.difference(scene.capturedAt) > maxStaleness) return false;
+  return true;
+}
