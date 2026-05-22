@@ -491,6 +491,21 @@ class NeighborhoodSyncEngine {
           colorSequence: memberPattern.colorObjects,
           effectName: memberPattern.name,
         );
+
+        // Fan the sync design name out to the Now Playing label so the
+        // dashboard's preset chip reflects the active sync immediately —
+        // without this the label stays at whatever pre-sync state it
+        // held, then never updates on teardown for non-scene tiers
+        // (Bug 3 in the cache-refresh audit). Teardown clears/restores
+        // the label per tier; this is the matching start-side write.
+        if (memberPattern.name.isNotEmpty) {
+          _ref
+              .read(activePresetLabelProvider.notifier)
+              .setLabelWithFingerprint(
+                memberPattern.name,
+                _ref.read(wledStateProvider),
+              );
+        }
       } else {
         debugPrint('Failed to apply pattern');
       }
@@ -532,16 +547,17 @@ class NeighborhoodSyncEngine {
   ///
   /// Priority (locked by [resolveCurrentMemberState] and the
   /// [executeMemberTeardown] orchestrator):
-  ///   1. active schedule item right now (with payload) → apply
-  ///   2. active autopilot item right now → apply
+  ///   1. active schedule item right now (with payload) → apply + label
+  ///   2. active autopilot item right now → apply + label
   ///   3. fresh pre-sync scene captured at sync start → apply + label
-  ///   4. → off
+  ///   4. → off + clear label
   ///
   /// All applies route through [WledRepository.applyJson] → the
   /// chokepoint, so participation is respected on restore (a
   /// non-participating channel won't receive the restore payload).
   /// The pre-sync scene is cleared after consumption so the next
-  /// session captures fresh.
+  /// session captures fresh. The participation cache is cleared
+  /// alongside so the dashboard channel-selector chips un-strike.
   Future<MemberTeardownAction?> _executeTeardown() async {
     final repo = _ref.read(wledRepositoryProvider);
     if (repo == null) {
@@ -575,13 +591,36 @@ class NeighborhoodSyncEngine {
         now: DateTime.now(),
         repo: repo,
         restorePresetLabel: (label) {
-          if (label == null || label.isEmpty) return;
-          _ref
-              .read(activePresetLabelProvider.notifier)
-              .setLabelWithFingerprint(label, _ref.read(wledStateProvider));
+          // null = clear (off tier). Non-empty = set + fingerprint.
+          // Empty string is a no-op safety net so a tier-source field
+          // that happens to be empty doesn't wipe a label the user
+          // expects to keep. The TurnOff tier passes literal null so
+          // it always clears regardless of any upstream empties.
+          final notifier =
+              _ref.read(activePresetLabelProvider.notifier);
+          if (label == null) {
+            notifier.clear();
+          } else if (label.isNotEmpty) {
+            notifier.setLabelWithFingerprint(
+              label,
+              _ref.read(wledStateProvider),
+            );
+          }
         },
         clearPreSyncScene: () {
           _ref.read(preSyncSceneProvider.notifier).state = null;
+        },
+        restoreParticipation: () {
+          // Sync's [_executePattern] writes the participation cache on
+          // every apply but nothing clears it on teardown, so the
+          // dashboard channel-selector chips stayed strike-through
+          // across sync sessions until app relaunch reloaded the cache
+          // from disk (which mirrored the same value). Clearing to
+          // null here restores the "no preference = all channels"
+          // default that the applyJson chokepoint and the dashboard
+          // gate both treat as the open state. Fire-and-forget — never
+          // block teardown completion on the SharedPreferences write.
+          unawaited(saveLocalParticipatingChannels(null));
         },
         participating: participating,
       );

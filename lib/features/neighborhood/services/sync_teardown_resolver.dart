@@ -162,12 +162,23 @@ AutopilotScheduleItem? currentAutopilotItemFor({
 ///   3. Resolve the action via [resolveCurrentMemberState].
 ///   4. Apply it via [repo.applyJson] — routes through the chokepoint
 ///      so participation is respected on restore too.
-///   5. Restore the Now Playing label only for the [ApplyPreSyncScene]
-///      tier (mirrors Game Day's setLabelWithFingerprint pattern). When
-///      [scene.activeLabel] is null, the restorePresetLabel callback is
-///      still invoked with null — the engine's wiring may choose to
-///      no-op on null vs explicit clear.
-///   6. Call [clearPreSyncScene] so the next sync session captures fresh.
+///   5. Restore the Now Playing label for ALL four tiers, sourcing the
+///      label from the tier itself:
+///        • [ApplySchedule]      → `item.actionLabel`
+///        • [ApplyAutopilot]     → `item.patternName`
+///        • [ApplyPreSyncScene]  → `scene.activeLabel`
+///        • [TurnOff]            → null (the engine wiring treats null
+///                                  as "clear" so the dashboard's Now
+///                                  Playing chip empties when lights
+///                                  go off)
+///      The label is fed into [restorePresetLabel] verbatim; the
+///      engine-side wiring decides null/empty/non-empty semantics.
+///   6. Call [restoreParticipation] so the dashboard channel selector's
+///      strike-through clears — sync writes the participation cache on
+///      every apply but nothing clears it post-teardown, so without
+///      this callback the cache stays at the sync-time value until app
+///      relaunch (Bug 2 in the cache-refresh audit).
+///   7. Call [clearPreSyncScene] so the next sync session captures fresh.
 ///
 /// Returns the [MemberTeardownAction] that was executed (helpful for
 /// the engine's debug log and the test assertions).
@@ -180,6 +191,7 @@ Future<MemberTeardownAction> executeMemberTeardown({
   required WledRepository repo,
   required void Function(String? label) restorePresetLabel,
   required void Function() clearPreSyncScene,
+  void Function()? restoreParticipation,
   Duration maxStaleness = kPreSyncSceneMaxStaleness,
   List<int>? participating,
 }) async {
@@ -225,15 +237,19 @@ Future<MemberTeardownAction> executeMemberTeardown({
     case ApplySchedule(:final item):
       // wledPayload non-null guaranteed by the usableSchedule filter.
       await apply(item.wledPayload!);
+      restorePresetLabel(item.actionLabel);
     case ApplyAutopilot(:final item):
       await apply(item.wledPayload);
+      restorePresetLabel(item.patternName);
     case ApplyPreSyncScene(:final scene):
       await apply(scene.wledPayload);
       restorePresetLabel(scene.activeLabel);
     case TurnOff():
       await apply(const <String, dynamic>{'on': false});
+      restorePresetLabel(null);
   }
 
+  restoreParticipation?.call();
   clearPreSyncScene();
   return action;
 }

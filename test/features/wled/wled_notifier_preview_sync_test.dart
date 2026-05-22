@@ -235,7 +235,7 @@ void main() {
       expect(container.read(wledStateProvider).colorSequence.length, 3);
 
       // 2. Simulate the next poll arriving ~150ms later (well inside the
-      //    2s suppression window). The parser would normally strip the
+      //    3.5s suppression window). The parser would normally strip the
       //    middle slot — the suppression guard must prevent that write.
       notifier.applyStateDataForTest(_polledState(
         fx: 17,
@@ -250,12 +250,57 @@ void main() {
       // The as-sent 3-color sequence survives. If the suppression guard
       // were missing, this would be 2 colors (black stripped).
       expect(container.read(wledStateProvider).colorSequence.length, 3,
-          reason: 'poll within 2s window must not overwrite local color seq');
+          reason: 'poll within 3.5s window must not overwrite local color seq');
       expect(container.read(wledStateProvider).colorSequence[1],
           const Color(0xFF000000),
           reason: 'middle (black) slot must survive — drift bug otherwise');
       expect(container.read(wledStateProvider).effectId, 17,
           reason: 'effectId stays at locally-applied value');
+    });
+
+    test(
+        'poll at 2.5s post-apply (between OLD 2s window and NEW 3.5s window) '
+        'is still suppressed — locks the Fix-1 widened window so a slow '
+        'effect echo cannot clobber after the original 2s boundary closes',
+        () async {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+
+      notifier.applyPreviewSync(
+        colors: const [
+          Color(0xFFFF0000),
+          Color(0xFF000000),
+          Color(0xFF0000FF),
+        ],
+        effectId: 17,
+        effectName: 'Twinkle',
+      );
+
+      // Backdate exactly 2.5s — past the OLD 2s cutoff (would have let a
+      // poll through) but inside the NEW 3500ms window (must still
+      // suppress). If the constant ever shrinks back below 2500ms this
+      // test fires.
+      notifier.debugSetLastLocalApplyAtForTest(
+        DateTime.now().subtract(const Duration(milliseconds: 2500)),
+      );
+
+      notifier.applyStateDataForTest(_polledState(
+        fx: 17,
+        cols: const [
+          [255, 0, 0],
+          [0, 0, 0],
+          [0, 0, 255],
+        ],
+      ));
+      await _settle();
+
+      expect(container.read(wledStateProvider).colorSequence.length, 3,
+          reason:
+              'poll at 2.5s must still be suppressed under the widened window');
+      expect(container.read(wledStateProvider).colorSequence[1],
+          const Color(0xFF000000));
     });
 
     test('connected + presetId still update from poll within window',
@@ -319,11 +364,11 @@ void main() {
         effectName: 'Twinkle',
       );
 
-      // Backdate the suppression timestamp past the 2s window. This is the
-      // test-only knob added on the notifier so tests don't need to wait
-      // 2 real seconds.
+      // Backdate the suppression timestamp past the 3.5s window. Tests
+      // don't need to wait that long in wall time — the @visibleForTesting
+      // knob rewinds the stamp directly.
       notifier.debugSetLastLocalApplyAtForTest(
-        DateTime.now().subtract(const Duration(seconds: 3)),
+        DateTime.now().subtract(const Duration(seconds: 4)),
       );
 
       // Now poll — the polled (lossy) sequence should apply normally.
@@ -340,7 +385,7 @@ void main() {
       // Polled lossy version applies: parser stripped the [0,0,0] slot.
       expect(container.read(wledStateProvider).colorSequence.length, 2,
           reason:
-              'after 2s window, polled state resumes overwriting (lossy parse)');
+              'after 3.5s window, polled state resumes overwriting (lossy parse)');
     });
 
     test('effectId drift from device DOES update after window', () async {
@@ -359,7 +404,7 @@ void main() {
       );
 
       notifier.debugSetLastLocalApplyAtForTest(
-        DateTime.now().subtract(const Duration(seconds: 3)),
+        DateTime.now().subtract(const Duration(seconds: 4)),
       );
 
       notifier.applyStateDataForTest(_polledState(

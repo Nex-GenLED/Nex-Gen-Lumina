@@ -341,11 +341,18 @@ class WledNotifier extends Notifier<WledStateModel> {
   ///
   /// The user-facing apply paths bypass `_postUpdate` and call `applyJson`
   /// directly, so the regular 1.5s periodic poller is the clobber source.
-  /// With a 1.5s poll cadence, a 2s window covers the next poll cycle plus
-  /// a small buffer. Remote mode (10s cadence) sees no poll inside the
-  /// window so the guard is a no-op there.
+  /// Window sizing math (local mode, 1.5s poll cadence):
+  ///   need ≥ poll_cadence + max_observed_echo_lag
+  /// On-device validation of the 2s window showed a slow-effect residual
+  /// race where the device's `/json/state` echo lagged >2s; a poll fired
+  /// between window-close (2s) and next-cycle (3s) read the stale device
+  /// state and clobbered. 3500ms covers two full poll cycles (3.0s) plus
+  /// a 500ms buffer for slower effect transitions while still letting
+  /// external visual-field changes surface within ~4s. Remote mode (10s
+  /// cadence) sees no poll inside the window so the guard is a no-op there.
   DateTime? _lastLocalApplyAt;
-  static const _kLocalApplyPollSuppressWindow = Duration(seconds: 2);
+  static const _kLocalApplyPollSuppressWindow =
+      Duration(milliseconds: 3500);
 
   bool _isPollOverwriteSuppressed() {
     final at = _lastLocalApplyAt;
