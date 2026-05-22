@@ -311,8 +311,10 @@ class _ColorwayEffectSelectorPageState
       }
     }
 
-    // Always update local preview state so roofline shows on house image
-    ref.read(wledStateProvider.notifier).applyLocalPreview(
+    // Always update local preview AND Explore hero from the as-sent payload.
+    // Single chokepoint also arms poll-overwrite suppression so the home
+    // dashboard preview doesn't snap back to the device's (lossy) echo.
+    ref.read(wledStateProvider.notifier).applyPreviewSync(
       colors: previewColors,
       effectId: fxId,
       speed: speed,

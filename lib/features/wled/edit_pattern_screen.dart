@@ -93,7 +93,21 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       return;
     }
     payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-    await repo.applyJson(payload);
+    final ok = await repo.applyJson(payload);
+    if (!ok || !mounted) return;
+    // Drive the dashboard hero preview and Explore hero from the as-sent
+    // pattern so navigating home shows the new look immediately, without
+    // waiting for the next poll. Also arms poll-overwrite suppression so
+    // the just-applied colors don't snap to the device's lossy echo.
+    ref.read(wledStateProvider.notifier).applyPreviewSync(
+      colors: _pattern.actionColors,
+      effectId: _pattern.effectId,
+      effectName: _pattern.name,
+      speed: _pattern.speed,
+      intensity: _pattern.intensity,
+      brightness: _pattern.brightness,
+      colorGroupSize: _pattern.colorGroupSize,
+    );
   }
 
   Future<void> _savePattern() async {

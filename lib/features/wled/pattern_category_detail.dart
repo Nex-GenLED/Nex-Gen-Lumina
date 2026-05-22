@@ -103,14 +103,17 @@ class _GradientPatternCard extends ConsumerWidget {
             }
             payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
             await repo.applyJson(payload);
-            ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(data.name, ref.read(wledStateProvider));
-            ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+            // Update home dashboard preview AND Explore hero from the
+            // as-sent payload + arm poll-overwrite suppression.
+            ref.read(wledStateProvider.notifier).applyPreviewSync(
               colors: data.colors,
               effectId: data.effectId,
+              effectName: data.name,
               speed: data.speed,
+              intensity: data.intensity,
               brightness: data.brightness,
-              name: data.name,
             );
+            ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(data.name, ref.read(wledStateProvider));
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${data.name} applied!')));
             }

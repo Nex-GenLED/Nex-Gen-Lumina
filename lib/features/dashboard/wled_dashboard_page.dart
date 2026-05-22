@@ -1182,7 +1182,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 if (success) {
                   try {
                     final preview = _extractPreviewFromPayload(payload);
-                    ref.read(wledStateProvider.notifier).applyLocalPreview(
+                    ref.read(wledStateProvider.notifier).applyPreviewSync(
                       colors: preview.colors,
                       effectId: preview.effectId,
                       speed: preview.speed,
@@ -1193,7 +1193,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     );
                     ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
                   } catch (e) {
-                    debugPrint('Error in AI suggestion applyLocalPreview: $e');
+                    debugPrint('Error in AI suggestion applyPreviewSync: $e');
                   }
                 }
                 ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
@@ -1251,7 +1251,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               if (success) {
                 try {
                   final preview = _extractPreviewFromPayload(payload);
-                  ref.read(wledStateProvider.notifier).applyLocalPreview(
+                  ref.read(wledStateProvider.notifier).applyPreviewSync(
                     colors: preview.colors,
                     effectId: preview.effectId,
                     speed: preview.speed,
@@ -1261,7 +1261,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     spacing: preview.spacing,
                   );
                 } catch (e) {
-                  debugPrint('Error in favorite grid applyLocalPreview: $e');
+                  debugPrint('Error in favorite grid applyPreviewSync: $e');
                 }
                 try { ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(favorite.patternName, ref.read(wledStateProvider)); } catch (e) {
                   debugPrint('Error in favorite grid set active label: $e');

@@ -1697,31 +1697,25 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       final patternGrp = (firstSeg['grp'] as int?) ?? 1;
       final patternSpc = (firstSeg['spc'] as int?) ?? 0;
 
-      // Update preview immediately so home screen roofline matches device
+      // Update preview immediately so home screen roofline AND Explore hero
+      // match the as-sent payload. Single chokepoint writes both sinks +
+      // arms poll-overwrite suppression so the next poll doesn't snap the
+      // visual fields back to the device's (lossy) echo of the same colors.
       try {
-        ref.read(wledStateProvider.notifier).applyLocalPreview(
+        ref.read(wledStateProvider.notifier).applyPreviewSync(
           colors: activeColors,
           effectId: appliedFx,
           speed: patternSpeed,
           intensity: patternIntensity,
           effectName: widget.pattern.name,
+          brightness: preparedPayload['bri'] as int? ?? 255,
           colorGroupSize: patternGrp,
           spacing: patternSpc,
         );
       } catch (e) {
-        debugPrint('Error in pattern grid applyLocalPreview: $e');
+        debugPrint('Error in pattern grid applyPreviewSync: $e');
       }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(widget.pattern.name, ref.read(wledStateProvider));
-      // Update Explore page roofline preview
-      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-        colors: activeColors,
-        effectId: appliedFx,
-        speed: patternSpeed,
-        brightness: preparedPayload['bri'] as int? ?? 255,
-        name: widget.pattern.name,
-        colorGroupSize: patternGrp,
-        spacing: patternSpc,
-      );
 
       if (context.mounted) {
         // Show pattern adjustment panel in a bottom sheet
