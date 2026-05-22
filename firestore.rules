@@ -838,9 +838,28 @@ service cloud.firestore {
     }
 
     // ── Demo Leads (pre-auth lead capture) ──
+    //
+    // The demo flow runs UNAUTHENTICATED end-to-end. The anonymous demo
+    // session needs to:
+    //   - create a lead (submitLead)
+    //   - get-by-known-ID the lead it just created
+    //     (_triggerContactRequestNotification reads it to compose the
+    //     consultation-request email body)
+    //   - update the lead (markDemoCompleted, logContactRequest)
+    //
+    // The previous rule `allow read, update: if request.auth != null || true`
+    // had a `|| true` that allowed UNAUTHENTICATED `list` queries to
+    // enumerate every prospect's PII (name, email, phone, zipCode).
+    //
+    // Split read into get/list: get-by-ID stays open (capability gated by
+    // the unguessable ~120-bit Firestore auto-ID, which only the demo
+    // session that created the doc knows). `list` is restricted to
+    // admin/owner claims so bulk enumeration is blocked.
     match /demo_leads/{leadId} {
       allow create: if true;
-      allow read, update: if request.auth != null || true; // Leads may be read/updated during demo flow before auth
+      allow get: if true;
+      allow list: if hasAdminOrOwnerClaim();
+      allow update: if true;
       allow delete: if false; // Only admins via Firebase console
     }
 
