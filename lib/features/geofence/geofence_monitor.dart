@@ -245,7 +245,13 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       }
 
       if (payload != null) {
-        await repo.applyJson(payload);
+        // Route the geofence-triggered apply through the chokepoint so
+        // the dashboard + roofline preview + Now Playing chip all
+        // reflect the action that just fired (e.g. "Welcome Home").
+        // Bare repo.applyJson would leave Now Playing stale.
+        await ref
+            .read(wledStateProvider.notifier)
+            .applyPayloadWithLabel(payload, labelHint: actionName);
       } else {
         await _applyFallback(actionName, repo);
       }

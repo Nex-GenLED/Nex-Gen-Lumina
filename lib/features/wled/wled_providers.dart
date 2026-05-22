@@ -20,6 +20,14 @@ import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 
+/// Defensive int coercion used by [WledNotifier.applyPayloadWithLabel] when
+/// reading WLED JSON payload fields that may be `int`, `num`, or absent.
+int? _asInt(Object? v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return null;
+}
+
 /// Connectivity status stream that checks if user is on home network.
 ///
 /// Polls every 10 seconds using the user's saved homeSsidHash from their
@@ -973,6 +981,107 @@ class WledNotifier extends Notifier<WledStateModel> {
         spacing: spacing,
       );
     }
+  }
+
+  /// Persistent-pattern apply chokepoint for non-user writers (schedule,
+  /// autopilot, scene, geofence, Game Day, AI design, etc.).
+  ///
+  /// Wraps [WledRepository.applyJson] and on success fans the change out to
+  /// the same three UI surfaces the cluster fix already paired manually at
+  /// each call site:
+  ///
+  ///   • [wledStateProvider] + [explorePreviewProvider] via [applyPreviewSync]
+  ///     (visual cache + dashboard / Explore roofline hero)
+  ///   • [activePresetLabelProvider] via [setLabelWithFingerprint]
+  ///     (Now Playing chip) — ONLY when [labelHint] is non-null
+  ///
+  /// [labelHint] semantics — important:
+  ///   • Non-null  → PERSISTENT pattern change (scheduled, autopilot, scene,
+  ///     geofence, manually applied). Updates label.
+  ///   • null      → TRANSIENT effect (score-celebration flash, override-
+  ///     restore returning to prior state). Device write + visual cache
+  ///     update happens but Now Playing stays at whatever persistent
+  ///     pattern the user had — the flash does not steal the label.
+  ///
+  /// Payload extraction is defensive: missing fields fall back to current
+  /// state. A `{'on': false}` power-off payload is handled specially —
+  /// only [wledStateProvider.isOn] is updated; the explorePreview hero and
+  /// the label are left alone (the cluster fix's TurnOff teardown owns
+  /// the label-clear-on-off case separately).
+  ///
+  /// Returns whatever [WledRepository.applyJson] returned. On a write
+  /// failure no provider is mutated.
+  Future<bool> applyPayloadWithLabel(
+    Map<String, dynamic> payload, {
+    required String? labelHint,
+    bool updateExplorePreview = true,
+  }) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) return false;
+
+    final success = await repo.applyJson(payload);
+    if (!success) return false;
+
+    // Power-off short-circuit: don't fan a black-render to the preview hero.
+    if (payload['on'] == false) {
+      state = state.copyWith(isOn: false);
+      if (labelHint != null) {
+        ref
+            .read(activePresetLabelProvider.notifier)
+            .setLabelWithFingerprint(labelHint, state);
+      }
+      return true;
+    }
+
+    final current = state;
+    Map<String, dynamic>? firstSeg;
+    final segs = payload['seg'];
+    if (segs is List && segs.isNotEmpty && segs.first is Map) {
+      firstSeg = Map<String, dynamic>.from(segs.first as Map);
+    }
+
+    final effectId = _asInt(firstSeg?['fx']) ?? current.effectId;
+    final speed = _asInt(firstSeg?['sx']) ?? current.speed;
+    final intensity = _asInt(firstSeg?['ix']) ?? current.intensity;
+    final brightness = _asInt(payload['bri']) ?? current.brightness;
+
+    List<Color> colors;
+    final colArr = firstSeg?['col'];
+    if (colArr is List && colArr.isNotEmpty) {
+      colors = colArr.whereType<List>().take(3).map((c) {
+        final r = c.isNotEmpty ? (_asInt(c[0]) ?? 0) : 0;
+        final g = c.length > 1 ? (_asInt(c[1]) ?? 0) : 0;
+        final b = c.length > 2 ? (_asInt(c[2]) ?? 0) : 0;
+        return Color.fromARGB(
+          255,
+          r.clamp(0, 255),
+          g.clamp(0, 255),
+          b.clamp(0, 255),
+        );
+      }).toList();
+    } else {
+      colors = current.colorSequence.isNotEmpty
+          ? current.colorSequence
+          : const [Colors.white];
+    }
+
+    applyPreviewSync(
+      colors: colors,
+      effectId: effectId,
+      effectName: labelHint,
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      updateExplorePreview: updateExplorePreview,
+    );
+
+    if (labelHint != null) {
+      ref
+          .read(activePresetLabelProvider.notifier)
+          .setLabelWithFingerprint(labelHint, state);
+    }
+
+    return true;
   }
 
   /// Test-only knob: rewind the poll-suppression timestamp so the next

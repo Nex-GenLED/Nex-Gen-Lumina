@@ -134,37 +134,35 @@ final favoriteScenesProvider = Provider<AsyncValue<List<Scene>>>((ref) {
 /// Apply a scene to the connected device
 final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
   return (scene) async {
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return false;
+    if (ref.read(wledRepositoryProvider) == null) return false;
 
     try {
       final payload = scene.toWledPayload();
       debugPrint('🎬 Applying scene "${scene.name}": $payload');
-      final success = await repo.applyJson(payload);
+
+      // Route the device write + label + visual cache through the
+      // applyPayloadWithLabel chokepoint. The prior bare applyJson left
+      // explorePreviewProvider stale (the roofline hero kept showing the
+      // pre-scene render). The chokepoint fans wledState + explorePreview
+      // + activePresetLabel together.
+      final success = await ref
+          .read(wledStateProvider.notifier)
+          .applyPayloadWithLabel(payload, labelHint: scene.name);
 
       // Immediately update local state with scene colors and preset label
       // This prevents the UI from showing stale colors during the polling delay
       if (success) {
-        // Update the active preset label
-        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(scene.name, ref.read(wledStateProvider));
-
-        // Convert preview colors to Color objects for the color sequence
-        final colorSequence = scene.previewColors
-            .where((c) => c.length >= 3 && (c[0] > 0 || c[1] > 0 || c[2] > 0))
-            .map((c) => Color.fromARGB(255, c[0], c[1], c[2]))
-            .toList();
-
-        // Extract color names for display
+        // Extract color names for display — scene knows the named-color
+        // strings (e.g. "Crimson", "Gold") which the chokepoint doesn't
+        // preserve. Re-apply via setLuminaPatternMetadata so the
+        // dashboard's color-name chips show the scene's labels rather
+        // than falling back to RGB hex.
         final colorNames = scene.previewColors
             .map((c) => _colorToName(c))
             .toSet()
             .toList();
-
-        // Update the wled state with scene colors immediately
         ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-          colorSequence: colorSequence,
           colorNames: colorNames,
-          effectName: scene.name,
         );
 
         // Also update brightness if specified

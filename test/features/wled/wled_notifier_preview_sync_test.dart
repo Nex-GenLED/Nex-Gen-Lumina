@@ -1,11 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// Recording fake repository — captures `applyJson` payloads and lets the
+/// test control the success/failure response. Used by the
+/// `applyPayloadWithLabel` tests below to drive the chokepoint helper
+/// through device-write success and failure branches without real IO.
+class _RecordingWledRepository extends _FakeWledRepository {
+  bool applyJsonShouldSucceed = true;
+  final List<Map<String, dynamic>> applyJsonCalls = [];
+
+  @override
+  Future<bool> applyJson(Map<String, dynamic> payload) async {
+    applyJsonCalls.add(Map<String, dynamic>.from(payload));
+    return applyJsonShouldSucceed;
+  }
+}
+
+ProviderContainer _makeContainerWithRepo(_RecordingWledRepository repo) {
+  return ProviderContainer(overrides: [
+    wledRepositoryProvider.overrideWith((ref) => repo),
+    wledConnectivityStatusProvider.overrideWith(
+      (ref) => Stream<ConnectivityStatus>.value(ConnectivityStatus.local),
+    ),
+  ]);
+}
 
 /// Minimal stub repository — preview-sync tests don't exercise device IO,
 /// they drive the notifier through its test-only entry points.
@@ -418,6 +443,193 @@ void main() {
       expect(container.read(wledStateProvider).effectId, 42,
           reason: 'external effect changes surface after the window');
       expect(container.read(wledStateProvider).colorSequence.length, 1);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // applyPayloadWithLabel — chokepoint for non-user writers (schedule,
+  // autopilot, scene, geofence, etc.). Fans wledState + explorePreview +
+  // (optionally) activePresetLabel from a raw WLED payload.
+  // ─────────────────────────────────────────────────────────────────────────
+  group('applyPayloadWithLabel — fans payload + visuals + label together',
+      () {
+    test(
+        'persistent labelHint updates ALL three sinks: wledState + '
+        'explorePreview + activePresetLabel', () async {
+      final repo = _RecordingWledRepository();
+      final container = _makeContainerWithRepo(repo);
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+
+      // Pre-set label to a sentinel so we can verify it changed.
+      container.read(activePresetLabelProvider.notifier).state = 'Sentinel';
+
+      final ok = await notifier.applyPayloadWithLabel(
+        const {
+          'on': true,
+          'bri': 220,
+          'seg': [
+            {
+              'fx': 12,
+              'sx': 80,
+              'ix': 180,
+              'col': [
+                [255, 0, 0],
+                [0, 255, 0],
+              ],
+            },
+          ],
+        },
+        labelHint: 'Scheduled USA',
+      );
+
+      expect(ok, isTrue);
+      expect(repo.applyJsonCalls.length, 1);
+
+      final wState = container.read(wledStateProvider);
+      expect(wState.effectId, 12);
+      expect(wState.speed, 80);
+      expect(wState.intensity, 180);
+      expect(wState.brightness, 220);
+      expect(wState.isOn, isTrue);
+      expect(wState.colorSequence.length, 2);
+      expect(wState.colorSequence[0], const Color(0xFFFF0000));
+      expect(wState.colorSequence[1], const Color(0xFF00FF00));
+
+      final ePreview = container.read(explorePreviewProvider);
+      expect(ePreview, isNotNull);
+      expect(ePreview!.effectId, 12);
+      expect(ePreview.name, 'Scheduled USA');
+
+      expect(container.read(activePresetLabelProvider), 'Scheduled USA',
+          reason: 'persistent labelHint must update Now Playing');
+    });
+
+    test(
+        'null labelHint (TRANSIENT effect) updates visuals but does NOT '
+        'touch the label — flash must not steal Now Playing', () async {
+      final repo = _RecordingWledRepository();
+      final container = _makeContainerWithRepo(repo);
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+
+      // User had a persistent pattern playing; its label is in place.
+      container.read(activePresetLabelProvider.notifier).state =
+          'Holiday Sparkle';
+
+      final ok = await notifier.applyPayloadWithLabel(
+        const {
+          'on': true,
+          'seg': [
+            {
+              'fx': 88,
+              'col': [
+                [255, 255, 255],
+              ],
+            },
+          ],
+        },
+        labelHint: null,
+      );
+
+      expect(ok, isTrue);
+      expect(container.read(wledStateProvider).effectId, 88,
+          reason: 'visual cache still updates so dashboard reflects the flash');
+      expect(container.read(activePresetLabelProvider), 'Holiday Sparkle',
+          reason:
+              'null labelHint must leave the user-facing label untouched');
+    });
+
+    test('power-off payload only flips isOn — preview/label untouched',
+        () async {
+      final repo = _RecordingWledRepository();
+      final container = _makeContainerWithRepo(repo);
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+
+      // Pre-populate explorePreview with a sentinel to verify it survives.
+      container.read(explorePreviewProvider.notifier).state =
+          const ExplorePreviewState(
+        colors: [Color(0xFFFF00FF)],
+        effectId: 7,
+        name: 'Pre-off sentinel',
+      );
+
+      final ok = await notifier.applyPayloadWithLabel(
+        const {'on': false},
+        labelHint: null,
+      );
+
+      expect(ok, isTrue);
+      expect(container.read(wledStateProvider).isOn, isFalse);
+      expect(container.read(explorePreviewProvider)?.name, 'Pre-off sentinel',
+          reason: 'off-payload must not clobber the roofline preview hero');
+    });
+
+    test('applyJson failure → no provider mutation', () async {
+      final repo = _RecordingWledRepository()..applyJsonShouldSucceed = false;
+      final container = _makeContainerWithRepo(repo);
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+      container.read(activePresetLabelProvider.notifier).state =
+          'Unchanged Label';
+
+      final priorEffect = container.read(wledStateProvider).effectId;
+
+      final ok = await notifier.applyPayloadWithLabel(
+        const {
+          'on': true,
+          'seg': [
+            {'fx': 99}
+          ],
+        },
+        labelHint: 'Should Not Land',
+      );
+
+      expect(ok, isFalse);
+      expect(container.read(wledStateProvider).effectId, priorEffect);
+      expect(container.read(activePresetLabelProvider), 'Unchanged Label',
+          reason: 'label must not change when the device write failed');
+    });
+
+    test(
+        'partial payload (brightness-only) falls back to current state for '
+        'effect/colors so visuals stay coherent', () async {
+      final repo = _RecordingWledRepository();
+      final container = _makeContainerWithRepo(repo);
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+
+      // Establish a current state via applyPreviewSync.
+      notifier.applyPreviewSync(
+        colors: const [Color(0xFFFF0000), Color(0xFF00FF00)],
+        effectId: 17,
+        effectName: 'Twinkle',
+        speed: 90,
+        intensity: 140,
+        brightness: 200,
+      );
+
+      // Apply a brightness-only payload (no seg).
+      final ok = await notifier.applyPayloadWithLabel(
+        const {'on': true, 'bri': 120},
+        labelHint: 'Dimmed Twinkle',
+      );
+
+      expect(ok, isTrue);
+      final wState = container.read(wledStateProvider);
+      expect(wState.brightness, 120,
+          reason: 'brightness from the payload lands');
+      expect(wState.effectId, 17,
+          reason: 'effect falls back to current state when seg.fx absent');
+      expect(wState.colorSequence.length, 2,
+          reason: 'colors fall back to current sequence');
+      expect(container.read(activePresetLabelProvider), 'Dimmed Twinkle');
     });
   });
 }

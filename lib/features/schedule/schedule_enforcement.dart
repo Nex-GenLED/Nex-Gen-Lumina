@@ -194,8 +194,16 @@ class ScheduleEnforcementService {
       bool success;
 
       if (schedule.hasWledPayload) {
-        // Apply the full WLED payload
-        success = await repo.applyJson(schedule.wledPayload!);
+        // Route through the applyPayloadWithLabel chokepoint so wledState +
+        // explorePreview + activePresetLabel all reflect the fired schedule.
+        // Bare repo.applyJson here would leave Now Playing stale (the
+        // SCHEDULE-FIRE bug confirmed on device).
+        success = await _ref
+            .read(wledStateProvider.notifier)
+            .applyPayloadWithLabel(
+              schedule.wledPayload!,
+              labelHint: schedule.actionLabel,
+            );
       } else if (schedule.presetId != null) {
         // Load the preset
         success = await repo.loadPreset(schedule.presetId!);
