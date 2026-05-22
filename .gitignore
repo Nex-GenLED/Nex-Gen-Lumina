@@ -138,6 +138,8 @@ scripts/_diag_command_routing.sh
 scripts/diag-output-*.log
 scripts/_diag_firestore_pull.js
 scripts/diag-firestore-*.json
+scripts/_diag_bridge_errors.js
+scripts/diag-bridge-errors-*.json
 
 # Catalog seeder — run once to seed the canonical SKU list, then forget.
 # Per Tyler's request, kept out of source control to discourage re-runs.
