@@ -10,7 +10,8 @@ import 'package:nexgen_command/widgets/roofline_light_painter.dart';
 ///
 /// This widget manages its own animation controller and responds to:
 /// - Live WLED device state (colors, effects, brightness)
-/// - Preview state from Lumina AI suggestions
+/// - Per-instance preview overrides via the `previewColors` /
+///   `previewEffectId` / `previewSpeed` constructor parameters.
 ///
 /// When a multi-segment RooflineConfiguration exists, renders each segment
 /// independently with per-channel color/effect support. Falls back to the
@@ -99,9 +100,6 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     // Get live WLED state
     final wledState = ref.watch(wledStateProvider);
 
-    // Get AR preview state (from Lumina AI)
-    final arPreview = ref.watch(arPreviewProvider);
-
     // Get multi-segment configuration if available
     final rooflineConfig = ref.watch(currentRooflineConfigProvider).valueOrNull;
     final hasSegments = rooflineConfig != null &&
@@ -123,12 +121,6 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
       effectiveSpeed = (rawSpeed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = widget.forceOn ?? true;
-    } else if (arPreview.isActive) {
-      effectiveColors = arPreview.colors;
-      effectiveEffectId = arPreview.effectId;
-      effectiveSpeed = (arPreview.speed * 0.5).round().clamp(0, 150);
-      effectiveBrightness = widget.brightness ?? 255;
-      isOn = true;
     } else {
       effectiveColors = wledState.displayColors;
       effectiveEffectId = wledState.effectId;
