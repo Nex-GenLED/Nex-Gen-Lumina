@@ -196,10 +196,11 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 180, 100)],
         effectId: 0,
         effectName: 'Warm White',
+        updateExplorePreview: false,
       );
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Warm White', ref.read(wledStateProvider));
       return '✓ Applying warm white';
@@ -230,11 +231,12 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 255, 255)],
         effectId: 0,
         brightness: 255,
         effectName: 'Bright White',
+        updateExplorePreview: false,
       );
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Bright White', ref.read(wledStateProvider));
       return '✓ Applying bright white';
@@ -268,7 +270,7 @@ class VoiceCommandHandler {
       };
 
       await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [
           const Color.fromARGB(255, 255, 0, 0),
           const Color.fromARGB(255, 0, 255, 0),
@@ -276,6 +278,7 @@ class VoiceCommandHandler {
         effectId: 28,
         speed: 150,
         effectName: 'Festive',
+        updateExplorePreview: false,
       );
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Festive', ref.read(wledStateProvider));
       return '✓ Applying festive pattern';

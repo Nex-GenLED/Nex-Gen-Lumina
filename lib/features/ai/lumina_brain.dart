@@ -460,18 +460,21 @@ class LuminaBrain {
         ]
       });
 
-      // Update local preview so the dashboard reflects the change immediately
+      // Update local preview so the dashboard reflects the change immediately.
+      // Audio intent doesn't originate from the Explore screen and uses a
+      // placeholder cyan color, so leave the Explore hero alone.
       try {
-        ref.read(wledStateProvider.notifier).applyLocalPreview(
+        ref.read(wledStateProvider.notifier).applyPreviewSync(
           colors: [const Color(0xFF00D4FF)],
           effectId: chosenId,
           effectName: chosenName,
           brightness: 220,
           speed: 128,
           intensity: 180,
+          updateExplorePreview: false,
         );
       } catch (e) {
-        debugPrint('Audio intent applyLocalPreview error: $e');
+        debugPrint('Audio intent applyPreviewSync error: $e');
       }
     }
 

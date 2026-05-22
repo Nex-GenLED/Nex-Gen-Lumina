@@ -24,7 +24,8 @@ void main() {
   group('executeMemberTeardown — per-tier apply', () {
     final now = DateTime.utc(2026, 5, 22, 21, 0);
 
-    test('tier 1 (schedule with payload): applies schedule.wledPayload', () async {
+    test('tier 1 (schedule with payload): applies schedule.wledPayload + '
+        'restores label from actionLabel', () async {
       final repo = _RecordingRepo();
       final clearCalls = _Counter();
       final labelCalls = <String?>[];
@@ -43,8 +44,9 @@ void main() {
       expect(action, isA<ApplySchedule>());
       expect(repo.applyCalls, hasLength(1));
       expect(repo.applyCalls.single, {'on': true, 'bri': 200});
-      expect(labelCalls, isEmpty,
-          reason: 'label restoration is scene-tier only');
+      expect(labelCalls, equals(<String?>['Warm White']),
+          reason: 'schedule tier restores Now Playing label from actionLabel '
+              '(Fix 2 in the cache-refresh audit — all 4 tiers now restore)');
       expect(clearCalls.value, 1,
           reason: 'clearPreSyncScene runs after every successful teardown');
     });
@@ -653,6 +655,172 @@ void main() {
         clearPreSyncScene: clearCalls.inc,
       );
       expect(clearCalls.value, 1);
+    });
+  });
+
+  group('executeMemberTeardown — label fanout across all four tiers (Fix 2)',
+      () {
+    final now = DateTime.utc(2026, 5, 22, 21, 0);
+
+    test('schedule tier emits actionLabel verbatim', () async {
+      final labelCalls = <String?>[];
+      await executeMemberTeardown(
+        activeSchedule: _scheduleItem(payload: {'on': true}),
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: labelCalls.add,
+        clearPreSyncScene: () {},
+      );
+      expect(labelCalls, equals(<String?>['Warm White']));
+    });
+
+    test('autopilot tier emits patternName verbatim', () async {
+      final labelCalls = <String?>[];
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: _autopilotItem(),
+        preSyncScene: null,
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: labelCalls.add,
+        clearPreSyncScene: () {},
+      );
+      expect(labelCalls, equals(<String?>['Royals Heritage']),
+          reason: 'autopilot tier sources the label from item.patternName');
+    });
+
+    test('scene tier still emits scene.activeLabel (regression guard)',
+        () async {
+      final labelCalls = <String?>[];
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: _scene(label: 'Manual Warm White'),
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: labelCalls.add,
+        clearPreSyncScene: () {},
+      );
+      expect(labelCalls, equals(<String?>['Manual Warm White']));
+    });
+
+    test('off tier emits null so the engine clears the label', () async {
+      final labelCalls = <String?>[];
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: null,
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: labelCalls.add,
+        clearPreSyncScene: () {},
+      );
+      expect(labelCalls, equals(<String?>[null]),
+          reason: 'off tier MUST pass literal null — the engine-side wiring '
+              'treats null as "clear" (vs empty-string no-op) so the Now '
+              'Playing chip empties when lights go off');
+    });
+
+    test('schedule wins priority + still emits its label even when other '
+        'tiers had data', () async {
+      final labelCalls = <String?>[];
+      await executeMemberTeardown(
+        activeSchedule: _scheduleItem(payload: {'on': true}),
+        activeAutopilot: _autopilotItem(),
+        preSyncScene: _scene(label: 'unused-scene-label'),
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: labelCalls.add,
+        clearPreSyncScene: () {},
+      );
+      expect(labelCalls, equals(<String?>['Warm White']),
+          reason: 'exactly one label fires per teardown — the winning tier');
+    });
+  });
+
+  group('executeMemberTeardown — restoreParticipation callback (Fix 3)', () {
+    final now = DateTime.utc(2026, 5, 22, 21, 0);
+
+    test('restoreParticipation fires once after the off tier', () async {
+      final partCalls = _Counter();
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: null,
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        restoreParticipation: partCalls.inc,
+      );
+      expect(partCalls.value, 1);
+    });
+
+    test('restoreParticipation fires after every winning tier', () async {
+      final partCallsSchedule = _Counter();
+      final partCallsAutopilot = _Counter();
+      final partCallsScene = _Counter();
+
+      await executeMemberTeardown(
+        activeSchedule: _scheduleItem(payload: {'on': true}),
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        restoreParticipation: partCallsSchedule.inc,
+      );
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: _autopilotItem(),
+        preSyncScene: null,
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        restoreParticipation: partCallsAutopilot.inc,
+      );
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: _scene(),
+        activeGroupId: 'g1',
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        restoreParticipation: partCallsScene.inc,
+      );
+
+      expect(partCallsSchedule.value, 1);
+      expect(partCallsAutopilot.value, 1);
+      expect(partCallsScene.value, 1);
+    });
+
+    test('restoreParticipation null callback is silently skipped (back-compat '
+        'guard so older callers that don\'t pass it don\'t break)', () async {
+      // No `restoreParticipation` argument — the executor must not crash.
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: null,
+        now: now,
+        repo: _RecordingRepo(),
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+      );
     });
   });
 }

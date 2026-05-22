@@ -21,6 +21,7 @@ import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/pre_sync_scene_snapshot.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -33,6 +34,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     resetParticipationCacheForTest();
+    resetActivePresetLabelCacheForTest();
   });
 
   group('capture-once-per-listening-session', () {
@@ -238,6 +240,125 @@ void main() {
           reason: 'group-switched scene is stale → off-fallback');
     });
   });
+
+  group('Fix 2 — Now Playing label fans out across sync lifecycle', () {
+    test(
+        '_executePattern success: activePresetLabelProvider is set to the '
+        'sync design name (matching the start-side write the audit named)',
+        () async {
+      final repo = _CapturingRepo(applyJsonReturns: true);
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0, 1]),
+        deviceChannels: const [_ch0, _ch1],
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      // Pre-condition: label empty.
+      expect(container.read(activePresetLabelProvider), isNull);
+
+      await engine.executePatternForTest(_baseCommand());
+
+      expect(container.read(activePresetLabelProvider), 'Test Pattern',
+          reason:
+              'sync start must fan the design name into the Now Playing label '
+              '— without this, non-scene teardown tiers had no source label to '
+              'restore from (Bug 3 in the cache-refresh audit)');
+    });
+
+    test(
+        'teardown off-tier clears the label so Now Playing empties when '
+        'lights go off (no schedule/autopilot/scene to fall back on)',
+        () async {
+      final repo = _CapturingRepo();
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0, 1]),
+        deviceChannels: const [_ch0, _ch1],
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      // Seed a label so we can observe the clear.
+      container
+          .read(activePresetLabelProvider.notifier)
+          // ignore: deprecated_member_use_from_same_package
+          .state = 'Sync-In-Progress Label';
+      expect(container.read(activePresetLabelProvider), isNotNull);
+
+      await engine.executeTeardownForTest();
+
+      expect(container.read(activePresetLabelProvider), isNull,
+          reason:
+              'off-tier passes literal null → engine wiring clears the label');
+    });
+
+    test(
+        'teardown scene-tier restores the label from scene.activeLabel '
+        '(regression guard — this tier already restored pre-Fix-2)',
+        () async {
+      final repo = _CapturingRepo();
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0, 1]),
+        deviceChannels: const [_ch0, _ch1],
+        activeGroupId: 'g1',
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: const {'on': true, 'bri': 128, 'tag': 'pre-sync'},
+          activeLabel: 'Manual Warm White',
+          capturedAt: DateTime.now(),
+        ),
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      // Seed a different label to ensure the restore actually changed it
+      // (not just absence of clobber).
+      container
+          .read(activePresetLabelProvider.notifier)
+          // ignore: deprecated_member_use_from_same_package
+          .state = 'Sync-In-Progress Label';
+
+      await engine.executeTeardownForTest();
+
+      expect(container.read(activePresetLabelProvider), 'Manual Warm White');
+    });
+  });
+
+  group('Fix 3 — participation cache restored on teardown', () {
+    test(
+        'teardown clears the participation cache so dashboard chips '
+        'un-strike without needing an app relaunch', () async {
+      // Pre-condition: simulate the sync engine having previously written
+      // a narrowed participation list (e.g. only channel 0 participates).
+      // The dashboard's channel-selector strike-through reads this cache,
+      // so the stale value is what causes the bug.
+      await saveLocalParticipatingChannels(const [0]);
+      expect(peekCachedParticipatingChannels(), equals(const [0]),
+          reason: 'pre-condition: cache populated by prior sync apply');
+
+      final repo = _CapturingRepo();
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0]),
+        deviceChannels: const [_ch0, _ch1],
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      await engine.executeTeardownForTest();
+
+      // The engine wires restoreParticipation → saveLocalParticipatingChannels(null).
+      // That setter updates the in-memory cache SYNCHRONOUSLY before its
+      // SharedPreferences await — so peek must return null immediately.
+      expect(peekCachedParticipatingChannels(), isNull,
+          reason: 'teardown must clear the participation cache. Stale cache '
+              'is what keeps the dashboard chip strike-through after sync '
+              'stops (Bug 2 in the cache-refresh audit).');
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,9 +422,15 @@ ProviderContainer _makeContainer({
 /// calls. getState() returns the configured fixture (or null) so the
 /// capture path can be exercised without a real controller.
 class _CapturingRepo implements WledRepository {
-  _CapturingRepo({this.stateToReturn});
+  _CapturingRepo({this.stateToReturn, this.applyJsonReturns = false});
 
   final Map<String, dynamic>? stateToReturn;
+
+  /// Configurable applyJson result. Default false matches existing teardown
+  /// tests (which only care about the call payload, not what runs in the
+  /// engine's `if (success)` branch). The Fix-2 sync-start tests need true
+  /// so the post-apply setLabelWithFingerprint path actually fires.
+  final bool applyJsonReturns;
 
   int getStateCallCount = 0;
   int get applyCallCount => applyCalls.length;
@@ -320,7 +447,7 @@ class _CapturingRepo implements WledRepository {
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     applyCalls.add(Map<String, dynamic>.from(payload));
-    return false; // false → skip the wledStateProvider notifier branch
+    return applyJsonReturns;
   }
 
   @override

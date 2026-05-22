@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
@@ -332,6 +333,33 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// [_applyStateData] for the full lifecycle.
   bool _hasPolledOnce = false;
 
+  /// Wall-clock time of the most recent [applyLocalPreview] /
+  /// [applyPreviewSync] call. Within [_kLocalApplyPollSuppressWindow] of
+  /// this stamp, [_applyStateData] skips writes to the visual fields the
+  /// local apply just owned — preventing the polled (lossy) representation
+  /// of the device state from clobbering the as-sent preview.
+  ///
+  /// The user-facing apply paths bypass `_postUpdate` and call `applyJson`
+  /// directly, so the regular 1.5s periodic poller is the clobber source.
+  /// Window sizing math (local mode, 1.5s poll cadence):
+  ///   need ≥ poll_cadence + max_observed_echo_lag
+  /// On-device validation of the 2s window showed a slow-effect residual
+  /// race where the device's `/json/state` echo lagged >2s; a poll fired
+  /// between window-close (2s) and next-cycle (3s) read the stale device
+  /// state and clobbered. 3500ms covers two full poll cycles (3.0s) plus
+  /// a 500ms buffer for slower effect transitions while still letting
+  /// external visual-field changes surface within ~4s. Remote mode (10s
+  /// cadence) sees no poll inside the window so the guard is a no-op there.
+  DateTime? _lastLocalApplyAt;
+  static const _kLocalApplyPollSuppressWindow =
+      Duration(milliseconds: 3500);
+
+  bool _isPollOverwriteSuppressed() {
+    final at = _lastLocalApplyAt;
+    if (at == null) return false;
+    return DateTime.now().difference(at) < _kLocalApplyPollSuppressWindow;
+  }
+
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
@@ -462,6 +490,12 @@ class WledNotifier extends Notifier<WledStateModel> {
   void _applyStateData(Map<String, dynamic> data) {
     final prevPresetId = state.presetId;
     final prevEffectId = state.effectId;
+    // Within the post-apply window, polled writes to fields the local apply
+    // just owned are suppressed so the dashboard preview reflects the
+    // as-sent payload instead of snapping to the device's (lossy) echo.
+    // Non-visual fields (paletteId, presetId, reverse, connected) update
+    // either way — external state changes still surface.
+    final suppressVisual = _isPollOverwriteSuppressed();
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
     int speed = state.speed;
@@ -536,7 +570,7 @@ class WledNotifier extends Notifier<WledStateModel> {
           }
         }
 
-        if (primaryColor != null) {
+        if (primaryColor != null && !suppressVisual) {
           state = state.copyWith(
             color: primaryColor,
             warmWhite: ww,
@@ -546,19 +580,31 @@ class WledNotifier extends Notifier<WledStateModel> {
       }
     }
 
-    state = state.copyWith(
-      isOn: isOn,
-      brightness: bri,
-      speed: speed,
-      intensity: intensity,
-      effectId: effectId,
-      paletteId: paletteId,
-      presetId: ps,
-      reverse: reverse,
-      colorGroupSize: colorGroupSize,
-      spacing: spacing,
-      connected: true,
-    );
+    if (suppressVisual) {
+      // Visual fields owned by [applyLocalPreview] (isOn, brightness, speed,
+      // intensity, effectId, colorGroupSize, spacing, color, colorSequence)
+      // stay at their just-applied values. Non-visual fields still update.
+      state = state.copyWith(
+        paletteId: paletteId,
+        presetId: ps,
+        reverse: reverse,
+        connected: true,
+      );
+    } else {
+      state = state.copyWith(
+        isOn: isOn,
+        brightness: bri,
+        speed: speed,
+        intensity: intensity,
+        effectId: effectId,
+        paletteId: paletteId,
+        presetId: ps,
+        reverse: reverse,
+        colorGroupSize: colorGroupSize,
+        spacing: spacing,
+        connected: true,
+      );
+    }
 
     // Mark that we have received a live fetch
     ref.read(wledStateFreshProvider.notifier).state = true;
@@ -854,6 +900,10 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// applying spacing patterns (e.g. "1 On 2 Off") so the home dashboard
   /// roofline preview matches the device. They reset to defaults (1/0) when
   /// not provided so non-spaced patterns clear any previous spacing.
+  ///
+  /// Also arms the poll-overwrite suppression window so the next ~2s of
+  /// polls don't clobber these just-applied visual fields with the device's
+  /// (lossy) echo of the same payload. See [_isPollOverwriteSuppressed].
   void applyLocalPreview({
     required List<Color> colors,
     required int effectId,
@@ -876,7 +926,61 @@ class WledNotifier extends Notifier<WledStateModel> {
       colorGroupSize: colorGroupSize,
       spacing: spacing,
     );
+    _lastLocalApplyAt = DateTime.now();
     debugPrint('🎨 Applied local preview: ${colors.length} colors, effect: $effectName, grp=$colorGroupSize spc=$spacing (offline OK)');
+  }
+
+  /// Single chokepoint every user-initiated apply path routes through.
+  ///
+  /// Writes the as-sent payload to BOTH [wledStateProvider] (via
+  /// [applyLocalPreview]) AND [explorePreviewProvider] atomically, so the
+  /// dashboard hero and the Explore-page roofline hero stay aligned with
+  /// what was just sent to the device. Also arms the poll-overwrite
+  /// suppression window via [applyLocalPreview]'s timestamp side effect.
+  ///
+  /// Pass [updateExplorePreview]:false for paths that should leave the
+  /// Explore hero alone (e.g. voice / audio modes that don't originate
+  /// from the Explore screen).
+  void applyPreviewSync({
+    required List<Color> colors,
+    required int effectId,
+    String? effectName,
+    int speed = 128,
+    int intensity = 128,
+    int brightness = 255,
+    int colorGroupSize = 1,
+    int spacing = 0,
+    bool updateExplorePreview = true,
+  }) {
+    applyLocalPreview(
+      colors: colors,
+      effectId: effectId,
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      effectName: effectName,
+      colorGroupSize: colorGroupSize,
+      spacing: spacing,
+    );
+    if (updateExplorePreview) {
+      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+        colors: colors,
+        effectId: effectId,
+        speed: speed,
+        brightness: brightness,
+        name: effectName ?? '',
+        colorGroupSize: colorGroupSize,
+        spacing: spacing,
+      );
+    }
+  }
+
+  /// Test-only knob: rewind the poll-suppression timestamp so the next
+  /// poll behaves as if the [_kLocalApplyPollSuppressWindow] has expired.
+  /// Lets tests verify post-window behavior without sleeping 2 real seconds.
+  @visibleForTesting
+  void debugSetLastLocalApplyAtForTest(DateTime? at) {
+    _lastLocalApplyAt = at;
   }
 
   /// Clears custom Lumina pattern metadata (e.g., when user manually adjusts pattern).

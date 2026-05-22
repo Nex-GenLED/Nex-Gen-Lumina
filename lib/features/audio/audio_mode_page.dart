@@ -82,10 +82,11 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     });
 
     if (success && mounted) {
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [NexGenPalette.cyan],
         effectId: effectId,
         effectName: effectName,
+        updateExplorePreview: false,
       );
     }
   }
@@ -108,10 +109,11 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     });
 
     if (success && mounted) {
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color(0xFFFFF4E5)],
         effectId: 0,
         effectName: 'Solid',
+        updateExplorePreview: false,
       );
     }
   }

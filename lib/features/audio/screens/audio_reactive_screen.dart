@@ -58,10 +58,11 @@ class _AudioReactiveScreenState extends ConsumerState<AudioReactiveScreen> {
 
     final success = await repo.applyJson(payload);
     if (success && mounted) {
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [NexGenPalette.cyan],
         effectId: effectId,
         effectName: effectName,
+        updateExplorePreview: false,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Applied: $effectName'), backgroundColor: Colors.green.shade700),
