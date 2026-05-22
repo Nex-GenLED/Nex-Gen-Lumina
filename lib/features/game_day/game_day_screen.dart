@@ -1579,28 +1579,7 @@ class _TeamPickerSheet extends ConsumerStatefulWidget {
 
 class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
   final _searchController = TextEditingController();
-  String? _categoryFilter;
-
-  // Category chips group leagues by sport so WNBA sits next to NBA under
-  // "Basketball" and NWSL next to MLS under "Soccer".
-  static final List<({String label, Set<SportType> sports})> _categories = [
-    (label: 'Football', sports: {SportType.nfl, SportType.ncaaFB}),
-    (
-      label: 'Basketball',
-      sports: {SportType.nba, SportType.wnba, SportType.ncaaMB},
-    ),
-    (label: 'Baseball', sports: {SportType.mlb}),
-    (label: 'Hockey', sports: {SportType.nhl}),
-    (
-      label: 'Soccer',
-      sports: {
-        SportType.mls,
-        SportType.nwsl,
-        SportType.fifa,
-        SportType.championsLeague,
-      },
-    ),
-  ];
+  SportType? _sportFilter;
 
   @override
   void initState() {
@@ -1619,11 +1598,8 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
   @override
   Widget build(BuildContext context) {
     var teams = ref.watch(gameDayFilteredTeamsProvider);
-    if (_categoryFilter != null) {
-      final allowed = _categories
-              .firstWhere((c) => c.label == _categoryFilter)
-              .sports;
-      teams = teams.where((e) => allowed.contains(e.value.sport)).toList();
+    if (_sportFilter != null) {
+      teams = teams.where((e) => e.value.sport == _sportFilter).toList();
     }
 
     return Column(
@@ -1685,24 +1661,22 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
         ),
         const SizedBox(height: 8),
 
-        // Sport filter chips
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+        // Sport filter chips — one per league, matches Neighborhood Sync picker.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(
+            runSpacing: 6,
             children: [
               _FilterChip(
                 label: 'All',
-                selected: _categoryFilter == null,
-                onTap: () => setState(() => _categoryFilter = null),
+                selected: _sportFilter == null,
+                onTap: () => setState(() => _sportFilter = null),
               ),
-              for (final category in _categories)
+              for (final sport in SportType.values)
                 _FilterChip(
-                  label: category.label,
-                  selected: _categoryFilter == category.label,
-                  onTap: () =>
-                      setState(() => _categoryFilter = category.label),
+                  label: sport.displayName,
+                  selected: _sportFilter == sport,
+                  onTap: () => setState(() => _sportFilter = sport),
                 ),
             ],
           ),
