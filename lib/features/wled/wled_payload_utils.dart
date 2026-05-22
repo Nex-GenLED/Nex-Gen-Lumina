@@ -239,6 +239,98 @@ Map<String, dynamic> expandForParticipation(
   return result;
 }
 
+/// Pre-applyJson defensive filter for **externally-sourced multi-seg-WITH-ids**
+/// payloads — surfaced by the Phase 2 Stop-Sync teardown audit.
+///
+/// **Why this exists separately from [expandForParticipation]:**
+/// The chokepoint's Rule 4 passes multi-seg payloads through unchanged
+/// ("caller built it that way intentionally"). That protection is
+/// load-bearing for legitimate multi-seg broadcasters (Bundle 3's
+/// [buildParticipatingSegArray] output, pixel-range animations in
+/// `lumina_custom_effects.dart`) — those callers pre-filter their seg
+/// arrays to participating ids themselves, so the chokepoint must not
+/// second-guess them.
+///
+/// The Stop-Sync teardown's scene tier breaks that assumption: it feeds
+/// the captured `getState()` snapshot to `applyJson`, and `getState()`
+/// returns the FULL device state — every seg the controller has —
+/// regardless of which channels the local user participates in. Rule 4
+/// then passes that multi-seg payload through, and the controller's
+/// non-participating segs get touched on Stop Sync. The hardware T5
+/// equivalent of this bug (controller .250 / participation=[0] / staged
+/// blue ch1 → restore force-lit ch1) is the merge-gate failure that
+/// blocks shipping without this filter.
+///
+/// **Discriminator** (mirrors the chokepoint where it makes sense; the
+/// shapes that pass through here also pass through the chokepoint, so
+/// applying this filter is always safe as a pre-step):
+///
+///   • [participating] is null or empty → pass-through. Matches
+///     chokepoint Rules 1 and 2 — "no preference / explicit none" is
+///     filtered upstream (the engine skips-apply on empty), not here.
+///   • Payload has no 'seg' or non-list seg → pass-through (top-level-
+///     only payload like `{'on': false}`, `{'bri': N}`).
+///   • Single-seg payload → pass-through. Chokepoint Rules 5 (id), 6
+///     (no fx), and 7 (broadcast intent) handle single-seg shapes
+///     correctly on their own — including the participation-aware
+///     expand of Rule 7.
+///   • Multi-seg where ANY entry LACKS an explicit id → pass-through.
+///     That's not the bug-shape signature (externally-sourced
+///     getState() output always has ids per seg); this is most likely a
+///     pixel-range animation or other intentional multi-seg the caller
+///     pre-filtered.
+///   • Multi-seg where EVERY entry has an explicit id → **FILTER**.
+///     Keep only those segs whose id is in [participating].
+///
+/// If filtering reduces the seg array to empty, the result rewrites to
+/// `{'on': false}` (master power off): zero participating segs matched
+/// the captured scene, so the safe behavior is to fall through to the
+/// off-tier semantically rather than POST a seg-less payload (which
+/// would leave the controller in whatever state it was in — the OLD
+/// "frozen on sync state" bug).
+///
+/// Pure function — no side effects, no input mutation. Does not read
+/// the participation cache; the caller (e.g. teardown executor) passes
+/// `participating` in to match what `WledService.applyJson` reads
+/// inside the chokepoint.
+Map<String, dynamic> filterMultiSegByParticipation(
+  Map<String, dynamic> payload,
+  List<int>? participating,
+) {
+  if (participating == null || participating.isEmpty) return payload;
+
+  final seg = payload['seg'];
+  if (seg is! List || seg.length < 2) return payload;
+
+  // Bug-shape signature: every entry must have an explicit id. If any
+  // lacks one, this isn't the externally-sourced getState() shape —
+  // leave for the chokepoint to handle.
+  for (final entry in seg) {
+    if (entry is! Map || !entry.containsKey('id')) return payload;
+  }
+
+  final allowed = participating.toSet();
+  final filtered = <Map<String, dynamic>>[];
+  for (final entry in seg) {
+    final id = (entry as Map)['id'];
+    if (id is int && allowed.contains(id)) {
+      filtered.add(Map<String, dynamic>.from(entry));
+    }
+  }
+
+  if (filtered.isEmpty) {
+    // No participating segs matched. Don't POST a seg-less payload —
+    // that would silently leave the controller in its prior state
+    // (the sync state, in the teardown case) which is the original
+    // freeze bug. Fall through to off semantically.
+    return const <String, dynamic>{'on': false};
+  }
+
+  final result = Map<String, dynamic>.from(payload);
+  result['seg'] = filtered;
+  return result;
+}
+
 /// Normalizes a WLED JSON API payload to prevent segment state carry-over.
 ///
 /// WLED only updates fields explicitly included in a POST /json/state payload.
