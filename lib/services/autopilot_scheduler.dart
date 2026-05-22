@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -158,14 +157,22 @@ class AutopilotScheduler {
       return;
     }
 
-    // Restore captured state
+    // Restore captured state. Route through applyPayloadWithLabel with
+    // labelHint:null — the override flash kept the user's persistent
+    // label intact (transient writes don't touch Now Playing), so the
+    // restore must not touch it either. Bare repo.applyJson here would
+    // leave the roofline preview hero stuck on the captured-state's
+    // visual cache from before the override (sibling of the
+    // AUTOPILOT-CHANGE preview-bug).
     if (token.capturedState != null && token.capturedState!.isNotEmpty) {
       try {
-        final repo = _ref.read(wledRepositoryProvider);
-        if (repo != null) {
-          await repo.applyJson(token.capturedState!);
-          debugPrint('AutopilotScheduler: State restored after override');
-        }
+        await _ref
+            .read(wledStateProvider.notifier)
+            .applyPayloadWithLabel(
+              token.capturedState!,
+              labelHint: null,
+            );
+        debugPrint('AutopilotScheduler: State restored after override');
       } catch (e) {
         debugPrint('AutopilotScheduler: Failed to restore state: $e');
       }
@@ -385,19 +392,20 @@ class AutopilotScheduler {
     debugPrint('AutopilotScheduler: Applying pattern "${item.patternName}"');
 
     try {
-      final repo = _ref.read(wledRepositoryProvider);
-      if (repo == null) {
-        debugPrint('AutopilotScheduler: No WLED repository available');
-        return;
-      }
-
-      // Apply the WLED payload
-      final success = await repo.applyJson(item.wledPayload);
+      // Route through the applyPayloadWithLabel chokepoint. The previous
+      // path called repo.applyJson directly + setLabelWithFingerprint
+      // manually, which left explorePreviewProvider stale — the
+      // AUTOPILOT-CHANGE bug (roofline preview showed the prior
+      // pattern's purple/white blend after a new item fired).
+      final success = await _ref
+          .read(wledStateProvider.notifier)
+          .applyPayloadWithLabel(
+            item.wledPayload,
+            labelHint: item.patternName,
+          );
 
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');
-
-        _ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.patternName, _ref.read(wledStateProvider));
 
         _addActivityLogEntry(AutopilotActivityEntry(
           timestamp: DateTime.now(),

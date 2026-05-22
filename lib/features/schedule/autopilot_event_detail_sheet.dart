@@ -463,8 +463,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
   }
 
   Future<void> _previewNow(BuildContext context, WidgetRef ref) async {
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null || event.wledPayload == null) {
+    if (ref.read(wledRepositoryProvider) == null || event.wledPayload == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No device connected')),
@@ -472,7 +471,16 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
       }
       return;
     }
-    final success = await repo.applyJson(event.wledPayload!);
+    // Route through the applyPayloadWithLabel chokepoint so the dashboard
+    // hero + roofline preview + Now Playing chip all reflect the previewed
+    // event. The prior bare applyJson left Now Playing stale on the
+    // previously-active label.
+    final success = await ref
+        .read(wledStateProvider.notifier)
+        .applyPayloadWithLabel(
+          event.wledPayload!,
+          labelHint: event.patternName,
+        );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

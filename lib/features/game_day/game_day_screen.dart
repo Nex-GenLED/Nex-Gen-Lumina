@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app_colors.dart';
-import '../../app_providers.dart' show activePresetLabelProvider;
 import '../../theme.dart';
 import '../../widgets/glass_app_bar.dart';
 import '../../widgets/section_header.dart';
@@ -463,8 +462,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // Use savedDesignPayload if available (user's custom design wins)
     final effectivePayload = config.savedDesignPayload ?? payload;
 
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
+    if (ref.read(wledRepositoryProvider) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -480,7 +478,19 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // Capture messenger up-front because the toggleAutopilot await below
     // can unmount this widget before we get to show the result snackbar.
     final messenger = ScaffoldMessenger.of(context);
-    final ok = await repo.applyJson(effectivePayload);
+
+    // Route through the applyPayloadWithLabel chokepoint so the dashboard
+    // hero + explorePreview + Now Playing all reflect the Game Day apply.
+    // The prior bare applyJson + manual setLabelWithFingerprint left
+    // explorePreview stale (sibling of AUTOPILOT-CHANGE preview bug).
+    // Uses shortTeamName to avoid wrapping (e.g. "Royals Game Day" instead
+    // of "Kansas City Royals Game Day").
+    final ok = await ref
+        .read(wledStateProvider.notifier)
+        .applyPayloadWithLabel(
+          effectivePayload,
+          labelHint: '${config.shortTeamName} Game Day',
+        );
     if (!context.mounted) return;
 
     if (ok) {
@@ -499,13 +509,6 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           // Non-fatal — lights are already lit. Live scoring just won't fire.
         }
       }
-
-      // Set the Now Playing label so the home dashboard reflects the
-      // game-day apply rather than falling through to the raw WLED
-      // effect name. Uses shortTeamName to avoid wrapping (e.g.
-      // "Royals Game Day" instead of "Kansas City Royals Game Day").
-      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(
-          '${config.shortTeamName} Game Day', ref.read(wledStateProvider));
     }
 
     messenger.showSnackBar(
