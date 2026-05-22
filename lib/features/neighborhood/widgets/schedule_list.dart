@@ -13,6 +13,8 @@ import '../../wled/pattern_explore_screen.dart';
 import '../../wled/wled_providers.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
+import '../providers/group_autopilot_providers.dart';
+import 'group_autopilot_schedule_card.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN WIDGET
@@ -37,6 +39,13 @@ class NeighborhoodScheduleList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final schedulesAsync = ref.watch(neighborhoodSchedulesProvider);
+    // Convergence Phase 2 (additive): surface the persistent
+    // GroupGameDayAutopilot doc as a card in the schedule list. This
+    // gives the previously-orphan [GroupAutopilotScheduleCard] its
+    // first mount point and pairs with the host-broadcast wiring in
+    // sync_control_panel.dart that now writes the config.
+    final groupAutopilot =
+        ref.watch(groupAutopilotConfigProvider).valueOrNull;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,6 +56,12 @@ class NeighborhoodScheduleList extends ConsumerWidget {
           onAdd: () => _showCreateChooser(context, ref),
         ),
         const SizedBox(height: 12),
+
+        // ── Group Game Day Autopilot card (additive Phase 2) ──────────────
+        if (groupAutopilot != null && groupAutopilot.enabled) ...[
+          GroupAutopilotScheduleCard(config: groupAutopilot),
+          const SizedBox(height: 12),
+        ],
 
         // ── Schedule list ─────────────────────────────────────────────────
         schedulesAsync.when(

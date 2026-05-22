@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../wled/library_hierarchy_models.dart';
 import '../../wled/pattern_providers.dart';
 import '../../wled/wled_models.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
+import '../providers/group_autopilot_providers.dart';
 import '../services/group_autopilot_service.dart';
+import '../services/path2_host_broadcast.dart';
 import 'game_day_setup_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -843,6 +846,18 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                         _gameDayConfig = result.config;
                         _selectedComplementTheme = result.config!.toComplementTheme();
                       });
+
+                      // Convergence Phase 2 (additive): when the host
+                      // tapped "Set Game Day for Whole Neighborhood",
+                      // persist a real GroupGameDayAutopilot doc via
+                      // configureForTeam — fixing the previously-dead
+                      // pushToGroup flag. The OLD complement-theme
+                      // setState above still runs (unchanged) so the
+                      // existing per-session flow is untouched; this
+                      // adds the persistent group-doc write next to it.
+                      if (result.pushToGroup && isHost) {
+                        await _broadcastGameDayToGroup(result.config!.teamSlug);
+                      }
                     }
                   } else {
                     setState(() {
@@ -1144,6 +1159,62 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   void _stopSync() {
     ref.read(neighborhoodNotifierProvider.notifier).stopSync();
     ref.read(syncEngineActiveProvider.notifier).state = false;
+  }
+
+  /// Convergence Phase 2 (additive): the host tapped "Set Game Day for
+  /// Whole Neighborhood" — look up the host's canonical Path 1 config
+  /// for the team and persist a [GroupGameDayAutopilot] via
+  /// configureForTeam. If the host has no Path 1 yet, surface a
+  /// snackbar instructing them to set it up first (deep-link UX lands
+  /// in Phase 2b).
+  ///
+  /// The existing complement-theme in-memory state-set continues to
+  /// run alongside this call; this method only ADDS the persistent
+  /// group-doc write that the previously-dead pushToGroup flag
+  /// implied but never delivered.
+  Future<void> _broadcastGameDayToGroup(String teamSlug) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final path1 = ref.read(teamAutopilotConfigProvider(teamSlug));
+    final service = ref.read(groupAutopilotServiceProvider);
+    final outcome = await broadcastPath1ToGroup(
+      configureForTeam: service.configureForTeam,
+      groupId: widget.group.id,
+      teamSlug: teamSlug,
+      path1Config: path1,
+    );
+    if (!mounted) return;
+    switch (outcome) {
+      case Path2HostBroadcastSucceeded(:final assembled):
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Game Day broadcast to ${assembled.activeMemberIds.length} '
+              '${assembled.activeMemberIds.length == 1 ? "house" : "houses"}.',
+            ),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      case Path2HostBroadcastNeedsPath1Setup():
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Set up Game Day Autopilot for this team first, then '
+              'broadcast.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      case Path2HostBroadcastFailed(:final error):
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Broadcast failed: $error'),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+    }
   }
 }
 
