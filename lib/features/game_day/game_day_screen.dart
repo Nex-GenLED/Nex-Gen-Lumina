@@ -15,6 +15,7 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
 import '../wled/wled_providers.dart';
+import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
 
@@ -439,29 +440,6 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     WidgetRef ref,
     GameDayAutopilotConfig config,
   ) async {
-    // Build the WLED payload directly from team colors
-    final primary = Color(config.primaryColorValue);
-    final secondary = Color(config.secondaryColorValue);
-    final payload = {
-      'on': true,
-      'bri': config.brightness.clamp(0, 255),
-      'seg': [
-        {
-          'fx': config.effectId,
-          'sx': config.speed,
-          'ix': config.intensity,
-          'pal': 0,
-          'col': [
-            [primary.red, primary.green, primary.blue, 0],
-            [secondary.red, secondary.green, secondary.blue, 0],
-          ],
-        }
-      ],
-    };
-
-    // Use savedDesignPayload if available (user's custom design wins)
-    final effectivePayload = config.savedDesignPayload ?? payload;
-
     if (ref.read(wledRepositoryProvider) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -479,18 +457,16 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // can unmount this widget before we get to show the result snackbar.
     final messenger = ScaffoldMessenger.of(context);
 
-    // Route through the applyPayloadWithLabel chokepoint so the dashboard
-    // hero + explorePreview + Now Playing all reflect the Game Day apply.
-    // The prior bare applyJson + manual setLabelWithFingerprint left
-    // explorePreview stale (sibling of AUTOPILOT-CHANGE preview bug).
-    // Uses shortTeamName to avoid wrapping (e.g. "Royals Game Day" instead
-    // of "Kansas City Royals Game Day").
-    final ok = await ref
-        .read(wledStateProvider.notifier)
-        .applyPayloadWithLabel(
-          effectivePayload,
-          labelHint: '${config.shortTeamName} Game Day',
-        );
+    // Convergence-Phase-2b: the payload build + apply routes through
+    // the shared [applyGameDayConfigToDevice] helper. The Path 2
+    // unified "Light it Up Now" button calls the SAME helper — both
+    // call sites must produce identical WLED payloads + labelHint
+    // shape so the .250 participation hardware probe's PASS holds.
+    final ok = await applyGameDayConfigToDevice(
+      applyPayloadWithLabel:
+          ref.read(wledStateProvider.notifier).applyPayloadWithLabel,
+      config: config,
+    );
     if (!context.mounted) return;
 
     if (ok) {

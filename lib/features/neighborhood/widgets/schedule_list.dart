@@ -5,8 +5,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app_colors.dart';
+import '../../../app_router.dart';
 import '../../../utils/time_format.dart';
 import '../../../widgets/schedule_type_badge.dart';
 import '../../wled/pattern_explore_screen.dart';
@@ -170,12 +172,11 @@ class NeighborhoodScheduleList extends ConsumerWidget {
   }
 
   void _openGameDayFlow(BuildContext context, WidgetRef ref) {
-    // Navigate to the existing GameDaySetupScreen
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const _GameDayScheduleWrapper(),
-      ),
-    );
+    // Convergence-Phase-2b: send the user to the Path 1 Fan Zone
+    // (canonical source of truth for Game Day team configs). The
+    // legacy [_GameDayScheduleWrapper] that lived here was a static
+    // placeholder pointing at the now-deleted GameDaySetupScreen.
+    context.push(AppRoutes.gameDay);
   }
 
   void _showScheduleDetails(BuildContext context, WidgetRef ref, SyncSchedule schedule) {
@@ -1261,60 +1262,6 @@ class _ScheduleTimeConfigSheetState
         );
       }
     }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// GAME DAY SCHEDULE WRAPPER
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// Placeholder wrapper that navigates to the existing Game Day Fan Zone
-/// team selection flow. When configuration is complete, it returns to the
-/// sync control center.
-class _GameDayScheduleWrapper extends StatelessWidget {
-  const _GameDayScheduleWrapper();
-
-  @override
-  Widget build(BuildContext context) {
-    // Use the existing GameDaySetupScreen from the neighborhood widgets
-    // This import is already available transitively
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: const Text('Game Day Autopilot'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.sports_football, size: 48, color: NexGenPalette.cyan),
-              SizedBox(height: 16),
-              Text(
-                'Game Day Autopilot',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Configure via the Game Day Fan Zone\nin your team settings.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 14),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 

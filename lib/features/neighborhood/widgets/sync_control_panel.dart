@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../wled/library_hierarchy_models.dart';
 import '../../wled/pattern_providers.dart';
 import '../../wled/wled_models.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
-import '../providers/group_autopilot_providers.dart';
 import '../services/group_autopilot_service.dart';
-import '../services/path2_host_broadcast.dart';
+import '../services/path1_complement_theme.dart';
+import '../services/path1_game_day_snapshot.dart';
 import 'game_day_setup_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -74,7 +73,13 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   ComplementTheme _selectedComplementTheme = ComplementThemes.july4th;
 
   // ── Game Day ───────────────────────────────────────────────────────────
-  GameDaySyncConfig? _gameDayConfig;
+  // Convergence-Phase-2b: this field now holds the Path 1 snapshot of
+  // the team the user picked in the new GameDayPath2Screen (which
+  // already lit up their lights + handled the optional broadcast
+  // internally). We only need the snapshot here to drive the
+  // complement-theme UI display and the sync-session effect/speed/
+  // intensity/brightness overrides in [_startSync].
+  Path1GameDaySnapshot? _gameDayPath1Snapshot;
 
   // ── Per-house customization ────────────────────────────────────────────
   bool _perHouseExpanded = false;
@@ -829,10 +834,10 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
             children: ComplementThemes.all.map((theme) {
               final isGameDay = theme.id == 'gameday';
               final isSelected = isGameDay
-                  ? _gameDayConfig != null && _selectedComplementTheme.id == 'gameday'
-                  : _selectedComplementTheme.id == theme.id && _gameDayConfig == null;
-              final displayTheme = (isGameDay && _gameDayConfig != null)
-                  ? _gameDayConfig!.toComplementTheme()
+                  ? _gameDayPath1Snapshot != null && _selectedComplementTheme.id == 'gameday'
+                  : _selectedComplementTheme.id == theme.id && _gameDayPath1Snapshot == null;
+              final displayTheme = (isGameDay && _gameDayPath1Snapshot != null)
+                  ? path1ToComplementTheme(_gameDayPath1Snapshot!)
                   : theme;
               return InkWell(
                 onTap: () async {
@@ -840,28 +845,26 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                     final currentMember = ref.read(currentUserMemberProvider);
                     final isHost = currentMember != null &&
                         currentMember.oderId == widget.group.creatorUid;
-                    final result = await showGameDaySetupFull(context, isHost: isHost);
-                    if (result.config != null && mounted) {
+                    // Convergence Phase 2b: the new GameDayPath2Screen
+                    // reads Path 1, handles the Light-it-Up apply +
+                    // optional broadcast inline (DECISION 1: explicit
+                    // host checkbox, default OFF), and returns the
+                    // snapshot of the team the user lit up. We only
+                    // need that snapshot here to bind the theme
+                    // display + the sync-session overrides.
+                    final snapshot = await showGameDayPath2Setup(
+                      context,
+                      isHost: isHost,
+                    );
+                    if (snapshot != null && mounted) {
                       setState(() {
-                        _gameDayConfig = result.config;
-                        _selectedComplementTheme = result.config!.toComplementTheme();
+                        _gameDayPath1Snapshot = snapshot;
+                        _selectedComplementTheme = path1ToComplementTheme(snapshot);
                       });
-
-                      // Convergence Phase 2 (additive): when the host
-                      // tapped "Set Game Day for Whole Neighborhood",
-                      // persist a real GroupGameDayAutopilot doc via
-                      // configureForTeam — fixing the previously-dead
-                      // pushToGroup flag. The OLD complement-theme
-                      // setState above still runs (unchanged) so the
-                      // existing per-session flow is untouched; this
-                      // adds the persistent group-doc write next to it.
-                      if (result.pushToGroup && isHost) {
-                        await _broadcastGameDayToGroup(result.config!.teamSlug);
-                      }
                     }
                   } else {
                     setState(() {
-                      _gameDayConfig = null;
+                      _gameDayPath1Snapshot = null;
                       _selectedComplementTheme = theme;
                     });
                   }
@@ -906,7 +909,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                           ],
                         ),
                       ),
-                      if (isGameDay && _gameDayConfig == null)
+                      if (isGameDay && _gameDayPath1Snapshot == null)
                         Text(
                           'Set up',
                           style: TextStyle(
@@ -1093,10 +1096,13 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
 
     if (_selectedSyncType == SyncType.complement) {
       // Complement mode: use theme + optional Game Day overrides
-      final effectOverride = _gameDayConfig?.effectId ?? 0;
-      final speed = _gameDayConfig?.speed ?? _selectedSpeed;
-      final intensity = _gameDayConfig?.intensity ?? _selectedIntensity;
-      final brightness = _gameDayConfig?.brightness ?? _selectedBrightness;
+      // (Phase 2b: overrides now come from the Path 1 snapshot, the
+      // single source of truth for per-team Game Day settings.)
+      final snap = _gameDayPath1Snapshot;
+      final effectOverride = snap?.effectId ?? 0;
+      final speed = snap?.speed ?? _selectedSpeed;
+      final intensity = snap?.intensity ?? _selectedIntensity;
+      final brightness = snap?.brightness ?? _selectedBrightness;
 
       command = engine.createComplementCommand(
         groupId: widget.group.id,
@@ -1159,62 +1165,6 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   void _stopSync() {
     ref.read(neighborhoodNotifierProvider.notifier).stopSync();
     ref.read(syncEngineActiveProvider.notifier).state = false;
-  }
-
-  /// Convergence Phase 2 (additive): the host tapped "Set Game Day for
-  /// Whole Neighborhood" — look up the host's canonical Path 1 config
-  /// for the team and persist a [GroupGameDayAutopilot] via
-  /// configureForTeam. If the host has no Path 1 yet, surface a
-  /// snackbar instructing them to set it up first (deep-link UX lands
-  /// in Phase 2b).
-  ///
-  /// The existing complement-theme in-memory state-set continues to
-  /// run alongside this call; this method only ADDS the persistent
-  /// group-doc write that the previously-dead pushToGroup flag
-  /// implied but never delivered.
-  Future<void> _broadcastGameDayToGroup(String teamSlug) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final path1 = ref.read(teamAutopilotConfigProvider(teamSlug));
-    final service = ref.read(groupAutopilotServiceProvider);
-    final outcome = await broadcastPath1ToGroup(
-      configureForTeam: service.configureForTeam,
-      groupId: widget.group.id,
-      teamSlug: teamSlug,
-      path1Config: path1,
-    );
-    if (!mounted) return;
-    switch (outcome) {
-      case Path2HostBroadcastSucceeded(:final assembled):
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Game Day broadcast to ${assembled.activeMemberIds.length} '
-              '${assembled.activeMemberIds.length == 1 ? "house" : "houses"}.',
-            ),
-            backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      case Path2HostBroadcastNeedsPath1Setup():
-        messenger.showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Set up Game Day Autopilot for this team first, then '
-              'broadcast.',
-            ),
-            backgroundColor: Colors.orange.shade800,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      case Path2HostBroadcastFailed(:final error):
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Broadcast failed: $error'),
-            backgroundColor: Colors.red.shade700,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-    }
   }
 }
 

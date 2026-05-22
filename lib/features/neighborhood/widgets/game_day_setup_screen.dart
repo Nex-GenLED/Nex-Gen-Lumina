@@ -1,158 +1,56 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
+// lib/features/neighborhood/widgets/game_day_setup_screen.dart
+//
+// Path 2 (Sync→Complement→Game Day) entry point. Convergence-Phase-2b
+// rewrites this file from a config builder into a Path 1 reader: the
+// canonical [GameDayAutopilotConfig] is the single source of truth for
+// team Game Day settings. This screen lets the user pick a team that
+// already has Path 1 configured (deep-linking to Path 1 setup when not)
+// and surfaces ONE "Light it Up Now" button + (for hosts) an explicit
+// "also broadcast" checkbox that defaults OFF (DECISION 1: never
+// auto-fanout).
+//
+// What the previous shape did and why it's gone:
+//   - Built an in-memory GameDaySyncConfig (effect/colors/sliders) that
+//     could diverge from the user's Path 1. Phase 2b deletes the
+//     duplicate; users edit Game Day settings ONLY in Path 1.
+//   - Had three buttons (Apply to My House / Set for Group / Set for
+//     Whole Neighborhood). Phase 2b collapses to one apply path with
+//     a host-only broadcast checkbox.
+//   - The Score Celebration toggle and the Game Day Autopilot toggle
+//     lived in Step 2. The autopilot toggle relocates into the new
+//     Step 2 preview (still useful: a host can enable/disable autopilot
+//     for the team while looking at the Light-it-Up confirm). The
+//     score-celebration toggle moves to Path 1's Game Day Fan Zone
+//     where the rest of the team config lives (no UI change needed —
+//     Path 1 already exposes it; the Path 2 duplicate is dropped).
+//
+// Decision 2 holds by construction: lightItUpNow routes the apply
+// through applyPayloadWithLabel — the same participation-respecting
+// chokepoint validated by the 2026-05-22 .250 hardware probe.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../../app_colors.dart';
+import '../../../app_router.dart';
 import '../../../theme.dart';
 import '../../../utils/time_format.dart';
 import '../../autopilot/game_day_autopilot_config.dart';
 import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../autopilot/game_day_autopilot_service.dart';
+import '../../game_day/light_it_up_now.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
-import '../../wled/wled_models.dart';
+import '../../wled/wled_providers.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
+import '../providers/group_autopilot_providers.dart';
+import '../services/path1_game_day_snapshot.dart';
+import '../services/path2_setup_resolution.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GAME DAY SYNC CONFIGURATION
-// ═════════════════════════════════════════════════════════════════════════════
-
-/// Configuration for a Game Day sync session.
-class GameDaySyncConfig {
-  final String teamSlug;
-  final String teamName;
-  final Color primaryColor;
-  final Color secondaryColor;
-  final SportType sport;
-  final String espnTeamId;
-  final int effectId;
-  final int speed;
-  final int intensity;
-  final int brightness;
-  final bool scoreCelebrationEnabled;
-  final int celebrationDurationSeconds;
-
-  const GameDaySyncConfig({
-    required this.teamSlug,
-    required this.teamName,
-    required this.primaryColor,
-    required this.secondaryColor,
-    required this.sport,
-    required this.espnTeamId,
-    this.effectId = 0,
-    this.speed = 128,
-    this.intensity = 128,
-    this.brightness = 200,
-    this.scoreCelebrationEnabled = true,
-    this.celebrationDurationSeconds = 15,
-  });
-
-  GameDaySyncConfig copyWith({
-    int? effectId,
-    int? speed,
-    int? intensity,
-    int? brightness,
-    bool? scoreCelebrationEnabled,
-    int? celebrationDurationSeconds,
-  }) {
-    return GameDaySyncConfig(
-      teamSlug: teamSlug,
-      teamName: teamName,
-      primaryColor: primaryColor,
-      secondaryColor: secondaryColor,
-      sport: sport,
-      espnTeamId: espnTeamId,
-      effectId: effectId ?? this.effectId,
-      speed: speed ?? this.speed,
-      intensity: intensity ?? this.intensity,
-      brightness: brightness ?? this.brightness,
-      scoreCelebrationEnabled:
-          scoreCelebrationEnabled ?? this.scoreCelebrationEnabled,
-      celebrationDurationSeconds:
-          celebrationDurationSeconds ?? this.celebrationDurationSeconds,
-    );
-  }
-
-  /// Build a ComplementTheme from the team colors.
-  ComplementTheme toComplementTheme() {
-    return ComplementTheme(
-      id: 'gameday_$teamSlug',
-      name: 'Game Day - $teamName',
-      description: '${sport.displayName} team colors',
-      icon: _sportIcon(sport),
-      themeColors: [
-        primaryColor.value & 0xFFFFFF,
-        secondaryColor.value & 0xFFFFFF,
-      ],
-      recommendedEffectId: effectId,
-    );
-  }
-
-  /// Build a SyncPatternAssignment from this config.
-  SyncPatternAssignment toPatternAssignment() {
-    return SyncPatternAssignment(
-      name: 'Game Day - $teamName',
-      effectId: effectId,
-      colors: [
-        primaryColor.value & 0xFFFFFF,
-        secondaryColor.value & 0xFFFFFF,
-      ],
-      speed: speed,
-      intensity: intensity,
-      brightness: brightness,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'teamSlug': teamSlug,
-        'teamName': teamName,
-        'primaryColor': primaryColor.value,
-        'secondaryColor': secondaryColor.value,
-        'sport': sport.toJson(),
-        'espnTeamId': espnTeamId,
-        'effectId': effectId,
-        'speed': speed,
-        'intensity': intensity,
-        'brightness': brightness,
-        'scoreCelebrationEnabled': scoreCelebrationEnabled,
-        'celebrationDurationSeconds': celebrationDurationSeconds,
-      };
-
-  factory GameDaySyncConfig.fromJson(Map<String, dynamic> json) {
-    return GameDaySyncConfig(
-      teamSlug: json['teamSlug'] as String,
-      teamName: json['teamName'] as String,
-      primaryColor: Color(json['primaryColor'] as int),
-      secondaryColor: Color(json['secondaryColor'] as int),
-      sport: SportType.fromJson(json['sport'] as String),
-      espnTeamId: json['espnTeamId'] as String,
-      effectId: json['effectId'] as int? ?? 0,
-      speed: json['speed'] as int? ?? 128,
-      intensity: json['intensity'] as int? ?? 128,
-      brightness: json['brightness'] as int? ?? 200,
-      scoreCelebrationEnabled:
-          json['scoreCelebrationEnabled'] as bool? ?? true,
-      celebrationDurationSeconds:
-          json['celebrationDurationSeconds'] as int? ?? 15,
-    );
-  }
-
-  static IconData _sportIcon(SportType sport) => switch (sport) {
-        SportType.nfl || SportType.ncaaFB => Icons.sports_football,
-        SportType.nba || SportType.wnba || SportType.ncaaMB =>
-          Icons.sports_basketball,
-        SportType.mlb => Icons.sports_baseball,
-        SportType.nhl => Icons.sports_hockey,
-        SportType.mls ||
-        SportType.nwsl ||
-        SportType.fifa ||
-        SportType.championsLeague =>
-          Icons.sports_soccer,
-      };
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PROVIDERS
+// PROVIDERS — kept from the legacy screen so the team-picker UI behaves the same
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Sport filter for the Game Day team picker.
@@ -187,40 +85,40 @@ final _gameDayFilteredTeamsProvider =
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GAME DAY SETUP SCREEN
+// GAME DAY PATH 2 SCREEN
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Full-screen Game Day setup flow:
-///   Step 1: Team selection
-///   Step 2: Effect picker + score celebration toggle
-///
-/// Returns a [GameDaySyncConfig] via Navigator.pop when the user confirms.
-class GameDaySetupScreen extends ConsumerStatefulWidget {
-  /// If true, the host can push the team to the whole group.
+/// Path 2 entry: pick a Path 1-configured team, preview its current
+/// design, and Light it Up (optionally broadcasting to the
+/// neighborhood). Returns the [Path1GameDaySnapshot] of the team the
+/// user lit up via Navigator.pop, or null if backed out.
+class GameDayPath2Screen extends ConsumerStatefulWidget {
+  /// When true, the broadcast checkbox is shown on the Step 2 confirm.
   final bool isHost;
 
-  const GameDaySetupScreen({super.key, this.isHost = false});
+  const GameDayPath2Screen({super.key, this.isHost = false});
 
   @override
-  ConsumerState<GameDaySetupScreen> createState() => _GameDaySetupScreenState();
+  ConsumerState<GameDayPath2Screen> createState() =>
+      _GameDayPath2ScreenState();
 }
 
-class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
+class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
   final _searchController = TextEditingController();
 
-  // Step 1: Team selection
-  String? _selectedSlug;
+  // Step 1 → 2 transition state. Both set when the user picks a team
+  // that has Path 1 configured; both null on Step 1.
+  Path1GameDaySnapshot? _selectedSnapshot;
   TeamColors? _selectedTeam;
 
-  // Step 2: Effect + celebration config
-  int _selectedEffectId = 0; // Solid
-  int _speed = 128;
-  int _intensity = 128;
-  int _brightness = 200;
-  bool _scoreCelebration = true;
-  int _celebrationDuration = 15;
+  // DECISION 1: host broadcast checkbox defaults OFF, never auto-fanout.
+  bool _broadcastToGroup = false;
 
-  bool get _isStep2 => _selectedTeam != null;
+  // Re-entry guard for the apply button so a slow controller doesn't
+  // produce duplicate writes when the user double-taps.
+  bool _applying = false;
+
+  bool get _isStep2 => _selectedSnapshot != null;
 
   @override
   void initState() {
@@ -249,8 +147,9 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
           onPressed: () {
             if (_isStep2) {
               setState(() {
-                _selectedSlug = null;
+                _selectedSnapshot = null;
                 _selectedTeam = null;
+                _broadcastToGroup = false;
               });
             } else {
               Navigator.of(context).pop();
@@ -258,7 +157,7 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
           },
         ),
         title: Text(
-          _isStep2 ? _selectedTeam!.teamName : 'Game Day Setup',
+          _isStep2 ? _selectedTeam!.teamName : 'Game Day',
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
@@ -268,7 +167,8 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // STEP 1: Team selection
+  // STEP 1: Team picker — surfaces Path 1 status per team, deep-links
+  // unconfigured teams into Path 1 setup before allowing Light-it-Up.
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep1() {
@@ -367,8 +267,6 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
                   ),
                 )
               : ListView.builder(
-                  // Bottom padding clears the GlassDockNavBar so the
-                  // last team row isn't hidden behind the dock.
                   padding: EdgeInsets.fromLTRB(
                       16, 4, 16, navBarTotalHeight(context) + 16),
                   itemCount: teams.length,
@@ -377,12 +275,7 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
                     return _GameDayTeamRow(
                       slug: entry.key,
                       team: entry.value,
-                      onTap: () {
-                        setState(() {
-                          _selectedSlug = entry.key;
-                          _selectedTeam = entry.value;
-                        });
-                      },
+                      onTap: () => _handleTeamTap(entry.key, entry.value),
                     );
                   },
                 ),
@@ -391,30 +284,54 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
     );
   }
 
+  /// Decide whether the chosen team has Path 1 set up. If yes, advance
+  /// to Step 2 with the snapshot. If no, deep-link to the Path 1 Fan
+  /// Zone (AppRoutes.gameDay) so the user can add the team's autopilot
+  /// config before broadcasting it through Path 2.
+  ///
+  /// The branching is delegated to [resolvePath2GameDaySetup] so the
+  /// sealed-result shape stays unit-testable.
+  void _handleTeamTap(String slug, TeamColors team) {
+    final snapshot = ref.read(path1GameDaySnapshotProvider(slug));
+    final resolution = resolvePath2GameDaySetup(
+      teamSlug: slug,
+      snapshot: snapshot,
+    );
+    switch (resolution) {
+      case Path2SetupReady(:final snapshot):
+        setState(() {
+          _selectedSnapshot = snapshot;
+          _selectedTeam = team;
+        });
+      case Path2SetupNeedsPath1():
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Set up Game Day Autopilot for ${team.teamName} first.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        // Pop this Path 2 screen so the user lands cleanly in the Fan
+        // Zone rather than stacking screens. Coming back through Path 2
+        // after adding a team is a one-tap return.
+        Navigator.of(context).pop();
+        context.push(AppRoutes.gameDay);
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
-  // STEP 2: Effect picker + Score celebration
+  // STEP 2: Read-only preview of the team's Path 1 design + Light it Up
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep2() {
     final team = _selectedTeam!;
-
-    // Effects well-suited for team colors on rooflines
-    final effects = <int, String>{
-      0: 'Solid',
-      2: 'Breathe',
-      28: 'Chase',
-      77: 'Meteor',
-      3: 'Wipe',
-      15: 'Running',
-      80: 'Ripple',
-      106: 'Flow',
-      10: 'Scan',
-      65: 'Colorloop',
-    };
+    final snap = _selectedSnapshot!;
+    final isAvailable = ref.watch(wledRepositoryProvider) != null;
 
     return ListView(
-      // Bottom padding clears the GlassDockNavBar so step 2's CTA
-      // ("Continue") at the end of this list isn't hidden behind it.
       padding: EdgeInsets.fromLTRB(16, 0, 16, navBarTotalHeight(context) + 16),
       children: [
         // Team color banner
@@ -447,55 +364,60 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
         ),
         const SizedBox(height: 20),
 
-        // Effect selector
-        Text(
-          'Choose an Effect',
-          style: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
+        // Read-only Path 1 design label
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade900.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade800),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.palette, color: team.primary, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Design',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      snap.designLabel,
+                      style: TextStyle(
+                        color: Colors.grey.shade400,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  // Deep-link to Path 1 for design edits — the only
+                  // surface where Game Day team config is changed.
+                  context.push(AppRoutes.gameDay);
+                },
+                child: const Text('Edit'),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: effects.entries.map((e) {
-            final isSelected = _selectedEffectId == e.key;
-            return ChoiceChip(
-              label: Text(e.value),
-              selected: isSelected,
-              onSelected: (sel) {
-                if (sel) setState(() => _selectedEffectId = e.key);
-              },
-              selectedColor: team.primary.withValues(alpha: 0.3),
-              backgroundColor: Colors.grey.shade800,
-              labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.grey.shade400,
-              ),
-              side: BorderSide(
-                color: isSelected ? team.primary : Colors.grey.shade700,
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
 
-        // Preview swatch
-        Text(
-          'Preview',
-          style: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 8),
+        // Color preview swatch (driven by the Path 1 snapshot's effectId)
         Container(
           height: 40,
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: _selectedEffectId == 0
+              colors: snap.effectId == 0
                   ? [team.primary, team.primary, team.secondary, team.secondary]
                   : [
                       team.primary,
@@ -507,146 +429,71 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
-          alignment: Alignment.center,
-          child: Text(
-            kEffectNames[_selectedEffectId] ?? 'Effect',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.7),
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
         ),
         const SizedBox(height: 20),
 
-        // Speed / Intensity / Brightness sliders
-        if (_selectedEffectId != 0) ...[
-          _buildSlider('Speed', _speed, (v) => setState(() => _speed = v)),
-          _buildSlider(
-              'Intensity', _intensity, (v) => setState(() => _intensity = v)),
-        ],
-        _buildSlider(
-            'Brightness', _brightness, (v) => setState(() => _brightness = v)),
-        const SizedBox(height: 20),
-
-        // ── Score Celebration toggle ──
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade900.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: _scoreCelebration
-                  ? team.primary.withValues(alpha: 0.4)
-                  : Colors.grey.shade800,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.celebration,
-                      color:
-                          _scoreCelebration ? team.primary : Colors.grey.shade500,
-                      size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Score Celebration',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          'Flash team colors when ${team.teamName} scores',
-                          style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Switch(
-                    value: _scoreCelebration,
-                    onChanged: (v) => setState(() => _scoreCelebration = v),
-                    activeColor: team.primary,
-                  ),
-                ],
-              ),
-              if (_scoreCelebration) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text(
-                      'Duration',
-                      style: TextStyle(
-                          color: Colors.grey.shade500, fontSize: 12),
-                    ),
-                    Expanded(
-                      child: Slider(
-                        value: _celebrationDuration.toDouble(),
-                        min: 5,
-                        max: 30,
-                        divisions: 5,
-                        activeColor: team.primary,
-                        inactiveColor: Colors.grey.shade800,
-                        onChanged: (v) =>
-                            setState(() => _celebrationDuration = v.round()),
-                      ),
-                    ),
-                    Text(
-                      '${_celebrationDuration}s',
-                      style: TextStyle(
-                          color: Colors.grey.shade400, fontSize: 12),
-                    ),
-                  ],
-                ),
-                // Test button (debug mode only)
-                if (kDebugMode)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: OutlinedButton.icon(
-                      onPressed: () => triggerScoreCelebration(
-                        _selectedSlug!,
-                        ref,
-                      ),
-                      icon: const Icon(Icons.bug_report, size: 16),
-                      label: const Text('Test Score Trigger'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange,
-                        side: const BorderSide(color: Colors.orange),
-                      ),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // ── Game Day Autopilot toggle ──
+        // ── Game Day Autopilot toggle (RELOCATED from the legacy Step 2) ──
         _GameDayAutopilotSection(
-          teamSlug: _selectedSlug!,
+          teamSlug: snap.teamSlug,
           team: team,
         ),
         const SizedBox(height: 24),
 
-        // ── Action buttons ──
+        // ── Host broadcast checkbox (DECISION 1: default OFF) ──
+        if (widget.isHost) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade900.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _broadcastToGroup
+                    ? team.primary.withValues(alpha: 0.5)
+                    : Colors.grey.shade800,
+              ),
+            ),
+            child: CheckboxListTile(
+              value: _broadcastToGroup,
+              onChanged: (v) => setState(() => _broadcastToGroup = v ?? false),
+              activeColor: team.primary,
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Also broadcast to my neighborhood',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              subtitle: Text(
+                'Sets the group Game Day for opted-in neighbors.',
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // ── Single unified action: Light it Up Now ──
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: _confirm,
-            icon: const Icon(Icons.check),
-            label: Text(
-              widget.isHost ? 'Set for Group' : 'Apply to My House',
-            ),
+            onPressed: !isAvailable || _applying ? null : _lightItUpNow,
+            icon: _applying
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.flash_on),
+            label: Text(_applying ? 'Lighting up...' : 'Light it Up Now'),
             style: ElevatedButton.styleFrom(
               backgroundColor: team.primary,
               foregroundColor: Colors.white,
@@ -657,94 +504,117 @@ class _GameDaySetupScreenState extends ConsumerState<GameDaySetupScreen> {
             ),
           ),
         ),
-
-        // Host: push to whole neighborhood
-        if (widget.isHost) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _confirm(pushToGroup: true),
-              icon: const Icon(Icons.groups, size: 20),
-              label: const Text('Set Game Day for Whole Neighborhood'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: team.primary,
-                side: BorderSide(color: team.primary),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
+        if (!isAvailable) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Controller not connected — check that you are on the same '
+            'Wi-Fi as your controller.',
+            style: TextStyle(color: Colors.red.shade300, fontSize: 12),
+            textAlign: TextAlign.center,
           ),
         ],
       ],
     );
   }
 
-  Widget _buildSlider(String label, int value, ValueChanged<int> onChanged) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 70,
-          child: Text(label,
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-        ),
-        Expanded(
-          child: Slider(
-            value: value.toDouble(),
-            min: 0,
-            max: 255,
-            activeColor: _selectedTeam?.primary ?? Colors.cyan,
-            inactiveColor: Colors.grey.shade800,
-            onChanged: (v) => onChanged(v.round()),
+  Future<void> _lightItUpNow() async {
+    final snap = _selectedSnapshot!;
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Look up the FULL Path 1 config — the snapshot omits
+    // savedDesignPayload (broadcast-shaped view-model). The apply
+    // helper prefers savedDesignPayload over the basic config-derived
+    // payload, matching Path 1 _activateNow's precedence.
+    final config = ref.read(teamAutopilotConfigProvider(snap.teamSlug));
+    if (config == null) {
+      // Race: snapshot existed at picker time but the underlying config
+      // was removed since. Surface and bail.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Game Day Autopilot for ${snap.teamName} is no longer '
+            'configured. Set it up again to continue.',
           ),
+          backgroundColor: Colors.orange.shade800,
         ),
-        SizedBox(
-          width: 40,
-          child: Text('$value',
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
-              textAlign: TextAlign.end),
-        ),
-      ],
-    );
-  }
+      );
+      return;
+    }
 
-  void _confirm({bool pushToGroup = false}) {
-    final config = GameDaySyncConfig(
-      teamSlug: _selectedSlug!,
-      teamName: _selectedTeam!.teamName,
-      primaryColor: _selectedTeam!.primary,
-      secondaryColor: _selectedTeam!.secondary,
-      sport: _selectedTeam!.sport,
-      espnTeamId: _selectedTeam!.espnTeamId,
-      effectId: _selectedEffectId,
-      speed: _speed,
-      intensity: _intensity,
-      brightness: _brightness,
-      scoreCelebrationEnabled: _scoreCelebration,
-      celebrationDurationSeconds: _celebrationDuration,
+    setState(() => _applying = true);
+    final notifier = ref.read(wledStateProvider.notifier);
+    final service = ref.read(groupAutopilotServiceProvider);
+    final groupId = ref.read(activeNeighborhoodIdProvider);
+
+    final outcome = await lightItUpNow(
+      applyPayloadWithLabel: notifier.applyPayloadWithLabel,
+      configureForTeam: service.configureForTeam,
+      config: config,
+      broadcastToGroup: _broadcastToGroup,
+      groupId: groupId,
     );
 
-    Navigator.of(context).pop(_GameDayResult(config, pushToGroup));
-  }
-}
+    if (!mounted) return;
+    setState(() => _applying = false);
 
-/// Return value from GameDaySetupScreen.
-class _GameDayResult {
-  final GameDaySyncConfig config;
-  final bool pushToGroup;
-  const _GameDayResult(this.config, this.pushToGroup);
+    switch (outcome) {
+      case LightItUpApplied():
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('${snap.teamName} lights activated!'),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pop(snap);
+      case LightItUpAppliedAndBroadcasted(:final assembled):
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${snap.teamName} lights activated + broadcast to '
+              '${assembled.activeMemberIds.length} '
+              '${assembled.activeMemberIds.length == 1 ? "house" : "houses"}.',
+            ),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        Navigator.of(context).pop(snap);
+      case LightItUpApplyFailed():
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Failed to activate lights. Check controller connection.',
+            ),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      case LightItUpAppliedButBroadcastFailed(:final error):
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${snap.teamName} lights lit, but broadcast failed: $error',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        Navigator.of(context).pop(snap);
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // GAME DAY AUTOPILOT SECTION
 // ═════════════════════════════════════════════════════════════════════════════
+//
+// RELOCATION NOTE: this section moved from the legacy Step 2 (where it
+// sat under the effect picker + sliders) into the new Path 2 Step 2 —
+// the read-only confirm screen. Users who picked a team can still
+// enable/disable Game Day Autopilot for it from here while reviewing
+// the design. The widget itself is unchanged.
 
-/// Autopilot toggle section shown in Step 2 of GameDaySetupScreen.
-///
-/// When toggled ON, shows a confirmation card with next game info and
-/// the selected design. Writes a [GameDayAutopilotConfig] to Firestore.
 class _GameDayAutopilotSection extends ConsumerStatefulWidget {
   final String teamSlug;
   final TeamColors team;
@@ -808,7 +678,6 @@ class _GameDayAutopilotSectionState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row with toggle
           Row(
             children: [
               Icon(
@@ -852,8 +721,6 @@ class _GameDayAutopilotSectionState
               ),
             ],
           ),
-
-          // Expanded details when enabled
           if (isEnabled) ...[
             const SizedBox(height: 12),
             Container(
@@ -868,7 +735,6 @@ class _GameDayAutopilotSectionState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Next game info
                   Row(
                     children: [
                       Icon(Icons.calendar_today,
@@ -904,8 +770,6 @@ class _GameDayAutopilotSectionState
                     ],
                   ),
                   const SizedBox(height: 6),
-
-                  // Design info
                   Row(
                     children: [
                       Icon(Icons.palette,
@@ -928,8 +792,6 @@ class _GameDayAutopilotSectionState
                       ),
                     ],
                   ),
-
-                  // Active session status
                   if (session != null && session.isActive) ...[
                     const SizedBox(height: 8),
                     Container(
@@ -1008,6 +870,11 @@ class _GameDayAutopilotSectionState
 // ═════════════════════════════════════════════════════════════════════════════
 // SCORE CELEBRATION
 // ═════════════════════════════════════════════════════════════════════════════
+//
+// NOTE FOR PHASE 2b-PART-2: this function and its hardcoded fx=88 +
+// member-fanout logic are the celebration broadcast slated for rework
+// in Phase 2b-part-2. Left intact here so the score-monitoring
+// pipeline keeps working through the part-1 review window.
 
 /// Triggers a score celebration animation across all Neighborhood Sync members
 /// who have the same team selected in Game Day mode.
@@ -1022,7 +889,6 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
 
   debugPrint('[GameDay] Score celebration triggered for $teamSlug');
 
-  // Build a celebration sync command: rapid flash of team colors
   final groupId = ref.read(activeNeighborhoodIdProvider);
   if (groupId == null) {
     debugPrint('[GameDay] No active neighborhood group for celebration');
@@ -1034,7 +900,6 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
       ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
   if (members.isEmpty) return;
 
-  // Celebration effect: Fireworks (fx:88) with team colors
   final celebrationCommand = SyncCommand(
     id: '',
     groupId: groupId,
@@ -1047,7 +912,7 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
     intensity: 220,
     brightness: 255,
     startTimestamp: DateTime.now().add(const Duration(seconds: 1)),
-    memberDelays: {for (var m in members) m.oderId: 0}, // Simultaneous
+    memberDelays: {for (var m in members) m.oderId: 0},
     timingConfig: const SyncTimingConfig(),
     syncType: SyncType.simultaneous,
     patternName: '${teamColors.teamName} SCORES!',
@@ -1109,7 +974,11 @@ class _SportChip extends StatelessWidget {
   }
 }
 
-class _GameDayTeamRow extends StatelessWidget {
+/// Team row in Step 1, showing a "Path 1 ready" check when the team
+/// has [GameDayAutopilotConfig] set up (so tapping advances to Step 2
+/// instead of deep-linking). Reads
+/// [path1GameDaySnapshotProvider(slug)] reactively per row.
+class _GameDayTeamRow extends ConsumerWidget {
   final String slug;
   final TeamColors team;
   final VoidCallback onTap;
@@ -1121,7 +990,9 @@ class _GameDayTeamRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasPath1 =
+        ref.watch(path1GameDaySnapshotProvider(slug)) != null;
     final sportEmoji = switch (team.sport) {
       SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
       SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
@@ -1144,11 +1015,14 @@ class _GameDayTeamRow extends StatelessWidget {
           decoration: BoxDecoration(
             color: NexGenPalette.gunmetal,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: NexGenPalette.line),
+            border: Border.all(
+              color: hasPath1
+                  ? team.primary.withValues(alpha: 0.35)
+                  : NexGenPalette.line,
+            ),
           ),
           child: Row(
             children: [
-              // Team color icon
               Container(
                 width: 40,
                 height: 40,
@@ -1170,7 +1044,6 @@ class _GameDayTeamRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              // Team name + sport
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1183,17 +1056,37 @@ class _GameDayTeamRow extends StatelessWidget {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-                    Text(
-                      team.sport.displayName,
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 11,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          team.sport.displayName,
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (hasPath1) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.check_circle,
+                            color: team.primary,
+                            size: 12,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            'Configured',
+                            style: TextStyle(
+                              color: team.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
               ),
-              // Color swatches
               Container(
                 width: 20,
                 height: 20,
@@ -1218,7 +1111,11 @@ class _GameDayTeamRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.chevron_right, color: Colors.grey.shade600, size: 20),
+              Icon(
+                hasPath1 ? Icons.chevron_right : Icons.add_circle_outline,
+                color: hasPath1 ? Colors.grey.shade400 : Colors.grey.shade600,
+                size: 20,
+              ),
             ],
           ),
         ),
@@ -1228,35 +1125,31 @@ class _GameDayTeamRow extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PUBLIC API: Launch Game Day setup and return config
+// PUBLIC API
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Opens the Game Day Setup screen and returns the selected config.
-/// Returns null if the user backs out.
-Future<GameDaySyncConfig?> showGameDaySetup(
+/// Opens the Path 2 Game Day screen and returns the
+/// [Path1GameDaySnapshot] of the team the user lit up (or null if they
+/// backed out without applying). The apply + optional broadcast are
+/// already complete by the time this future resolves — the caller
+/// only needs the snapshot for its own sync-session state.
+Future<Path1GameDaySnapshot?> showGameDayPath2Setup(
   BuildContext context, {
-  bool isHost = false,
+  required bool isHost,
 }) async {
-  final result = await Navigator.of(context).push<_GameDayResult>(
+  return Navigator.of(context).push<Path1GameDaySnapshot>(
     MaterialPageRoute(
-      builder: (_) => GameDaySetupScreen(isHost: isHost),
+      builder: (_) => GameDayPath2Screen(isHost: isHost),
     ),
   );
-  return result?.config;
 }
 
-/// Opens Game Day setup and returns both config and whether to push to group.
-Future<({GameDaySyncConfig? config, bool pushToGroup})> showGameDaySetupFull(
-  BuildContext context, {
-  bool isHost = false,
-}) async {
-  final result = await Navigator.of(context).push<_GameDayResult>(
-    MaterialPageRoute(
-      builder: (_) => GameDaySetupScreen(isHost: isHost),
-    ),
-  );
-  return (
-    config: result?.config,
-    pushToGroup: result?.pushToGroup ?? false,
-  );
-}
+// Note for grep-archaeology: the legacy `showGameDaySetup`,
+// `showGameDaySetupFull`, `GameDaySetupScreen`, and the
+// `GameDaySyncConfig` shape (with `toComplementTheme` /
+// `toPatternAssignment`) were the Path 2 duplicate that diverged from
+// Path 1. They were removed in Convergence-Phase-2b. Replacement
+// public API: [showGameDayPath2Setup] (above). Replacement of
+// `GameDaySyncConfig.toComplementTheme`:
+// `path1ToComplementTheme(snapshot)` in
+// `lib/features/neighborhood/services/path1_complement_theme.dart`.
