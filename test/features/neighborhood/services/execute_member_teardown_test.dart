@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/neighborhood/services/pre_sync_scene_snapshot.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_teardown_resolver.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 
@@ -286,6 +287,311 @@ void main() {
     });
   });
 
+  group('executeMemberTeardown — restore respects participation via chokepoint', () {
+    final now = DateTime.utc(2026, 5, 22, 21, 0);
+
+    test(
+        'scene-tier restore with participation=[0]: WledRepository.applyJson '
+        'IS called AND the post-chokepoint payload OMITS the non-participating '
+        'seg (id:1) so the excluded channel cannot be touched by the restore '
+        '(unit/integration equivalent of hardware T5)', () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = [0];
+
+      // Scene's wledPayload mirrors what WledRepository.getState() returns:
+      // multi-seg WITH ids (full device state from the controller). Seg 1
+      // is staged "blue" — if the restore touches it, the post-chokepoint
+      // payload will still carry the blue seg 1 entry. The participation
+      // filter must drop it for the restore to be safe.
+      final sceneFromGetState = <String, dynamic>{
+        'on': true,
+        'bri': 217,
+        'seg': [
+          {
+            'id': 0,
+            'start': 0,
+            'stop': 128,
+            'fx': 0,
+            'col': [
+              [255, 232, 192, 0]
+            ],
+          },
+          {
+            'id': 1,
+            'start': 128,
+            'stop': 138,
+            'fx': 0,
+            'col': [
+              [0, 0, 255, 0] // ch1 staged solid blue (the "must not be touched" channel)
+            ],
+          },
+        ],
+      };
+
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: sceneFromGetState,
+          activeLabel: 'Manual',
+          capturedAt: now,
+        ),
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: [0],
+      );
+
+      // First half of the assertion: the restore went THROUGH applyJson
+      // (i.e. the executor did not build/send a payload that bypassed the
+      // repository). This is the routing proof.
+      expect(repo.applyCalls, hasLength(1),
+          reason: 'restore must route through WledRepository.applyJson — '
+              'a bypass would skip the chokepoint participation filter');
+
+      // Second half: the payload, AFTER the chokepoint runs, must not
+      // carry the excluded seg. This is the participation-respect proof.
+      final postChokepoint = repo.postChokepointCalls.single;
+      final segs = postChokepoint['seg'] as List;
+      final segIds = segs
+          .map((s) => (s as Map)['id'])
+          .where((id) => id != null)
+          .toList();
+
+      expect(segIds, isNot(contains(1)),
+          reason: 'restore must respect participation on the post-chokepoint '
+              'payload — a non-participating channel (id:1) must not receive '
+              'the restore apply. If this fails, the scene-tier restore is '
+              'bypassing the chokepoint participation filter (likely via '
+              'expandForParticipation Rule 4 short-circuiting multi-seg-with-'
+              'ids payloads), and a non-participating channel would be '
+              'force-lit on Stop Sync.');
+    });
+
+    test(
+        'guard: full participation [0,1] does NOT over-filter — both segs '
+        'retained in the post-chokepoint payload (regression guard against '
+        'over-eager filtering that would break T1/T3-like full-participation '
+        'restore paths)', () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = [0, 1];
+      final sceneFromGetState = <String, dynamic>{
+        'on': true,
+        'bri': 217,
+        'seg': [
+          {
+            'id': 0,
+            'fx': 0,
+            'col': [
+              [255, 232, 192, 0]
+            ],
+          },
+          {
+            'id': 1,
+            'fx': 0,
+            'col': [
+              [255, 232, 192, 0]
+            ],
+          },
+        ],
+      };
+
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: sceneFromGetState,
+          activeLabel: 'Warm White',
+          capturedAt: now,
+        ),
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: [0, 1],
+      );
+
+      final postChokepoint = repo.postChokepointCalls.single;
+      final segIds = (postChokepoint['seg'] as List)
+          .map((s) => (s as Map)['id'])
+          .toList();
+      expect(segIds, containsAll(<int>[0, 1]),
+          reason: 'full participation must retain ALL captured segs — '
+              'over-filtering would regress the T1/T3 hardware passes');
+    });
+
+    test(
+        'guard: empty participation passes through unchanged '
+        '(matches chokepoint Rule 2 — explicit-none is upstream skip)',
+        () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = const [];
+      final sceneFromGetState = <String, dynamic>{
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {'id': 0, 'fx': 0, 'col': [[255, 0, 0, 0]]},
+          {'id': 1, 'fx': 0, 'col': [[0, 0, 255, 0]]},
+        ],
+      };
+
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: sceneFromGetState,
+          activeLabel: null,
+          capturedAt: now,
+        ),
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: const [],
+      );
+
+      // Filter passes through; chokepoint Rule 2 also passes through.
+      // Both segs reach the controller untouched (empty participation
+      // means "no filter applied" — actual skip-apply happens upstream).
+      final postChokepoint = repo.postChokepointCalls.single;
+      final segIds = (postChokepoint['seg'] as List)
+          .map((s) => (s as Map)['id'])
+          .toList();
+      expect(segIds, containsAll(<int>[0, 1]),
+          reason: 'empty participating must not be treated as "filter all" — '
+              'matches chokepoint Rule 2 semantics');
+    });
+
+    test(
+        'guard: null participation passes through unchanged '
+        '(matches chokepoint Rule 1 — no preference set)', () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = null;
+      final sceneFromGetState = <String, dynamic>{
+        'on': true,
+        'seg': [
+          {'id': 0, 'fx': 0},
+          {'id': 1, 'fx': 0},
+        ],
+      };
+
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: sceneFromGetState,
+          activeLabel: null,
+          capturedAt: now,
+        ),
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: null,
+      );
+
+      // No participating set → no filter, no expand. Payload reaches
+      // the controller verbatim (both segs intact).
+      final input = repo.applyCalls.single;
+      final segIds = (input['seg'] as List)
+          .map((s) => (s as Map)['id'])
+          .toList();
+      expect(segIds, containsAll(<int>[0, 1]));
+    });
+
+    test(
+        'defense-in-depth: SCHEDULE tier with a multi-seg-with-ids payload '
+        '(hypothetical "save current device state as schedule" flow) is '
+        'ALSO filtered correctly — the audit confirmed schedule stores are '
+        'single-seg today, but the pre-filter covers the future regression', () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = [0];
+
+      // Hypothetical multi-seg-with-ids schedule payload (NOT currently
+      // produced by any code path; this test exists as defense-in-depth
+      // against a future "save current device state as schedule" flow).
+      final scheduleWithMultiSeg = ScheduleItem(
+        id: 'sch_multiseg',
+        timeLabel: '7:00 PM',
+        offTimeLabel: '11:00 PM',
+        repeatDays: const ['Mon'],
+        actionLabel: 'Captured state',
+        enabled: true,
+        wledPayload: const <String, dynamic>{
+          'on': true,
+          'bri': 200,
+          'seg': [
+            {'id': 0, 'fx': 0, 'col': [[100, 200, 50, 0]]},
+            {'id': 1, 'fx': 0, 'col': [[0, 0, 255, 0]]},
+          ],
+        },
+      );
+
+      await executeMemberTeardown(
+        activeSchedule: scheduleWithMultiSeg,
+        activeAutopilot: null,
+        preSyncScene: null,
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: [0],
+      );
+
+      final postChokepoint = repo.postChokepointCalls.single;
+      final segIds = (postChokepoint['seg'] as List)
+          .map((s) => (s as Map)['id'])
+          .toList();
+      expect(segIds, isNot(contains(1)),
+          reason: 'pre-applyJson filter applies to ALL tiers — defense in '
+              'depth against a multi-seg-with-ids schedule payload that '
+              'could leak in via a future save-current-state flow');
+    });
+
+    test(
+        'restore degrades to off-fallback when filter strips ALL segs '
+        '(no participating ids match the captured scene)', () async {
+      final repo = _RecordingRepo()..participatingForChokepoint = [2];
+      final sceneFromGetState = <String, dynamic>{
+        'on': true,
+        'bri': 217,
+        'seg': [
+          {'id': 0, 'fx': 0, 'col': [[255, 232, 192, 0]]},
+          {'id': 1, 'fx': 0, 'col': [[0, 0, 255, 0]]},
+        ],
+      };
+
+      await executeMemberTeardown(
+        activeSchedule: null,
+        activeAutopilot: null,
+        preSyncScene: PreSyncScene(
+          groupId: 'g1',
+          wledPayload: sceneFromGetState,
+          activeLabel: 'Manual',
+          capturedAt: now,
+        ),
+        activeGroupId: 'g1',
+        now: now,
+        repo: repo,
+        restorePresetLabel: (_) {},
+        clearPreSyncScene: () {},
+        participating: [2], // participation id not present in scene
+      );
+
+      // Filter degrades to {'on': false} — the safe alternative to
+      // POSTing a seg-less payload that would leave the controller
+      // frozen on the sync state.
+      expect(repo.applyCalls.single, {'on': false},
+          reason: 'when no participating segs match the captured scene, '
+              'fall back to off rather than leak the sync state through');
+    });
+  });
+
   group('executeMemberTeardown — clear-on-consumption', () {
     final now = DateTime.utc(2026, 5, 22, 21, 0);
 
@@ -409,9 +715,25 @@ class _Counter {
 class _RecordingRepo extends WledRepository {
   final List<Map<String, dynamic>> applyCalls = [];
 
+  /// When set, applyJson mirrors WledService's pipeline:
+  ///   normalizeWledPayload → expandForParticipation → recorded as
+  ///   [postChokepointCalls]. Lets a test reason about the post-
+  ///   chokepoint shape (i.e. what would actually be POSTed to the
+  ///   controller) without standing up a real WledService + HTTP layer.
+  List<int>? participatingForChokepoint;
+  final List<Map<String, dynamic>> postChokepointCalls = [];
+
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     applyCalls.add(Map<String, dynamic>.from(payload));
+    if (participatingForChokepoint != null) {
+      final normalized = normalizeWledPayload(payload);
+      final expanded = expandForParticipation(
+        normalized,
+        participatingForChokepoint,
+      );
+      postChokepointCalls.add(expanded);
+    }
     return true;
   }
 

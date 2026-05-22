@@ -558,6 +558,14 @@ class NeighborhoodSyncEngine {
     final preSyncScene = _ref.read(preSyncSceneProvider);
     final activeGroupId = _ref.read(activeNeighborhoodIdProvider);
 
+    // Read the local participating-channels cache — the same source
+    // [WledService.applyJson] reads inside the chokepoint. Passed to
+    // the executor so its pre-applyJson filter ([filterMultiSegByParticipation])
+    // can strip non-participating segs from externally-sourced multi-
+    // seg-with-ids payloads (the scene tier's getState() snapshot)
+    // BEFORE they reach the chokepoint's Rule 4 pass-through.
+    final participating = await getCachedParticipatingChannels();
+
     try {
       final action = await executeMemberTeardown(
         activeSchedule: activeSchedule,
@@ -575,6 +583,7 @@ class NeighborhoodSyncEngine {
         clearPreSyncScene: () {
           _ref.read(preSyncSceneProvider.notifier).state = null;
         },
+        participating: participating,
       );
       debugPrint('Sync teardown executed: ${action.runtimeType}');
       return action;

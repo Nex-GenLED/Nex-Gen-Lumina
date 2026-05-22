@@ -25,6 +25,7 @@ import '../../../models/autopilot_schedule_item.dart';
 import '../../../services/autopilot_scheduler.dart';
 import '../../schedule/schedule_models.dart';
 import '../../schedule/schedule_providers.dart';
+import '../../wled/wled_payload_utils.dart';
 import '../../wled/wled_repository.dart';
 import 'pre_sync_scene_snapshot.dart';
 
@@ -180,6 +181,7 @@ Future<MemberTeardownAction> executeMemberTeardown({
   required void Function(String? label) restorePresetLabel,
   required void Function() clearPreSyncScene,
   Duration maxStaleness = kPreSyncSceneMaxStaleness,
+  List<int>? participating,
 }) async {
   final freshScene = isPreSyncSceneFresh(
     scene: preSyncScene,
@@ -204,17 +206,32 @@ Future<MemberTeardownAction> executeMemberTeardown({
     preSyncScene: freshScene,
   );
 
+  // Pre-applyJson defensive filter: strips non-participating segs from
+  // externally-sourced multi-seg-with-ids payloads BEFORE they reach
+  // the chokepoint (chokepoint Rule 4 passes that shape through
+  // unchanged, which would force-light excluded channels on Stop Sync).
+  // No-op for single-seg / no-seg / null-or-empty-participating cases —
+  // those go through the chokepoint correctly on their own. Applied to
+  // every tier defensively: the audit confirmed only scene-tier emits
+  // multi-seg-with-ids today, but a future schedule/autopilot save flow
+  // (e.g. "save current device state as a schedule") could regress, so
+  // filtering pre-applyJson at the executor avoids special-casing.
+  Future<bool> apply(Map<String, dynamic> payload) {
+    final filtered = filterMultiSegByParticipation(payload, participating);
+    return repo.applyJson(filtered);
+  }
+
   switch (action) {
     case ApplySchedule(:final item):
       // wledPayload non-null guaranteed by the usableSchedule filter.
-      await repo.applyJson(item.wledPayload!);
+      await apply(item.wledPayload!);
     case ApplyAutopilot(:final item):
-      await repo.applyJson(item.wledPayload);
+      await apply(item.wledPayload);
     case ApplyPreSyncScene(:final scene):
-      await repo.applyJson(scene.wledPayload);
+      await apply(scene.wledPayload);
       restorePresetLabel(scene.activeLabel);
     case TurnOff():
-      await repo.applyJson(const <String, dynamic>{'on': false});
+      await apply(const <String, dynamic>{'on': false});
   }
 
   clearPreSyncScene();
