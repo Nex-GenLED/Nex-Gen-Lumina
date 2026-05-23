@@ -230,27 +230,14 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
           ),
         ),
 
-        // Sport filter chips
-        SizedBox(
-          height: 44,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              _SportChip(
-                label: 'ALL',
-                selected: activeSport == null,
-                onTap: () =>
-                    ref.read(_gameDaySportFilterProvider.notifier).state = null,
-              ),
-              ...SportType.values.map((s) => _SportChip(
-                    label: s.displayName,
-                    selected: activeSport == s,
-                    onTap: () => ref
-                        .read(_gameDaySportFilterProvider.notifier)
-                        .state = s,
-                  )),
-            ],
+        // Sport filter chips — multi-row Wrap, parity with the Fan Zone
+        // picker (601f888) so all ~11 leagues are visible at once.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GameDaySportFilterChips(
+            activeSport: activeSport,
+            onSportChanged: (s) =>
+                ref.read(_gameDaySportFilterProvider.notifier).state = s,
           ),
         ),
 
@@ -935,6 +922,53 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
 // ═════════════════════════════════════════════════════════════════════════════
 // HELPER WIDGETS
 // ═════════════════════════════════════════════════════════════════════════════
+
+/// Multi-row Wrap of per-league sport filter chips for the Path 2 team
+/// picker. Pure presentation — takes the active sport + selection
+/// callback; the Riverpod state plumbing lives at the call site.
+///
+/// Layout (Wrap, not horizontal ListView) is the symmetry match with
+/// the Fan Zone picker after 601f888. With ~11 leagues, horizontal
+/// scrolling required swiping to reach NHL/Soccer leagues; Wrap shows
+/// them all at once on a typical phone width.
+///
+/// This widget is intentionally public + Riverpod-free so the widget
+/// test (game_day_path2_sport_chips_test.dart) can exercise it
+/// directly without spinning up the screen's Firestore-dependent
+/// providers.
+class GameDaySportFilterChips extends StatelessWidget {
+  /// Currently selected sport, or null when "ALL" is active.
+  final SportType? activeSport;
+
+  /// Called with the new sport selection (null for "ALL").
+  final ValueChanged<SportType?> onSportChanged;
+
+  const GameDaySportFilterChips({
+    super.key,
+    required this.activeSport,
+    required this.onSportChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      runSpacing: 6,
+      children: [
+        _SportChip(
+          label: 'ALL',
+          selected: activeSport == null,
+          onTap: () => onSportChanged(null),
+        ),
+        for (final sport in SportType.values)
+          _SportChip(
+            label: sport.displayName,
+            selected: activeSport == sport,
+            onTap: () => onSportChanged(sport),
+          ),
+      ],
+    );
+  }
+}
 
 class _SportChip extends StatelessWidget {
   final String label;
