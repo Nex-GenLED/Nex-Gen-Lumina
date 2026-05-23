@@ -27,6 +27,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 /// "Dr", etc. Add new entries when a new acronym pattern ships.
 const Set<String> _kAcronyms = <String>{
   'KC', 'AI', 'NY', 'LA', 'SF', 'DC', 'US', 'UK',
+  'CL', // Champions League prefix — added 2026-05-23 (Fix 3 Part 2)
   'NFL', 'NBA', 'MLB', 'NHL', 'MLS',
 };
 
@@ -151,14 +152,37 @@ final RegExp _slugRegex = RegExp(r'^[A-Za-z0-9_]+$');
 ///   displayNameFor('')                           // ''
 String displayNameFor(String rawId) {
   if (rawId.isEmpty) return '';
-  // Already humanized — has spaces or punctuation.
-  if (!_slugRegex.hasMatch(rawId)) return rawId;
-  // Explicit override.
-  final override = _slugOverrides[rawId];
-  if (override != null) return override;
-  // Underscore split + acronym preservation + title case.
-  final chunks = rawId.split('_').where((c) => c.isNotEmpty);
-  return chunks.map(_titleCaseOrAcronym).join(' ');
+
+  // Pure-slug path: matches the original behavior.
+  if (_slugRegex.hasMatch(rawId)) {
+    // Explicit override.
+    final override = _slugOverrides[rawId];
+    if (override != null) return override;
+    // Underscore split + acronym preservation + title case.
+    final chunks = rawId.split('_').where((c) => c.isNotEmpty);
+    return chunks.map(_titleCaseOrAcronym).join(' ');
+  }
+
+  // Mixed-input path (Fix 3 Part 2, 2026-05-23): the input has a
+  // space, hyphen, or other non-slug character. Pre-fix this returned
+  // the input unchanged, which let label hints like "Nfl_bills Game
+  // Day" leak the underscore through to Now Playing. Now we tokenize
+  // on spaces and humanize any token that still contains underscores.
+  //
+  // - "Nfl_bills Game Day"    → "NFL Bills Game Day"
+  // - "Pattern: warm_white"   → "Pattern: Warm White"
+  // - "Already Clean Label"   → unchanged (no underscore chunks)
+  // - "Tyler's House"         → unchanged (no underscore chunks)
+  //
+  // Tokens without underscores pass through verbatim so punctuation
+  // (apostrophes, hyphens) and acronyms in their authored form aren't
+  // mangled.
+  final parts = rawId.split(' ').map((token) {
+    if (token.isEmpty || !token.contains('_')) return token;
+    final chunks = token.split('_').where((c) => c.isNotEmpty);
+    return chunks.map(_titleCaseOrAcronym).join(' ');
+  });
+  return parts.join(' ');
 }
 
 String _titleCaseOrAcronym(String chunk) {

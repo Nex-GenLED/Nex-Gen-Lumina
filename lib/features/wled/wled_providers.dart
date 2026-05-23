@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/ddp_service.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -1076,9 +1077,21 @@ class WledNotifier extends Notifier<WledStateModel> {
     );
 
     if (labelHint != null) {
+      // Fix 3 / Bug A: compose effect + color when the caller's hint
+      // matches a vanilla catalog effect name. Custom labels ("Royals
+      // Game Day"), unknown effects, and color-ignoring effects
+      // (rainbow, palette) pass through unchanged. See composeEffectLabel
+      // for the full heuristic.
+      final composedLabel = composeEffectLabel(
+        labelHint: labelHint,
+        effectId: effectId,
+        colors: colors
+            .map((c) => [c.red, c.green, c.blue, 0])
+            .toList(growable: false),
+      );
       ref
           .read(activePresetLabelProvider.notifier)
-          .setLabelWithFingerprint(labelHint, state);
+          .setLabelWithFingerprint(composedLabel ?? labelHint, state);
     }
 
     return true;

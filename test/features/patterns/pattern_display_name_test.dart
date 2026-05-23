@@ -123,13 +123,21 @@ void main() {
       expect(displayNameFor('Vegas_Golden_Knights_Wave'), 'Golden Knights Wave');
     });
 
-    test('Paris_Saint-Germain (with hyphen) → returned unchanged (not a slug)',
+    test(
+        'Paris_Saint-Germain_Game_Day (hyphen inside slug) → humanized '
+        'via the mixed-input branch. The hyphen rejects the pure-slug '
+        'regex; the mixed-input branch tokenizes on whitespace (one '
+        'token here) and humanizes the embedded underscore chunks. The '
+        '"germain" segment lowercases because _titleCaseOrAcronym only '
+        'capitalizes the first character of each underscore chunk and '
+        'lowercases the rest — proper-noun casing inside a chunk '
+        'containing a hyphen is lost. Acceptable trade-off: production '
+        'never generates this slug (Paris Saint-Germain is in the '
+        'short-name override map and resolves directly to "PSG"); the '
+        'key win is that the underscore no longer leaks through.',
         () {
-      // The hyphen breaks the slug regex, so the input is returned as-is.
-      // The team override only fires for the exact slug form, which doesn't
-      // include hyphens.
       expect(displayNameFor('Paris_Saint-Germain_Game_Day'),
-          'Paris_Saint-Germain_Game_Day');
+          'Paris Saint-germain Game Day');
     });
   });
 
@@ -161,8 +169,11 @@ void main() {
     });
 
     test('acronym allowlist matches Tyler\'s spec', () {
+      // CL added 2026-05-23 (Fix 3 Part 2) — Champions League prefix,
+      // appears in production slugs as `cl_*`. Tyler's spec named it
+      // explicitly alongside NFL/MLB/NHL/NBA.
       expect(debugAcronymsForTest,
-          {'KC', 'AI', 'NY', 'LA', 'SF', 'DC', 'US', 'UK', 'NFL', 'NBA', 'MLB', 'NHL', 'MLS'});
+          {'KC', 'AI', 'NY', 'LA', 'SF', 'DC', 'US', 'UK', 'CL', 'NFL', 'NBA', 'MLB', 'NHL', 'MLS'});
     });
   });
 
@@ -190,6 +201,61 @@ void main() {
         expect(teamShortName(entry.key), entry.value,
             reason: 'teamShortName("${entry.key}") should equal "${entry.value}"');
       }
+    });
+  });
+
+  group('displayNameFor — mixed input (Fix 3 Part 2 defense-in-depth)', () {
+    test(
+        '"Nfl_bills Game Day" → "NFL Bills Game Day". The pre-fix Game '
+        'Day leak path: shortTeamName produced "Nfl_bills", composer '
+        'appended " Game Day", consumer used to bail on space-bearing '
+        'input. Now we humanize underscore chunks within each space-'
+        'separated token.', () {
+      expect(displayNameFor('Nfl_bills Game Day'),
+          equals('NFL Bills Game Day'));
+    });
+
+    test(
+        '"Pattern: warm_white" → "Pattern: Warm White". The '
+        'autopilot_providers / lumina_ai_screen risk shape.', () {
+      expect(displayNameFor('Pattern: warm_white'),
+          equals('Pattern: Warm White'));
+    });
+
+    test('chunks without underscores stay untouched in mixed input', () {
+      expect(displayNameFor('Already Clean Label'),
+          equals('Already Clean Label'));
+    });
+
+    test(
+        'mixed input with acronym chunk → acronym preserved on the '
+        'embedded slug chunk', () {
+      expect(displayNameFor('Pattern: KC_Royals'),
+          equals('Pattern: KC Royals'));
+    });
+
+    test('pure-slug path unchanged by the mixed-input branch', () {
+      expect(displayNameFor('warm_white'), equals('Warm White'));
+      expect(displayNameFor('KC_Royals_Game_Day'),
+          equals('KC Royals Game Day'));
+    });
+  });
+
+  group('displayNameFor — CL acronym (Champions League prefix)', () {
+    test(
+        'CL is in the acronym allowlist (Tyler\'s spec named '
+        'NFL/MLB/NHL/NBA/CL).', () {
+      expect(debugAcronymsForTest, contains('CL'));
+    });
+
+    test(
+        'cl_ac_milan_game_day → "CL Ac Milan Game Day". CL uppercased '
+        'via the allowlist; AC stays title-cased ("Ac") because it is '
+        'NOT in the explicit allowlist (Tyler\'s spec did not name AC). '
+        'Defense-in-depth — primary fix in shortTeamName means this '
+        'slug should not normally reach displayNameFor.', () {
+      expect(displayNameFor('cl_ac_milan_game_day'),
+          equals('CL Ac Milan Game Day'));
     });
   });
 }
