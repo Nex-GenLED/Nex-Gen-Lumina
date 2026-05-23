@@ -381,6 +381,33 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     final col = s['col'];
     if (col is List && col.isNotEmpty) {
       s['col'] = validateRgbwList(col, source: 'normalizeWledPayload');
+
+      // Pad col UP to 3 slots so the device's seg.col is overwritten
+      // explicitly on every apply. WLED's seg.col is a fixed 3-slot
+      // array; partial-col payloads (1 or 2 slots) leave the unspecified
+      // slots holding the PRIOR pattern's values. The next /json/state
+      // poll then returns new-slot-0 + stale-slots-1/2, and the
+      // dashboard renders all three as a "blend" — display-only bug,
+      // but visible across schedule / autopilot / Game Day / Sync /
+      // manual apply / scene paths because they all converge here.
+      //
+      // Pad UP only (do not trim oversized col). The unused-slot value
+      // [0, 0, 0, 0] matches the post-validateRgbwList 4-channel shape
+      // so the per-slot validator pass above stays consistent.
+      //
+      // Leave-alone guarantees this pad MUST preserve:
+      //   - payload with NO col key → untouched (no synthesis — would
+      //     blank lights on slider tweaks / current-color applies)
+      //   - empty col []            → untouched (no color info)
+      //   - oversized col (>3)      → untouched (pad up only)
+      //   - non-fx partial updates  → untouched (this branch only
+      //     runs when col is present; the fx-default block above
+      //     handles the "has fx but no col" case separately)
+      final padded = List<List<int>>.from(s['col'] as List);
+      while (padded.length < 3) {
+        padded.add(const [0, 0, 0, 0]);
+      }
+      s['col'] = padded;
     }
 
     // Also validate per-pixel 'i' arrays
