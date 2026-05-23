@@ -8,6 +8,8 @@ import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
 import '../services/group_autopilot_service.dart';
+import '../services/path1_complement_theme.dart';
+import '../services/path1_game_day_snapshot.dart';
 import 'game_day_setup_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -71,7 +73,13 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   ComplementTheme _selectedComplementTheme = ComplementThemes.july4th;
 
   // ── Game Day ───────────────────────────────────────────────────────────
-  GameDaySyncConfig? _gameDayConfig;
+  // Convergence-Phase-2b: this field now holds the Path 1 snapshot of
+  // the team the user picked in the new GameDayPath2Screen (which
+  // already lit up their lights + handled the optional broadcast
+  // internally). We only need the snapshot here to drive the
+  // complement-theme UI display and the sync-session effect/speed/
+  // intensity/brightness overrides in [_startSync].
+  Path1GameDaySnapshot? _gameDayPath1Snapshot;
 
   // ── Per-house customization ────────────────────────────────────────────
   bool _perHouseExpanded = false;
@@ -826,10 +834,10 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
             children: ComplementThemes.all.map((theme) {
               final isGameDay = theme.id == 'gameday';
               final isSelected = isGameDay
-                  ? _gameDayConfig != null && _selectedComplementTheme.id == 'gameday'
-                  : _selectedComplementTheme.id == theme.id && _gameDayConfig == null;
-              final displayTheme = (isGameDay && _gameDayConfig != null)
-                  ? _gameDayConfig!.toComplementTheme()
+                  ? _gameDayPath1Snapshot != null && _selectedComplementTheme.id == 'gameday'
+                  : _selectedComplementTheme.id == theme.id && _gameDayPath1Snapshot == null;
+              final displayTheme = (isGameDay && _gameDayPath1Snapshot != null)
+                  ? path1ToComplementTheme(_gameDayPath1Snapshot!)
                   : theme;
               return InkWell(
                 onTap: () async {
@@ -837,16 +845,26 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                     final currentMember = ref.read(currentUserMemberProvider);
                     final isHost = currentMember != null &&
                         currentMember.oderId == widget.group.creatorUid;
-                    final result = await showGameDaySetupFull(context, isHost: isHost);
-                    if (result.config != null && mounted) {
+                    // Convergence Phase 2b: the new GameDayPath2Screen
+                    // reads Path 1, handles the Light-it-Up apply +
+                    // optional broadcast inline (DECISION 1: explicit
+                    // host checkbox, default OFF), and returns the
+                    // snapshot of the team the user lit up. We only
+                    // need that snapshot here to bind the theme
+                    // display + the sync-session overrides.
+                    final snapshot = await showGameDayPath2Setup(
+                      context,
+                      isHost: isHost,
+                    );
+                    if (snapshot != null && mounted) {
                       setState(() {
-                        _gameDayConfig = result.config;
-                        _selectedComplementTheme = result.config!.toComplementTheme();
+                        _gameDayPath1Snapshot = snapshot;
+                        _selectedComplementTheme = path1ToComplementTheme(snapshot);
                       });
                     }
                   } else {
                     setState(() {
-                      _gameDayConfig = null;
+                      _gameDayPath1Snapshot = null;
                       _selectedComplementTheme = theme;
                     });
                   }
@@ -891,7 +909,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                           ],
                         ),
                       ),
-                      if (isGameDay && _gameDayConfig == null)
+                      if (isGameDay && _gameDayPath1Snapshot == null)
                         Text(
                           'Set up',
                           style: TextStyle(
@@ -1078,10 +1096,13 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
 
     if (_selectedSyncType == SyncType.complement) {
       // Complement mode: use theme + optional Game Day overrides
-      final effectOverride = _gameDayConfig?.effectId ?? 0;
-      final speed = _gameDayConfig?.speed ?? _selectedSpeed;
-      final intensity = _gameDayConfig?.intensity ?? _selectedIntensity;
-      final brightness = _gameDayConfig?.brightness ?? _selectedBrightness;
+      // (Phase 2b: overrides now come from the Path 1 snapshot, the
+      // single source of truth for per-team Game Day settings.)
+      final snap = _gameDayPath1Snapshot;
+      final effectOverride = snap?.effectId ?? 0;
+      final speed = snap?.speed ?? _selectedSpeed;
+      final intensity = snap?.intensity ?? _selectedIntensity;
+      final brightness = snap?.brightness ?? _selectedBrightness;
 
       command = engine.createComplementCommand(
         groupId: widget.group.id,
