@@ -6,6 +6,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../patterns/utils/pattern_display_name.dart';
 import '../sports_alerts/models/sport_type.dart';
 
 // ---------------------------------------------------------------------------
@@ -214,15 +215,43 @@ class GameDayAutopilotConfig {
     };
   }
 
-  /// City-stripped team name, e.g. "kansas-city-royals" → "Royals".
-  /// Used for compact UI strings (Now Playing label) where the full
-  /// city + team name would wrap. Falls back to [teamName] if [teamSlug]
-  /// is empty or malformed.
+  /// Compact team name for Now Playing labels.
+  ///
+  /// Pre-2026-05-23 this split [teamSlug] on hyphen only, but actual
+  /// slugs in [kTeamColors] are underscore-separated with a league
+  /// prefix (e.g. `nfl_bills`, `cl_ac_milan`). The split was a no-op
+  /// for the real data, and the result leaked both the league prefix
+  /// and the underscore character into Game Day labels — visible to
+  /// the user as "Nfl_bills Game Day" in Now Playing.
+  ///
+  /// Resolution order (Fix 3 Part 2):
+  ///   1. Prefer [teamShortName] against [teamName]. This hits the
+  ///      curated short-name overrides for multi-word nicknames
+  ///      ("Boston Red Sox" → "Red Sox"), city-shared clubs
+  ///      ("AC Milan" → "AC Milan"), league-suffix clubs
+  ///      ("Inter Miami CF" → "Inter Miami"), and falls back to
+  ///      `.split(' ').last` for the ~354 standard "City Mascot" teams
+  ///      ("Kansas City Royals" → "Royals", "Chicago Bears" → "Bears").
+  ///   2. Fallback (only when [teamName] is empty): split [teamSlug]
+  ///      on either `-` or `_`, capitalize the last non-empty chunk.
+  ///      Handles legacy hyphen-style slugs and any future
+  ///      underscore-style slug whose [teamName] field wasn't
+  ///      populated.
+  ///
+  /// Guarantee: the returned string NEVER contains `_` for any
+  /// non-empty input. Asserted by the regression test that iterates
+  /// every entry in [kTeamColors].
   String get shortTeamName {
+    if (teamName.isNotEmpty) {
+      return teamShortName(teamName);
+    }
     if (teamSlug.isEmpty) return teamName;
-    final parts = teamSlug.split('-');
+    final parts = teamSlug
+        .split(RegExp(r'[-_]'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return teamName;
     final last = parts.last;
-    if (last.isEmpty) return teamName;
     return last[0].toUpperCase() + last.substring(1);
   }
 

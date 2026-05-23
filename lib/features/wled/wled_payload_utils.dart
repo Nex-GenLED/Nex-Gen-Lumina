@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/utils/color_naming.dart';
 import 'package:nexgen_command/utils/rgbw_validation.dart';
 
 /// Guarantees a color array is a 4-channel `[R, G, B, W]` list with W explicitly
@@ -426,5 +428,73 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
   final result = Map<String, dynamic>.from(payload);
   result['seg'] = normalizedSegs;
   return result;
+}
+
+/// Composes a Now Playing label by appending color names to a vanilla
+/// effect-named label hint (Fix 3 / Bug A).
+///
+/// The label sources that feed [applyPayloadWithLabel] (schedule
+/// `actionLabel`, autopilot `patternName`, scene `name`, geofence
+/// `actionName`, Game Day `'$team Game Day'`) were authored at
+/// create-time when only the effect-type token was captured. The color
+/// component lives in the payload itself (`seg[0].col`). This composer
+/// closes that gap at the apply chokepoint so legacy data composes
+/// correctly without a Firestore migration.
+///
+/// Heuristic (audit-locked, see docs/project_preview_followups_2026_05_22.md):
+///
+///   1. [labelHint] == null                     → returns null
+///      (TRANSIENT semantics preserved — flash / restore paths don't
+///      steal the label.)
+///   2. [effectId] not in [WledEffectsCatalog]  → returns [labelHint]
+///   3. [labelHint] != effect.name (case-fold)  → returns [labelHint]
+///      (caller has a CUSTOM label like "Royals Game Day" — the
+///      Game-Day-Red mislabel guard.)
+///   4. effect.colorBehavior is
+///      [ColorBehavior.generatesOwnColors] or
+///      [ColorBehavior.usesPalette]             → returns [labelHint]
+///      (effect ignores the user color slots — appending would
+///      mislead. The Rainbow-Red guard.)
+///   5. No colors resolve to a named bucket     → returns [labelHint]
+///      (pad/unknown/custom dropped — assembled list empty.)
+///   6. Else                                    → "labelHint Color[/Color][/Color]"
+///      Title-cased color names, deduped, joined with '/'.
+///
+/// PURE function — no Riverpod, no I/O — testable in isolation
+/// alongside [normalizeWledPayload] and [expandForParticipation].
+String? composeEffectLabel({
+  required String? labelHint,
+  required int effectId,
+  required List<List<int>> colors,
+}) {
+  if (labelHint == null) return null;
+
+  final effect = WledEffectsCatalog.getById(effectId);
+  if (effect == null) return labelHint;
+
+  if (labelHint.toLowerCase() != effect.name.toLowerCase()) {
+    return labelHint;
+  }
+
+  if (effect.colorBehavior == ColorBehavior.generatesOwnColors ||
+      effect.colorBehavior == ColorBehavior.usesPalette) {
+    return labelHint;
+  }
+
+  // Resolve each color to a name, drop pads/unknowns, dedupe while
+  // preserving insertion order (so "Red, Green, Blue" stays in caller-
+  // intended order, not alphabetical).
+  final seen = <String>{};
+  final names = <String>[];
+  for (final color in colors) {
+    final name = colorRgbToName(color);
+    if (name == 'unknown' || name == 'custom') continue;
+    if (seen.add(name)) names.add(name);
+  }
+
+  if (names.isEmpty) return labelHint;
+
+  final titleCased = names.map((n) => '${n[0].toUpperCase()}${n.substring(1)}');
+  return '$labelHint ${titleCased.join('/')}';
 }
 

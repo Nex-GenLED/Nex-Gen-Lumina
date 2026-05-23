@@ -70,12 +70,13 @@ void main() {
       expect(cols[0], [0, 70, 135, 0]);
       // Secondary 0xFFBD9B60 → r=189, g=155, b=96
       expect(cols[1], [189, 155, 96, 0]);
-      // shortTeamName splits the slug on '-' and capitalizes the last
-      // segment. Real kTeamColors slugs use '_' separators, so the
-      // production label is "Mlb_royals Game Day" — matches the format
-      // _activateNow has shipped with via cluster-fix-writers. Tests
-      // mirror the implementation, not the intent.
-      expect(capturedLabel, 'Mlb_royals Game Day');
+      // Post Fix 3 Part 2 (2026-05-23): shortTeamName now prefers
+      // teamShortName(teamName) — the curated short-name lookup — so a
+      // production "Kansas City Royals" config resolves to "Royals
+      // Game Day" instead of the pre-fix "Mlb_royals Game Day" leak.
+      // The underscore + league prefix that used to surface in Now
+      // Playing is gone.
+      expect(capturedLabel, 'Royals Game Day');
     });
 
     test(
@@ -131,20 +132,18 @@ void main() {
     });
 
     test(
-        'label hint with a hyphen-separated slug strips the city — the '
-        'intended format ("Royals Game Day", not "Kansas City Royals Game '
-        'Day"). Underscore-separated slugs from kTeamColors land in the '
-        'fallback capitalized-whole-slug case.', () async {
+        'label hint composes to "Royals Game Day" regardless of slug '
+        'shape — the curated teamShortName lookup against teamName is '
+        'the primary resolution path post Fix 3 Part 2. Hyphenated '
+        'slugs (legacy doc format) and underscore slugs (production '
+        'kTeamColors format) both produce the same compact label.',
+        () async {
       String? capturedLabel;
       await applyGameDayConfigToDevice(
         applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
           capturedLabel = labelHint;
           return true;
         },
-        // Hyphenated slug exercises the "split on -" branch in
-        // shortTeamName, which is the format the suffix was designed
-        // around. Real kTeamColors slugs use underscores → see the
-        // first test for the production output shape.
         config: configFor(teamSlug: 'kansas-city-royals', teamName: 'Kansas City Royals'),
       );
       expect(capturedLabel, 'Royals Game Day');
