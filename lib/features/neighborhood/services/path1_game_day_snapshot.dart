@@ -125,3 +125,49 @@ class Path1GameDaySnapshot {
     return Path1GameDaySnapshot.fromConfig(config);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THREE-STATE RESOLUTION
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// AsyncLoading must be a distinct state from "no config" — collapsing
+// the two (via maybeWhen orElse → null) caused the 1b configure-twice
+// gap: tapping a configured team BEFORE its Firestore stream resolved
+// treated it as un-configured and deep-linked to the Path 1 Fan Zone
+// (a builder), defeating the point of Phase 2b.
+//
+// [Path1SnapshotResolution] makes the three states explicit so the
+// row badge and the tap-handler branch on the SAME signal — they can
+// never disagree (no path where the badge says "configured" but the
+// tap says "needs setup").
+
+/// Resolution of a team's Path 1 snapshot at a moment in time. Build
+/// via [path1GameDaySnapshotResolutionProvider] in production or
+/// construct directly in tests.
+sealed class Path1SnapshotResolution {
+  const Path1SnapshotResolution();
+}
+
+/// The user's Path 1 configs are still streaming in. Callers must NOT
+/// treat this as "no config" — surface a loading affordance and gate
+/// any deep-link or config-dependent action behind a resolved state.
+class Path1SnapshotLoading extends Path1SnapshotResolution {
+  const Path1SnapshotLoading();
+}
+
+/// A Path 1 config exists for this team. Carries the snapshot view-model
+/// so the UI can render preview controls without a second provider read.
+class Path1SnapshotReady extends Path1SnapshotResolution {
+  final Path1GameDaySnapshot snapshot;
+  const Path1SnapshotReady(this.snapshot);
+}
+
+/// The configs stream resolved and this team is NOT configured (or the
+/// stream errored — treated as absent so the user can re-attempt Path 1
+/// setup rather than getting stuck on a loading spinner). Carries the
+/// team slug so the caller can deep-link cleanly.
+class Path1SnapshotAbsent extends Path1SnapshotResolution {
+  final String teamSlug;
+  const Path1SnapshotAbsent(this.teamSlug);
+}
+

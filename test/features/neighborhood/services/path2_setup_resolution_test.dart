@@ -1,10 +1,12 @@
-// Tests for [resolvePath2GameDaySetup] — the Convergence-Phase-2
-// resolver that decides whether the Path 2 (Sync→Complement→Game Day)
-// setup screen renders against the user's Path 1 snapshot or deep-
-// links into Path 1 setup.
+// Tests for [resolvePath2GameDaySetup] — the Convergence-Phase-2b
+// resolver that maps the 3-state [Path1SnapshotResolution] (Loading /
+// Ready / Absent) into the Path 2 UI decision (Loading / Ready /
+// NeedsPath1).
 //
-// Pure-function: feeds in pre-built [Path1GameDaySnapshot] values + a
-// team slug, asserts on the sealed result branches.
+// 1b configure-twice regression sentinel: the Loading branch MUST NOT
+// collapse to NeedsPath1. Tapping a configured team mid-load previously
+// deep-linked to the Fan Zone builder, defeating Phase 2b. Lock that
+// behavior in with a dedicated test.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
@@ -34,31 +36,41 @@ void main() {
     }
 
     test(
-        'returns Path2SetupNeedsPath1 carrying the team slug when '
-        'snapshot is null (no Path 1 config exists)', () {
+        'Loading → Path2SetupLoading — MUST NOT collapse to NeedsPath1 '
+        '(1b configure-twice regression sentinel)', () {
       final result = resolvePath2GameDaySetup(
-        teamSlug: 'mlb_royals',
-        snapshot: null,
+        resolution: const Path1SnapshotLoading(),
       );
+      expect(result, isA<Path2SetupLoading>());
+      expect(result, isNot(isA<Path2SetupNeedsPath1>()),
+          reason: 'collapsing Loading to NeedsPath1 deep-links the user to '
+              'the Path 1 Fan Zone (a builder) mid-stream-load, defeating '
+              'Phase 2b. The 1b regression on Pulla traced exactly here.');
+    });
 
+    test('Ready → Path2SetupReady carrying the snapshot', () {
+      final snap = Path1GameDaySnapshot.fromConfig(configFor());
+      final result = resolvePath2GameDaySetup(
+        resolution: Path1SnapshotReady(snap),
+      );
+      expect(result, isA<Path2SetupReady>());
+      expect((result as Path2SetupReady).snapshot, same(snap));
+    });
+
+    test(
+        'Absent → Path2SetupNeedsPath1 carrying the team slug for deep-linking',
+        () {
+      final result = resolvePath2GameDaySetup(
+        resolution: const Path1SnapshotAbsent('mlb_royals'),
+      );
       expect(result, isA<Path2SetupNeedsPath1>());
       expect(
         (result as Path2SetupNeedsPath1).teamSlug,
         'mlb_royals',
-        reason: 'team slug carried through so the UI can deep-link into '
-            'the correct team\'s Path 1 setup screen',
+        reason:
+            'team slug carried through so the UI can deep-link into the '
+            'correct team\'s Path 1 setup screen',
       );
-    });
-
-    test('returns Path2SetupReady carrying the snapshot when present', () {
-      final snap = Path1GameDaySnapshot.fromConfig(configFor());
-      final result = resolvePath2GameDaySetup(
-        teamSlug: 'mlb_royals',
-        snapshot: snap,
-      );
-
-      expect(result, isA<Path2SetupReady>());
-      expect((result as Path2SetupReady).snapshot, same(snap));
     });
 
     test(
@@ -69,10 +81,8 @@ void main() {
         configFor(enabled: false),
       );
       final result = resolvePath2GameDaySetup(
-        teamSlug: 'mlb_royals',
-        snapshot: disabled,
+        resolution: Path1SnapshotReady(disabled),
       );
-
       expect(result, isA<Path2SetupReady>());
       expect((result as Path2SetupReady).snapshot.autopilotEnabled, isFalse);
     });

@@ -36,7 +36,6 @@ import '../../../app_colors.dart';
 import '../../../app_router.dart';
 import '../../../theme.dart';
 import '../../../utils/time_format.dart';
-import '../../autopilot/game_day_autopilot_config.dart';
 import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../autopilot/game_day_autopilot_service.dart';
 import '../../game_day/light_it_up_now.dart';
@@ -284,20 +283,27 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
     );
   }
 
-  /// Decide whether the chosen team has Path 1 set up. If yes, advance
-  /// to Step 2 with the snapshot. If no, deep-link to the Path 1 Fan
-  /// Zone (AppRoutes.gameDay) so the user can add the team's autopilot
-  /// config before broadcasting it through Path 2.
+  /// Decide whether the chosen team has Path 1 set up. Branches on the
+  /// 3-state [Path1SnapshotResolution]:
+  ///   - Loading → no-op (the row's tap is already disabled in this
+  ///     state; this is defense-in-depth in case the user somehow
+  ///     fires the tap mid-load).
+  ///   - Ready   → advance to Step 2 read-only preview.
+  ///   - Absent  → deep-link to the Path 1 Fan Zone.
   ///
-  /// The branching is delegated to [resolvePath2GameDaySetup] so the
-  /// sealed-result shape stays unit-testable.
+  /// The 3-state resolution is the same signal the row badge reads, so
+  /// badge-shown ⇔ tap-advances. They can never disagree.
   void _handleTeamTap(String slug, TeamColors team) {
-    final snapshot = ref.read(path1GameDaySnapshotProvider(slug));
     final resolution = resolvePath2GameDaySetup(
-      teamSlug: slug,
-      snapshot: snapshot,
+      resolution:
+          ref.read(path1GameDaySnapshotResolutionProvider(slug)),
     );
     switch (resolution) {
+      case Path2SetupLoading():
+        // Should be unreachable because the row disables its onTap while
+        // loading. Keep an explicit branch (no-op) so the switch is
+        // exhaustive and a regression here is caught at the type level.
+        return;
       case Path2SetupReady(:final snapshot):
         setState(() {
           _selectedSnapshot = snapshot;
@@ -974,10 +980,15 @@ class _SportChip extends StatelessWidget {
   }
 }
 
-/// Team row in Step 1, showing a "Path 1 ready" check when the team
-/// has [GameDayAutopilotConfig] set up (so tapping advances to Step 2
-/// instead of deep-linking). Reads
-/// [path1GameDaySnapshotProvider(slug)] reactively per row.
+/// Team row in Step 1. Renders one of three states from the same
+/// upstream [path1GameDaySnapshotResolutionProvider] the tap handler
+/// reads, so the badge and tap-routing CAN NEVER DISAGREE:
+///
+///   - Loading → muted row, spinner trailing icon, tap DISABLED.
+///                Prevents the 1b configure-twice gap where mid-load
+///                taps deep-linked to the Fan Zone builder.
+///   - Ready   → "Configured" check + chevron, tap advances to Step 2.
+///   - Absent  → no badge, plus-icon trailing, tap deep-links to setup.
 class _GameDayTeamRow extends ConsumerWidget {
   final String slug;
   final TeamColors team;
@@ -991,8 +1002,10 @@ class _GameDayTeamRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hasPath1 =
-        ref.watch(path1GameDaySnapshotProvider(slug)) != null;
+    final resolution =
+        ref.watch(path1GameDaySnapshotResolutionProvider(slug));
+    final isLoading = resolution is Path1SnapshotLoading;
+    final hasPath1 = resolution is Path1SnapshotReady;
     final sportEmoji = switch (team.sport) {
       SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
       SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
@@ -1006,7 +1019,11 @@ class _GameDayTeamRow extends ConsumerWidget {
     };
 
     return InkWell(
-      onTap: onTap,
+      // Tap is DISABLED while the resolution is Loading — gates the
+      // 1b configure-twice race (badge + tap derive from the same
+      // signal, so a configured team's tap can never collapse to
+      // "needs setup" mid-load).
+      onTap: isLoading ? null : onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1021,102 +1038,115 @@ class _GameDayTeamRow extends ConsumerWidget {
                   : NexGenPalette.line,
             ),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [team.primary, team.secondary],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  sportEmoji,
-                  style: const TextStyle(fontSize: 18),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      team.teamName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
+          child: Opacity(
+            opacity: isLoading ? 0.55 : 1.0,
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [team.primary, team.secondary],
                     ),
-                    Row(
-                      children: [
-                        Text(
-                          team.sport.displayName,
-                          style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 11,
-                          ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    sportEmoji,
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        team.teamName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
                         ),
-                        if (hasPath1) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.check_circle,
-                            color: team.primary,
-                            size: 12,
-                          ),
-                          const SizedBox(width: 2),
+                      ),
+                      Row(
+                        children: [
                           Text(
-                            'Configured',
+                            team.sport.displayName,
                             style: TextStyle(
-                              color: team.primary,
+                              color: Colors.grey.shade500,
                               fontSize: 11,
-                              fontWeight: FontWeight.w500,
                             ),
                           ),
+                          if (hasPath1) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.check_circle,
+                              color: team.primary,
+                              size: 12,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              'Configured',
+                              style: TextStyle(
+                                color: team.primary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: team.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
                     ),
-                  ],
-                ),
-              ),
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color: team.primary,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.2),
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color: team.secondary,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.2),
+                const SizedBox(width: 4),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: team.secondary,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                hasPath1 ? Icons.chevron_right : Icons.add_circle_outline,
-                color: hasPath1 ? Colors.grey.shade400 : Colors.grey.shade600,
-                size: 20,
-              ),
-            ],
+                const SizedBox(width: 8),
+                if (isLoading)
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: Colors.grey.shade500,
+                    ),
+                  )
+                else
+                  Icon(
+                    hasPath1 ? Icons.chevron_right : Icons.add_circle_outline,
+                    color: hasPath1 ? Colors.grey.shade400 : Colors.grey.shade600,
+                    size: 20,
+                  ),
+              ],
+            ),
           ),
         ),
       ),

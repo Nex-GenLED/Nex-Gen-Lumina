@@ -289,23 +289,39 @@ final teamAutopilotConfigProvider =
   );
 });
 
-/// Convergence-Phase-1B read path: Path 2 reads a team's canonical
-/// Path 1 [GameDayAutopilotConfig] as a [Path1GameDaySnapshot].
+/// Convergence-Phase-2b: Path 2 reads a team's canonical Path 1
+/// [GameDayAutopilotConfig] as a 3-state [Path1SnapshotResolution].
 ///
-/// Returns `null` when no Path 1 config exists for the team — Path 2
-/// uses that signal to deep-link the user into Path 1 setup before
-/// allowing a host broadcast. A disabled config still returns a non-
-/// null snapshot with `autopilotEnabled = false`, so the UI can show
-/// the existing design preview and offer an enable action.
+/// Returns one of:
+///   - [Path1SnapshotLoading] — the underlying Firestore stream has
+///     not yet resolved. Callers MUST NOT collapse this to "absent"
+///     (regression sentinel: doing so caused the 1b configure-twice
+///     gap on Pulla — tapping a configured team mid-load deep-linked
+///     to the Fan Zone builder instead of the read-only preview).
+///   - [Path1SnapshotReady] — a config exists; carries the snapshot.
+///     Disabled configs still resolve to Ready (with
+///     `autopilotEnabled = false`) so the UI can show the existing
+///     design + offer an enable action.
+///   - [Path1SnapshotAbsent] — the stream resolved (or errored) and
+///     this team has no Path 1 config. Callers deep-link to Path 1
+///     setup. Errors fold to Absent on purpose: better the user can
+///     re-attempt setup than be stuck on a spinner.
 ///
-/// Additive — no caller wires this into the UI yet. Phase 2 of the
-/// Game Day convergence rewires the Sync→Complement→Game Day flow to
-/// read from this provider instead of constructing an in-memory
-/// GameDaySyncConfig.
-final path1GameDaySnapshotProvider =
-    Provider.family<Path1GameDaySnapshot?, String>((ref, teamSlug) {
-  final config = ref.watch(teamAutopilotConfigProvider(teamSlug));
-  return Path1GameDaySnapshot.fromConfigOrNull(config);
+/// Reads the parent AsyncValue via `.when(data, loading, error)` (NOT
+/// `.maybeWhen` with `orElse → null`) so AsyncLoading stays a distinct
+/// signal all the way to the UI.
+final path1GameDaySnapshotResolutionProvider =
+    Provider.family<Path1SnapshotResolution, String>((ref, teamSlug) {
+  final configsAsync = ref.watch(gameDayAutopilotConfigsProvider);
+  return configsAsync.when(
+    data: (configs) {
+      final matches = configs.where((c) => c.teamSlug == teamSlug);
+      if (matches.isEmpty) return Path1SnapshotAbsent(teamSlug);
+      return Path1SnapshotReady(Path1GameDaySnapshot.fromConfig(matches.first));
+    },
+    loading: () => const Path1SnapshotLoading(),
+    error: (_, __) => Path1SnapshotAbsent(teamSlug),
+  );
 });
 
 // ---------------------------------------------------------------------------
