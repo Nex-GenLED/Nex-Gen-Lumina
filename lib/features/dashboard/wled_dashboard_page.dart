@@ -521,7 +521,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Icon(
-            Icons.bolt_rounded,
+            Icons.router_rounded,
             size: 22,
             color: state.connected
                 ? NexGenPalette.cyan
