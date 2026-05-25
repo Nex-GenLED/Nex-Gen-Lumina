@@ -394,42 +394,18 @@ class PatternRepository {
 
   static const List<PatternCategory> _categories = [
     catArchitectural,
-    catHoliday,
     catSports,
-    catSeasonal,
-    catParty,
+    catHoliday,
     catMovies,
-    catSecurity,
     catNature,
+    catParty,
+    catSeasonal,
+    catSecurity,
   ];
 
   // ================= Sub-Categories (3-tier navigation) =================
   static final List<SubCategory> _subCategories = [
-    // Holidays
-    SubCategory(
-      id: 'sub_xmas',
-      name: 'Christmas',
-      themeColors: const [Color(0xFFFF0000), Color(0xFF00FF00), Colors.white], // Pure red & green
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_halloween',
-      name: 'Halloween',
-      themeColors: const [Color(0xFFFF8C00), Color(0xFF800080), Colors.black], // Pure orange, purple
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_july4',
-      name: '4th of July',
-      themeColors: const [Color(0xFFFF0000), Colors.white, Color(0xFF0000FF)], // Pure red, white, blue
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_easter',
-      name: 'Easter',
-      themeColors: const [Color(0xFFFFB6C1), Color(0xFFADD8E6), Color(0xFFBFFF00)], // Light pink, light blue, lime
-      parentCategoryId: catHoliday.id,
-    ),
+    // Holidays (chronological)
     SubCategory(
       id: 'sub_valentines',
       name: "Valentine's",
@@ -442,26 +418,32 @@ class PatternRepository {
       themeColors: const [Color(0xFF00FF00), Color(0xFF90EE90), Colors.white], // Pure green, light green
       parentCategoryId: catHoliday.id,
     ),
+    SubCategory(
+      id: 'sub_easter',
+      name: 'Easter',
+      themeColors: const [Color(0xFFFFB6C1), Color(0xFFADD8E6), Color(0xFFBFFF00)], // Light pink, light blue, lime
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_july4',
+      name: '4th of July',
+      themeColors: const [Color(0xFFFF0000), Colors.white, Color(0xFF0000FF)], // Pure red, white, blue
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_halloween',
+      name: 'Halloween',
+      themeColors: const [Color(0xFFFF8C00), Color(0xFF800080), Colors.black], // Pure orange, purple
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_xmas',
+      name: 'Christmas',
+      themeColors: const [Color(0xFFFF0000), Color(0xFF00FF00), Colors.white], // Pure red & green
+      parentCategoryId: catHoliday.id,
+    ),
 
     // Game Day - Using pure RGB colors for accurate LED display
-    SubCategory(
-      id: 'sub_kc',
-      name: 'Kansas City',
-      themeColors: const [Color(0xFFFF0000), Color(0xFFFFD700)], // Pure red, gold
-      parentCategoryId: catSports.id,
-    ),
-    SubCategory(
-      id: 'sub_seattle',
-      name: 'Seattle',
-      themeColors: const [Color(0xFF0000FF), Color(0xFF00FF00)], // Pure blue, pure green
-      parentCategoryId: catSports.id,
-    ),
-    SubCategory(
-      id: 'sub_rb_generic',
-      name: 'General Red/Blue',
-      themeColors: const [Color(0xFFFF0000), Color(0xFF0000FF), Colors.white], // Pure red, pure blue
-      parentCategoryId: catSports.id,
-    ),
     SubCategory(
       id: 'sub_gy_generic',
       name: 'General Green/Yellow',
@@ -474,8 +456,32 @@ class PatternRepository {
       themeColors: const [Color(0xFFFF8C00), Color(0xFF0000FF)], // Pure orange, pure blue
       parentCategoryId: catSports.id,
     ),
+    SubCategory(
+      id: 'sub_rb_generic',
+      name: 'General Red/Blue',
+      themeColors: const [Color(0xFFFF0000), Color(0xFF0000FF), Colors.white], // Pure red, pure blue
+      parentCategoryId: catSports.id,
+    ),
+    SubCategory(
+      id: 'sub_kc',
+      name: 'Kansas City',
+      themeColors: const [Color(0xFFFF0000), Color(0xFFFFD700)], // Pure red, gold
+      parentCategoryId: catSports.id,
+    ),
+    SubCategory(
+      id: 'sub_seattle',
+      name: 'Seattle',
+      themeColors: const [Color(0xFF0000FF), Color(0xFF00FF00)], // Pure blue, pure green
+      parentCategoryId: catSports.id,
+    ),
 
     // Seasonal - Using pure RGB colors for accurate LED display
+    SubCategory(
+      id: 'sub_autumn',
+      name: 'Autumn Harvest',
+      themeColors: const [Color(0xFFFF8C00), Color(0xFF8B4513), Color(0xFFFF0000)], // Orange, saddle brown, red
+      parentCategoryId: catSeasonal.id,
+    ),
     SubCategory(
       id: 'sub_spring',
       name: 'Spring Pastels',
@@ -489,12 +495,6 @@ class PatternRepository {
       parentCategoryId: catSeasonal.id,
     ),
     SubCategory(
-      id: 'sub_autumn',
-      name: 'Autumn Harvest',
-      themeColors: const [Color(0xFFFF8C00), Color(0xFF8B4513), Color(0xFFFF0000)], // Orange, saddle brown, red
-      parentCategoryId: catSeasonal.id,
-    ),
-    SubCategory(
       id: 'sub_winter',
       name: 'Winter Frost',
       themeColors: const [Color(0xFF708090), Color(0xFFADD8E6), Colors.white], // Slate gray, light blue, white
@@ -502,12 +502,6 @@ class PatternRepository {
     ),
 
     // Architectural - Warm tones use specific hex values for LED accuracy
-    SubCategory(
-      id: 'sub_warm_whites',
-      name: 'Warm Whites',
-      themeColors: const [Color(0xFFFFB347), Color(0xFFFF8C00), Colors.white], // Warm amber, orange, white
-      parentCategoryId: catArchitectural.id,
-    ),
     SubCategory(
       id: 'sub_cool_whites',
       name: 'Cool Whites',
@@ -526,8 +520,20 @@ class PatternRepository {
       themeColors: const [Colors.white],
       parentCategoryId: catArchitectural.id,
     ),
+    SubCategory(
+      id: 'sub_warm_whites',
+      name: 'Warm Whites',
+      themeColors: const [Color(0xFFFFB347), Color(0xFFFF8C00), Colors.white], // Warm amber, orange, white
+      parentCategoryId: catArchitectural.id,
+    ),
 
     // Party - Using pure RGB colors for accurate LED display
+    SubCategory(
+      id: 'sub_baby_shower',
+      name: 'Baby Shower',
+      themeColors: const [Color(0xFFADD8E6), Color(0xFFFFB6C1), Colors.white], // Light blue, light pink, white
+      parentCategoryId: catParty.id,
+    ),
     SubCategory(
       id: 'sub_birthday',
       name: 'Birthday Brights',
@@ -544,12 +550,6 @@ class PatternRepository {
       id: 'sub_rave',
       name: 'Rave / Strobe',
       themeColors: const [Color(0xFF800080), Color(0xFF00FFFF), Color(0xFFFF69B4)], // Purple, cyan, hot pink
-      parentCategoryId: catParty.id,
-    ),
-    SubCategory(
-      id: 'sub_baby_shower',
-      name: 'Baby Shower',
-      themeColors: const [Color(0xFFADD8E6), Color(0xFFFFB6C1), Colors.white], // Light blue, light pink, white
       parentCategoryId: catParty.id,
     ),
   ];
@@ -571,6 +571,25 @@ class PatternRepository {
             'pal': 3, // Red/White
             'sx': 180,
             'ix': 200
+          }
+        ]
+      },
+    ),
+    PatternItem(
+      id: 'pat_easter_pastels',
+      name: 'Easter Pastels',
+      imageUrl: 'https://images.unsplash.com/photo-1522938974444-f12497b69347',
+      categoryId: catHoliday.id,
+      wledPayload: const {
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {
+            'id': 0,
+            'fx': 9, // Color Waves
+            'pal': 12, // Pastel-like
+            'sx': 140,
+            'ix': 160
           }
         ]
       },
@@ -609,25 +628,6 @@ class PatternRepository {
             'pal': 5, // Purple/Orange
             'sx': 210,
             'ix': 200
-          }
-        ]
-      },
-    ),
-    PatternItem(
-      id: 'pat_easter_pastels',
-      name: 'Easter Pastels',
-      imageUrl: 'https://images.unsplash.com/photo-1522938974444-f12497b69347',
-      categoryId: catHoliday.id,
-      wledPayload: const {
-        'on': true,
-        'bri': 200,
-        'seg': [
-          {
-            'id': 0,
-            'fx': 9, // Color Waves
-            'pal': 12, // Pastel-like
-            'sx': 140,
-            'ix': 160
           }
         ]
       },
