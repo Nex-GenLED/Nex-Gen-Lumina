@@ -1076,12 +1076,11 @@ class _NeighborhoodGroupListViewState
         border: Border(
             top: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.1))),
       ),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Primary — matches "Start a Block Party" in onboarding
-          SizedBox(
-            width: double.infinity,
+          Expanded(
             child: ElevatedButton.icon(
               onPressed: widget.onCreateGroup,
               icon:
@@ -1095,7 +1094,7 @@ class _NeighborhoodGroupListViewState
                 backgroundColor: NexGenPalette.cyan,
                 foregroundColor: Colors.black,
                 padding:
-                    const EdgeInsets.symmetric(vertical: 16),
+                    const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
                 elevation: 8,
@@ -1104,10 +1103,9 @@ class _NeighborhoodGroupListViewState
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(width: 12),
           // Secondary — matches "Join the Party" in onboarding
-          SizedBox(
-            width: double.infinity,
+          Expanded(
             child: OutlinedButton.icon(
               onPressed: widget.onJoinGroup,
               icon: const Icon(Icons.login, size: 20),
