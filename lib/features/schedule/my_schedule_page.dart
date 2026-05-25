@@ -2337,11 +2337,11 @@ class _CalDayCell extends StatelessWidget {
               Container(
                 width: 4,
                 height: 4,
-                margin: const EdgeInsets.only(top: 2),
+                margin: const EdgeInsets.only(top: 3),
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 3)],
+                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 1.5)],
                 ),
               ),
           ],
