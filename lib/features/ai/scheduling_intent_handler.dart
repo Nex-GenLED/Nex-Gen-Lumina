@@ -41,12 +41,25 @@ const _kFrost = Color(0xFFDCF0FF);
 ///     so the UI can later group, bulk-undo, or atomically delete siblings
 ///     authored by the same prompt.
 ///
-/// **Known Type-A limitation:** `result.wledPayload` is one blob for the
-/// whole response. The cloud schema does not provide per-intent WLED
-/// payloads, so every item in a compound batch carries the same
-/// `wledPayload`. Distinct per-intent designs are a follow-up requiring a
-/// schema extension; today, "warm white at sunset AND red on Friday" yields
-/// two schedules that run the same single design.
+/// Per-element `wled` payloads (Item #51 Type-A full):
+///   • Each intent Map may carry its own `wled` field (full WLED state for
+///     that schedule). When present, the resulting [ScheduleItem] uses that
+///     per-element payload instead of [result.wledPayload].
+///   • When omitted, the item falls back to [result.wledPayload] — the
+///     primary design from the top of the AI response.
+///
+/// **Honesty guard:** when a sibling carries a distinct `patternName` from
+/// the top-level design AND has no per-element `wled`, attaching the
+/// top-level payload would create a "lying" entry (e.g. a schedule named
+/// "Friday Red" running a warm-white payload). The guard drops those
+/// siblings and surfaces them in the chat message so the user knows what
+/// didn't land — never silently. The honest cases are:
+///   • the intent's `patternName` matches the top-level — legitimate reuse;
+///   • the intent has its own `wled` Map — distinct design provided.
+/// At least one item is always scheduled: if every intent is ambiguous,
+/// the first one is scheduled against the top-level payload (with the
+/// honesty caveat noted in the message) so the user gets *something* they
+/// asked for.
 Future<void> handleSchedulingIntents({
   required WidgetRef ref,
   required BuildContext context,
@@ -70,13 +83,29 @@ Future<void> handleSchedulingIntents({
   );
   onMessagePosted?.call();
 
+  // ── Honesty guard: drop ambiguous intents (distinct name, no own wled) ─
+  // Without this, a sibling labeled "Friday Red" with no per-element wled
+  // would silently attach to the top-level warm-white payload — a lying
+  // entry. Dropped intent names surface in the post-add message so the
+  // user knows what didn't land.
+  final topLevelPatternName =
+      result.wledPayload?['patternName'] as String?;
+  final classification = classifyIntents(
+    intents: intents,
+    topLevelPatternName: topLevelPatternName,
+  );
+  final keptIntents = classification.kept;
+  final droppedNames = classification.droppedNames;
+
   // ── Build N ScheduleItems sharing one sourcePromptId ──────────────────
   // sourcePromptId: a single opaque uuid stamped on every sibling so the
   // UI can later group, bulk-undo, or atomically roll back the set.
+  // Per-element wled wins inside the builder; the shared payload is the
+  // top-level fallback for honest reuse cases.
   final sourcePromptId = const Uuid().v4();
   final batchTs = DateTime.now().millisecondsSinceEpoch;
   final items = buildScheduleItemsFromIntents(
-    intents: intents,
+    intents: keptIntents,
     sourcePromptId: sourcePromptId,
     batchTs: batchTs,
     sharedWledPayload: result.wledPayload,
@@ -101,16 +130,18 @@ Future<void> handleSchedulingIntents({
   // Wording diverges by count but the mechanism is identical: single
   // ScaffoldMessenger SnackBar with one Add action that persists via
   // addAll(). Names route through displayNameFor so the prompt cell
-  // never leaks a raw slug.
+  // never leaks a raw slug. Counts reflect only the KEPT (honest)
+  // intents — the dropped ones appear in the post-Add chat message.
   final String promptText;
   final String successText;
   if (items.length == 1) {
-    final firstName = displayNameFor(intents.first['patternName'] as String? ?? 'Custom');
-    final firstTime = intents.first['timeLabel'] as String? ?? 'Sunset';
+    final firstName = displayNameFor(
+        keptIntents.first['patternName'] as String? ?? 'Custom');
+    final firstTime = keptIntents.first['timeLabel'] as String? ?? 'Sunset';
     promptText = 'Add "$firstName" to your schedule at $firstTime?';
     successText = 'Schedule added';
   } else {
-    final names = intents
+    final names = keptIntents
         .map((i) => displayNameFor(i['patternName'] as String? ?? 'Custom'))
         .toList();
     // For 2-3 items list the names inline; for 4+ just say the count to
@@ -147,6 +178,29 @@ Future<void> handleSchedulingIntents({
                 duration: const Duration(seconds: 2),
               ),
             );
+            // Honesty follow-up: if the guard dropped any siblings,
+            // post a chat message naming them so the user sees the
+            // saved/skipped split in the conversation history (the
+            // SnackBar disappears).
+            if (droppedNames.isNotEmpty) {
+              final savedQuoted = items
+                  .map((i) => '"${displayNameFor(
+                      i.actionLabel.startsWith('Pattern: ')
+                          ? i.actionLabel.substring(9)
+                          : i.actionLabel)}"')
+                  .join(', ');
+              final droppedQuoted = droppedNames
+                  .map((n) => '"${displayNameFor(n)}"')
+                  .join(', ');
+              final droppedPhrase = droppedNames.length == 1
+                  ? 'a separate design for $droppedQuoted'
+                  : 'separate designs for $droppedQuoted';
+              controller.addAssistantMessage(
+                'Saved $savedQuoted. I couldn\'t set $droppedPhrase '
+                'in one go — ask me to add it and I\'ll schedule it.',
+              );
+              onMessagePosted?.call();
+            }
           } catch (e) {
             debugPrint('handleSchedulingIntents: addAll failed: $e');
             if (!context.mounted) return;
@@ -164,22 +218,102 @@ Future<void> handleSchedulingIntents({
   );
 }
 
+/// Result of [classifyIntents] — the honest slice plus the names of any
+/// intents dropped for ambiguity.
+class IntentClassification {
+  /// Intents safe to schedule. Either carry their own `wled` (distinct
+  /// design provided) or reuse the top-level design under the matching
+  /// `patternName`. May be a subset of the input.
+  final List<Map<String, dynamic>> kept;
+
+  /// Display names of intents the guard dropped because they would have
+  /// attached the wrong design under a truthful label. The caller surfaces
+  /// these in the post-add message so the user knows what didn't land.
+  final List<String> droppedNames;
+
+  const IntentClassification({
+    required this.kept,
+    required this.droppedNames,
+  });
+}
+
+/// Honesty guard. Partition `intents` into the ones safe to schedule
+/// (`kept`) vs the ones that would create a lying entry (`droppedNames`,
+/// surfaced to the user).
+///
+/// Classification per intent:
+///   • HONEST if the intent has its own `wled` Map (distinct design
+///     provided by the model) — schedule with the per-element payload.
+///   • HONEST if the intent's `patternName` matches [topLevelPatternName]
+///     (case-insensitive, trimmed) — legitimate reuse of the primary
+///     design.
+///   • AMBIGUOUS otherwise — distinct patternName but no per-element
+///     payload would attach the wrong design under a truthful label.
+///
+/// Fallback: if EVERY intent is ambiguous (pathological — the model
+/// produced N distinct names but no per-element payloads), the FIRST
+/// intent is kept and scheduled against the top-level. The user still
+/// gets *something* they asked for; the caller's message names the rest
+/// as unsaved. This branch happens at most rarely; the schema explicitly
+/// forbids the model from producing this shape, but the guard is the
+/// belt-and-suspenders.
+@visibleForTesting
+IntentClassification classifyIntents({
+  required List<Map<String, dynamic>> intents,
+  required String? topLevelPatternName,
+}) {
+  if (intents.isEmpty) {
+    return const IntentClassification(kept: [], droppedNames: []);
+  }
+
+  final topNormalized = topLevelPatternName?.trim().toLowerCase();
+
+  final kept = <Map<String, dynamic>>[];
+  final droppedNames = <String>[];
+  for (final intent in intents) {
+    final hasOwnWled = intent['wled'] is Map;
+    final name = (intent['patternName'] as String?)?.trim() ?? '';
+    final nameMatchesTop = topNormalized != null &&
+        topNormalized.isNotEmpty &&
+        name.toLowerCase() == topNormalized;
+    if (hasOwnWled || nameMatchesTop) {
+      kept.add(intent);
+    } else {
+      droppedNames.add(name.isEmpty ? 'Custom' : name);
+    }
+  }
+
+  // Pathological fallback: every intent was ambiguous. Keep the first one
+  // so the user gets at least one schedule from their compound prompt.
+  // The first item's name moves out of droppedNames (it IS being saved,
+  // just under the top-level design); the rest stay dropped.
+  if (kept.isEmpty) {
+    kept.add(intents.first);
+    if (droppedNames.isNotEmpty) {
+      droppedNames.removeAt(0);
+    }
+  }
+
+  return IntentClassification(kept: kept, droppedNames: droppedNames);
+}
+
 /// Map N AI intents to N [ScheduleItem]s sharing one [sourcePromptId].
 ///
 /// Pure function — extracted from [handleSchedulingIntents] so the
 /// item-construction invariants (shared sourcePromptId, unique ids,
-/// field defaulting, "Pattern: " action-label prefix) are testable
-/// without standing up Riverpod, ScaffoldMessenger, or Firebase Auth.
+/// field defaulting, "Pattern: " action-label prefix, per-element vs
+/// shared wledPayload selection) are testable without standing up
+/// Riverpod, ScaffoldMessenger, or Firebase Auth.
 ///
 /// Each item's [ScheduleItem.id] is `'ai-$batchTs-$index'` so two items
 /// minted in the same millisecond don't collide. The whole batch shares
 /// [sourcePromptId] so the UI can later group, bulk-undo, or atomically
 /// roll back siblings authored by the same prompt.
 ///
-/// Known Type-A limitation: the cloud schema returns ONE top-level
-/// `wled` payload for the whole response, not per-intent. Every item in
-/// the batch carries the same [sharedWledPayload]. Distinct per-intent
-/// payloads are a follow-up requiring a schema extension.
+/// Per-element WLED payload: each intent may carry its own `wled` Map
+/// (Item #51 Type-A full). When present, the resulting item uses that
+/// per-element payload. When absent, the item falls back to
+/// [sharedWledPayload] — the top-level design.
 @visibleForTesting
 List<ScheduleItem> buildScheduleItemsFromIntents({
   required List<Map<String, dynamic>> intents,
@@ -198,6 +332,16 @@ List<ScheduleItem> buildScheduleItemsFromIntents({
         const ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     final patternName = intent['patternName'] as String? ?? 'Custom';
 
+    // Per-element wled wins when present; else fall back to the
+    // shared top-level payload. The honesty guard upstream
+    // ([classifyIntents]) ensures this fallback only fires when the
+    // patternName matches the top-level design, so the user never sees
+    // a sibling labeled "Friday Red" running a warm-white payload.
+    final perIntentWled = intent['wled'];
+    final itemPayload = perIntentWled is Map
+        ? Map<String, dynamic>.from(perIntentWled)
+        : sharedWledPayload;
+
     items.add(ScheduleItem(
       id: 'ai-$batchTs-$i',
       timeLabel: timeLabel,
@@ -205,7 +349,7 @@ List<ScheduleItem> buildScheduleItemsFromIntents({
       repeatDays: repeatDays,
       actionLabel: 'Pattern: $patternName',
       enabled: true,
-      wledPayload: sharedWledPayload,
+      wledPayload: itemPayload,
       sourcePromptId: sourcePromptId,
     ));
   }

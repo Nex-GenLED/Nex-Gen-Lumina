@@ -1,12 +1,14 @@
 // test/features/ai/scheduling_intent_handler_test.dart
 //
-// Item construction tests for the compound schedule dispatcher
-// (Item #51 Type-A completion). Exercises the pure helper
-// `buildScheduleItemsFromIntents` extracted from
-// `handleSchedulingIntents` so the per-item invariants — shared
-// sourcePromptId, unique ids, field defaulting, "Pattern: " action-label
-// prefix, atomic-batch one-blob wledPayload — can be asserted without
-// standing up Riverpod, ScaffoldMessenger, or Firebase Auth.
+// Pure-function tests for the compound schedule dispatcher (Item #51
+// Type-A). Two helpers exposed via @visibleForTesting:
+//   • buildScheduleItemsFromIntents — item construction (ids,
+//     sourcePromptId, field defaulting, per-element vs shared wled)
+//   • classifyIntents — honesty guard that drops "lying" intents
+//     (distinct patternName + no per-element wled) so the user never
+//     sees a sibling labeled "Friday Red" running a warm-white payload
+// Exercises both helpers without standing up Riverpod, ScaffoldMessenger,
+// or Firebase Auth.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
@@ -143,8 +145,8 @@ void main() {
           reason: 'every sibling shares the one provenance stamp');
     });
 
-    test('every item in a batch carries the same wledPayload reference '
-        '(Type-A limitation — one blob, N items)', () {
+    test('intents without per-element wled → all items reuse the shared '
+        'top-level payload', () {
       final items = buildScheduleItemsFromIntents(
         intents: [
           _intent(patternName: 'A'),
@@ -155,9 +157,11 @@ void main() {
         sharedWledPayload: sharedWled,
       );
 
-      // Documents the known Type-A limitation: one cloud response carries
-      // one wled blob; every sibling reuses it. A future per-intent
-      // payload schema would change this.
+      // When no per-element wled is provided, siblings fall back to the
+      // top-level payload — by design, not a limitation. (The honesty
+      // guard upstream ensures this fallback only happens when the
+      // intent's patternName matches the top-level, so labels stay
+      // honest.)
       expect(items[0].wledPayload, sharedWled);
       expect(items[1].wledPayload, sharedWled);
       expect(identical(items[0].wledPayload, items[1].wledPayload), isTrue);
@@ -225,6 +229,250 @@ void main() {
       );
 
       expect(items.every((i) => i.wledPayload == null), isTrue);
+    });
+  });
+
+  // ── Per-element wled (Item #51 Type-A full) ────────────────────────────
+  // Two distinct designs in one compound prompt: each intent carries its
+  // own `wled` Map, and buildScheduleItemsFromIntents prefers the
+  // per-element payload over the shared top-level one.
+  group('buildScheduleItemsFromIntents — per-element wled', () {
+    const redWled = <String, dynamic>{
+      'on': true,
+      'bri': 255,
+      'seg': [
+        {
+          'fx': 0,
+          'col': [
+            [255, 0, 0, 0],
+          ],
+        },
+      ],
+    };
+
+    test('two intents with distinct per-element wled → items get '
+        'DIFFERENT payloads, shared sourcePromptId', () {
+      final items = buildScheduleItemsFromIntents(
+        intents: [
+          _intent(patternName: 'Warm White Wash'),
+          {
+            'action': 'add',
+            'timeLabel': '19:00',
+            'offTimeLabel': null,
+            'repeatDays': ['Fri'],
+            'patternName': 'Friday Red',
+            'wled': redWled,
+          },
+        ],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: sharedWled,
+      );
+
+      expect(items.length, 2);
+      // Sibling 0 had no per-element wled → falls back to the top-level
+      // warm-white payload.
+      expect(items[0].wledPayload, sharedWled);
+      // Sibling 1 had its own wled → carries the red payload, NOT the
+      // shared one.
+      expect(items[1].wledPayload, isNot(equals(sharedWled)));
+      expect(
+          (items[1].wledPayload!['seg'] as List).first['col'].first.first, 255);
+      // Provenance stamp still shared across the batch.
+      expect(items[0].sourcePromptId, items[1].sourcePromptId);
+    });
+
+    test('per-element wled is copied (not aliased) so callers can mutate '
+        'their input without affecting persisted items', () {
+      final mutableRed = {
+        'on': true,
+        'seg': [
+          {'fx': 0},
+        ],
+      };
+      final items = buildScheduleItemsFromIntents(
+        intents: [
+          {
+            'patternName': 'Red',
+            'timeLabel': '19:00',
+            'wled': mutableRed,
+          },
+        ],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: sharedWled,
+      );
+
+      // Defensive copy: mutating the source map after building must not
+      // mutate the item's stored payload.
+      mutableRed['on'] = false;
+      expect(items.first.wledPayload!['on'], isTrue);
+    });
+
+    test('intent with non-Map wled value → silently falls back to '
+        'shared payload (defensive)', () {
+      final items = buildScheduleItemsFromIntents(
+        intents: [
+          {
+            'patternName': 'Warm White Wash',
+            'timeLabel': 'Sunset',
+            'wled': 'not-a-map', // model junk
+          },
+        ],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: sharedWled,
+      );
+
+      expect(items.first.wledPayload, sharedWled);
+    });
+  });
+
+  // ── Honesty guard (classifyIntents) ────────────────────────────────────
+  // The guard partitions intents into the slice safe to schedule (`kept`)
+  // vs the names of dropped "lying" siblings (distinct patternName + no
+  // per-element wled → would attach the wrong design under a truthful
+  // label). Surfaces dropped names to the user via the post-add chat
+  // message; never silently drops.
+  group('classifyIntents — honesty guard', () {
+    const friRed = <String, dynamic>{
+      'on': true,
+      'seg': [
+        {'fx': 0, 'col': [[255, 0, 0, 0]]}
+      ],
+    };
+
+    test('same patternName as top-level → kept (legit reuse)', () {
+      final result = classifyIntents(
+        intents: [_intent(patternName: 'Warm White Wash')],
+        topLevelPatternName: 'Warm White Wash',
+      );
+      expect(result.kept.length, 1);
+      expect(result.droppedNames, isEmpty);
+    });
+
+    test('distinct patternName WITH per-element wled → kept (legit '
+        'distinct design)', () {
+      final result = classifyIntents(
+        intents: [
+          {
+            'patternName': 'Friday Red',
+            'timeLabel': '19:00',
+            'wled': friRed,
+          },
+        ],
+        topLevelPatternName: 'Warm White Wash',
+      );
+      expect(result.kept.length, 1);
+      expect(result.droppedNames, isEmpty);
+    });
+
+    test('two intents: distinct patternName, NO per-element wled → '
+        'guard drops the distinct one, names it', () {
+      final result = classifyIntents(
+        intents: [
+          _intent(patternName: 'Warm White Wash'),
+          // Distinct name, no own wled → would lie about the design.
+          {
+            'patternName': 'Friday Red',
+            'timeLabel': '19:00',
+          },
+        ],
+        topLevelPatternName: 'Warm White Wash',
+      );
+      expect(result.kept.length, 1);
+      expect(result.kept.first['patternName'], 'Warm White Wash');
+      expect(result.droppedNames, ['Friday Red']);
+    });
+
+    test('all ambiguous → fallback keeps intents[0], drops the rest by '
+        'name', () {
+      // Pathological: model produced 3 distinct names but no per-element
+      // payloads, AND none matches the top-level. The fallback rule
+      // schedules the first one (the user gets *something*) and surfaces
+      // the rest as dropped.
+      final result = classifyIntents(
+        intents: [
+          {'patternName': 'Alpha', 'timeLabel': '06:00'},
+          {'patternName': 'Bravo', 'timeLabel': '12:00'},
+          {'patternName': 'Charlie', 'timeLabel': '18:00'},
+        ],
+        topLevelPatternName: 'Original Design',
+      );
+      expect(result.kept.length, 1);
+      expect(result.kept.first['patternName'], 'Alpha');
+      expect(result.droppedNames, ['Bravo', 'Charlie'],
+          reason: 'first becomes kept; rest stay dropped — never zero kept');
+    });
+
+    test('case-insensitive name match against top-level', () {
+      final result = classifyIntents(
+        intents: [
+          _intent(patternName: 'WARM WHITE WASH'),
+          _intent(patternName: '  warm white wash  '), // whitespace
+        ],
+        topLevelPatternName: 'Warm White Wash',
+      );
+      expect(result.kept.length, 2);
+      expect(result.droppedNames, isEmpty);
+    });
+
+    test('topLevelPatternName null → only intents with their own wled '
+        'are kept', () {
+      // No top-level patternName to reuse. The only honest path is per-
+      // element wled. An intent without one falls into the pathological
+      // fallback if it's the only intent.
+      final resultWithOwnWled = classifyIntents(
+        intents: [
+          {'patternName': 'X', 'wled': friRed},
+        ],
+        topLevelPatternName: null,
+      );
+      expect(resultWithOwnWled.kept.length, 1);
+      expect(resultWithOwnWled.droppedNames, isEmpty);
+
+      final resultWithoutOwnWled = classifyIntents(
+        intents: [
+          {'patternName': 'X'},
+          {'patternName': 'Y'},
+        ],
+        topLevelPatternName: null,
+      );
+      // Both ambiguous → fallback keeps intents[0], drops the rest.
+      expect(resultWithoutOwnWled.kept.length, 1);
+      expect(resultWithoutOwnWled.kept.first['patternName'], 'X');
+      expect(resultWithoutOwnWled.droppedNames, ['Y']);
+    });
+
+    test('empty intents → empty kept, empty dropped', () {
+      final result = classifyIntents(
+        intents: const [],
+        topLevelPatternName: 'Anything',
+      );
+      expect(result.kept, isEmpty);
+      expect(result.droppedNames, isEmpty);
+    });
+  });
+
+  // ── Back-compat regression (singular wrapped to 1-element list) ─────────
+  group('back-compat — parser-wrapped singular still works', () {
+    test('1 intent matching top-level name → kept, scheduled as 1 item', () {
+      // The cloud parser normalizes a singular `schedulingIntent` into
+      // a 1-element list. The model sets patternName equal to the
+      // top-level — so the guard keeps it.
+      final classification = classifyIntents(
+        intents: [_intent(patternName: 'Warm White Wash')],
+        topLevelPatternName: 'Warm White Wash',
+      );
+      final items = buildScheduleItemsFromIntents(
+        intents: classification.kept,
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: sharedWled,
+      );
+      expect(items.length, 1);
+      expect(items.first.actionLabel, 'Pattern: Warm White Wash');
+      expect(items.first.wledPayload, sharedWled);
     });
   });
 }
