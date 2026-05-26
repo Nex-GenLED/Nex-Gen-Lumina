@@ -391,6 +391,14 @@ class WledNotifier extends Notifier<WledStateModel> {
     // observed service time so the queue stays at depth ≤ 1 thanks to the
     // _polling in-flight gate below. Local-mode 1.5s unchanged.
     final pollMs = ref.read(isRemoteModeProvider) ? 10000 : 1500;
+    // Cold-start hydration: Timer.periodic fires its first callback AFTER
+    // `pollMs`, so without this the dashboard sits on WledStateModel.initial()
+    // for the full poll period before any request is issued (BRIDGE_LATENCY
+    // _AUDIT_2026-05 §1). Fire a one-shot fetch unawaited so it races the
+    // first periodic tick instead of blocking it. `_pollOnce` is re-entry-
+    // safe (`_polling` guard) and null-repo-safe; on null repo it returns
+    // silently and the periodic loop will retry once the repository resolves.
+    unawaited(_pollOnce());
     _poller = Timer.periodic(Duration(milliseconds: pollMs), (_) async {
       final service = ref.read(wledRepositoryProvider);
       if (service == null) return;
