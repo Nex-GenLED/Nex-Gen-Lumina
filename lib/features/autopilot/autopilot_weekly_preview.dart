@@ -258,7 +258,7 @@ class _DayDetailSheet extends ConsumerWidget {
     WidgetRef ref,
     AutopilotScheduleItem item,
   ) {
-    final nameController = TextEditingController(text: item.patternName);
+    final nameController = TextEditingController(text: item.displayName);
     final colors = <Color>[
       ...?_extractColors(item.wledPayload),
     ];
@@ -539,7 +539,7 @@ class _DayColumn extends StatelessWidget {
     }
 
     return Tooltip(
-      message: '${item.patternName}\n${item.reason}',
+      message: '${item.displayName}\n${item.reason}',
       child: Container(
         width: 32,
         height: 6,
@@ -639,7 +639,7 @@ class _GameDayChipsRow extends ConsumerWidget {
               onPressed: () => onDayTap?.call(item.scheduledTime),
               backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.15),
               side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
-              tooltip: item.eventName ?? item.patternName,
+              tooltip: item.eventName ?? item.displayName,
             );
           },
         ),

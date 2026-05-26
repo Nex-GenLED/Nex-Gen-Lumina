@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Trigger types for autopilot schedule items.
 enum AutopilotTrigger {
@@ -268,6 +269,13 @@ class AutopilotScheduleItem {
 
     return '${repeatDays.join(", ")} at $timeStr';
   }
+
+  /// UI-safe pattern name. Routes the stored [patternName] through the
+  /// centralized slug resolver so render sites can't leak snake_case
+  /// identifiers. Authored strings pass through unchanged. Distinct from
+  /// [AutopilotTriggerExtension.displayName] below — that one names the
+  /// trigger category ("Game Day", "Holiday"), this one names the pattern.
+  String get displayName => displayNameFor(patternName);
 
   @override
   String toString() =>
