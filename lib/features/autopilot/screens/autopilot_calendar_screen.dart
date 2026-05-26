@@ -803,7 +803,7 @@ class _AutopilotDetail extends ConsumerWidget {
                   color: NexGenPalette.textMedium, fontSize: 11)),
         ]),
         const SizedBox(height: 12),
-        Text(event.patternName,
+        Text(event.displayName,
             style: const TextStyle(
                 color: Colors.white,
                 fontSize: 20,

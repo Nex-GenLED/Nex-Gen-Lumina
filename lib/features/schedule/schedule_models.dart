@@ -75,7 +75,7 @@ class ScheduleItem {
   });
 
   /// UI-safe action label. Routes the pattern-name portion of a
-  /// "Pattern: <name>" [actionLabel] through the centralized slug
+  /// `"Pattern: <name>"` [actionLabel] through the centralized slug
   /// resolver. Non-pattern labels (e.g. "Turn Off") pass through
   /// unchanged.
   String get displayActionLabel => actionLabel.startsWith('Pattern: ')
