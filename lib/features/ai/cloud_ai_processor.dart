@@ -103,6 +103,22 @@ class CloudAIProcessor {
 
     final obj = parsed.object;
 
+    // Normalize the AI's scheduling-intent field(s) into a single canonical
+    // List<Map> form. The cloud schema accepts BOTH:
+    //   • `schedulingIntent` (singular Map|null) — original shape
+    //   • `schedulingIntents` (array of Maps|null) — Item #51 compound-schedule
+    //     support
+    // Compound responses use the array. Single-schedule responses keep using
+    // the singular form (prompt forbids emitting both). Whichever shape the
+    // model returns, the handler downstream reads ONE canonical key —
+    // `schedulingIntents` as a List<Map<String, dynamic>>.
+    //
+    // BACK-COMPAT: until the handler is updated to read the list (Item #51
+    // Prompt 4), we ALSO keep the legacy `schedulingIntent` passthrough so the
+    // current single-action dispatch keeps working between commits.
+    // Drop malformed entries defensively — never throw on a bad model response.
+    final normalizedIntents = normalizeSchedulingIntents(obj);
+
     // Extract WLED payload
     Map<String, dynamic>? wled;
     final candidate = obj['wled'];
@@ -118,8 +134,14 @@ class CloudAIProcessor {
           'speed': obj['speed'],
         if (obj['intensity'] != null && !candidate.containsKey('intensity'))
           'intensity': obj['intensity'],
+        // Legacy passthrough — handler still reads this until Item #51 Prompt 4
+        // migrates it to the normalized list. Dropped automatically when the
+        // model emits the array form (prompt forbids emitting both).
         if (obj['schedulingIntent'] != null)
           'schedulingIntent': obj['schedulingIntent'],
+        // Canonical normalized list — present when the model emitted EITHER
+        // shape. Future handler reads only this key.
+        if (normalizedIntents != null) 'schedulingIntents': normalizedIntents,
       };
     } else if (obj.containsKey('seg') ||
         obj.containsKey('on') ||
@@ -260,6 +282,39 @@ class CloudAIProcessor {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /// Normalize the AI's scheduling-intent shape into a canonical List<Map>.
+  ///
+  /// Resolution order:
+  ///   1. `schedulingIntents` is a List → filter to Map elements, drop
+  ///      anything that doesn't look like a schedule object. Return the
+  ///      filtered list (possibly empty → return null if every entry was
+  ///      malformed, so the bag-assembly omits the key entirely).
+  ///   2. `schedulingIntent` is a Map → wrap as `[that map]`.
+  ///   3. Neither field present (or both null) → return null.
+  ///
+  /// Defensive: never throws. The model occasionally returns a stray
+  /// `false` or `"none"` for these fields; we silently coerce to "no
+  /// intents present" rather than crashing the entire response pipeline.
+  @visibleForTesting
+  static List<Map<String, dynamic>>? normalizeSchedulingIntents(
+      Map<String, dynamic> obj) {
+    final arr = obj['schedulingIntents'];
+    if (arr is List) {
+      final filtered = <Map<String, dynamic>>[];
+      for (final entry in arr) {
+        if (entry is Map) {
+          filtered.add(Map<String, dynamic>.from(entry));
+        }
+      }
+      return filtered.isEmpty ? null : filtered;
+    }
+    final single = obj['schedulingIntent'];
+    if (single is Map) {
+      return [Map<String, dynamic>.from(single)];
+    }
+    return null;
+  }
 
   static _JsonExtraction? _extractJson(String content) {
     try {
