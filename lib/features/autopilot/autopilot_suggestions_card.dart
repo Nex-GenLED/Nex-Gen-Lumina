@@ -101,7 +101,7 @@ class _AutopilotSuggestionsCardState
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Applied "${suggestion.patternName}"'),
+                        content: Text('Applied "${suggestion.displayName}"'),
                         backgroundColor: Colors.green.shade700,
                       ),
                     );
