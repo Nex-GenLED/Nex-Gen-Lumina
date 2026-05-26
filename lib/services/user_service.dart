@@ -748,6 +748,33 @@ class UserService {
     debugPrint('✅ Schedule added: ${schedule.id}');
   }
 
+  /// Add multiple schedule items in a single Firestore write. Throws on
+  /// persistent write failure.
+  ///
+  /// All N items either persist together or none do (atomic at the
+  /// Firestore-write layer). Used by the compound-schedule batch path
+  /// where a single Lumina prompt produces multiple ScheduleItems and
+  /// partial success would leave the user with an incoherent schedule.
+  ///
+  /// Mirrors [addSchedule]'s shape: arrayUnion + _writeWithRetry + same
+  /// error propagation. arrayUnion deduplicates identical encoded objects
+  /// server-side, which is fine for items with fresh unique ids.
+  Future<void> addSchedules(String userId, List<ScheduleItem> items) async {
+    if (items.isEmpty) return;
+    await _writeWithRetry(() async {
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'schedules': FieldValue.arrayUnion(
+            items.map((i) => sanitizeForFirestore(i.toJson())).toList(),
+          ),
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
+    });
+    debugPrint('✅ ${items.length} schedules added atomically: '
+        '${items.map((i) => i.id).join(", ")}');
+  }
+
   /// Remove a schedule item by ID. Throws on persistent write failure.
   /// arrayRemove requires exact match, so we fetch and resave.
   Future<void> removeSchedule(String userId, String scheduleId) async {

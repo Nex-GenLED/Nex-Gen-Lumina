@@ -209,6 +209,81 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     );
   }
 
+  /// Aggregate conflict pre-check for a batch addAll. Detects both:
+  ///   • batch-vs-existing — each item's overlap with already-persisted
+  ///     ScheduleItems and CalendarEntries
+  ///   • intra-batch — two items in the SAME batch colliding with each
+  ///     other (e.g. compound dispatcher emits "7pm Mon-Fri" and "7:30pm
+  ///     Mon-Fri" — overlapping windows on shared days)
+  ///
+  /// Returns one merged [ScheduleConflictInfo] so a single dialog can
+  /// surface every conflict at once. No dialog is shown here — the caller
+  /// (compound handler) decides UX.
+  ///
+  /// [excludeIds] lets the caller suppress siblings already considered
+  /// part of the batch (used when editing one item of a compound set).
+  ScheduleConflictInfo checkConflictsForAddAll(List<ScheduleItem> items,
+      {Set<String>? excludeIds}) {
+    if (items.isEmpty) return const ScheduleConflictInfo();
+
+    final calEntries = _ref.read(calendarScheduleProvider);
+    final excluded = excludeIds ?? const <String>{};
+
+    // Dedupe by ScheduleItem.id so the same already-persisted conflict
+    // surfaced by multiple batch items isn't listed twice in the dialog.
+    final mergedItemConflicts = <String, ScheduleItem>{};
+    final mergedEntryKeys = <String>{};
+
+    // Batch-vs-existing: each item vs already-persisted state.
+    for (final item in items) {
+      final hits = ScheduleConflictDetector.findItemConflicts(
+        incoming: item,
+        existing: state,
+      );
+      for (final c in hits) {
+        if (excluded.contains(c.id)) continue;
+        mergedItemConflicts[c.id] = c;
+      }
+      mergedEntryKeys.addAll(
+        ScheduleConflictDetector.findEntryConflictsForItem(
+          item: item,
+          calendarEntries: calEntries,
+        ),
+      );
+    }
+
+    // Intra-batch: pairwise check among the items themselves. If item j
+    // (j > i) collides with item i, BOTH are listed so the user sees what
+    // their compound prompt produced.
+    final intraBatch = <String, ScheduleItem>{};
+    for (int i = 0; i < items.length; i++) {
+      final earlierSlice = items.sublist(0, i);
+      final hits = ScheduleConflictDetector.findItemConflicts(
+        incoming: items[i],
+        existing: earlierSlice,
+      );
+      if (hits.isNotEmpty) {
+        intraBatch[items[i].id] = items[i];
+        for (final c in hits) {
+          intraBatch[c.id] = c;
+        }
+      }
+    }
+    // Intra-batch items belong in the conflict list too — the user must
+    // see them next to the existing-state conflicts, not in a separate
+    // surface.
+    for (final entry in intraBatch.entries) {
+      if (excluded.contains(entry.key)) continue;
+      mergedItemConflicts[entry.key] = entry.value;
+    }
+
+    return ScheduleConflictInfo(
+      conflictingItems: mergedItemConflicts.values.toList(),
+      conflictingEntryKeys: mergedEntryKeys.toList(),
+      calendarEntries: calEntries,
+    );
+  }
+
   // ─── Mutations ─────────────────────────────────────────────────
 
   /// Toggle a schedule's enabled state
@@ -285,6 +360,69 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint('SchedulesNotifier: Failed to persist add — reverting: $e');
       state = oldState;
       _showSaveError('add', e, () => add(item));
+    }
+
+    _isMutating = false;
+  }
+
+  /// Atomically add multiple schedules in a single Firestore write.
+  ///
+  /// All-or-nothing: either every item persists or none do. Designed for
+  /// compound user-intent batches where partial success would leave the
+  /// user with an incoherent schedule (e.g. one Lumina prompt → 3 sibling
+  /// ScheduleItems sharing the same `sourcePromptId` provenance stamp).
+  ///
+  /// Differs from [mergeWithDedup] (autopilot path) in three ways:
+  ///   • Persists every item verbatim — no dedup against existing items.
+  ///   • No 50-item cap; the caller is expected to bound batch size.
+  ///   • Single arrayUnion write rather than full-field overwrite, so it
+  ///     doesn't clobber concurrent autopilot/manual writes.
+  ///
+  /// Pass [resolution] after showing the conflict dialog to handle overlaps,
+  /// same convention as [add].
+  Future<void> addAll(List<ScheduleItem> items,
+      {ConflictResolution? resolution}) async {
+    if (items.isEmpty) return;
+
+    final userId = _userId;
+    if (userId == null) {
+      debugPrint('SchedulesNotifier: Cannot addAll - no user signed in');
+      return;
+    }
+
+    // ── Conflict resolution (before optimistic update) ───────────
+    if (resolution == ConflictResolution.cancel) return;
+    if (resolution == ConflictResolution.removeExisting) {
+      final conflicts = checkConflictsForAddAll(items);
+      for (final c in conflicts.conflictingItems) {
+        await remove(c.id);
+      }
+      final calNotifier = _ref.read(calendarScheduleProvider.notifier);
+      for (final key in conflicts.conflictingEntryKeys) {
+        await calNotifier.removeEntry(key);
+      }
+    }
+
+    _isMutating = true;
+
+    // Capture oldState ONCE before the optimistic push so a partial-failure
+    // revert restores every item together.
+    final oldState = List<ScheduleItem>.from(state);
+
+    // Single optimistic push — N items appended in one state mutation so
+    // listeners see the batch atomically.
+    state = [...state, ...items];
+
+    try {
+      await _ref.read(userServiceProvider).addSchedules(userId, items);
+      debugPrint(
+          'SchedulesNotifier: addAll persisted ${items.length} items atomically');
+      _triggerWledSync();
+    } catch (e) {
+      debugPrint(
+          'SchedulesNotifier: Failed to persist addAll — reverting all ${items.length} items: $e');
+      state = oldState;
+      _showSaveError('addAll', e, () => addAll(items, resolution: resolution));
     }
 
     _isMutating = false;
