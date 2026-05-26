@@ -188,7 +188,7 @@ class _SuggestionTileState extends ConsumerState<_SuggestionTile> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: _buildPatternPreview(),
         title: Text(
-          widget.suggestion.patternName,
+          widget.suggestion.displayName,
           style: const TextStyle(fontWeight: FontWeight.w500),
         ),
         subtitle: Column(

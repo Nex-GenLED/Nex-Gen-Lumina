@@ -467,7 +467,7 @@ class _EventChip extends ConsumerWidget {
             Icon(event.eventType.icon, size: 13, color: color),
             const SizedBox(width: 5),
             Text(
-              event.patternName,
+              event.displayName,
               style: TextStyle(
                   color: color,
                   fontSize: 12,
@@ -595,7 +595,7 @@ class _EventDetailOverlay extends ConsumerWidget {
 
                         // Pattern name
                         Text(
-                          event.patternName,
+                          event.displayName,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 20,

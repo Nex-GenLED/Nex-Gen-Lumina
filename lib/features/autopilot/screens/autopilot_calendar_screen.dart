@@ -344,7 +344,7 @@ class _AutopilotCalendarScreenState
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(result != null
-            ? '📌 "${event.patternName}" is now protected'
+            ? '📌 "${event.displayName}" is now protected'
             : 'Could not convert event'),
       ));
     }
@@ -360,7 +360,7 @@ class _AutopilotCalendarScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(
-                '"${event.patternName}" returned to autopilot control')),
+                '"${event.displayName}" returned to autopilot control')),
       );
     }
   }
@@ -591,7 +591,7 @@ class _AutopilotEventTile extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    event.patternName,
+                    event.displayName,
                     style: TextStyle(
                       color: color,
                       fontSize: 13,
@@ -657,7 +657,7 @@ class _UserEventTile extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    event.patternName,
+                    event.displayName,
                     style: const TextStyle(
                       color: color,
                       fontSize: 13,

@@ -134,9 +134,12 @@ class _AutopilotConflictSheetState extends State<_AutopilotConflictSheet> {
     final first = widget.conflicts.first;
 
     // Build a friendly description of the first conflict
-    final apName = first.autopilotEvent.patternName;
+    // Render-only — both used solely in Text widgets below. Resolved
+    // through the model getter so a slug-form patternName can't leak
+    // into the conflict description.
+    final apName = first.autopilotEvent.displayName;
     final apDay = _weekdayFromDate(first.autopilotEvent.startTime);
-    final userPattern = first.userEntry.patternName;
+    final userPattern = first.userEntry.displayName;
 
     return Container(
       decoration: const BoxDecoration(
@@ -371,7 +374,7 @@ class _ConflictTile extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              ap.patternName,
+              ap.displayName,
               style: TextStyle(
                 color: NexGenPalette.textHigh,
                 fontSize: 12,
@@ -384,7 +387,7 @@ class _ConflictTile extends StatelessWidget {
               color: NexGenPalette.textMedium.withValues(alpha: 0.5), size: 16),
           Expanded(
             child: Text(
-              user.patternName,
+              user.displayName,
               style: TextStyle(
                 color: NexGenPalette.textMedium,
                 fontSize: 12,
