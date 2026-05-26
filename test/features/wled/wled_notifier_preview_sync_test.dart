@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
@@ -158,16 +157,13 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  group('applyPreviewSync — single chokepoint writes both sinks', () {
-    test('writes wledStateProvider AND explorePreviewProvider atomically',
-        () async {
+  group('applyPreviewSync — writes wledStateProvider with as-sent values',
+      () {
+    test('mirrors the full as-sent payload into wledStateProvider', () async {
       final container = _makeContainer();
       addTearDown(container.dispose);
 
       final notifier = container.read(wledStateProvider.notifier);
-
-      // Precondition: explore preview is null (no design selected yet).
-      expect(container.read(explorePreviewProvider), isNull);
 
       notifier.applyPreviewSync(
         colors: const [Color(0xFFFF0000), Color(0xFF00FF00)],
@@ -180,7 +176,6 @@ void main() {
         spacing: 1,
       );
 
-      // wledStateProvider mirrors the as-sent payload.
       final wState = container.read(wledStateProvider);
       expect(wState.colorSequence,
           equals(const [Color(0xFFFF0000), Color(0xFF00FF00)]));
@@ -192,45 +187,6 @@ void main() {
       expect(wState.spacing, 1);
       expect(wState.customEffectName, 'Theater Chase');
       expect(wState.isOn, isTrue);
-
-      // explorePreviewProvider carries the same as-sent values.
-      final ePreview = container.read(explorePreviewProvider);
-      expect(ePreview, isNotNull);
-      expect(ePreview!.colors,
-          equals(const [Color(0xFFFF0000), Color(0xFF00FF00)]));
-      expect(ePreview.effectId, 12);
-      expect(ePreview.speed, 80);
-      expect(ePreview.brightness, 220);
-      expect(ePreview.name, 'Theater Chase');
-      expect(ePreview.colorGroupSize, 2);
-      expect(ePreview.spacing, 1);
-    });
-
-    test('updateExplorePreview:false leaves explore sink untouched', () async {
-      final container = _makeContainer();
-      addTearDown(container.dispose);
-
-      final notifier = container.read(wledStateProvider.notifier);
-
-      // Pre-set explore to a known value to verify it survives.
-      container.read(explorePreviewProvider.notifier).state =
-          const ExplorePreviewState(
-        colors: [Color(0xFF000000)],
-        effectId: 99,
-        name: 'Sentinel',
-      );
-
-      notifier.applyPreviewSync(
-        colors: const [Color(0xFFFFFFFF)],
-        effectId: 0,
-        effectName: 'Solid',
-        updateExplorePreview: false,
-      );
-
-      expect(container.read(explorePreviewProvider)?.name, 'Sentinel',
-          reason: 'updateExplorePreview:false must not clobber the sentinel');
-      expect(container.read(wledStateProvider).effectId, 0,
-          reason: 'wledStateProvider still updates regardless');
     });
   });
 
@@ -448,14 +404,14 @@ void main() {
 
   // ─────────────────────────────────────────────────────────────────────────
   // applyPayloadWithLabel — chokepoint for non-user writers (schedule,
-  // autopilot, scene, geofence, etc.). Fans wledState + explorePreview +
-  // (optionally) activePresetLabel from a raw WLED payload.
+  // autopilot, scene, geofence, etc.). Fans wledState + (optionally)
+  // activePresetLabel from a raw WLED payload.
   // ─────────────────────────────────────────────────────────────────────────
   group('applyPayloadWithLabel — fans payload + visuals + label together',
       () {
     test(
-        'persistent labelHint updates ALL three sinks: wledState + '
-        'explorePreview + activePresetLabel', () async {
+        'persistent labelHint updates wledState + activePresetLabel',
+        () async {
       final repo = _RecordingWledRepository();
       final container = _makeContainerWithRepo(repo);
       addTearDown(container.dispose);
@@ -497,11 +453,6 @@ void main() {
       expect(wState.colorSequence[0], const Color(0xFFFF0000));
       expect(wState.colorSequence[1], const Color(0xFF00FF00));
 
-      final ePreview = container.read(explorePreviewProvider);
-      expect(ePreview, isNotNull);
-      expect(ePreview!.effectId, 12);
-      expect(ePreview.name, 'Scheduled USA');
-
       expect(container.read(activePresetLabelProvider), 'Scheduled USA',
           reason: 'persistent labelHint must update Now Playing');
     });
@@ -542,21 +493,12 @@ void main() {
               'null labelHint must leave the user-facing label untouched');
     });
 
-    test('power-off payload only flips isOn — preview/label untouched',
-        () async {
+    test('power-off payload only flips isOn — label untouched', () async {
       final repo = _RecordingWledRepository();
       final container = _makeContainerWithRepo(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(wledStateProvider.notifier);
-
-      // Pre-populate explorePreview with a sentinel to verify it survives.
-      container.read(explorePreviewProvider.notifier).state =
-          const ExplorePreviewState(
-        colors: [Color(0xFFFF00FF)],
-        effectId: 7,
-        name: 'Pre-off sentinel',
-      );
 
       final ok = await notifier.applyPayloadWithLabel(
         const {'on': false},
@@ -565,8 +507,6 @@ void main() {
 
       expect(ok, isTrue);
       expect(container.read(wledStateProvider).isOn, isFalse);
-      expect(container.read(explorePreviewProvider)?.name, 'Pre-off sentinel',
-          reason: 'off-payload must not clobber the roofline preview hero');
     });
 
     test('applyJson failure → no provider mutation', () async {

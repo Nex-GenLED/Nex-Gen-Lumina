@@ -25,7 +25,6 @@ import '../autopilot/game_day_autopilot_config.dart';
 typedef ApplyPayloadWithLabelCall = Future<bool> Function(
   Map<String, dynamic> payload, {
   required String? labelHint,
-  bool updateExplorePreview,
 });
 
 /// Apply a Path 1 [GameDayAutopilotConfig] to the device.

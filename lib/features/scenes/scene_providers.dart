@@ -142,9 +142,9 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
 
       // Route the device write + label + visual cache through the
       // applyPayloadWithLabel chokepoint. The prior bare applyJson left
-      // explorePreviewProvider stale (the roofline hero kept showing the
-      // pre-scene render). The chokepoint fans wledState + explorePreview
-      // + activePresetLabel together.
+      // the visual cache stale (the roofline hero kept showing the
+      // pre-scene render). The chokepoint fans wledState +
+      // activePresetLabel together.
       final success = await ref
           .read(wledStateProvider.notifier)
           .applyPayloadWithLabel(payload, labelHint: scene.name);

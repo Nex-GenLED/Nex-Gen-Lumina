@@ -15,7 +15,6 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
-import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
@@ -941,15 +940,10 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   /// Single chokepoint every user-initiated apply path routes through.
   ///
-  /// Writes the as-sent payload to BOTH [wledStateProvider] (via
-  /// [applyLocalPreview]) AND [explorePreviewProvider] atomically, so the
-  /// dashboard hero and the Explore-page roofline hero stay aligned with
-  /// what was just sent to the device. Also arms the poll-overwrite
+  /// Writes the as-sent payload to [wledStateProvider] (via
+  /// [applyLocalPreview]) so the dashboard hero stays aligned with what
+  /// was just sent to the device. Also arms the poll-overwrite
   /// suppression window via [applyLocalPreview]'s timestamp side effect.
-  ///
-  /// Pass [updateExplorePreview]:false for paths that should leave the
-  /// Explore hero alone (e.g. voice / audio modes that don't originate
-  /// from the Explore screen).
   void applyPreviewSync({
     required List<Color> colors,
     required int effectId,
@@ -959,7 +953,6 @@ class WledNotifier extends Notifier<WledStateModel> {
     int brightness = 255,
     int colorGroupSize = 1,
     int spacing = 0,
-    bool updateExplorePreview = true,
   }) {
     applyLocalPreview(
       colors: colors,
@@ -971,28 +964,17 @@ class WledNotifier extends Notifier<WledStateModel> {
       colorGroupSize: colorGroupSize,
       spacing: spacing,
     );
-    if (updateExplorePreview) {
-      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-        colors: colors,
-        effectId: effectId,
-        speed: speed,
-        brightness: brightness,
-        name: effectName ?? '',
-        colorGroupSize: colorGroupSize,
-        spacing: spacing,
-      );
-    }
   }
 
   /// Persistent-pattern apply chokepoint for non-user writers (schedule,
   /// autopilot, scene, geofence, Game Day, AI design, etc.).
   ///
   /// Wraps [WledRepository.applyJson] and on success fans the change out to
-  /// the same three UI surfaces the cluster fix already paired manually at
-  /// each call site:
+  /// the same UI surfaces the cluster fix already paired manually at each
+  /// call site:
   ///
-  ///   • [wledStateProvider] + [explorePreviewProvider] via [applyPreviewSync]
-  ///     (visual cache + dashboard / Explore roofline hero)
+  ///   • [wledStateProvider] via [applyPreviewSync]
+  ///     (visual cache + dashboard hero)
   ///   • [activePresetLabelProvider] via [setLabelWithFingerprint]
   ///     (Now Playing chip) — ONLY when [labelHint] is non-null
   ///
@@ -1006,16 +988,15 @@ class WledNotifier extends Notifier<WledStateModel> {
   ///
   /// Payload extraction is defensive: missing fields fall back to current
   /// state. A `{'on': false}` power-off payload is handled specially —
-  /// only [wledStateProvider.isOn] is updated; the explorePreview hero and
-  /// the label are left alone (the cluster fix's TurnOff teardown owns
-  /// the label-clear-on-off case separately).
+  /// only [wledStateProvider.isOn] is updated; the label is left alone
+  /// (the cluster fix's TurnOff teardown owns the label-clear-on-off
+  /// case separately).
   ///
   /// Returns whatever [WledRepository.applyJson] returned. On a write
   /// failure no provider is mutated.
   Future<bool> applyPayloadWithLabel(
     Map<String, dynamic> payload, {
     required String? labelHint,
-    bool updateExplorePreview = true,
   }) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return false;
@@ -1073,7 +1054,6 @@ class WledNotifier extends Notifier<WledStateModel> {
       speed: speed,
       intensity: intensity,
       brightness: brightness,
-      updateExplorePreview: updateExplorePreview,
     );
 
     if (labelHint != null) {

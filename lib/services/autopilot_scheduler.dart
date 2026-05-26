@@ -394,7 +394,7 @@ class AutopilotScheduler {
     try {
       // Route through the applyPayloadWithLabel chokepoint. The previous
       // path called repo.applyJson directly + setLabelWithFingerprint
-      // manually, which left explorePreviewProvider stale — the
+      // manually, which left the visual cache stale — the
       // AUTOPILOT-CHANGE bug (roofline preview showed the prior
       // pattern's purple/white blend after a new item fired).
       final success = await _ref

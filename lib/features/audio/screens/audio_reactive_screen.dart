@@ -62,7 +62,6 @@ class _AudioReactiveScreenState extends ConsumerState<AudioReactiveScreen> {
         colors: [NexGenPalette.cyan],
         effectId: effectId,
         effectName: effectName,
-        updateExplorePreview: false,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Applied: $effectName'), backgroundColor: Colors.green.shade700),

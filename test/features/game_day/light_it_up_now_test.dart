@@ -48,7 +48,7 @@ void main() {
       var configureCalls = 0;
       final outcome = await lightItUpNow(
         applyPayloadWithLabel:
-            (payload, {required labelHint, updateExplorePreview = true}) async {
+            (payload, {required labelHint}) async {
           applyCalls += 1;
           return true;
         },
@@ -77,7 +77,7 @@ void main() {
       final assembled = stubAssembled();
       final outcome = await lightItUpNow(
         applyPayloadWithLabel:
-            (payload, {required labelHint, updateExplorePreview = true}) async => true,
+            (payload, {required labelHint}) async => true,
         configureForTeam: ({
           required String groupId,
           required GameDayAutopilotConfig sourceConfig,
@@ -102,7 +102,7 @@ void main() {
       var configureCalls = 0;
       final outcome = await lightItUpNow(
         applyPayloadWithLabel:
-            (payload, {required labelHint, updateExplorePreview = true}) async => false,
+            (payload, {required labelHint}) async => false,
         configureForTeam: ({
           required String groupId,
           required GameDayAutopilotConfig sourceConfig,
@@ -126,7 +126,7 @@ void main() {
       final boom = StateError('firestore write denied');
       final outcome = await lightItUpNow(
         applyPayloadWithLabel:
-            (payload, {required labelHint, updateExplorePreview = true}) async => true,
+            (payload, {required labelHint}) async => true,
         configureForTeam: ({
           required String groupId,
           required GameDayAutopilotConfig sourceConfig,
@@ -148,7 +148,7 @@ void main() {
       var configureCalls = 0;
       final outcome = await lightItUpNow(
         applyPayloadWithLabel:
-            (payload, {required labelHint, updateExplorePreview = true}) async => true,
+            (payload, {required labelHint}) async => true,
         configureForTeam: ({
           required String groupId,
           required GameDayAutopilotConfig sourceConfig,

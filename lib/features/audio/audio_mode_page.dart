@@ -86,7 +86,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
         colors: [NexGenPalette.cyan],
         effectId: effectId,
         effectName: effectName,
-        updateExplorePreview: false,
       );
     }
   }
@@ -113,7 +112,6 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
         colors: [const Color(0xFFFFF4E5)],
         effectId: 0,
         effectName: 'Solid',
-        updateExplorePreview: false,
       );
     }
   }

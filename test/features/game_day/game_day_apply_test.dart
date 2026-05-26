@@ -47,7 +47,7 @@ void main() {
       late Map<String, dynamic> captured;
       String? capturedLabel;
       final ok = await applyGameDayConfigToDevice(
-        applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
           captured = payload;
           capturedLabel = labelHint;
           return true;
@@ -96,7 +96,7 @@ void main() {
       };
       late Map<String, dynamic> captured;
       await applyGameDayConfigToDevice(
-        applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
           captured = payload;
           return true;
         },
@@ -111,7 +111,7 @@ void main() {
         () async {
       late Map<String, dynamic> captured;
       await applyGameDayConfigToDevice(
-        applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
           captured = payload;
           return true;
         },
@@ -123,7 +123,7 @@ void main() {
     test('returns false when the chokepoint returns false (device unreachable)',
         () async {
       final ok = await applyGameDayConfigToDevice(
-        applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
           return false;
         },
         config: configFor(),
@@ -140,7 +140,7 @@ void main() {
         () async {
       String? capturedLabel;
       await applyGameDayConfigToDevice(
-        applyPayloadWithLabel: (payload, {required labelHint, updateExplorePreview = true}) async {
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
           capturedLabel = labelHint;
           return true;
         },

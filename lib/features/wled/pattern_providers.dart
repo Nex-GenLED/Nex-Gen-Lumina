@@ -602,33 +602,3 @@ final selectorMotionTypeProvider = StateProvider<MotionType?>((ref) => null);
 /// Selected color behavior filter (null = all).
 final selectorColorBehaviorProvider = StateProvider<ColorBehavior?>((ref) => null);
 
-/// Preview state for the Explore page roofline hero.
-///
-/// Set when a design card is tapped on the Explore page. Cleared when
-/// navigating back to the folder list.
-class ExplorePreviewState {
-  final List<Color> colors;
-  final int effectId;
-  final int speed;
-  final int brightness;
-  final String name;
-
-  /// LEDs per color group (WLED `grp`). 1 = no grouping.
-  final int colorGroupSize;
-
-  /// Dark (off) LEDs after each lit group (WLED `spc`). 0 = no spacing.
-  final int spacing;
-
-  const ExplorePreviewState({
-    required this.colors,
-    required this.effectId,
-    this.speed = 128,
-    this.brightness = 255,
-    this.name = '',
-    this.colorGroupSize = 1,
-    this.spacing = 0,
-  });
-}
-
-/// Provider for the Explore page roofline preview. Null = hidden.
-final explorePreviewProvider = StateProvider<ExplorePreviewState?>((ref) => null);
