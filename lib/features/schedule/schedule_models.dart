@@ -48,6 +48,18 @@ class ScheduleItem {
   /// the lease manager's periodic sweep.
   final DateTime? disabledUntil;
 
+  /// Provenance marker for compound Lumina prompts (Item #51 Prompts 3-4).
+  /// When a single user prompt decomposes into N schedules ("red until
+  /// Dec 25, then warm white through New Year's"), every resulting
+  /// ScheduleItem carries the same opaque id so the UI can later group
+  /// siblings, offer bulk-undo, or atomically roll back the set.
+  ///
+  /// Null for any schedule not authored by the compound dispatcher —
+  /// manual entries, autopilot fan-outs, and pre-compound AI singletons
+  /// all leave this unset. Additive field; existing Firestore records
+  /// deserialize to null without migration.
+  final String? sourcePromptId;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -59,6 +71,7 @@ class ScheduleItem {
     this.presetId,
     this.useAudioReactive,
     this.disabledUntil,
+    this.sourcePromptId,
   });
 
   /// UI-safe action label. Routes the pattern-name portion of a
@@ -106,6 +119,7 @@ class ScheduleItem {
     bool? useAudioReactive,
     DateTime? disabledUntil,
     bool clearDisabledUntil = false,
+    String? sourcePromptId,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -119,6 +133,7 @@ class ScheduleItem {
         useAudioReactive: useAudioReactive ?? this.useAudioReactive,
         disabledUntil:
             clearDisabledUntil ? null : (disabledUntil ?? this.disabledUntil),
+        sourcePromptId: sourcePromptId ?? this.sourcePromptId,
       );
 
   Map<String, dynamic> toJson() => {
@@ -133,6 +148,7 @@ class ScheduleItem {
         if (useAudioReactive != null) 'useAudioReactive': useAudioReactive,
         if (disabledUntil != null)
           'disabledUntil': disabledUntil!.toIso8601String(),
+        if (sourcePromptId != null) 'sourcePromptId': sourcePromptId,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -150,6 +166,7 @@ class ScheduleItem {
         // Defensive parse — absence, non-string, or invalid ISO 8601
         // all collapse to null so a corrupt field can't crash boot.
         disabledUntil: _tryParseDisabledUntil(json['disabledUntil']),
+        sourcePromptId: json['sourcePromptId'] as String?,
       );
 
   static DateTime? _tryParseDisabledUntil(dynamic raw) {
