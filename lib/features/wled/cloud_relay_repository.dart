@@ -49,7 +49,11 @@ class CloudRelayRepository implements WledRepository {
   /// WledNotifier (Item #76 latency fix).
   static const _commandTimeout = Duration(seconds: 45);
 
-  /// Polling interval when waiting for command completion.
+  /// Polling interval — retained as a fallback knob, but the primary
+  /// completion path is a Firestore `snapshots()` listener now. The poll
+  /// was a 500 ms `.get()` loop that added ~250 ms avg of needless lag
+  /// per command (BRIDGE_LATENCY_AUDIT_2026-05.md §2).
+  // ignore: unused_field
   static const _pollInterval = Duration(milliseconds: 500);
 
   CloudRelayRepository({
@@ -142,28 +146,57 @@ class CloudRelayRepository implements WledRepository {
     }
   }
 
-  /// Wait for a command to complete by polling Firestore.
+  /// Wait for a command to complete via a Firestore `snapshots()` listener.
+  ///
+  /// Replaces the previous 500 ms `.get()` poll loop. Returns the terminal
+  /// [RemoteCommand] when the doc's status flips to completed/failed/timeout
+  /// (i.e. `isComplete`), or `null` if [_commandTimeout] elapses first —
+  /// same contract callers depend on.
+  ///
+  /// The diag block in [_executeCommand] already proves this path:
+  /// `_commandsRef.doc(commandId).snapshots()` delivers status changes
+  /// promptly. Snapshots fire immediately with the current state and on
+  /// every subsequent update, so a status that flips while the listener
+  /// is being set up is still observed on the first delivery.
+  ///
+  /// Cleanup: the subscription and timeout timer are cancelled exactly
+  /// once via [complete]; the Completer guard prevents double-resolution
+  /// when the timeout and a real status update race.
   Future<RemoteCommand?> _waitForCompletion(String commandId) async {
-    final startTime = DateTime.now();
+    final completer = Completer<RemoteCommand?>();
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? sub;
+    Timer? timeoutTimer;
 
-    while (DateTime.now().difference(startTime) < _commandTimeout) {
-      try {
-        final doc = await _commandsRef.doc(commandId).get();
-        if (doc.exists) {
-          final command = RemoteCommand.fromFirestore(doc);
-          if (command.isComplete) {
-            return command;
-          }
-        }
-      } catch (e) {
-        debugPrint('CloudRelay: Error polling command status: $e');
-      }
-
-      // Wait before polling again
-      await Future.delayed(_pollInterval);
+    void resolve(RemoteCommand? value) {
+      if (completer.isCompleted) return;
+      sub?.cancel();
+      timeoutTimer?.cancel();
+      completer.complete(value);
     }
 
-    return null; // Timeout
+    sub = _commandsRef.doc(commandId).snapshots().listen(
+      (snap) {
+        if (!snap.exists) return;
+        try {
+          final command = RemoteCommand.fromFirestore(snap);
+          if (command.isComplete) {
+            resolve(command);
+          }
+        } catch (e) {
+          debugPrint('CloudRelay: snapshot parse error: $e');
+        }
+      },
+      onError: (e) {
+        // Don't bail on transient stream errors — let the timeout decide
+        // whether this is fatal. Matches the resilience of the prior
+        // polling loop which also continued through individual .get() errors.
+        debugPrint('CloudRelay: snapshot listener error: $e');
+      },
+    );
+
+    timeoutTimer = Timer(_commandTimeout, () => resolve(null));
+
+    return completer.future;
   }
 
   /// Execute a command and return success/failure boolean.
