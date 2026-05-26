@@ -247,7 +247,7 @@ class SchedulePlanNotifier extends Notifier<SchedulePlanState> {
 
     try {
       final items = _planToScheduleItems(plan);
-      await ref.read(schedulesProvider.notifier).addAll(items);
+      await ref.read(schedulesProvider.notifier).mergeWithDedup(items);
 
       state = state.copyWith(
         submission: PlanSubmissionState(

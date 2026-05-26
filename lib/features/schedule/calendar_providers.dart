@@ -287,7 +287,7 @@ class CalendarScheduleNotifier
   /// symbolic "Sunset"/"Sunrise" labels that [ScheduleSyncService] honors
   /// via WLED's astronomical timer flags (hour: 24/25). Cross-path dedup
   /// against an existing autopilot-created sibling is handled by
-  /// [SchedulesNotifier.addAll]'s content-fingerprint check.
+  /// [SchedulesNotifier.mergeWithDedup]'s content-fingerprint check.
   Future<bool> _writeAsScheduleItem(RecurringIntent intent) async {
     final uid = _userId;
     if (uid == null) {
@@ -321,7 +321,7 @@ class CalendarScheduleNotifier
     };
 
     // Order repeatDays Mon-Sun for stable dedup against autopilot-written
-    // siblings (SchedulesNotifier.addAll fingerprints on repeatDays.join).
+    // siblings (SchedulesNotifier.mergeWithDedup fingerprints on repeatDays.join).
     const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final repeatDaysList =
         dayOrder.where(intent.repeatDays.contains).toList();
@@ -340,7 +340,7 @@ class CalendarScheduleNotifier
 
     try {
       final beforeLen = _ref.read(schedulesProvider).length;
-      await _ref.read(schedulesProvider.notifier).addAll([item]);
+      await _ref.read(schedulesProvider.notifier).mergeWithDedup([item]);
       final afterLen = _ref.read(schedulesProvider).length;
       final matched = afterLen == beforeLen;
       debugPrint('[LuminaCalendar] Recurring intent → ScheduleItem. '

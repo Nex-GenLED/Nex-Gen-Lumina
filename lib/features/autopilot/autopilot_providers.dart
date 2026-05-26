@@ -438,7 +438,7 @@ class AutopilotSettingsService {
       // This is a second line of defence against duplicate writes when two
       // regen paths fire close together (boot-time regen vs the schedule
       // page's force:true _maybeAutoTrigger). The data-layer dedup in
-      // SchedulesNotifier.addAll catches duplicates too, but skipping early
+      // SchedulesNotifier.mergeWithDedup catches duplicates too, but skipping early
       // avoids burning an AI generation worth of work writing nothing.
       final schedulesNotifier = _ref.read(schedulesProvider.notifier);
       final currentSchedules = _ref.read(schedulesProvider);
@@ -452,9 +452,9 @@ class AutopilotSettingsService {
           scheduleItems.isNotEmpty && scheduleItems.every(alreadyPresent);
       if (allAlreadyPresent) {
         debugPrint(
-            'AutopilotSettingsService: ${scheduleItems.length} generated items already present, skipping addAll');
+            'AutopilotSettingsService: ${scheduleItems.length} generated items already present, skipping mergeWithDedup');
       } else {
-        await schedulesNotifier.addAll(scheduleItems);
+        await schedulesNotifier.mergeWithDedup(scheduleItems);
       }
 
       // Mark schedule as generated (also moves the next-refresh window

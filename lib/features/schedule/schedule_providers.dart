@@ -380,19 +380,25 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     _isMutating = false;
   }
 
-  /// Add multiple schedules at once (used by Autopilot).
+  /// Merge multiple schedules with dedup + cap (used by Autopilot).
   ///
-  /// Dedups by id AND by content fingerprint (timeLabel, offTimeLabel,
-  /// repeatDays, actionLabel, enabled). Content-fingerprint dedup is the
-  /// load-bearing one for autopilot: AutopilotGenerationService stamps fresh
-  /// UUIDs on every regen, so id-only dedup lets duplicate items slip in
-  /// whenever two regen paths fire close together (e.g. boot-time
-  /// runAutopilotRegenIfNeeded racing with the schedule page's
-  /// _maybeAutoTrigger).
-  Future<void> addAll(List<ScheduleItem> items) async {
+  /// Not a plain "add everything I give you" — this path is autopilot-shaped:
+  /// dedups by id AND by content fingerprint (timeLabel, offTimeLabel,
+  /// repeatDays, actionLabel, enabled), enforces a 50-item cap by trimming
+  /// the oldest entries, and writes via `saveSchedules` (full-field
+  /// overwrite). Content-fingerprint dedup is the load-bearing one for
+  /// autopilot: AutopilotGenerationService stamps fresh UUIDs on every regen,
+  /// so id-only dedup lets duplicate items slip in whenever two regen paths
+  /// fire close together (e.g. boot-time runAutopilotRegenIfNeeded racing
+  /// with the schedule page's _maybeAutoTrigger).
+  ///
+  /// For compound user-intent batches (e.g. one Lumina prompt → N schedules)
+  /// a separate atomic batch path is being introduced — it persists every
+  /// item verbatim, no dedup, no cap, all-or-nothing atomic revert.
+  Future<void> mergeWithDedup(List<ScheduleItem> items) async {
     final userId = _userId;
     if (userId == null) {
-      debugPrint('SchedulesNotifier: Cannot addAll - no user signed in');
+      debugPrint('SchedulesNotifier: Cannot mergeWithDedup - no user signed in');
       return;
     }
 
@@ -411,7 +417,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     if (newItems.isEmpty) {
       debugPrint(
-          'SchedulesNotifier: addAll skipped — all ${items.length} items already present');
+          'SchedulesNotifier: mergeWithDedup skipped — all ${items.length} items already present');
       _isMutating = false;
       return;
     }
@@ -436,12 +442,12 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     try {
       await _ref.read(userServiceProvider).saveSchedules(userId, merged);
       debugPrint(
-          'Added ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
+          'Merged ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
       _triggerWledSync();
     } catch (e) {
-      debugPrint('SchedulesNotifier: Failed to persist addAll — reverting: $e');
+      debugPrint('SchedulesNotifier: Failed to persist mergeWithDedup — reverting: $e');
       state = oldState;
-      _showSaveError('addAll', e, () => addAll(items));
+      _showSaveError('mergeWithDedup', e, () => mergeWithDedup(items));
     }
 
     _isMutating = false;
