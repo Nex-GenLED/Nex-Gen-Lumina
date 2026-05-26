@@ -276,7 +276,7 @@ class _EntryConflictTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final timeFormat = ref.watch(timeFormatPreferenceProvider);
-    final label = entry?.patternName ?? dateKey;
+    final label = entry?.displayName ?? dateKey;
     final date = DateTime.tryParse(dateKey);
     final dateStr = date != null ? _formatDate(date) : dateKey;
     final timeRange = entry != null && entry!.onTime != null

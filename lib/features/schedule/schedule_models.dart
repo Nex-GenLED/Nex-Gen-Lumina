@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Represents a single automation schedule for lights/patterns.
 ///
@@ -59,6 +60,14 @@ class ScheduleItem {
     this.useAudioReactive,
     this.disabledUntil,
   });
+
+  /// UI-safe action label. Routes the pattern-name portion of a
+  /// "Pattern: <name>" [actionLabel] through the centralized slug
+  /// resolver. Non-pattern labels (e.g. "Turn Off") pass through
+  /// unchanged.
+  String get displayActionLabel => actionLabel.startsWith('Pattern: ')
+      ? 'Pattern: ${displayNameFor(actionLabel.substring(9))}'
+      : actionLabel;
 
   /// Returns true if this schedule has an off time configured.
   bool get hasOffTime => offTimeLabel != null && offTimeLabel!.isNotEmpty;

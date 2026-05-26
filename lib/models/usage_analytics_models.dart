@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Represents a single pattern usage event
 class PatternUsageEvent {
@@ -301,4 +302,10 @@ class FavoritePattern {
       autoAdded: autoAdded,
     );
   }
+
+  /// UI-safe pattern name. Routes the stored [patternName] through the
+  /// centralized slug resolver so render sites can't leak snake_case
+  /// identifiers. Authored strings (with spaces or punctuation) pass
+  /// through unchanged.
+  String get displayName => displayNameFor(patternName);
 }

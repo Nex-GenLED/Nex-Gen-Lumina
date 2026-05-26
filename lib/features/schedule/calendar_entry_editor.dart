@@ -100,7 +100,7 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
                 ),
               Expanded(
                 child: Text(
-                  'Edit ${widget.entry.patternName}',
+                  'Edit ${widget.entry.displayName}',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,

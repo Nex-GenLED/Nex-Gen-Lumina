@@ -6,6 +6,8 @@
 
 import 'package:flutter/material.dart';
 
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
+
 enum CalendarEntryType { auto, user, holiday, autopilot }
 
 /// Provenance labels for [CalendarEntry.sourceTag]. Additive — does not
@@ -199,4 +201,9 @@ class CalendarEntry {
     if (offTime == null) return onTime!;
     return '$onTime → $offTime';
   }
+
+  /// UI-safe pattern name. Routes the stored [patternName] through the
+  /// centralized slug resolver so render sites can't leak snake_case
+  /// identifiers. Authored strings pass through unchanged.
+  String get displayName => displayNameFor(patternName);
 }

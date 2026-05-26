@@ -1230,8 +1230,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             const SizedBox(height: 10),
           ]),
         ),
-        FavoritesGrid(
-          onPatternTap: (favorite) async {
+        Center(
+          child: FavoritesGrid(
+            onPatternTap: (favorite) async {
             try {
               if (!mounted) return;
               final repo = ref.read(wledRepositoryProvider);
@@ -1276,7 +1277,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 }
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Applied: ${favorite.patternName}'), backgroundColor: Colors.green.shade700),
+                    SnackBar(content: Text('Applied: ${favorite.displayName}'), backgroundColor: Colors.green.shade700),
                   );
                 }
               } else {
@@ -1295,6 +1296,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               }
             }
           },
+          ),
         ),
       ],
     );

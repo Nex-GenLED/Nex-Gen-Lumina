@@ -24,6 +24,7 @@ import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
@@ -891,7 +892,7 @@ class _PendingEntryTile extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry.patternName,
+                  entry.displayName,
                   style: TextStyle(
                     color: NexGenPalette.textHigh,
                     fontSize: 13,
@@ -972,7 +973,7 @@ class _DayHeroCard extends ConsumerWidget {
     final recurringItems = _itemsForWeekday(scheduleItems, wd);
     final recurringFirst = recurringItems.isNotEmpty ? recurringItems.first : null;
 
-    final patternName = calEntry?.patternName ??
+    final patternName = calEntry?.displayName ??
         (recurringFirst != null ? _labelFromAction(recurringFirst.actionLabel) : null);
     final color = calEntry?.color;
     final onTime = calEntry?.onTime ??
@@ -1305,7 +1306,8 @@ class _DayHeroCard extends ConsumerWidget {
     final lower = a.trim().toLowerCase();
     if (lower.startsWith('pattern')) {
       final idx = a.indexOf(':');
-      return idx != -1 ? a.substring(idx + 1).trim() : a;
+      final name = idx != -1 ? a.substring(idx + 1).trim() : a;
+      return displayNameFor(name);
     }
     return a.trim();
   }
@@ -1903,7 +1905,7 @@ class _WeekDayCell extends ConsumerWidget {
     final color = calEntry?.color ??
         (recurringItems.isNotEmpty ? null : null); // Recurring has no color
 
-    final patternName = calEntry?.patternName ??
+    final patternName = calEntry?.displayName ??
         (recurringItems.isNotEmpty
             ? _labelFromAction(recurringItems.first.actionLabel)
             : null);
@@ -2084,7 +2086,8 @@ class _WeekDayCell extends ConsumerWidget {
 
   String _labelFromAction(String a) {
     final idx = a.indexOf(':');
-    return idx != -1 ? a.substring(idx + 1).trim() : a.trim();
+    final name = idx != -1 ? a.substring(idx + 1).trim() : a.trim();
+    return displayNameFor(name);
   }
 }
 

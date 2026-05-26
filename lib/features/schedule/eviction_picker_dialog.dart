@@ -208,7 +208,7 @@ class _EvictionPickerDialogState
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Adding: ${entry.patternName} on ${entry.dateKey}'
+                    'Adding: ${entry.displayName} on ${entry.dateKey}'
                     '${entryTimeRange.isEmpty ? '' : ', $entryTimeRange'}',
                     style: const TextStyle(
                       color: NexGenPalette.textHigh,

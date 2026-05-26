@@ -109,8 +109,8 @@ const List<String> _kTeamPatternSuffixes = <String>[
   'Wave',
 ];
 
-/// Built once at first call. Composed from [_kTeamShortNames] (38 teams ×
-/// 3 suffixes = 114 entries) plus [_kExtraOverrides]. Lazily initialized
+/// Built once at first call. Composed from [_kTeamShortNames] (46 teams ×
+/// 3 suffixes = 138 entries) plus [_kExtraOverrides]. Lazily initialized
 /// to keep startup work flat — first call to [displayNameFor] for a slug
 /// not in the cache pays the build cost.
 Map<String, String>? _slugOverridesCache;

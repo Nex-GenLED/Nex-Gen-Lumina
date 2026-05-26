@@ -542,7 +542,7 @@ class _EntryRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  entry.patternName,
+                  entry.displayName,
                   style: const TextStyle(
                     color: NexGenPalette.textHigh,
                     fontWeight: FontWeight.w600,

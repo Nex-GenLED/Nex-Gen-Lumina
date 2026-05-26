@@ -176,7 +176,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
       children: [
         // Event name
         Text(
-          event.patternName,
+          event.displayName,
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -484,7 +484,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Previewing: ${event.patternName}' : 'Failed to send to device'),
+          content: Text(success ? 'Previewing: ${event.displayName}' : 'Failed to send to device'),
           backgroundColor: success ? NexGenPalette.gunmetal : Colors.red,
         ),
       );
@@ -498,7 +498,7 @@ class _AutopilotEventDetailSheet extends ConsumerWidget {
         backgroundColor: const Color(0xFF1A1F2E),
         title: const Text('Remove Event?', style: TextStyle(color: Colors.white)),
         content: Text(
-          'Remove "${event.patternName}" from your schedule?',
+          'Remove "${event.displayName}" from your schedule?',
           style: TextStyle(color: NexGenPalette.textSecondary),
         ),
         actions: [

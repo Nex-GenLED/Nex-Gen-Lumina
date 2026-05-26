@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
@@ -2067,7 +2068,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                           ),
                         ),
                         Text(
-                          widget.patternName,
+                          displayNameFor(widget.patternName),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,

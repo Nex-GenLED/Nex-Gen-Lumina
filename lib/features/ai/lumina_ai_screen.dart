@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
@@ -494,13 +495,14 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
             .toList() ??
         const ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     final patternName = intent['patternName'] as String? ?? 'Custom';
+    final displayPatternName = displayNameFor(patternName);
 
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Add "$patternName" to your schedule at $timeLabel?',
+          'Add "$displayPatternName" to your schedule at $timeLabel?',
           style: const TextStyle(color: _kFrost),
         ),
         backgroundColor: NexGenPalette.gunmetal90,

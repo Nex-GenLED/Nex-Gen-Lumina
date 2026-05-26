@@ -330,7 +330,7 @@ class _FavoritePatternCard extends ConsumerWidget {
                       // Pattern name (truncated for compact view)
                       Flexible(
                         child: Text(
-                          favorite.patternName,
+                          favorite.displayName,
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: textColor,
                                 fontWeight: FontWeight.w600,
