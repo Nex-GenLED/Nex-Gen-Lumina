@@ -13,14 +13,12 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
-import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
-import 'package:nexgen_command/features/schedule/schedule_models.dart';
-import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/app_providers.dart'
     show selectedTabIndexProvider, authStateProvider;
@@ -220,14 +218,25 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
 
       // ── Scheduling intent (recurring weekly/daily) ────────────────────────
       // The AI emits `schedulingIntent` in its JSON when the user asks for a
-      // recurring or future schedule (e.g. "every Thursday at sunset"). We
-      // post the AI's confirmation message to the chat, then offer a one-tap
-      // SnackBar action to persist a ScheduleItem.
+      // recurring or future schedule (e.g. "every Thursday at sunset"). The
+      // shared handler posts the AI's confirmation to the chat thread and
+      // offers a one-tap SnackBar to persist a ScheduleItem. Same path as
+      // the bottom-sheet entry — keep both in lock-step there.
       final schedulingIntent = result.wledPayload?['schedulingIntent'];
       if (schedulingIntent is Map) {
-        await _handleSchedulingIntent(
-          Map<String, dynamic>.from(schedulingIntent),
-          result,
+        LuminaPatternPreview? schedulePreview;
+        if (result.wledPayload != null) {
+          schedulePreview = _extractPreview(result.wledPayload!);
+        } else if (result.previewColors.isNotEmpty) {
+          schedulePreview = LuminaPatternPreview(colors: result.previewColors);
+        }
+        await handleSchedulingIntent(
+          ref: ref,
+          context: context,
+          intent: Map<String, dynamic>.from(schedulingIntent),
+          result: result,
+          preview: schedulePreview,
+          onMessagePosted: _scrollToEnd,
         );
         return;
       }
@@ -453,99 +462,6 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     );
 
     _scrollToEnd();
-  }
-
-  /// Handles a recurring/future scheduling intent from the AI.
-  ///
-  /// The AI emits `schedulingIntent` in its JSON when the user's request
-  /// implies a recurring schedule ("every Thursday at sunset", "warm white
-  /// nightly"). We post the AI's confirmation to the chat thread, then offer
-  /// a one-tap SnackBar action to persist a ScheduleItem via [schedulesProvider].
-  Future<void> _handleSchedulingIntent(
-    Map<String, dynamic> intent,
-    LuminaCommandResult result,
-  ) async {
-    final controller = ref.read(luminaSheetProvider.notifier);
-
-    // Show a preview if the AI returned light data alongside the schedule
-    LuminaPatternPreview? preview;
-    if (result.wledPayload != null) {
-      preview = _extractPreview(result.wledPayload!);
-    } else if (result.previewColors.isNotEmpty) {
-      preview = LuminaPatternPreview(colors: result.previewColors);
-    }
-
-    // Post the AI's response to the chat thread first so the user sees the
-    // confirmation message Claude crafted.
-    controller.addAssistantMessage(
-      result.responseText,
-      preview: preview,
-      wledPayload: result.wledPayload,
-    );
-
-    _scrollToEnd();
-
-    // Pull the schedule fields. ScheduleItem.repeatDays expects three-letter
-    // day codes ('Sun','Mon',…); the prompt instructs the AI to emit them
-    // that way, but we fall back to the full week for safety.
-    final timeLabel = intent['timeLabel'] as String? ?? 'Sunset';
-    final offTimeLabel = intent['offTimeLabel'] as String?;
-    final repeatDays = (intent['repeatDays'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        const ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    final patternName = intent['patternName'] as String? ?? 'Custom';
-    final displayPatternName = displayNameFor(patternName);
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Add "$displayPatternName" to your schedule at $timeLabel?',
-          style: const TextStyle(color: _kFrost),
-        ),
-        backgroundColor: NexGenPalette.gunmetal90,
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Add',
-          textColor: NexGenPalette.cyan,
-          onPressed: () async {
-            final messenger = ScaffoldMessenger.of(context);
-            try {
-              final item = ScheduleItem(
-                id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
-                timeLabel: timeLabel,
-                offTimeLabel: offTimeLabel,
-                repeatDays: repeatDays,
-                actionLabel: 'Pattern: $patternName',
-                enabled: true,
-                wledPayload: result.wledPayload,
-              );
-              await ref.read(schedulesProvider.notifier).add(item);
-              if (!mounted) return;
-              messenger.showSnackBar(
-                SnackBar(
-                  content: const Text('Schedule added'),
-                  backgroundColor: Colors.green.shade700,
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            } catch (e) {
-              debugPrint('Schedule add from Lumina screen failed: $e');
-              if (!mounted) return;
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text('Could not add schedule: $e'),
-                  backgroundColor: Colors.red.shade700,
-                  duration: const Duration(seconds: 3),
-                ),
-              );
-            }
-          },
-        ),
-      ),
-    );
   }
 
   void _handleNavigation(LuminaCommandResult result) {

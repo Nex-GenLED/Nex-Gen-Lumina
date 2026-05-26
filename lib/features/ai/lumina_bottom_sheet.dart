@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_waveform_painter.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
@@ -553,6 +554,29 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       final ephemeralIntent = result.ephemeralSessionIntent;
       if (ephemeralIntent != null && ephemeralIntent.isValid) {
         await _handleEphemeralSession(ephemeralIntent, result, prompt);
+        return;
+      }
+
+      // ── Scheduling intent (recurring weekly/daily) ────────────────────
+      // Pre-fix, this dispatch only existed on the full-screen path, so a
+      // schedule prompt typed into the dashboard sheet silently dropped
+      // the intent. Both surfaces now call the shared handler.
+      final schedulingIntent = result.wledPayload?['schedulingIntent'];
+      if (schedulingIntent is Map) {
+        LuminaPatternPreview? schedulePreview;
+        if (result.wledPayload != null) {
+          schedulePreview = _extractPreview(result.wledPayload!);
+        } else if (result.previewColors.isNotEmpty) {
+          schedulePreview = LuminaPatternPreview(colors: result.previewColors);
+        }
+        await handleSchedulingIntent(
+          ref: ref,
+          context: context,
+          intent: Map<String, dynamic>.from(schedulingIntent),
+          result: result,
+          preview: schedulePreview,
+          onMessagePosted: _scrollToEnd,
+        );
         return;
       }
 
