@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/participation_reconciler.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
@@ -144,6 +145,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       (_) => setState(() {}),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
+
+    // Stale participation-cache reconciliation. See
+    // docs/audits/CHANNEL_MAPPING_AUDIT_2026-05.md + Addendum 1. The
+    // helper self-gates: returns early until BOTH deviceChannels and
+    // currentRooflineConfig have emitted ready values, then clears the
+    // cache exactly once per app session if it disagrees with what the
+    // resolver would produce today. ref.listenManual on a ConsumerState
+    // auto-disposes with the state — no manual cleanup needed.
+    ref.listenManual(deviceChannelsProvider, (prev, next) {
+      runParticipationReconciliationIfReady(ref);
+    }, fireImmediately: true);
+    ref.listenManual(currentRooflineConfigProvider, (prev, next) {
+      runParticipationReconciliationIfReady(ref);
+    }, fireImmediately: true);
   }
 
   @override
