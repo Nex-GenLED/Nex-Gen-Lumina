@@ -111,11 +111,8 @@ class CloudAIProcessor {
     // Compound responses use the array. Single-schedule responses keep using
     // the singular form (prompt forbids emitting both). Whichever shape the
     // model returns, the handler downstream reads ONE canonical key —
-    // `schedulingIntents` as a List<Map<String, dynamic>>.
-    //
-    // BACK-COMPAT: until the handler is updated to read the list (Item #51
-    // Prompt 4), we ALSO keep the legacy `schedulingIntent` passthrough so the
-    // current single-action dispatch keeps working between commits.
+    // `schedulingIntents` as a List<Map<String, dynamic>>. The singular-input
+    // path is wrapped into a one-element list inside normalizeSchedulingIntents.
     // Drop malformed entries defensively — never throw on a bad model response.
     final normalizedIntents = normalizeSchedulingIntents(obj);
 
@@ -134,13 +131,9 @@ class CloudAIProcessor {
           'speed': obj['speed'],
         if (obj['intensity'] != null && !candidate.containsKey('intensity'))
           'intensity': obj['intensity'],
-        // Legacy passthrough — handler still reads this until Item #51 Prompt 4
-        // migrates it to the normalized list. Dropped automatically when the
-        // model emits the array form (prompt forbids emitting both).
-        if (obj['schedulingIntent'] != null)
-          'schedulingIntent': obj['schedulingIntent'],
         // Canonical normalized list — present when the model emitted EITHER
-        // shape. Future handler reads only this key.
+        // shape. The handler reads only this key; the legacy singular
+        // passthrough was retired in Item #51 Type-A completion.
         if (normalizedIntents != null) 'schedulingIntents': normalizedIntents,
       };
     } else if (obj.containsKey('seg') ||

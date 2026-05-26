@@ -216,29 +216,36 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         return;
       }
 
-      // ── Scheduling intent (recurring weekly/daily) ────────────────────────
-      // The AI emits `schedulingIntent` in its JSON when the user asks for a
-      // recurring or future schedule (e.g. "every Thursday at sunset"). The
-      // shared handler posts the AI's confirmation to the chat thread and
-      // offers a one-tap SnackBar to persist a ScheduleItem. Same path as
-      // the bottom-sheet entry — keep both in lock-step there.
-      final schedulingIntent = result.wledPayload?['schedulingIntent'];
-      if (schedulingIntent is Map) {
-        LuminaPatternPreview? schedulePreview;
-        if (result.wledPayload != null) {
-          schedulePreview = _extractPreview(result.wledPayload!);
-        } else if (result.previewColors.isNotEmpty) {
-          schedulePreview = LuminaPatternPreview(colors: result.previewColors);
+      // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────────
+      // The cloud parser canonicalizes both schema shapes (singular
+      // schedulingIntent, array schedulingIntents) into one List<Map> under
+      // the `schedulingIntents` key. The shared handler iterates the list,
+      // builds N ScheduleItems with a shared sourcePromptId, and persists
+      // atomically via addAll. Same path on full-screen and bottom-sheet.
+      final schedulingIntentsRaw = result.wledPayload?['schedulingIntents'];
+      if (schedulingIntentsRaw is List && schedulingIntentsRaw.isNotEmpty) {
+        final intents = schedulingIntentsRaw
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+        if (intents.isNotEmpty) {
+          LuminaPatternPreview? schedulePreview;
+          if (result.wledPayload != null) {
+            schedulePreview = _extractPreview(result.wledPayload!);
+          } else if (result.previewColors.isNotEmpty) {
+            schedulePreview =
+                LuminaPatternPreview(colors: result.previewColors);
+          }
+          await handleSchedulingIntents(
+            ref: ref,
+            context: context,
+            intents: intents,
+            result: result,
+            preview: schedulePreview,
+            onMessagePosted: _scrollToEnd,
+          );
+          return;
         }
-        await handleSchedulingIntent(
-          ref: ref,
-          context: context,
-          intent: Map<String, dynamic>.from(schedulingIntent),
-          result: result,
-          preview: schedulePreview,
-          onMessagePosted: _scrollToEnd,
-        );
-        return;
       }
 
       // ── Normal single-pattern apply ───────────────────────────────────────

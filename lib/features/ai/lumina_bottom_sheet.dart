@@ -557,27 +557,35 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         return;
       }
 
-      // ── Scheduling intent (recurring weekly/daily) ────────────────────
-      // Pre-fix, this dispatch only existed on the full-screen path, so a
-      // schedule prompt typed into the dashboard sheet silently dropped
-      // the intent. Both surfaces now call the shared handler.
-      final schedulingIntent = result.wledPayload?['schedulingIntent'];
-      if (schedulingIntent is Map) {
-        LuminaPatternPreview? schedulePreview;
-        if (result.wledPayload != null) {
-          schedulePreview = _extractPreview(result.wledPayload!);
-        } else if (result.previewColors.isNotEmpty) {
-          schedulePreview = LuminaPatternPreview(colors: result.previewColors);
+      // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────
+      // The cloud parser canonicalizes both schema shapes into one
+      // List<Map> under the `schedulingIntents` key. The shared handler
+      // iterates the list and persists atomically via addAll. Same path
+      // on full-screen and bottom-sheet.
+      final schedulingIntentsRaw = result.wledPayload?['schedulingIntents'];
+      if (schedulingIntentsRaw is List && schedulingIntentsRaw.isNotEmpty) {
+        final intents = schedulingIntentsRaw
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+        if (intents.isNotEmpty) {
+          LuminaPatternPreview? schedulePreview;
+          if (result.wledPayload != null) {
+            schedulePreview = _extractPreview(result.wledPayload!);
+          } else if (result.previewColors.isNotEmpty) {
+            schedulePreview =
+                LuminaPatternPreview(colors: result.previewColors);
+          }
+          await handleSchedulingIntents(
+            ref: ref,
+            context: context,
+            intents: intents,
+            result: result,
+            preview: schedulePreview,
+            onMessagePosted: _scrollToEnd,
+          );
+          return;
         }
-        await handleSchedulingIntent(
-          ref: ref,
-          context: context,
-          intent: Map<String, dynamic>.from(schedulingIntent),
-          result: result,
-          preview: schedulePreview,
-          onMessagePosted: _scrollToEnd,
-        );
-        return;
       }
 
       // Apply WLED payload to lights if available
