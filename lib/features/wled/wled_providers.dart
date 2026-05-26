@@ -306,12 +306,53 @@ final updateSegmentConfigProvider = Provider<Future<bool> Function({
   };
 });
 
+/// Tag for a continuous-knob command class that coalesces latest-wins
+/// inside [WledNotifier._postUpdate]. Discrete intents (power on/off,
+/// pattern apply, preset load) MUST NOT be tagged — every tap must
+/// execute. See [WledNotifier._postUpdate] for the gate logic.
+const String _kTransientBrightness = 'brightness';
+const String _kTransientSpeed = 'speed';
+const String _kTransientColor = 'color';
+
+/// Args carried forward when a transient write is coalesced. Stored in
+/// [WledNotifier._transientPending] and replayed by the in-flight write's
+/// `finally` block. Latest-wins: each new arrival overwrites the slot.
+class _PendingPost {
+  final bool? on;
+  final int? brightness;
+  final int? speed;
+  final Color? color;
+  final int? white;
+  final bool? forceRgbwZeroWhite;
+  final bool isManualChange;
+  const _PendingPost({
+    this.on,
+    this.brightness,
+    this.speed,
+    this.color,
+    this.white,
+    this.forceRgbwZeroWhite,
+    required this.isManualChange,
+  });
+}
+
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
   Timer? _reconnectTimer;
   bool _posting = false;
   bool _polling = false;
   bool _infoQueried = false;
+
+  /// Per-transient-type in-flight gate + latest-wins pending slot.
+  ///
+  /// While a write of a given transient type (brightness/speed/color) is
+  /// in flight, a newer write of the SAME type replaces the slot in
+  /// [_transientPending] rather than issuing a second durable command.
+  /// The in-flight write's `finally` block drains the slot recursively.
+  /// Discrete commands (power, pattern apply) pass `transientType: null`
+  /// and bypass this entirely.
+  final Set<String> _transientInFlight = <String>{};
+  final Map<String, _PendingPost> _transientPending = <String, _PendingPost>{};
 
   // Monotonically incremented for every _resolvePresetName invocation. The
   // resolver captures its seq at entry and aborts the write if a newer call
@@ -869,26 +910,47 @@ class WledNotifier extends Notifier<WledStateModel> {
   Future<void> setBrightness(int bri, {bool isManualChange = true}) async {
     state = state.copyWith(brightness: bri);
     // Always send power state with brightness to ensure WLED interprets correctly
-    await _postUpdate(on: state.isOn, brightness: bri, isManualChange: isManualChange);
+    await _postUpdate(
+      on: state.isOn,
+      brightness: bri,
+      isManualChange: isManualChange,
+      transientType: _kTransientBrightness,
+    );
   }
 
   Future<void> setSpeed(int sx, {bool isManualChange = true}) async {
     state = state.copyWith(speed: sx);
-    await _postUpdate(speed: sx, isManualChange: isManualChange);
+    await _postUpdate(
+      speed: sx,
+      isManualChange: isManualChange,
+      transientType: _kTransientSpeed,
+    );
   }
 
   Future<void> setColor(Color color, {bool isManualChange = true}) async {
     state = state.copyWith(color: color);
     // For RGBW strips, explicitly set white to 0 for pure RGB color accuracy
     // This prevents WLED's auto-white from mixing in white LED and distorting colors
-    await _postUpdate(color: color, forceRgbwZeroWhite: state.supportsRgbw, isManualChange: isManualChange);
+    await _postUpdate(
+      color: color,
+      forceRgbwZeroWhite: state.supportsRgbw,
+      isManualChange: isManualChange,
+      transientType: _kTransientColor,
+    );
   }
 
   Future<void> setWarmWhite(int white, {bool isManualChange = true}) async {
     final clamped = white.clamp(0, 255);
     state = state.copyWith(warmWhite: clamped);
     // Send an update including current color and the updated white channel
-    await _postUpdate(color: state.color, white: state.supportsRgbw ? clamped : null, isManualChange: isManualChange);
+    // (same _kTransientColor channel as setColor — both write the col[] array,
+    // so they coalesce together latest-wins).
+    await _postUpdate(
+      color: state.color,
+      white: state.supportsRgbw ? clamped : null,
+      isManualChange: isManualChange,
+      transientType: _kTransientColor,
+    );
   }
 
   /// Sets Lumina pattern metadata (colors, effect name) when a pattern is applied.
@@ -1111,7 +1173,29 @@ class WledNotifier extends Notifier<WledStateModel> {
     int? white,
     bool? forceRgbwZeroWhite,
     bool isManualChange = false,
+    String? transientType,
   }) async {
+    // Per-transient-type latest-wins coalescing.
+    //
+    // When a same-type write is already in flight, replace the pending
+    // slot and return. The in-flight write's `finally` block drains the
+    // slot via a recursive call, so the LATEST value always lands —
+    // earlier intermediate values are dropped on the floor. Discrete
+    // commands (power, pattern apply) pass `transientType: null` and
+    // bypass this gate so every tap executes.
+    if (transientType != null && _transientInFlight.contains(transientType)) {
+      _transientPending[transientType] = _PendingPost(
+        on: on,
+        brightness: brightness,
+        speed: speed,
+        color: color,
+        white: white,
+        forceRgbwZeroWhite: forceRgbwZeroWhite,
+        isManualChange: isManualChange,
+      );
+      return;
+    }
+
     // If DDP streaming is active, avoid HTTP state updates to prevent conflicts.
     final ddpStreaming = ref.read(ddpStreamingProvider);
     if (ddpStreaming) {
@@ -1156,6 +1240,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
 
     _posting = true;
+    if (transientType != null) {
+      _transientInFlight.add(transientType);
+    }
     bool ok = false;
     try {
       // Check if a channel filter is active (user selected specific channels).
@@ -1228,6 +1315,27 @@ class WledNotifier extends Notifier<WledStateModel> {
       await Future.delayed(Duration(milliseconds: isRemote ? 3000 : 150));
     } finally {
       _posting = false;
+      if (transientType != null) {
+        _transientInFlight.remove(transientType);
+        // Drain the latest-wins slot: any same-type writes that arrived
+        // during this in-flight period collapsed to one pending args set.
+        // Replay them now so the most recent value lands on the device.
+        // Runs in the finally so it executes even if the network write
+        // threw — a transient gate must never deadlock.
+        final pending = _transientPending.remove(transientType);
+        if (pending != null) {
+          unawaited(_postUpdate(
+            on: pending.on,
+            brightness: pending.brightness,
+            speed: pending.speed,
+            color: pending.color,
+            white: pending.white,
+            forceRgbwZeroWhite: pending.forceRgbwZeroWhite,
+            isManualChange: pending.isManualChange,
+            transientType: transientType,
+          ));
+        }
+      }
     }
 
     // Trigger an immediate single poll so the UI reflects device-confirmed

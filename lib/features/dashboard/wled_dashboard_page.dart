@@ -952,48 +952,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
                   // ── Row 2: Brightness slider ──
                   const SizedBox(height: 4),
-                  Consumer(builder: (context, ref, _) {
-                    final st = ref.watch(wledStateProvider);
-                    return Row(
-                      children: [
-                        Icon(
-                          Icons.brightness_low,
-                          size: 13,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                        Expanded(
-                          child: SliderTheme(
-                            data: Theme.of(context).sliderTheme.copyWith(
-                              trackHeight: 2,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                            ),
-                            child: Slider(
-                              value: st.brightness.toDouble(),
-                              min: 0,
-                              max: 255,
-                              onChangeStart: st.connected
-                                  ? (v) async {
-                                      final canProceed = await _checkSyncWarning();
-                                      if (!canProceed && mounted) setState(() {});
-                                    }
-                                  : null,
-                              onChanged: st.connected
-                                  ? (v) => ref.read(wledStateProvider.notifier).setBrightness(v.round())
-                                  : null,
-                              activeColor: NexGenPalette.cyan,
-                              inactiveColor: Colors.white.withValues(alpha: 0.15),
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          Icons.brightness_high,
-                          size: 13,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                      ],
-                    );
-                  }),
+                  _BrightnessSlider(onCheckSyncWarning: _checkSyncWarning),
                 ],
               ),
             ),
@@ -1759,6 +1718,107 @@ class _FeatureButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Brightness slider with a 200ms debounce on the network publish.
+///
+/// Mirrors widgets/pattern_adjustment_panel.dart:182,217-221,256-258
+/// (same `Timer? _debounce` field, same cancel-on-dispose discipline,
+/// same 200ms window) so rapid drag ticks coalesce to a single
+/// setBrightness call once the user pauses or releases.
+///
+/// In-drag tracking: a local `_pendingBrightness` holds the gesture's
+/// current value so the slider thumb visually follows the finger without
+/// each tick triggering a network write. `onChangeEnd` cancels the
+/// debounce and publishes immediately so the final value lands the
+/// instant the user lifts. Falls back to the notifier's `st.brightness`
+/// when no drag is in flight.
+class _BrightnessSlider extends ConsumerStatefulWidget {
+  const _BrightnessSlider({required this.onCheckSyncWarning});
+
+  final Future<bool> Function() onCheckSyncWarning;
+
+  @override
+  ConsumerState<_BrightnessSlider> createState() => _BrightnessSliderState();
+}
+
+class _BrightnessSliderState extends ConsumerState<_BrightnessSlider> {
+  Timer? _debounce;
+  int? _pendingBrightness;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _publish(int value) {
+    _debounce?.cancel();
+    ref.read(wledStateProvider.notifier).setBrightness(value);
+    if (mounted) setState(() => _pendingBrightness = null);
+  }
+
+  void _scheduleDebouncedPublish(int value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      _publish(value);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = ref.watch(wledStateProvider);
+    final displayValue = (_pendingBrightness ?? st.brightness)
+        .toDouble()
+        .clamp(0.0, 255.0);
+    return Row(
+      children: [
+        Icon(
+          Icons.brightness_low,
+          size: 13,
+          color: Colors.white.withValues(alpha: 0.35),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: Theme.of(context).sliderTheme.copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                ),
+            child: Slider(
+              value: displayValue,
+              min: 0,
+              max: 255,
+              onChangeStart: st.connected
+                  ? (v) async {
+                      final canProceed = await widget.onCheckSyncWarning();
+                      if (!canProceed && mounted) setState(() {});
+                    }
+                  : null,
+              onChanged: st.connected
+                  ? (v) {
+                      final rounded = v.round();
+                      setState(() => _pendingBrightness = rounded);
+                      _scheduleDebouncedPublish(rounded);
+                    }
+                  : null,
+              onChangeEnd: st.connected
+                  ? (v) => _publish(v.round())
+                  : null,
+              activeColor: NexGenPalette.cyan,
+              inactiveColor: Colors.white.withValues(alpha: 0.15),
+            ),
+          ),
+        ),
+        Icon(
+          Icons.brightness_high,
+          size: 13,
+          color: Colors.white.withValues(alpha: 0.35),
+        ),
+      ],
     );
   }
 }
