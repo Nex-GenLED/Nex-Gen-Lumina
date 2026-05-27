@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 
@@ -21,6 +24,29 @@ class ConnectivityService {
     if (_cachedSsid != null && _cacheTime != null) {
       if (DateTime.now().difference(_cacheTime!) < _cacheDuration) {
         return _cachedSsid;
+      }
+    }
+
+    // iOS-only: NEHotspotNetwork.fetchCurrent (the API network_info_plus
+    // uses under the hood on iOS 14+) returns nil unless Core Location
+    // has an active session — even with the wifi-info entitlement AND
+    // location permission granted. permission_handler only READS / GRANTS
+    // the permission; it doesn't activate a CLLocationManager session.
+    // A best-effort getCurrentPosition wakes the subsystem so the SSID
+    // read that immediately follows returns a value instead of nil. The
+    // outcome of this call is intentionally ignored — denied / restricted
+    // / timeout all fall through to the SSID attempt, which then fails
+    // the same way it would have today (no regression).
+    if (Platform.isIOS) {
+      try {
+        await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.low,
+            timeLimit: Duration(seconds: 3),
+          ),
+        );
+      } catch (_) {
+        // best-effort warm-up; ignore every failure mode
       }
     }
 

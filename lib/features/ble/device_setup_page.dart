@@ -15,7 +15,6 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:network_info_plus/network_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
@@ -432,8 +431,12 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       if (perm == LocationPermission.deniedForever) {
         debugPrint('Location permission permanently denied; cannot read SSID');
       }
-      final info = NetworkInfo();
-      final ssid = await info.getWifiName();
+      // Route through ConnectivityService.getCurrentSsid so the iOS
+      // Core Location warm-up applies here too — without it,
+      // NEHotspotNetwork.fetchCurrent returns nil on iOS 14+ even with
+      // permissions granted (same root cause as remote_access_screen).
+      final ssid =
+          await ref.read(connectivityServiceProvider).getCurrentSsid();
       if (!mounted) return;
       setState(() => _currentSsid = ssid);
     } catch (e) {
