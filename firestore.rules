@@ -399,24 +399,57 @@ service cloud.firestore {
                request.auth.token.email == 'bridge@nex-genled.com';
       }
 
+      // 2026-05-27: Two bridges in the field have stale NVS pointing
+      // to deleted (or about-to-be-deleted) UIDs and keep heartbeating
+      // into /bridge_registry. Block their writes until each device is
+      // physically recovered and re-flashed:
+      //   • MAC 441D64C935AC → pairedUid xBnFxkN6ScRueZRgWxRnzGKsVMt2
+      //     (Ellie's original orphan from the prior session)
+      //   • MAC E08CFE4049AC → pairedUid ASeUR5nnqtYAui1XRkaQu2iqxkI2
+      //     (Ellie's current bridge — UID deleted in tonight's wipe;
+      //     bridge physically unlocatable at wipe time)
+      //
+      // TEMPORARY — REMOVE the corresponding entry from the list below
+      // (or the entire helper + the two AND clauses on `allow create` /
+      // `allow update` if both bridges are recovered) once each device
+      // has been located and reset. Search this file for
+      // "isNotBlockedDeletedUid" to find every reference.
+      //
+      // Uses .get('pairedUid', '') so writes without a pairedUid field
+      // (e.g. user-side pendingUid pairing requests) evaluate to true
+      // and proceed normally.
+      function isNotBlockedDeletedUid() {
+        return !(request.resource.data.get('pairedUid', '') in [
+          'xBnFxkN6ScRueZRgWxRnzGKsVMt2',
+          'ASeUR5nnqtYAui1XRkaQu2iqxkI2',
+        ]);
+      }
+
       // Any signed-in user can read so the discovery flow can list
       // unpaired bridges and look up a specific bridge by deviceId.
       allow read: if request.auth != null;
 
-      // Only the bridge can create its own registration doc.
-      allow create: if isBridge();
+      // Only the bridge can create its own registration doc, and the
+      // incoming doc must not carry the blocked pairedUid (see
+      // isNotBlockedDeletedUid above — temporary).
+      allow create: if isBridge() && isNotBlockedDeletedUid();
 
       // Two write paths:
       //   (a) the bridge updates anything on its own doc, or
       //   (b) a user requests pairing by writing pendingUid=their uid
       //       — but only when the bridge is unpaired, so a malicious
       //       user can't yank a bridge that's already in service.
-      allow update: if isBridge() ||
+      // Both paths are further gated on isNotBlockedDeletedUid (the
+      // incoming doc must not carry the blocked pairedUid).
+      allow update: if (isBridge() ||
         (request.auth != null &&
          resource.data.status == 'unpaired' &&
-         request.resource.data.pendingUid == request.auth.uid);
+         request.resource.data.pendingUid == request.auth.uid))
+        && isNotBlockedDeletedUid();
 
       // Registry docs are durable identifiers — never deleted by clients.
+      // (Console / admin-SDK deletes bypass rules, so the orphan doc can
+      // still be cleaned up from the Firebase Console.)
       allow delete: if false;
     }
 
