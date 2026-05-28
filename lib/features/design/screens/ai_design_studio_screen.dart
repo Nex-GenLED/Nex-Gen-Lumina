@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
@@ -44,48 +45,60 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       appBar: _buildAppBar(context),
+      // SafeArea(bottom: false) handles the top notch; the bottom is
+      // reserved via navBarTotalHeight(context) so the persistent glass
+      // dock doesn't occlude the bottom-most widgets (input section,
+      // action buttons, clarification dialog's Continue/Back row, quick
+      // ideas). navBarTotalHeight already includes the device's bottom
+      // inset — using SafeArea(bottom:true) on top would double-count it.
+      // Matches the wider-codebase convention (my_designs_screen.dart:60,
+      // pattern_grid_widgets.dart:62, current_colors_editor_screen.dart:73).
       body: SafeArea(
-        child: Column(
-          children: [
-            // Live preview canvas
-            Expanded(
-              flex: 3,
-              child: LivePreviewCanvas(
-                enabled: livePreviewEnabled,
-              ),
-            ),
-
-            // Understanding panel (shows what we understood)
-            if (intent != null && !isClarifying)
-              AIUnderstandingPanel(
-                intent: intent,
-                onEditLayer: _handleEditLayer,
-                onOpenManual: () => setState(() => _showManualControls = true),
-              ),
-
-            // Clarification dialog (when needed)
-            if (isClarifying)
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+          child: Column(
+            children: [
+              // Live preview canvas
               Expanded(
-                flex: 2,
-                child: ClarificationDialogWidget(
-                  onComplete: _handleClarificationsComplete,
-                  onManualRequested: (aspect) {
-                    setState(() => _showManualControls = true);
-                  },
+                flex: 3,
+                child: LivePreviewCanvas(
+                  enabled: livePreviewEnabled,
                 ),
               ),
 
-            // Input section
-            if (!isClarifying)
-              _buildInputSection(context, isProcessing),
+              // Understanding panel (shows what we understood)
+              if (intent != null && !isClarifying)
+                AIUnderstandingPanel(
+                  intent: intent,
+                  onEditLayer: _handleEditLayer,
+                  onOpenManual: () => setState(() => _showManualControls = true),
+                ),
 
-            // Action buttons
-            if (patternReady) _buildActionButtons(context),
+              // Clarification dialog (when needed)
+              if (isClarifying)
+                Expanded(
+                  flex: 2,
+                  child: ClarificationDialogWidget(
+                    onComplete: _handleClarificationsComplete,
+                    onManualRequested: (aspect) {
+                      setState(() => _showManualControls = true);
+                    },
+                  ),
+                ),
 
-            // Quick ideas
-            if (state == DesignStudioStatus.idle && intent == null)
-              _buildQuickIdeas(context),
-          ],
+              // Input section
+              if (!isClarifying)
+                _buildInputSection(context, isProcessing),
+
+              // Action buttons
+              if (patternReady) _buildActionButtons(context),
+
+              // Quick ideas
+              if (state == DesignStudioStatus.idle && intent == null)
+                _buildQuickIdeas(context),
+            ],
+          ),
         ),
       ),
     );
@@ -374,9 +387,30 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
         ref.read(composedPatternProvider.notifier).state = result.pattern;
       }
     } catch (e) {
-      if (!mounted) return;
-      ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.error;
+      _handleOrchestratorError(e);
     }
+  }
+
+  /// Shared catch handler for the two screens-level orchestrator entry
+  /// points (_handleSubmit, _handleClarificationsComplete). On a thrown
+  /// orchestrator error, both code paths must:
+  ///   - reset status out of `processing` so the input UI re-enables
+  ///     instead of staying spinner-locked (status == error makes
+  ///     isProcessing false → _buildInputSection re-enables Submit),
+  ///   - surface a user-facing toast so the failure is visible, not
+  ///     silent.
+  /// debugPrint preserves the raw error for log triage without exposing
+  /// internal stack info to the user.
+  void _handleOrchestratorError(Object e) {
+    debugPrint('DesignStudio orchestrator error: $e');
+    if (!mounted) return;
+    ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.error;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text("Couldn't process that — please try again."),
+        backgroundColor: Colors.red.shade800,
+      ),
+    );
   }
 
   void _useQuickIdea(String idea) {
@@ -390,9 +424,29 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     // TODO: Focus on the specific layer in manual controls
   }
 
-  void _handleClarificationsComplete() {
-    // Apply clarifications and continue
-    ref.read(applyClarificationsProvider);
+  Future<void> _handleClarificationsComplete() async {
+    // applyClarificationsProvider is a FutureProvider<DesignStudioResult>
+    // whose body runs the orchestrator and writes results back to the
+    // state providers this screen watches. ref.read(provider) on a
+    // FutureProvider returns an AsyncValue snapshot without triggering
+    // execution — earlier code did exactly that, so Continue was a no-op.
+    // refresh(provider.future) invalidates any cached value and kicks the
+    // body fresh.
+    //
+    // We must await INSIDE try/catch: the provider body flips status to
+    // `processing` before its async work, so an unhandled throw leaves
+    // the UI stuck on the spinner. _handleOrchestratorError resets status
+    // and toasts on failure. The happy path is unchanged — the provider's
+    // own writes drive the UI rebuild.
+    try {
+      // We await for the side-effect (provider body runs + writes state)
+      // and to surface a throw into our catch; the resolved value is read
+      // off the providers the body wrote, not the return here.
+      // ignore: unused_result
+      await ref.refresh(applyClarificationsProvider.future);
+    } catch (e) {
+      _handleOrchestratorError(e);
+    }
   }
 
   void _handleSaveDesign() {
