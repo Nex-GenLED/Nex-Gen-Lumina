@@ -1077,24 +1077,24 @@ class _NeighborhoodGroupListViewState
             top: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.1))),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           // Primary — matches "Start a Block Party" in onboarding
           Expanded(
             child: ElevatedButton.icon(
               onPressed: widget.onCreateGroup,
-              icon:
-                  const Icon(Icons.add_circle_outline, size: 20),
+              icon: const Icon(Icons.add_circle_outline, size: 20),
               label: const Text(
                 'Start a Block Party',
+                textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16),
+                    fontWeight: FontWeight.bold, fontSize: 15),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NexGenPalette.cyan,
                 foregroundColor: Colors.black,
-                padding:
-                    const EdgeInsets.symmetric(vertical: 14),
+                alignment: Alignment.center,
+                minimumSize: const Size.fromHeight(52),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
                 elevation: 8,
@@ -1109,12 +1109,18 @@ class _NeighborhoodGroupListViewState
             child: OutlinedButton.icon(
               onPressed: widget.onJoinGroup,
               icon: const Icon(Icons.login, size: 20),
-              label: const Text('Join the Party'),
+              label: const Text(
+                'Join the Party',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: NexGenPalette.cyan,
                 side: const BorderSide(color: NexGenPalette.cyan),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 14),
+                alignment: Alignment.center,
+                minimumSize: const Size.fromHeight(52),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
               ),
