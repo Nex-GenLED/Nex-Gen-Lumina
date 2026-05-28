@@ -389,8 +389,12 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       final currentSsid = await connectivityService.getCurrentSsid();
 
       if (currentSsid == null || currentSsid.isEmpty) {
+        // Surface the SPECIFIC reason so Tyler (no Mac/Xcode console) can
+        // read it off the screen. DIAGNOSTIC build — keep the message
+        // structured so the reason is unmistakable.
+        final reason = connectivityService.lastSsidFailureReason ?? 'unknown';
         _showSnackBar(
-          'Could not read WiFi name. Make sure WiFi is enabled and '
+          'SSID read failed: $reason. Make sure WiFi is enabled and '
           'you are connected to your home network.',
           isError: true,
         );

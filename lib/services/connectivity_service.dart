@@ -17,9 +17,20 @@ class ConnectivityService {
   DateTime? _cacheTime;
   static const _cacheDuration = Duration(seconds: 30);
 
+  /// Last reason getCurrentSsid returned null / failed. The UI reads this
+  /// after a null result to surface the specific failure to the user — Tyler
+  /// has no Mac/Xcode console, so the reason MUST be visible in-app. Set on
+  /// every branch of getCurrentSsid (including success → null). Stable until
+  /// the next getCurrentSsid call.
+  String? _lastSsidFailureReason;
+  String? get lastSsidFailureReason => _lastSsidFailureReason;
+
   /// Get the current WiFi SSID (network name).
   /// Returns null if not connected to WiFi or permission denied.
   Future<String?> getCurrentSsid() async {
+    // Reset reason at the top of every call — stale values would lie.
+    _lastSsidFailureReason = null;
+
     // Return cached value if still valid
     if (_cachedSsid != null && _cacheTime != null) {
       if (DateTime.now().difference(_cacheTime!) < _cacheDuration) {
@@ -32,12 +43,27 @@ class ConnectivityService {
     // has an active session — even with the wifi-info entitlement AND
     // location permission granted. permission_handler only READS / GRANTS
     // the permission; it doesn't activate a CLLocationManager session.
-    // A best-effort getCurrentPosition wakes the subsystem so the SSID
-    // read that immediately follows returns a value instead of nil. The
-    // outcome of this call is intentionally ignored — denied / restricted
-    // / timeout all fall through to the SSID attempt, which then fails
-    // the same way it would have today (no regression).
+    //
+    // Two-stage warm-up:
+    //   1. getLastKnownPosition — returns the cached fix INSTANTLY (no GPS
+    //      wait). May be enough on its own to mark Core Location as
+    //      recently-active. Returns null indoors with no prior fix.
+    //   2. getCurrentPosition — belt-and-suspenders. Waits for a fresh fix,
+    //      can time out indoors (the leading theory for why the 6d28e40
+    //      warm-up alone wasn't enough).
+    //
+    // Both outcomes are intentionally non-fatal — every failure mode falls
+    // through to the SSID attempt below, which then propagates a specific
+    // reason via _lastSsidFailureReason.
     if (Platform.isIOS) {
+      debugPrint('SSID: warmup START');
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        debugPrint(
+            'SSID: getLastKnownPosition -> ${last == null ? "null" : "position"}');
+      } catch (e) {
+        debugPrint('SSID: getLastKnownPosition threw $e');
+      }
       try {
         await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
@@ -45,25 +71,42 @@ class ConnectivityService {
             timeLimit: Duration(seconds: 3),
           ),
         );
-      } catch (_) {
-        // best-effort warm-up; ignore every failure mode
+        debugPrint('SSID: getCurrentPosition -> position');
+      } on TimeoutException catch (_) {
+        debugPrint('SSID: getCurrentPosition -> timeout');
+      } catch (e) {
+        debugPrint('SSID: getCurrentPosition -> error:$e');
       }
     }
 
     try {
       // On some platforms, SSID may include quotes - strip them
       String? ssid = await _networkInfo.getWifiName();
-      if (ssid != null) {
-        // Remove surrounding quotes if present (common on Android)
-        if (ssid.startsWith('"') && ssid.endsWith('"')) {
-          ssid = ssid.substring(1, ssid.length - 1);
-        }
+      if (ssid == null) {
+        debugPrint('SSID: getWifiName -> null');
+        _lastSsidFailureReason = 'getwifiname_null';
+        _cachedSsid = null;
+        _cacheTime = DateTime.now();
+        return null;
       }
+      // Remove surrounding quotes if present (common on Android)
+      if (ssid.startsWith('"') && ssid.endsWith('"')) {
+        ssid = ssid.substring(1, ssid.length - 1);
+      }
+      if (ssid.isEmpty) {
+        debugPrint('SSID: getWifiName -> empty');
+        _lastSsidFailureReason = 'getwifiname_empty';
+        _cachedSsid = ssid;
+        _cacheTime = DateTime.now();
+        return ssid;
+      }
+      debugPrint('SSID: getWifiName -> "$ssid"');
       _cachedSsid = ssid;
       _cacheTime = DateTime.now();
       return ssid;
     } catch (e) {
-      debugPrint('ConnectivityService: Failed to get WiFi SSID: $e');
+      debugPrint('SSID: getWifiName threw $e');
+      _lastSsidFailureReason = 'getwifiname_exception:$e';
       return null;
     }
   }
