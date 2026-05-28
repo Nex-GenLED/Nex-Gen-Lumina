@@ -577,6 +577,21 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Patterns subcollection — user-private creative content (custom
+    // patterns saved/edited from the pattern editor). Mirrors the
+    // favorites rule: single ownership gate, no field-shape assertions
+    // so the pattern schema can evolve without rule churn. Written by
+    // EditPatternScreen via .set(merge:true) (evaluates as create OR
+    // update depending on doc existence — both allowed). Added 2026-05-28
+    // to fix a structural gap: the path had no rule and fell through to
+    // default-deny since the feature shipped.
+    match /users/{userId}/patterns/{patternId} {
+      allow read:   if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
     // ==================== Global Analytics Collections ====================
     // These collections aggregate anonymized data across all users
 
