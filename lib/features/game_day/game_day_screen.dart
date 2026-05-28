@@ -1714,7 +1714,11 @@ class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
           child: ListView.builder(
             controller: widget.scrollController,
             itemCount: teams.length,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            // Bottom padding clears the persistent GlassDockNavBar so the
+            // last team rows (e.g. the bottom Tigers entries) aren't
+            // hidden behind it and can be tapped.
+            padding: EdgeInsets.fromLTRB(
+                16, 0, 16, navBarTotalHeight(context) + 16),
             itemBuilder: (context, index) {
               final entry = teams[index];
               final slug = entry.key;
