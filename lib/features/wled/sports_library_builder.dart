@@ -16,6 +16,7 @@ class SportsLibraryBuilder {
     'NBA': 'NBA',
     'MLB': 'MLB',
     'NHL': 'NHL',
+    'ECHL': 'ECHL',
     'MLS': 'MLS',
     'EPL': 'Premier League',
     'LA_LIGA': 'La Liga',
@@ -33,6 +34,7 @@ class SportsLibraryBuilder {
     'NBA': 1,
     'MLB': 2,
     'NHL': 3,
+    'ECHL': 6,
     'WNBA': 5,
   };
 
