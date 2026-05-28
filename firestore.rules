@@ -592,6 +592,20 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
+    // Designs subcollection — user-private CustomDesign content (saved
+    // from Design Studio, SaveCustomPattern "Save As" / "Save unsaved
+    // custom", and duplicate-design). Mirrors the patterns/favorites
+    // rule: single ownership gate, no field-shape assertions so the
+    // schema can evolve. Added 2026-05-28 to close a default-deny gap —
+    // the path had no rule and these three save paths silently failed
+    // since they shipped.
+    match /users/{userId}/designs/{designId} {
+      allow read:   if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
     // ==================== Global Analytics Collections ====================
     // These collections aggregate anonymized data across all users
 
