@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../wled/library_hierarchy_models.dart';
 import '../../wled/pattern_providers.dart';
-import '../../wled/wled_models.dart';
+import '../../wled/wled_effects_catalog.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
@@ -365,7 +365,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    kEffectNames[pattern.effectId] ?? 'Effect #${pattern.effectId}',
+                    WledEffectsCatalog.getName(pattern.effectId),
                     style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
                   ),
                 ],
@@ -1187,7 +1187,7 @@ class _FeaturedPatternCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = pattern.colorObjects;
-    final effectName = kEffectNames[pattern.effectId] ?? '';
+    final effectName = WledEffectsCatalog.getName(pattern.effectId);
 
     return Padding(
       padding: const EdgeInsets.only(right: 10),
@@ -1805,7 +1805,7 @@ class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
         ),
         const SizedBox(height: 12),
         ...syncEffects.map((effectId) {
-          final name = kEffectNames[effectId] ?? 'Effect #$effectId';
+          final name = WledEffectsCatalog.getName(effectId);
           final isSuggested = suggestedEffects.contains(effectId);
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),

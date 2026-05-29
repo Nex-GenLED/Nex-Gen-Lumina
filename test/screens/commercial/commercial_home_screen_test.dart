@@ -149,10 +149,10 @@ void main() {
       // Persisted intent says "Blue Line Vibes" with a blue fingerprint, but
       // the device is actually playing red. Reconcile drops the stale
       // label. displayPatternNameProvider falls through to P3 (effect
-      // name) which for fx=84 is "Solid Pattern" per kEffectNames.
+      // name) which for fx=84 is "Solid Pattern Tri" per the device catalog.
       final actualDevice = WledStateModel.initial().copyWith(
         isOn: true,
-        effectId: 84, // 'Solid Pattern' per kEffectNames
+        effectId: 84, // 'Solid Pattern Tri' per device /json/effects
         presetId: 0,
         colorSequence: const [Color(0xFFFF0000)],
       );
@@ -180,7 +180,7 @@ void main() {
 
       // Stale label gone; P3 effect-name fallback wins.
       expect(find.text('Blue Line Vibes'), findsNothing);
-      expect(find.text('Solid Pattern'), findsOneWidget,
+      expect(find.text('Solid Pattern Tri'), findsOneWidget,
           reason:
               'After reconcile drops stale label, P3 effect-name fallback fires. '
               'Identical to what residential dashboard would show.');
@@ -216,7 +216,7 @@ void main() {
       // render for the same container state.
       final state = WledStateModel.initial().copyWith(
         isOn: true,
-        effectId: 12, // 'Fade' per kEffectNames
+        effectId: 12, // 'Fade' per device /json/effects
         presetId: 0,
       );
       await _pumpWithState(tester, deviceState: state);

@@ -252,7 +252,8 @@ class WledEffectsCatalog {
   ];
 
   /// Complete list of all WLED effects (0-186).
-  /// Skipped IDs: 48, 53, 114, 142, 151, 161, 169, 170, 171 (retired/unused).
+  /// Reserved (RSVD) slots in firmware: 53, 142, 151, 161, 169, 170, 171.
+  /// Verified against device /json/effects on WLED 0.15.1 (2026-05-29).
   ///
   /// ColorBehavior classifications:
   /// - usesSelectedColors: Effect displays your colors exactly (solid, chase, wipe)
@@ -400,6 +401,7 @@ class WledEffectsCatalog {
 
     // Game effects
     WledEffect(id: 44, name: 'Tetrix', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
+    WledEffect(id: 48, name: 'Rolling Balls', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 91, name: 'Bouncing Balls', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 95, name: 'Popcorn', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
 
@@ -407,6 +409,7 @@ class WledEffectsCatalog {
     WledEffect(id: 82, name: 'Halloween Eyes', category: 'Holiday', colorBehavior: ColorBehavior.usesSelectedColors),
 
     // 2D effects (require 2D matrix) - Mixed color behaviors
+    WledEffect(id: 114, name: 'Rotozoomer', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 118, name: 'Spaceships', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 119, name: 'Crazy Bees', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 120, name: 'Ghost Rider', category: '2D', requires2D: true, colorBehavior: ColorBehavior.generatesOwnColors),

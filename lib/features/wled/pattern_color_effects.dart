@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Bottom sheet for picking a solid color when using Solid effect.
@@ -108,7 +108,7 @@ class _ColorAssignmentSheetState extends State<ColorAssignmentSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final effectName = kEffectNames[widget.effectId] ?? 'Effect ${widget.effectId}';
+    final effectName = WledEffectsCatalog.getName(widget.effectId);
 
     return Container(
       padding: const EdgeInsets.all(20),
