@@ -61,15 +61,19 @@ Move to CLOSED only after this passes on the new build.
 **Display-only.** No data migration needed: fx substitution in `design_models.dart:185-187` was always correct (83 IS Solid Pattern on device — multi-color solid designs have been rendering the right effect on hardware). No firmware impact. Fixed `commercial_home_screen_test.dart` fixture that was asserting the old (wrong) label for fx=84.
 **Verification owed:** Cold-start after a multi-color solid apply → Now Playing shows "Solid Pattern" (or the design's own name via the #62/#81 path), NOT "Halloween Eyes".
 
-### #63 (REVISED) — Game Day team cluster: 3 distinct bugs, one disease
-**Status:** OPEN, diagnosed + fix shape locked (2026-05-29)
-**Reported:** Ellie Cochran, 2026-05-27. Diagnosed 2026-05-29 via writer/reader sweep.
+### #63 — Game Day team cluster: 3 bugs, one shared-service fix (BUNDLED)
+**Status:** OPEN, diagnosed + fix shape locked, ready to build next session.
+**Reported:** Ellie Cochran, 2026-05-27. Refined 2026-05-29 with field-confirmed E3 symptom from both entry points.
 
-Shared disease: writer ≠ reader / duplicate-path. Fix vehicle: a shared `TeamRegistrationService.addTeam(uid, teamSlug)` owning subcollection write + profile write + Explore cache invalidation. Three distinct failures:
+**Disease:** writer ≠ reader / duplicate-path. **Vehicle:** one shared `TeamRegistrationService.addTeam(uid, teamSlug)` that owns: subcollection write (`/game_day_autopilot/`) + profile write (`sports_teams` / `sports_team_priority`) + Explore "My Teams" cache invalidation. Free-text → slug via `team_color_resolver.dart`.
 
-- **E1:** installer writes `/users/{uid}` profile fields only; Game Day reader (`gameDayTeamsProvider`) AND-intersects profile fields WITH the `/game_day_autopilot/` subcollection → installer satisfies half → reader empty. **Fix:** installer routes through the shared `addTeam` (writes both), resolving free-text names via `team_color_resolver.dart` to slugs.
-- **E3:** `updateMyTeams()` / `clearMyTeams()` have ZERO call sites — dead wire; Explore "My Teams" folder can never populate. **Fix:** `patternRepositoryProvider` listens to `currentUserProfileProvider` → calls `updateMyTeams(profile.sportsTeams)` on resolve, `clearMyTeams()` on logout.
-- **E5:** PRODUCT DECISION LOCKED (Tyler 2026-05-29): adding a team does NOT auto-enable autopilot (keep `enabled: false` default). But toggling autopilot ON must IMMEDIATELY populate the season calendar for that team (force-bypass the 7-day gate — it's for background cadence, not user-initiated enable); toggling OFF must REMOVE that team's dates. Requires: populate tags entries by source team/config id; disable tears down entries matching that tag; manual Refresh passes `force: true`. **VERIFY** whether populate already tags entries by source (`sourceTeamSlug`/`configId`) — if not, adding that tag is part of the fix. May hook into existing `CalendarEntryLeaseManager`. Do NOT flip the picker to `enabled: true` (the audit's suggestion conflicts with this decision).
+- **E1** — installer writes profile fields only; Game Day reader (`gameDayTeamsProvider`) AND-intersects profile fields WITH the `/game_day_autopilot/` subcollection → installer satisfies half → reader empty. Identity hand-off is CORRECT (writes to customer UID); it's the SCHEMA hand-off that fails. **Fix:** installer routes through `TeamRegistrationService.addTeam` (writes BOTH locations).
+
+- **E3** (Ellie-confirmed symptom): teams favorited via EITHER profile build OR Game Day setup don't appear in the Explore Designs → Game Day "My Teams" folder, from both entry points. **Root cause:** `updateMyTeams()` / `clearMyTeams()` have ZERO call sites → `_myTeamsNodes` always `[]` → folder renders but never populates. **Fix:** `patternRepositoryProvider` listens to `currentUserProfileProvider` → `updateMyTeams(profile.sportsTeams)` on resolve, `clearMyTeams()` on logout. Wiring to the PROFILE catches both entry points because both writers land in the profile fields. Bundled into the shared-service pass per Tyler — once `addTeam` owns Explore cache invalidation, this reader-wire is part of it; independently shippable if scope-trimming is needed.
+
+- **E5** — PRODUCT DECISION LOCKED (Tyler 2026-05-29): adding a team does NOT auto-enable autopilot (keep `enabled: false` default; do NOT flip picker to `true`). Toggling autopilot ON → IMMEDIATELY populate the season calendar for that team, force-bypassing the 7-day gate (gate is for background cadence, not user-initiated enable). Toggling OFF → remove that team's dates. Requires: populate TAGS entries by source team/config id; disable tears down tagged entries; manual Refresh passes `force: true`. **VERIFY** whether populate already tags entries by source (`sourceTeamSlug` / `configId`) — may hook into `CalendarEntryLeaseManager`.
+
+**Blast radius (per audit):** E1 = installer commit path + `TeamColorResolver` dep (new installs only, existing users unaffected). E3 = one `ref.listen` in `patternRepositoryProvider`. E5 = picker enabled-state handling + force-refresh + source-tagging on populate/teardown. All low-to-medium risk individually; the shared service is the unifying abstraction.
 
 ### #77 — Cold-start preview/label leak — WLED writer paths bypassed Bug B chokepoint
 **Status:** IN BUILD (committed e222dde, awaiting on-device verification)
