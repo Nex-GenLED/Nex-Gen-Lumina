@@ -205,8 +205,20 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   @override
   void dispose() {
     if (_isPaletteView) {
+      // Reset mood filter when leaving a palette view. The microtask
+      // defers the state mutation past dispose() to avoid modifying
+      // providers during the dispose tree (downstream rebuilds mid-
+      // teardown). But the microtask body must NOT touch `ref` — by the
+      // time it runs the widget is gone and `ref` is dead, throwing
+      // "Cannot use ref after the widget was disposed" (StateError —
+      // observed as #84 save-design crash, /debug_errors/ doc
+      // NxZSc4Xlo5iAalrPYMuf). Capture the notifier here (while `ref`
+      // is valid); the notifier itself is owned by Riverpod's
+      // ProviderContainer, independent of this widget's lifecycle, so
+      // mutating it from the microtask is safe.
+      final notifier = ref.read(selectedMoodFilterProvider.notifier);
       Future.microtask(() {
-        ref.read(selectedMoodFilterProvider.notifier).state = null;
+        notifier.state = null;
       });
     }
     super.dispose();
