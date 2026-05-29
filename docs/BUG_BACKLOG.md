@@ -106,6 +106,11 @@ Before a user wipe, query `bridge_registry` for all `pairedUid` values, check ea
 **Surfaced by:** 2026-05-29 writer sweep during #77 fix.
 Background workers (`game_day_autopilot_background_worker.dart:487`, `sync_event_background_worker.dart:483/686/785/999/1072/1114`) POST to `$_functionsBaseUrl/applySyncPattern` and other Cloud Functions, which then dispatch to controllers/bridges server-side. If those Cloud Functions build WLED payloads without an equivalent `normalizeWledPayload` step, the same col[] stale-slot leak exists on the server side and re-poisons devices on autopilot/sync fires regardless of client-side fixes. Audit `functions/src/` for any WLED payload construction; ensure parity with the client's `normalizeWledPayload` chokepoint. Out of scope tonight; required follow-up before the client-side fix can be considered complete across all surfaces.
 
+### #79 — CloudRelayRepository wire-level test coverage gap
+**Status:** OPEN (deferred from #77)
+**Surfaced by:** #77 implementation (e222dde / 7ddb8cc).
+All 4 bypass sites are fixed; wire-level tests cover only the 2 WledService sites. CloudRelayRepository.setState and .savePreset have composition proof (line-by-line mirrors of WledService siblings, same applyJson chokepoint redirect, same pre-normalize approach) but no direct wire assertion. Adding direct coverage requires `fake_cloud_firestore` + Firebase init scaffolding (~30-45 min). Deferred at session close 2026-05-29; composition + on-device Step 6 remote-mode repeat covers the gap for now. Worth closing eventually for explicit symmetry with WledService coverage.
+
 ---
 
 ## 🟢 LOWER PRIORITY / POLISH — OPEN
