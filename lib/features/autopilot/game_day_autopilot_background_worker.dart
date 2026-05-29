@@ -30,6 +30,7 @@ import '../sports_alerts/models/sport_type.dart';
 import '../neighborhood/services/sync_event_background_persistence.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../wled/wled_payload_utils.dart';
 import 'game_day_background_persistence.dart';
 import 'game_day_priority_resolver.dart';
 import 'team_design_catalog.dart';
@@ -165,7 +166,7 @@ class GameDayAutopilotBackgroundWorker {
       if (config == null || !config.scoreCelebrationEnabled) return;
 
       // Build a flash pattern in team colors.
-      final payload = _buildCelebrationPayload(config);
+      final payload = buildCelebrationPayloadForTest(config);
       await _applyToControllers(payload);
 
       // After ~15 seconds, revert to base team pattern.
@@ -173,7 +174,7 @@ class GameDayAutopilotBackgroundWorker {
         if (_disposed) return;
         final currentSession = _sessions[teamSlug];
         if (currentSession == null || !currentSession.isActive) return;
-        final basePayload = _buildBasePayload(config);
+        final basePayload = buildBasePayloadForTest(config);
         await _applyToControllers(basePayload);
       }));
     } catch (e) {
@@ -229,7 +230,7 @@ class GameDayAutopilotBackgroundWorker {
     );
     _sessions[config.teamSlug] = session;
 
-    final payload = _buildBasePayload(config);
+    final payload = buildBasePayloadForTest(config);
     await _applyToControllers(payload);
     await _persistSessions();
 
@@ -398,12 +399,18 @@ class GameDayAutopilotBackgroundWorker {
 
   // ── WLED payload building ───────────────────────────────────────────
 
-  Map<String, dynamic> _buildBasePayload(
+  @visibleForTesting
+  static Map<String, dynamic> buildBasePayloadForTest(
     BackgroundGameDayAutopilotConfig config,
   ) {
-    // Saved design wins.
+    // Saved design wins. Routed through normalizeWledPayload so saved
+    // blobs with a <3-slot col (or with grp/spc/of omitted) get the same
+    // stale-slot defense the WledService chokepoint applies — the
+    // background isolate can't reach that chokepoint at apply time.
     if (config.designMode == 'saved' && config.savedDesignPayload != null) {
-      return Map<String, dynamic>.from(config.savedDesignPayload!);
+      return normalizeWledPayload(
+        Map<String, dynamic>.from(config.savedDesignPayload!),
+      );
     }
 
     // Build from team colors via the design catalog.
@@ -428,16 +435,20 @@ class GameDayAutopilotBackgroundWorker {
       _ => catalog.first,
     };
 
-    return Map<String, dynamic>.from(design.wledPayload);
+    // TeamDesignCatalog payloads carry a 2-slot col ([primary, secondary]).
+    // Normalize pads to 3 so the device's third slot is overwritten
+    // explicitly instead of holding the prior pattern's color.
+    return normalizeWledPayload(Map<String, dynamic>.from(design.wledPayload));
   }
 
   /// Build a celebration flash payload in team colors.
-  Map<String, dynamic> _buildCelebrationPayload(
+  @visibleForTesting
+  static Map<String, dynamic> buildCelebrationPayloadForTest(
     BackgroundGameDayAutopilotConfig config,
   ) {
     final primary = Color(config.primaryColorValue);
     final secondary = Color(config.secondaryColorValue);
-    return {
+    return normalizeWledPayload({
       'on': true,
       'bri': 255,
       'seg': [
@@ -462,7 +473,7 @@ class GameDayAutopilotBackgroundWorker {
           ],
         }
       ],
-    };
+    });
   }
 
   /// Dispatch a WLED payload to the user's controllers via the

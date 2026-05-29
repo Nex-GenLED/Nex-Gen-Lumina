@@ -9,6 +9,7 @@ import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
 import '../../sports_alerts/services/game_schedule_service.dart';
+import '../../wled/wled_payload_utils.dart';
 import 'season_schedule_reconciliation.dart';
 import 'sync_event_background_persistence.dart';
 
@@ -429,7 +430,7 @@ class SyncEventBackgroundWorker {
 
       // Apply base pattern to local WLED controllers
       await _applyPatternToControllers(
-        _buildPatternPayload(
+        buildPatternPayloadForTest(
           effectId: config.baseEffectId,
           colors: config.baseColors,
           speed: config.baseSpeed,
@@ -627,7 +628,7 @@ class SyncEventBackgroundWorker {
   }) async {
     // Apply celebration pattern
     await _applyPatternToControllers(
-      _buildPatternPayload(
+      buildPatternPayloadForTest(
         effectId: config.celebrationEffectId,
         colors: config.celebrationColors,
         speed: 220,
@@ -650,7 +651,7 @@ class SyncEventBackgroundWorker {
       Duration(seconds: config.celebrationDurationSeconds),
       () async {
         await _applyPatternToControllers(
-          _buildPatternPayload(
+          buildPatternPayloadForTest(
             effectId: config.baseEffectId,
             colors: config.baseColors,
             speed: config.baseSpeed,
@@ -721,27 +722,29 @@ class SyncEventBackgroundWorker {
 
   /// Build a WLED apply-payload from pattern fields. RGBW format with W=0
   /// (Lumina relies on WLED's hardware gamma for white-channel mixing).
-  Map<String, dynamic> _buildPatternPayload({
+  ///
+  /// Pad-to-3-slot + grp/spc/of defaults are applied by [normalizeWledPayload]
+  /// — the same chokepoint `WledService.applyJson` uses on the foreground
+  /// path. Routing through it here keeps the two isolate workers
+  /// (sync + game-day) and the foreground apply on ONE normalizer instead
+  /// of three drifting hand-rolled implementations (#83 fix).
+  @visibleForTesting
+  static Map<String, dynamic> buildPatternPayloadForTest({
     required int effectId,
     required List<int> colors,
     required int speed,
     required int intensity,
     required int brightness,
   }) {
-    final colorSlots = <List<int>>[];
-    for (var i = 0; i < 3; i++) {
-      if (i < colors.length) {
-        final c = colors[i];
-        colorSlots.add([
-          (c >> 16) & 0xFF, // R
-          (c >> 8) & 0xFF, // G
-          c & 0xFF, // B
+    final colorSlots = <List<int>>[
+      for (var i = 0; i < colors.length && i < 3; i++)
+        [
+          (colors[i] >> 16) & 0xFF, // R
+          (colors[i] >> 8) & 0xFF, // G
+          colors[i] & 0xFF, // B
           0, // W
-        ]);
-      } else {
-        colorSlots.add([0, 0, 0, 0]);
-      }
-    }
+        ],
+    ];
     final segArray = <Map<String, dynamic>>[
       for (int ch = 0; ch < _kMaxSyncChannels; ch++)
         {
@@ -752,11 +755,11 @@ class SyncEventBackgroundWorker {
           'col': colorSlots,
         },
     ];
-    return {
+    return normalizeWledPayload({
       'on': true,
       'bri': brightness,
       'seg': segArray,
-    };
+    });
   }
 
   /// Dispatch a pre-built WLED payload to the host's controllers via the
