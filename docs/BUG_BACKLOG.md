@@ -1,6 +1,6 @@
 # Lumina — Bug & Work Backlog
 
-**Last updated:** 2026-05-28
+**Last updated:** 2026-05-29
 **Branch context:** `submission/app-store-v1`
 **Firestore project (source of truth):** `icrt6menwsv2d8all8oijs021b06s5`
 > ⚠️ NOT `nex-gen-lumina-22751` — a stale CLI override pointed there on 2026-05-27 and nearly caused a wrong-project rules deploy. Always run `firebase use icrt6menwsv2d8all8oijs021b06s5` and confirm before any `firebase deploy`.
@@ -44,6 +44,35 @@
 - **E5:** Adding teams to "My Teams" + "sync schedule" doesn't add them to that day's schedule.
 **Claude's read:** Same architectural pattern as the My Designs orphan and the participation-cache bug — **a feature writes teams to one location; the surfaces that should display them read from a different location.** Debug approach: map ALL team writers vs. ALL team readers (installer flow, end-user view, Explore "My Teams", schedule-sync). The write target is almost certainly orphaned from the read surfaces.
 
+### #77 — Cold-start preview/label leak — WLED writer paths bypassed Bug B chokepoint
+**Status:** IN BUILD (committed e222dde, awaiting on-device verification)
+**Surfaced by:** Tyler 2026-05-29 — after a solid-blue apply on Pulla, cold-start showed Now Playing label "Solid" instead of the real pattern name AND dashboard preview rendered 3 colors despite the device being solid blue.
+**Root cause:** Bug B (`normalizeWledPayload` col[] padding, commit `e556251` 2026-05-23) was correct but only covered the `applyJson` chokepoint. Four sibling writer paths (`WledService.setState`, `CloudRelayRepository.setState`, `WledService.savePreset`, `CloudRelayRepository.savePreset`) bypassed it. Single-color writes left col[1]/col[2] holding the prior pattern's values on the device; the next poll faithfully read them back. Multi-slot col then poisoned the persisted-label fingerprint, so `reconcileWithDeviceState` dropped the Lumina label and Now Playing fell through to the raw effect name ("Solid" for effectId 0).
+**Audit document:** the 2026-05-29 read-before-edit diagnostic refuted the leading "persisted state rendered before first poll" hypothesis (no persistence of `WledStateModel` exists) and identified the device-side stale-col[] leak as the true source. Writer sweep also confirmed background workers post to Cloud Functions, not directly to WLED — see #78.
+
+**Implementation landed 2026-05-29 (commit e222dde):**
+- WledService.setState → routed through applyJson (chokepoint pickup)
+- CloudRelayRepository.setState → same redirect; bridge firmware confirmed command-name-agnostic (esp32-bridge/src/main.cpp:821-825)
+- WledService.savePreset → pre-normalize state (restructured so sim hook captures wire-equivalent state)
+- CloudRelayRepository.savePreset → pre-normalize state
+- _applyStateData solid-mode (fx=0) guard → parses only col[0] when effectId == 0; retroactively heals already-stuck devices
+- 9 new tests (3 normalize + 4 savePreset wire + 4 read-side guard, final test proves end-to-end persisted-label recovery)
+- 259/259 tests pass across wled + lease-manager. flutter analyze clean (no new issues).
+
+Follow-up commit 7ddb8cc closed additional coverage gaps per audit spec:
+- WledService.setState gets 7 dedicated wire-shape tests via a new `lastSimulatedSetStatePayload` capture hook (payload-build hoisted above the sim branch so the captured shape mirrors the post-normalize wire payload).
+- fx=83 (Solid Pattern, multi-color) regression added — confirms the solid-mode guard scopes strictly to fx==0 and does not trim named multi-color effects.
+- CloudRelayRepository.setState and savePreset are covered by composition (identical payload-build, same normalize chokepoint as their WledService siblings); direct wire tests deferred pending `fake_cloud_firestore` test infra.
+
+**Verification owed (on-device, formal — not eyeball):**
+1. Apply 3-color catalog pattern → device + preview both 3 colors.
+2. Apply solid blue (fx=0) → device truly solid blue, preview ONLY blue.
+3. Force-quit + cold-start → preview STILL only blue, Now Playing label shows real pattern name (not "Solid").
+4. 2-color → 1-color via schedule-lease / savePreset path → both clean.
+5. Rapid brightness-slider drag (setState path) → no symptom.
+6. Repeat 1-5 in remote mode (CloudRelayRepository path).
+Move to CLOSED only after this sequence runs and is documented.
+
 ---
 
 ## 🟡 MEDIUM PRIORITY — OPEN
@@ -72,6 +101,11 @@ Replaces the hardcoded blocked-UID list in `isNotBlockedDeletedUid()` with an ex
 **Status:** OPEN (procedural fix)
 Before a user wipe, query `bridge_registry` for all `pairedUid` values, check each against Auth, and surface/handle orphans BEFORE deleting — so cleanups don't keep discovering live orphan bridges mid-run (the recurring pain of the 2026-05-27 session).
 
+### #78 — Audit Cloud Function WLED payload paths for same chokepoint leak
+**Status:** OPEN
+**Surfaced by:** 2026-05-29 writer sweep during #77 fix.
+Background workers (`game_day_autopilot_background_worker.dart:487`, `sync_event_background_worker.dart:483/686/785/999/1072/1114`) POST to `$_functionsBaseUrl/applySyncPattern` and other Cloud Functions, which then dispatch to controllers/bridges server-side. If those Cloud Functions build WLED payloads without an equivalent `normalizeWledPayload` step, the same col[] stale-slot leak exists on the server side and re-poisons devices on autopilot/sync fires regardless of client-side fixes. Audit `functions/src/` for any WLED payload construction; ensure parity with the client's `normalizeWledPayload` chokepoint. Out of scope tonight; required follow-up before the client-side fix can be considered complete across all surfaces.
+
 ---
 
 ## 🟢 LOWER PRIORITY / POLISH — OPEN
@@ -93,8 +127,8 @@ Grant the service account `firebaserules.rulesets.test` (so `scripts/_test_rules
 On the new build: open dashboard with a deliberately-stale participation cache → channels should self-correct. (Ellie's original channel-2 greyed-out bug.)
 
 ### #74 — Formal on-device verification of Bug B preview parity (`e556251`)
-**Status:** OPEN (optional — already eyeballed as working)
-The commit message's 4-step sequence: 3-color → 1-color → reverse → purple twinkle → white solid. "Previews look better" already confirms it in practice; this is belt-and-suspenders.
+**Status:** SUPERSEDED by #77
+Verification owed merged into #77's gate; this item closed. The 2026-05-29 audit showed Bug B was correct but incomplete (four bypass sites), so the new on-device sequence in #77 subsumes Bug B's belt-and-suspenders check.
 
 ---
 
