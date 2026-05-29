@@ -17,12 +17,20 @@
 
 ## 🔴 HIGH PRIORITY — OPEN
 
-### #61 — iOS "Detect Home Network" SSID — verify the profile fix landed
-**Status:** IN BUILD (fixed at source, awaiting on-device confirmation)
-**Root cause (confirmed 2026-05-28):** Two App Store provisioning profiles existed for `com.nexgenled.command`. Codemagic's `fetch-signing-files --create` was building with `Lumina ios_app_store 1778537934`, which was **missing** the "Access Wi-Fi Information" capability. The hand-made `Lumina AppStore 2` had it, but wasn't the one in use. App returned `getwifiname_null` despite a fully-correct entitlement chain (entitlements file ✅, all build configs wire to it ✅, App ID capability ✅, Info.plist strings ✅, Core Location awake ✅).
-**Action taken:** Deleted the stale `1778537934` profile. Next Codemagic build will regenerate a fresh profile (or fall back to `Lumina AppStore 2`) — either carries the capability since the App ID has it enabled.
-**Remaining:** On the next build, watch the "Fetch signing files" step (must succeed — flag if API key lacks create-profile permission). After install, tap Detect Home Network → expect GREEN "Home network saved." If still failing, the instrumentation (`e8d3bf7`) now surfaces the specific reason in-app — read the new red-bar string; a *different* reason means a second layer (plugin/iOS-version). The diagnostic path already ruled OUT Core Location.
-**Files:** `lib/services/connectivity_service.dart` (instrumentation only), iOS signing (portal-side fix, no code).
+### #61 — iOS "Detect Home Network" SSID — signing-loop lockdown shipped
+**Status:** IN BUILD (lockdown landed in `021dcc2`, awaiting loop-broken build + on-device GREEN)
+**Original hypothesis (2026-05-28, now superseded):** SSID failed because the active profile (`Lumina ios_app_store 1778537934`) was missing "Access Wi-Fi Information" while the hand-made `Lumina AppStore 2` had it. Deleting the stale profile was expected to make the next build pick up `AppStore 2` (or regenerate a clean equivalent).
+**What build `6a19ca50e5dcd2a2604d6e79` revealed (2026-05-29):** the deletion didn't stick. The build's `fetch-signing-files` step matched BOTH `com.nexgenled.command` (canonical, App ID 3HQCCV6BUJ, profile `Lumina AppStore 2` / PLL5Z25C2R) AND `com.nexgenled.command.K337ZPY37S` (junk team-id-suffixed App ID 6MWGH4KKC4) and `--create` minted a fresh profile (`1780075208` / AABS73KU7R) against the junk one. Two recreation engines, both active every build:
+1. **fetch-signing-files default is prefix match** — per codemagic-cli-tools docs: `com.example.app also matches com.example.app.extension`. Search for `com.nexgenled.command` hit the junk suffixed App ID too, and `--create` made it a new profile.
+2. **`ExportOptions.plist` `signingStyle: automatic`** let xcodebuild's `-exportArchive` automatic-signing re-create the team-id-suffixed App ID Apple-side on any capability mismatch — the original birth mechanism of `6MWGH4KKC4`.
+**Lockdown shipped (`021dcc2`, 2026-05-29):**
+- `codemagic.yaml` fetch-signing-files: added `--strict-match-identifier`. Under strict match, only the exact bundle id is searched; junk App IDs and `com.nexgenled.command.RunnerTests` are never touched. `--create` stays safe because it can only ever create against the canonical App ID (which already has PLL5Z25C2R).
+- `ios/ExportOptions.plist`: `signingStyle` flipped automatic → manual; `provisioningProfiles` dict pins `com.nexgenled.command` → `Lumina AppStore 2`. teamID K337ZPY37S preserved.
+- **NOT** touched: `project.pbxproj` `CODE_SIGN_STYLE` entries. `xcode-project use-profiles` patches these dynamically every CI build; committing Manual without a matching specifier would break local Xcode dev opens, and committing a specifier would hardcode profile-name churn into local dev too. Both recreation surfaces are closed by the two changes above; pbxproj edits would only harden a hypothetical use-profiles-skipped path.
+**Loop-broken proof (next build):** `Fetch signing files` step must show exactly ONE bundle ID matched (`com.nexgenled.command`, App ID 3HQCCV6BUJ) and exactly ONE profile (`Lumina AppStore 2` / PLL5Z25C2R). No `Creating new Profile` line for any suffixed App ID. `Set up code signing settings` must embed PLL5Z25C2R for the Runner target. If any of those drift, strict-match didn't engage — stop and report.
+**On-device:** install → Detect Home Network → expect GREEN. Instrumentation (`e8d3bf7`) still surfaces the specific reason if anything else surfaces — the diagnostic path already ruled OUT Core Location.
+**Operational sequence (do not delete junk App ID prematurely):** ship `021dcc2` → build → confirm clean signing in logs → confirm GREEN on device → THEN delete junk App ID `6MWGH4KKC4` Apple-side (it will stay dead because strict-match + manual export prevent the recreation engines from firing). Deleting earlier would just get reversed by the next build's `--create`.
+**Files:** `codemagic.yaml`, `ios/ExportOptions.plist` (signing lockdown); `lib/services/connectivity_service.dart` (instrumentation only, no behavioral change).
 
 ### #62 / #81 — My Designs unification + canonical apply (#81 stale-preview + wrong-label)
 **Status:** IN BUILD (committed b7f335a, awaiting on-device verification)
@@ -53,23 +61,15 @@ Move to CLOSED only after this passes on the new build.
 **Display-only.** No data migration needed: fx substitution in `design_models.dart:185-187` was always correct (83 IS Solid Pattern on device — multi-color solid designs have been rendering the right effect on hardware). No firmware impact. Fixed `commercial_home_screen_test.dart` fixture that was asserting the old (wrong) label for fx=84.
 **Verification owed:** Cold-start after a multi-color solid apply → Now Playing shows "Solid Pattern" (or the design's own name via the #62/#81 path), NOT "Halloween Eyes".
 
-### #63 — Ellie field bugs: Game Day team propagation cluster (E1/E3/E5)
-**Status:** OPEN — revised 2026-05-29; three distinct bugs sharing one disease (writer ≠ reader), ready to fix
+### #63 (REVISED) — Game Day team cluster: 3 distinct bugs, one disease
+**Status:** OPEN, diagnosed + fix shape locked (2026-05-29)
 **Reported:** Ellie Cochran, 2026-05-27. Diagnosed 2026-05-29 via writer/reader sweep.
 
-**E1 — Installer-added favorite teams don't transfer to Game Day:**
-Installer writes team data to **profile fields only** (favorite teams array on the user doc). Game Day reader requires team data in BOTH the profile fields AND a `/game_day_autopilot/{teamId}` subcollection entry. Intersection of (profile-has-team) ∩ (subcollection-has-team) = ∅ → Game Day shows nothing.
+Shared disease: writer ≠ reader / duplicate-path. Fix vehicle: a shared `TeamRegistrationService.addTeam(uid, teamSlug)` owning subcollection write + profile write + Explore cache invalidation. Three distinct failures:
 
-**E3 — Explore "My Teams" never populates:**
-`updateMyTeams()` has **zero call sites** — completely dead wire. Whatever surface was supposed to invoke it (most likely Game Day team add or the team picker) was never connected. Explore's "My Teams" read therefore always sees an empty list, regardless of what the user added in Game Day.
-
-**E5 — Refresh + sync-schedule doesn't pick up newly added teams:**
-Team picker writes new teams with `enabled: false`. The sync path reads with an `enabled: true` filter only. Compounding: the Refresh action doesn't force-bypass the 7-day staleness gate, so even after a manual flip to `enabled: true`, sync skips the team if it was touched within the gate window.
-
-**Fix shape (shared service):**
-`TeamRegistrationService.addTeam()` — one chokepoint that writes (a) the profile fields, (b) the `/game_day_autopilot/{teamId}` subcollection entry, and (c) invalidates the Explore "My Teams" cache. All three current writers (installer flow, Game Day team add, Explore add) route through it. Closes the E1 ∩-empty bug, kills the E3 dead wire (by deleting `updateMyTeams()` and replacing its intended callers with `addTeam()`), and gives E5 a single place to enforce the enabled-default decision.
-
-**E5 product decision PENDING from Tyler:** When a user adds a team, should autopilot turn ON for that team automatically (enabled: true) or stay OFF until the user explicitly toggles it (enabled: false + the Refresh path needs the gate-bypass)? Both are defensible — affects whether E5's fix is one-line (default true) or two-part (default false + Refresh bypass). Ready to implement either way as soon as Tyler picks.
+- **E1:** installer writes `/users/{uid}` profile fields only; Game Day reader (`gameDayTeamsProvider`) AND-intersects profile fields WITH the `/game_day_autopilot/` subcollection → installer satisfies half → reader empty. **Fix:** installer routes through the shared `addTeam` (writes both), resolving free-text names via `team_color_resolver.dart` to slugs.
+- **E3:** `updateMyTeams()` / `clearMyTeams()` have ZERO call sites — dead wire; Explore "My Teams" folder can never populate. **Fix:** `patternRepositoryProvider` listens to `currentUserProfileProvider` → calls `updateMyTeams(profile.sportsTeams)` on resolve, `clearMyTeams()` on logout.
+- **E5:** PRODUCT DECISION LOCKED (Tyler 2026-05-29): adding a team does NOT auto-enable autopilot (keep `enabled: false` default). But toggling autopilot ON must IMMEDIATELY populate the season calendar for that team (force-bypass the 7-day gate — it's for background cadence, not user-initiated enable); toggling OFF must REMOVE that team's dates. Requires: populate tags entries by source team/config id; disable tears down entries matching that tag; manual Refresh passes `force: true`. **VERIFY** whether populate already tags entries by source (`sourceTeamSlug`/`configId`) — if not, adding that tag is part of the fix. May hook into existing `CalendarEntryLeaseManager`. Do NOT flip the picker to `enabled: true` (the audit's suggestion conflicts with this decision).
 
 ### #77 — Cold-start preview/label leak — WLED writer paths bypassed Bug B chokepoint
 **Status:** IN BUILD (committed e222dde, awaiting on-device verification)
