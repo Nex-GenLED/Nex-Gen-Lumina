@@ -1,6 +1,6 @@
 # Lumina — Bug & Work Backlog
 
-**Last updated:** 2026-05-29
+**Last updated:** 2026-05-29 (post-closeout: #62/#81 unified + #82 shipped)
 **Branch context:** `submission/app-store-v1`
 **Firestore project (source of truth):** `icrt6menwsv2d8all8oijs021b06s5`
 > ⚠️ NOT `nex-gen-lumina-22751` — a stale CLI override pointed there on 2026-05-27 and nearly caused a wrong-project rules deploy. Always run `firebase use icrt6menwsv2d8all8oijs021b06s5` and confirm before any `firebase deploy`.
@@ -24,25 +24,52 @@
 **Remaining:** On the next build, watch the "Fetch signing files" step (must succeed — flag if API key lacks create-profile permission). After install, tap Detect Home Network → expect GREEN "Home network saved." If still failing, the instrumentation (`e8d3bf7`) now surfaces the specific reason in-app — read the new red-bar string; a *different* reason means a second layer (plugin/iOS-version). The diagnostic path already ruled OUT Core Location.
 **Files:** `lib/services/connectivity_service.dart` (instrumentation only), iOS signing (portal-side fix, no code).
 
-### #62 — My Designs unification (Tier 2) — DECISION LOCKED: Option A3
-**Status:** OPEN (fresh-session feature work; prerequisite `/designs/` rule now DEPLOYED-LIVE)
-**Decision:** A3 — dual collections, unified read. Catalog stays pristine; all user-created/edited designs surface in the My Designs folder.
-**Why not a simple migration:** `EditablePattern` (flat, channel-agnostic) and `CustomDesign` (per-channel) model fundamentally different things; translation is lossy both ways. So: keep `EditablePattern` in `/patterns/`, keep `CustomDesign` in `/designs/`, and have `MyDesignsScreen` read BOTH, merge, sort by `updatedAt`, render two card variants.
-**Three creation surfaces must all feed My Designs:**
-1. **EditPatternScreen** → `/patterns/` → writes today (post rule), but: (a) reuses the catalog slug as doc id → re-editing the same catalog pattern OVERWRITES the prior save; needs a fresh unique id + `sourcePatternId` provenance field; (b) no `createdAt`/`updatedAt` timestamps → can't sort.
-2. **AI Design Studio** `_handleSaveDesign` → **TODO STUB, writes nothing** (toast only). Needs BUILDING, not migrating. `ComposedPattern → CustomDesign` adapter is ~20 lines (both channel-shaped) → writes `/designs/`. `_handleApplyToLights` is also a TODO stub.
-3. **SaveCustomPatternDialog** (3 paths: "Save As", "Save unsaved custom", duplicate) → `/designs/` → already correctly wired; unblocked by the `/designs/` rule deployed 2026-05-28.
-**Scope:** ~3–5 dev-hours. Files: `editable_pattern_model.dart` (add fields + extend copyWith/toJson/fromJson), `edit_pattern_screen.dart` (fresh id, timestamps, sourcePatternId), `colorway_effect_selector.dart:~443` (stop passing slug as id), `my_designs_screen.dart` (second stream + EditablePattern card variant + route its edit-tap to EditPatternScreen, not Design Studio).
-**Keep:** static `_ColorPreview` swatch for v1 (per-card `AnimatedRooflineOverlay` deferred — battery cost).
-**DO NOT TOUCH:** catalog source/read path, `AnimatedRooflineOverlay`/`RooflineLightPainter`.
+### #62 / #81 — My Designs unification + canonical apply (#81 stale-preview + wrong-label)
+**Status:** IN BUILD (committed b7f335a, awaiting on-device verification)
+**Shipped 2026-05-29:** My Designs flipped from a bespoke screen to a synthetic Explore category that renders saved designs as standard catalog cards and applies them through the SAME 6-step canonical apply the catalog uses (`applySavedDesign`). The degraded bespoke apply path (which skipped 5 of the 6 steps) is gone, so #81's stale-preview residual and wrong-label fallback are fixed as a consequence.
+**Canonical apply chain (lib/features/design/apply_saved_design.dart):**
+1. `SyncWarningDialog.checkAndProceed` (auto-pause Neighborhood Sync)
+2. `effectiveChannelIds` U1 gate
+3. `applyChannelFilter` (narrow seg[] to selected channels)
+4. `repo.applyJson` (Bug B chokepoint — #77)
+5. `wledStateProvider.notifier.applyPreviewSync` (kills stale-preview window — was the source of the blue+WHITE residual)
+6. `activePresetLabelProvider.setLabelWithFingerprint(design.name, state)` (Now Playing = design's own name — kills the #81 wrong-label fall-through to effect-name lookup)
+**Verification owed (on-device, 4-step repro):**
+1. Apply Old Glory from Explore (3-color).
+2. Open My Designs → apply an all-blue saved design.
+3. Preview shows ONLY blue + Now Playing shows the design's name (NOT "Solid" / NOT "Halloween Eyes").
+4. Force-quit + cold-start → still correct on relaunch.
+Move to CLOSED only after this passes on the new build.
+
+### #82 — kEffectNames off-by-one (Halloween Eyes vs Solid Pattern)
+**Status:** IN BUILD (committed c8ed60a, awaiting cold-start label confirmation on device)
+**Root cause:** Hand-maintained `kEffectNames` map in `lib/features/wled/wled_models.dart` had drifted from the firmware's actual effect order starting around id 37. id 83 was labeled "Halloween Eyes" when the device renders "Solid Pattern" there — which matters because `design_models.dart:185-187` substitutes fx=83 for multi-color solid designs, and the label fallback chain (#81) was surfacing the wrong name.
+**Device-verified:** Pulled `/json/effects` from bench controller 192.168.1.250 (WLED 0.15.1, 187 entries, ending …Wavesins, Rocktaves, Akemi). Diffed every id against `WledEffectsCatalog.allEffects` — **zero name mismatches**. The catalog is authoritative.
+**Shipped:**
+- Deleted `kEffectNames` map (~120 stale lines).
+- Switched 5 call sites to `WledEffectsCatalog.getName(id)` (already exposes device-canonical names + "Effect #N" fallback): `WledSegment.effectName` getter, `pattern_color_effects.dart` picker, `sync_control_panel.dart` (3 label sites).
+- Patched catalog: added Rolling Balls (48) and Rotozoomer (114) — real device effects the catalog had miscategorized as retired. True RSVD slots (53, 142, 151, 161, 169, 170, 171) remain firmware placeholders.
+- New parity test (`test/features/wled/effects_catalog_device_parity_test.dart`) locks 12 indices against the device array. 193/193 wled tests pass; flutter analyze clean.
+**Display-only.** No data migration needed: fx substitution in `design_models.dart:185-187` was always correct (83 IS Solid Pattern on device — multi-color solid designs have been rendering the right effect on hardware). No firmware impact. Fixed `commercial_home_screen_test.dart` fixture that was asserting the old (wrong) label for fx=84.
+**Verification owed:** Cold-start after a multi-color solid apply → Now Playing shows "Solid Pattern" (or the design's own name via the #62/#81 path), NOT "Halloween Eyes".
 
 ### #63 — Ellie field bugs: Game Day team propagation cluster (E1/E3/E5)
-**Status:** OPEN (likely ONE root cause)
-**Reported:** Ellie Cochran, 2026-05-27.
-- **E1:** Installer-added favorite teams don't transfer to the end user in Game Day.
-- **E3:** Explore tab "My Teams" shows no teams even after adding them in Game Day.
-- **E5:** Adding teams to "My Teams" + "sync schedule" doesn't add them to that day's schedule.
-**Claude's read:** Same architectural pattern as the My Designs orphan and the participation-cache bug — **a feature writes teams to one location; the surfaces that should display them read from a different location.** Debug approach: map ALL team writers vs. ALL team readers (installer flow, end-user view, Explore "My Teams", schedule-sync). The write target is almost certainly orphaned from the read surfaces.
+**Status:** OPEN — revised 2026-05-29; three distinct bugs sharing one disease (writer ≠ reader), ready to fix
+**Reported:** Ellie Cochran, 2026-05-27. Diagnosed 2026-05-29 via writer/reader sweep.
+
+**E1 — Installer-added favorite teams don't transfer to Game Day:**
+Installer writes team data to **profile fields only** (favorite teams array on the user doc). Game Day reader requires team data in BOTH the profile fields AND a `/game_day_autopilot/{teamId}` subcollection entry. Intersection of (profile-has-team) ∩ (subcollection-has-team) = ∅ → Game Day shows nothing.
+
+**E3 — Explore "My Teams" never populates:**
+`updateMyTeams()` has **zero call sites** — completely dead wire. Whatever surface was supposed to invoke it (most likely Game Day team add or the team picker) was never connected. Explore's "My Teams" read therefore always sees an empty list, regardless of what the user added in Game Day.
+
+**E5 — Refresh + sync-schedule doesn't pick up newly added teams:**
+Team picker writes new teams with `enabled: false`. The sync path reads with an `enabled: true` filter only. Compounding: the Refresh action doesn't force-bypass the 7-day staleness gate, so even after a manual flip to `enabled: true`, sync skips the team if it was touched within the gate window.
+
+**Fix shape (shared service):**
+`TeamRegistrationService.addTeam()` — one chokepoint that writes (a) the profile fields, (b) the `/game_day_autopilot/{teamId}` subcollection entry, and (c) invalidates the Explore "My Teams" cache. All three current writers (installer flow, Game Day team add, Explore add) route through it. Closes the E1 ∩-empty bug, kills the E3 dead wire (by deleting `updateMyTeams()` and replacing its intended callers with `addTeam()`), and gives E5 a single place to enforce the enabled-default decision.
+
+**E5 product decision PENDING from Tyler:** When a user adds a team, should autopilot turn ON for that team automatically (enabled: true) or stay OFF until the user explicitly toggles it (enabled: false + the Refresh path needs the gate-bypass)? Both are defensible — affects whether E5's fix is one-line (default true) or two-part (default false + Refresh bypass). Ready to implement either way as soon as Tyler picks.
 
 ### #77 — Cold-start preview/label leak — WLED writer paths bypassed Bug B chokepoint
 **Status:** IN BUILD (committed e222dde, awaiting on-device verification)
