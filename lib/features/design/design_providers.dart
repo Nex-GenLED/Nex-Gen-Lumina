@@ -465,6 +465,15 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
     final wledState = ref.read(wledStateProvider);
     final segments = ref.read(zoneSegmentsProvider).valueOrNull ?? [];
 
+    // #84 candidate 3: use the modern float accessors (.r/.g/.b ∈ [0,1])
+    // with rounding (mirrors wled_dashboard_page.dart:1471-1473). The
+    // deprecated .red/.green/.blue int accessors may be removed in newer
+    // Flutter stable channels — replacing them eliminates that as a runtime
+    // throw vector for the Save Design crash.
+    final c = wledState.color;
+    final r = (c.r * 255.0).round().clamp(0, 255);
+    final g = (c.g * 255.0).round().clamp(0, 255);
+    final b = (c.b * 255.0).round().clamp(0, 255);
     final channels = segments.map((seg) => ChannelDesign(
       channelId: seg.id,
       channelName: seg.name,
@@ -473,12 +482,7 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
         LedColorGroup(
           startLed: 0,
           endLed: seg.ledCount > 0 ? seg.ledCount - 1 : 0,
-          color: [
-            wledState.color.red,
-            wledState.color.green,
-            wledState.color.blue,
-            wledState.warmWhite,
-          ],
+          color: [r, g, b, wledState.warmWhite],
         ),
       ],
       effectId: wledState.effectId,

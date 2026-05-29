@@ -606,6 +606,16 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
+    // Global uncaught-error sink for the app's FlutterError / PlatformDispatcher
+    // handlers. Tyler reads these in the Firestore console to triage crashes
+    // that would otherwise need Crashlytics or a Mac (#84). Owner-only.
+    match /users/{userId}/debug_errors/{errorId} {
+      allow read:   if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
     // ==================== Global Analytics Collections ====================
     // These collections aggregate anonymized data across all users
 

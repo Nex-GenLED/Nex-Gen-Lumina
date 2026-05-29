@@ -126,14 +126,28 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
     if (name == null || name.isEmpty || !mounted) return;
 
-    final designId = await ref.read(saveCurrentAsDesignProvider)(name);
-    if (designId != null) {
-      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(name, ref.read(wledStateProvider));
+    // #84 guards: try/catch around the await (mirrors _showSavePatternDialog
+    // — without this an uncaught async exception SIGABRTs on iOS release);
+    // post-save block fully gated on `mounted` (the notifier read used to
+    // run before the mounted check → "Notifier after dispose" crash mode
+    // per CLAUDE.md).
+    String? designId;
+    try {
+      designId = await ref.read(saveCurrentAsDesignProvider)(name);
+    } catch (e) {
+      debugPrint('saveCurrentAsDesignProvider threw: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved "$name" to My Designs')),
+          SnackBar(content: Text('Failed to save "$name": $e')),
         );
       }
+      return;
+    }
+    if (designId != null && mounted) {
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(name, ref.read(wledStateProvider));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved "$name" to My Designs')),
+      );
     }
   }
 

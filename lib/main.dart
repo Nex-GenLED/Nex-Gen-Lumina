@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -27,8 +28,79 @@ import 'package:timezone/data/latest.dart' as tz;
 /// - Firebase initialization
 /// - go_router navigation
 /// - Material 3 theming with light/dark modes
+/// Re-entry guard: if the sink itself throws (e.g. Firestore unreachable),
+/// we must not recurse into ourselves and feedback-loop.
+bool _errorSinkActive = false;
+
+/// Global uncaught-error sink. #84 hardening.
+///
+/// Without this the app has no error reporting surface — Tyler can't read
+/// Crashlytics (no Mac) and TestFlight crash logs aren't accessible from
+/// the device. Writes a capped record to /users/{uid}/debug_errors/{autoId}
+/// so the next uncaught error in a TestFlight build is readable from the
+/// Firestore console.
+///
+/// Must never throw. Sink failures are swallowed.
+Future<void> _reportUncaughtError({
+  required Object error,
+  required StackTrace? stack,
+  required String context,
+}) async {
+  if (_errorSinkActive) return;
+  _errorSinkActive = true;
+  try {
+    debugPrint('🛑 UNCAUGHT [$context]: $error\n$stack');
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final errStr = error.toString();
+    final stackStr = stack?.toString() ?? '';
+    const cap = 3000;
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('debug_errors')
+        .add({
+      'timestamp': FieldValue.serverTimestamp(),
+      'context': context,
+      'error_type': error.runtimeType.toString(),
+      'error': errStr.length > cap ? errStr.substring(0, cap) : errStr,
+      'stack': stackStr.length > cap ? stackStr.substring(0, cap) : stackStr,
+      'platform': Platform.isIOS
+          ? 'ios'
+          : Platform.isAndroid
+              ? 'android'
+              : 'other',
+    });
+  } catch (_) {
+    // Sink must never crash the app. Swallow.
+  } finally {
+    _errorSinkActive = false;
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Install global error sinks IMMEDIATELY — before anything else can throw.
+  // Firestore writes inside the sink fail silently until Firebase init below
+  // completes; in the meantime, debugPrint still records (silenced in
+  // release, but always running on debug builds).
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details); // keep default console rendering
+    _reportUncaughtError(
+      error: details.exception,
+      stack: details.stack,
+      context: 'FlutterError.onError',
+    );
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    _reportUncaughtError(
+      error: error,
+      stack: stack,
+      context: 'PlatformDispatcher.onError',
+    );
+    return true; // signal handled — don't escalate to the OS
+  };
 
   // Silence all debugPrint output in release builds
   if (kReleaseMode) {
