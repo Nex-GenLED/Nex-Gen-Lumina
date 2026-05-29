@@ -38,7 +38,6 @@ import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.dart';
-import 'package:nexgen_command/features/design/my_designs_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
 import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart';
@@ -830,16 +829,6 @@ class AppRouter {
                     pageBuilder: (context, state) => const NoTransitionPage(
                         child: AIDesignStudioScreen()),
                   ),
-                  // /dashboard/my-designs — saved designs library. Nested
-                  // here so its "create new design" push lands inside the
-                  // home branch and the nav bar stays visible.
-                  GoRoute(
-                    path: 'my-designs',
-                    name: 'my-designs',
-                    parentNavigatorKey: _homeNavigatorKey,
-                    pageBuilder: (context, state) =>
-                        const NoTransitionPage(child: MyDesignsScreen()),
-                  ),
                   // /dashboard/neighborhood-sync — Neighborhood Sync hub.
                   // Pushed from the home dashboard with the nav bar visible
                   // and a back button (added in the screen).
@@ -1155,9 +1144,6 @@ class AppRoutes {
   // Default = home variant. Branch-aware callers should use the helper.
   static const String designStudio = homeDesignStudio;
   static const String editPattern = '/edit-pattern';
-  // My Designs nested under home branch so its "create new" push lands
-  // inside the same branch with the bottom nav bar still visible.
-  static const String myDesigns = '/dashboard/my-designs';
   static const String voiceAssistants = '/settings/voice-assistants';
   static const String sportsAlerts = '/settings/sports-alerts';
   static const String myProperties = '/settings/properties';

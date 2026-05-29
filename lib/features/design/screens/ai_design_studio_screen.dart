@@ -51,8 +51,8 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
       // action buttons, clarification dialog's Continue/Back row, quick
       // ideas). navBarTotalHeight already includes the device's bottom
       // inset — using SafeArea(bottom:true) on top would double-count it.
-      // Matches the wider-codebase convention (my_designs_screen.dart:60,
-      // pattern_grid_widgets.dart:62, current_colors_editor_screen.dart:73).
+      // Matches the wider-codebase convention (pattern_grid_widgets.dart:62,
+      // current_colors_editor_screen.dart:73).
       body: SafeArea(
         bottom: false,
         child: Padding(

@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
+import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -119,7 +120,10 @@ class _SavedDesignsCategoryCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push(AppRoutes.myDesigns);
+          // Routes to the synthetic Explore "My Designs" category — the
+          // unified surface for browsing + applying saved designs (#62).
+          context.push('/explore/library/my_designs',
+              extra: const {'name': 'My Designs'});
         },
         splashColor: _accentColor.withValues(alpha: 0.10),
         highlightColor: _accentColor.withValues(alpha: 0.05),
@@ -423,11 +427,13 @@ class MySavedDesignsSection extends ConsumerWidget {
                 ),
                 TextButton.icon(
                   onPressed: () {
-                    // Navigate to My Designs screen for full management
-                    context.push(AppRoutes.myDesigns);
+                    // Routes to the synthetic Explore "My Designs" category
+                    // (#62) — unified browse + apply surface.
+                    context.push('/explore/library/my_designs',
+                        extra: const {'name': 'My Designs'});
                   },
-                  icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('Manage'),
+                  icon: const Icon(Icons.grid_view_rounded, size: 16),
+                  label: const Text('See all'),
                   style: TextButton.styleFrom(
                     foregroundColor: NexGenPalette.cyan,
                   ),
@@ -461,45 +467,12 @@ class MySavedDesignsSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _applyDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
-    // Check for active neighborhood sync before changing lights
-    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-    if (!shouldProceed) return;
-
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No device connected')),
-        );
-      }
-      return;
-    }
-
-    try {
-      var payload = design.toWledPayload();
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('PatternLibrary design apply: skip (U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(design.name, ref.read(wledStateProvider));
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Applied: ${design.name}')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Apply design failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to apply design')),
-        );
-      }
-    }
+  Future<void> _applyDesign(
+      BuildContext context, WidgetRef ref, CustomDesign design) async {
+    // Single chokepoint — all "apply a saved design" call sites flow
+    // through [applySavedDesign] (the canonical 6-step routine). Audit
+    // 2026-05-29 / #62.
+    await applySavedDesign(context, ref, design);
   }
 
   Future<void> _confirmRemoveDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {

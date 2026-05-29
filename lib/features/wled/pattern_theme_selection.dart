@@ -22,6 +22,9 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/design/apply_saved_design.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets
@@ -194,6 +197,11 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
 class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   bool _isPaletteView = false;
 
+  /// One-shot guard so the saved-design intercept fires its post-frame apply
+  /// + pop exactly once per mount. Without this, rebuilds during the async
+  /// apply would re-schedule the callback and stack snackbars / double-pop.
+  bool _savedDesignApplyKicked = false;
+
   @override
   void dispose() {
     if (_isPaletteView) {
@@ -202,6 +210,38 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       });
     }
     super.dispose();
+  }
+
+  /// Helper invoked from the saved-design intercept's post-frame callback.
+  /// Resolves the saved design from the designs stream, runs the canonical
+  /// apply, and pops back to the My Designs grid. Pops even on resolve
+  /// failure so the user isn't stranded on the spinner screen.
+  Future<void> _applySavedDesignAndPop(String? designId) async {
+    if (!mounted) return;
+    if (designId == null || designId.isEmpty) {
+      if (mounted && context.canPop()) context.pop();
+      return;
+    }
+    final designs = ref.read(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    if (match == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Design not found')),
+        );
+        if (context.canPop()) context.pop();
+      }
+      return;
+    }
+    await applySavedDesign(context, ref, match);
+    if (mounted && context.canPop()) context.pop();
   }
 
   @override
@@ -275,6 +315,26 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                 data: (children) {
                   return nodeAsync.when(
                     data: (node) {
+                      // Saved-design intercept (#62): when the resolved
+                      // node carries the `isSavedDesign` metadata flag, do
+                      // NOT route through ColorwayEffectSelectorPage —
+                      // saved designs are already fully-configured payloads
+                      // and don't need a palette/effect tuner. Apply the
+                      // design directly via the canonical 6-step routine,
+                      // then pop back to the My Designs grid.
+                      if (node != null &&
+                          node.metadata?['isSavedDesign'] == true) {
+                        if (!_savedDesignApplyKicked) {
+                          _savedDesignApplyKicked = true;
+                          final designId =
+                              node.metadata?['sourceDesignId'] as String?;
+                          WidgetsBinding.instance.addPostFrameCallback((_) async {
+                            await _applySavedDesignAndPop(designId);
+                          });
+                        }
+                        return const Center(
+                            child: CircularProgressIndicator());
+                      }
                       if (node != null && node.isPalette) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && !_isPaletteView) {

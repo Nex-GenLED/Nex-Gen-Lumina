@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
@@ -17,10 +19,72 @@ final patternRepositoryProvider = Provider<PatternRepository>((ref) {
   return repo;
 });
 
-/// Loads all pattern categories (folders)
+/// Synthetic root category id for the user's saved designs. See
+/// [myDesignsCategoryNode] + [_customDesignToLibraryNode]. The category
+/// itself lives at this id; individual designs surface as palette nodes
+/// with id `design_{firestoreId}` under this parent.
+const String kMyDesignsCategoryId = 'my_designs';
+
+/// Synthetic LibraryNode used when LibraryBrowserScreen / breadcrumbs look
+/// up the My Designs category by id. Title matches the home + Explore
+/// surface label so breadcrumbs read correctly.
+const LibraryNode myDesignsCategoryNode = LibraryNode(
+  id: kMyDesignsCategoryId,
+  name: 'My Designs',
+  nodeType: LibraryNodeType.category,
+  sortOrder: -1,
+);
+
+/// Adapter: a Firestore-backed [CustomDesign] becomes a palette-shaped
+/// [LibraryNode] so the Explore catalog rendering + apply machinery can
+/// handle saved designs without a parallel UI. The `isSavedDesign`
+/// metadata flag is the discriminator the LibraryBrowserScreen branch
+/// uses to route taps through [applySavedDesign] instead of the catalog
+/// palette tuner.
+LibraryNode _customDesignToLibraryNode(CustomDesign design) {
+  final colors = <Color>[];
+  for (final ch in design.channels.where((c) => c.included)) {
+    for (final group in ch.colorGroups.take(2)) {
+      colors.add(group.flutterColor);
+      if (colors.length >= 3) break;
+    }
+    if (colors.length >= 3) break;
+  }
+  return LibraryNode(
+    id: 'design_${design.id}',
+    name: design.name,
+    nodeType: LibraryNodeType.palette,
+    parentId: kMyDesignsCategoryId,
+    themeColors: colors.isEmpty ? const <Color>[Colors.white] : colors,
+    metadata: <String, dynamic>{
+      'isSavedDesign': true,
+      'sourceDesignId': design.id,
+    },
+  );
+}
+
+/// Loads all pattern categories (folders).
+///
+/// Prepends the synthetic "My Designs" category when the user is signed in
+/// and has at least one saved design — keeping the surface empty for
+/// guests / brand-new accounts.
 final patternCategoriesProvider = FutureProvider<List<PatternCategory>>((ref) async {
   final repo = ref.watch(patternRepositoryProvider);
-  return repo.getCategories();
+  final baseCategories = await repo.getCategories();
+
+  // Only inject when there's something to show — avoids dangling empty
+  // category for brand-new accounts before the first design is saved.
+  final designs = ref.watch(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+  if (designs.isEmpty) return baseCategories;
+
+  return <PatternCategory>[
+    const PatternCategory(
+      id: kMyDesignsCategoryId,
+      name: 'My Designs',
+      imageUrl: '',
+    ),
+    ...baseCategories,
+  ];
 });
 
 /// Loads items for a given category id
@@ -472,13 +536,42 @@ String _formatUsageTime(DateTime time) {
 
 /// Provider to get child nodes of a parent node in the library hierarchy.
 /// Pass null for parentId to get root categories.
+///
+/// Branches on the synthetic [kMyDesignsCategoryId] id space so saved
+/// designs appear as palette children without modifying [PatternRepository].
 final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, String?>((ref, parentId) async {
+  if (parentId == kMyDesignsCategoryId) {
+    final designs = ref.watch(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    return designs.map(_customDesignToLibraryNode).toList(growable: false);
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getChildNodes(parentId);
 });
 
 /// Provider to get a single node by its ID.
+///
+/// Branches on the synthetic id space:
+///   - `my_designs` → returns the synthetic category node.
+///   - `design_*`   → resolves the saved design from designsStreamProvider
+///                    and adapts it via [_customDesignToLibraryNode].
 final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref, nodeId) async {
+  if (nodeId == kMyDesignsCategoryId) {
+    return myDesignsCategoryNode;
+  }
+  if (nodeId.startsWith('design_')) {
+    final designId = nodeId.substring('design_'.length);
+    final designs = ref.watch(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    return match == null ? null : _customDesignToLibraryNode(match);
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getNodeById(nodeId);
 });
@@ -486,6 +579,11 @@ final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref
 /// Provider to get the ancestor chain for breadcrumb navigation.
 /// Returns list from root to parent (does not include current node).
 final libraryAncestorsProvider = FutureProvider.family<List<LibraryNode>, String>((ref, nodeId) async {
+  if (nodeId == kMyDesignsCategoryId) return const <LibraryNode>[];
+  if (nodeId.startsWith('design_')) {
+    // Saved-design palettes sit one level under the My Designs category.
+    return const <LibraryNode>[myDesignsCategoryNode];
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getAncestors(nodeId);
 });

@@ -463,7 +463,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     _FeatureButton(
                       icon: Icons.palette_outlined,
                       label: 'My Designs',
-                      onTap: () => context.push(AppRoutes.designStudio),
+                      // Routes to the synthetic Explore "My Designs"
+                      // category (#62 unification) — saved designs render
+                      // as standard catalog cards there, applied via the
+                      // canonical 6-step path. Previously pushed to
+                      // designStudio which is a creation surface, not a
+                      // browse surface.
+                      onTap: () =>
+                          context.push('/explore/library/my_designs',
+                              extra: const {'name': 'My Designs'}),
                     ),
                 ],
               ),
