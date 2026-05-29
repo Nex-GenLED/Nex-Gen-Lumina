@@ -20,6 +20,7 @@ workflows:
         script: |
           app-store-connect fetch-signing-files $BUNDLE_ID \
             --type IOS_APP_STORE \
+            --strict-match-identifier \
             --create
       - name: Add certificates to keychain
         script: keychain add-certificates
