@@ -48,26 +48,45 @@ workflows:
       - name: Build IPA
         script: flutter build ipa --release
       - name: Dump signed entitlements
-        # Read-only diagnostic for #61 SSID layer disambiguation. `flutter
-        # build ipa` swallows the xcodebuild ProcessProductPackaging block,
-        # so we inspect the signed binary directly. Prints two things:
-        #   1. Entitlements actually compiled into the signed Runner.app
-        #      (codesign -d --entitlements :-) — what iOS will enforce.
-        #   2. Entitlements the embedded provisioning profile GRANTS — the
-        #      profile's capability surface.
+        # Read-only diagnostic for #61 SSID layer disambiguation.
+        #
+        # Why the exported IPA, not the archive: build 187's dump showed
+        # "code object is not signed at all" — the archive's Runner.app is
+        # the PRE-EXPORT, unsigned binary. xcodebuild -exportArchive does
+        # the actual re-sign with the pinned profile, and the entitlements
+        # blob the device enforces is whatever made it into THAT binary.
+        # Inspecting the archive can't catch an export-stage strip.
+        #
+        # Two outputs:
+        #   1. codesign -d --entitlements :- on Payload/Runner.app —
+        #      entitlements compiled into the SHIPPED binary (what iOS
+        #      enforces at runtime).
+        #   2. embedded.mobileprovision's Entitlements dict — what the
+        #      pinned profile grants (the upper bound any export re-sign
+        #      intersects against).
+        #
         # If `com.apple.developer.networking.wifi-info` is in the profile
-        # but NOT in the binary, archive/export is stripping it (layer 1
-        # confirmed). If it's in the binary, layer 1 is ruled out and the
-        # cause is Core Location dormancy at runtime (the in-app
-        # instrumentation will name it as corelocation_warmup_failed).
+        # but NOT in the shipped binary, manual export is stripping it
+        # (Item #61 layer 1 confirmed → revert signing mode or fix
+        # ExportOptions). If it's missing from the profile too, the App
+        # ID capability is not enabled — fix in Apple Developer portal
+        # and regenerate the profile.
         script: |
-          APP="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
-          if [ ! -d "$APP" ]; then
-            APP=$(find build/ios -name "Runner.app" -type d | head -1)
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -1)
+          if [ -z "$IPA" ]; then
+            echo "(no .ipa found under build/ios/ipa — skipping dump)"
+            exit 0
           fi
-          echo "=== signed app location ==="
-          echo "$APP"
-          echo "=== codesign entitlements (what the binary carries) ==="
+          echo "=== exported ipa ==="
+          echo "$IPA"
+          DUMP_DIR=$(mktemp -d)
+          unzip -q "$IPA" -d "$DUMP_DIR" || true
+          APP="$DUMP_DIR/Payload/Runner.app"
+          if [ ! -d "$APP" ]; then
+            echo "(no Payload/Runner.app inside $IPA — unexpected layout)"
+            exit 0
+          fi
+          echo "=== codesign entitlements (what the shipped binary carries) ==="
           codesign -d --entitlements :- "$APP" 2>&1 || true
           echo "=== embedded provisioning profile entitlements (what the profile grants) ==="
           if [ -f "$APP/embedded.mobileprovision" ]; then
