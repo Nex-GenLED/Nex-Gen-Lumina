@@ -315,4 +315,152 @@ void main() {
           reason: 'ps change should trigger _resolvePresetName write');
     });
   });
+
+  /// Read-side solid-mode guard (audit 2026-05-29). When the device returns
+  /// fx=0 with stale col[1]/col[2] from a prior write that didn't pad them,
+  /// _applyStateData must take col[0] only — slots 1+2 in solid mode are
+  /// residual values that would otherwise poison the preview and the
+  /// persisted-label fingerprint.
+  group('Solid-mode (fx=0) col-slot guard', () {
+    Map<String, dynamic> stateWithCol({
+      required int fx,
+      required List<List<int>> col,
+    }) {
+      return <String, dynamic>{
+        'on': true,
+        'bri': 200,
+        'ps': 0,
+        'seg': [
+          <String, dynamic>{
+            'id': 0,
+            'fx': fx,
+            'sx': 128,
+            'ix': 128,
+            'col': col,
+          },
+        ],
+      };
+    }
+
+    test('fx=0 with stale col[1]/col[2]: only col[0] parsed', () {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+      // Device returns blue in slot 0, stale gold in slot 1, stale white
+      // in slot 2 — the exact shape reproduced by the cold-start audit.
+      notifier.applyStateDataForTest(stateWithCol(
+        fx: 0,
+        col: const [
+          [0, 0, 255, 0],
+          [255, 215, 0, 0],
+          [255, 255, 255, 0],
+        ],
+      ));
+
+      final state = container.read(wledStateProvider);
+      expect(state.effectId, 0);
+      expect(state.colorSequence.length, 1,
+          reason: 'solid mode must drop residual col[1]/col[2]');
+      expect(state.colorSequence.first, const Color.fromARGB(255, 0, 0, 255));
+      expect(state.color, const Color.fromARGB(255, 0, 0, 255),
+          reason: 'primary color still comes from col[0]');
+    });
+
+    test('fx=5 (non-solid) with multi-slot col: all non-zero slots parsed',
+        () {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+      // Non-solid effect — multi-slot col is intentional and must survive.
+      notifier.applyStateDataForTest(stateWithCol(
+        fx: 5,
+        col: const [
+          [0, 0, 255, 0],
+          [255, 215, 0, 0],
+          [255, 255, 255, 0],
+        ],
+      ));
+
+      final state = container.read(wledStateProvider);
+      expect(state.effectId, 5);
+      expect(state.colorSequence.length, 3,
+          reason: 'non-solid effects keep all non-zero col slots');
+    });
+
+    test('fx=0 with single-slot col: parsed unchanged', () {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+      notifier.applyStateDataForTest(stateWithCol(
+        fx: 0,
+        col: const [
+          [255, 0, 0, 0],
+        ],
+      ));
+
+      final state = container.read(wledStateProvider);
+      expect(state.colorSequence.length, 1);
+      expect(state.colorSequence.first, const Color.fromARGB(255, 255, 0, 0));
+    });
+
+    test('persisted label survives reconcile when col[1]/col[2] are stale',
+        () async {
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      // Persist an intent that matches what the device IS playing: solid
+      // blue, fx=0, ps=0, single-color fingerprint. Pre-guard, the device's
+      // stale slots [gold, white] would push the parsed colorSequence to
+      // 3 entries and the fingerprint would not match → label dropped.
+      // With the guard, only col[0]=blue is parsed → fingerprint matches.
+      final labelNotifier = container.read(activePresetLabelProvider.notifier);
+      labelNotifier.setLabelWithFingerprint(
+        'Calming Sky',
+        WledStateModel.initial().copyWith(
+          isOn: true,
+          effectId: 0,
+          presetId: 0,
+          colorSequence: const [Color.fromARGB(255, 0, 0, 255)],
+        ),
+      );
+      // Drop the post-set label, simulating a cold start where the intent
+      // was loaded from prefs into escrow rather than committed to state.
+      // The notifier exposes the escrow shape via reconcileWithDeviceState;
+      // here we drive the same code path the first poll does.
+      // (Cold-start escrow simulation: the prior call seeded the persisted
+      // intent via _persistIntent. resetActivePresetLabelCacheForTest in
+      // setUp wipes the in-memory cache so the next provider read loads
+      // from SharedPreferences into escrow.)
+      resetActivePresetLabelCacheForTest();
+      // Force a rebuild so _loadPersistedValue runs and lands in escrow.
+      container.invalidate(activePresetLabelProvider);
+      expect(container.read(activePresetLabelProvider), isNull,
+          reason: 'escrow hold — no commit until reconcile');
+      // Let the async _loadPersistedValue land.
+      await _settle();
+      await _settle();
+
+      // First poll — device returns the exact state the label intent
+      // fingerprinted, but with stale col[1]/col[2] slots from a prior
+      // multi-color pattern. The solid guard drops those slots so the
+      // fingerprint recomputes to the same value the intent stored.
+      final notifier = container.read(wledStateProvider.notifier);
+      notifier.applyStateDataForTest(stateWithCol(
+        fx: 0,
+        col: const [
+          [0, 0, 255, 0],
+          [255, 215, 0, 0],
+          [255, 255, 255, 0],
+        ],
+      ));
+      await _settle();
+
+      expect(container.read(activePresetLabelProvider), 'Calming Sky',
+          reason:
+              'persisted label should be restored when guard normalizes col');
+    });
+  });
 }

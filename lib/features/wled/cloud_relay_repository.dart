@@ -243,7 +243,13 @@ class CloudRelayRepository implements WledRepository {
       payload['seg'] = [segUpdate];
     }
 
-    return _executeBool('setState', payload);
+    // Route through applyJson so normalizeWledPayload pads col[] to 3 slots.
+    // Mirrors the WledService.setState fix; the bridge dispatches all
+    // non-getState/getInfo commands identically (POST /json/state) so the
+    // command-name change from 'setState' to 'applyJson' is a no-op for
+    // the controller. expandForParticipation pass-through (Rule 5: seg
+    // has explicit id) preserves the targeted-single-seg shape.
+    return applyJson(payload);
   }
 
   @override
@@ -410,9 +416,13 @@ class CloudRelayRepository implements WledRepository {
     String? presetName,
   }) async {
     if (presetId < 1 || presetId > 250) return false;
+    // Pre-normalize caller state so the preset persists with all 3 col
+    // slots populated; mirrors the WledService.savePreset fix so local +
+    // relay paths produce identical preset shapes on the controller.
+    final normalizedState = normalizeWledPayload(state);
     // Save preset via cloud relay by sending the state with psave field
     final payload = <String, dynamic>{
-      ...state,
+      ...normalizedState,
       'psave': presetId,
     };
     if (presetName != null && presetName.isNotEmpty) {

@@ -96,6 +96,33 @@ void main() {
       ]));
     });
 
+    test(
+        'setState-shaped seg (id present, no fx, 1-color col) → col padded '
+        'to 3 slots. Closes the proof chain for the 2026-05-29 cold-start '
+        'fix: WledService.setState now routes its {id, sx?, col:[1]} payload '
+        'through applyJson, so normalize must pad col regardless of whether '
+        'fx is present.', () {
+      final result = normalizeWledPayload({
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {
+            'id': 0,
+            'sx': 128,
+            'col': [
+              [0, 0, 255, 0],
+            ],
+          },
+        ],
+      });
+      final col = ((result['seg'] as List).first as Map)['col'];
+      expect(col, equals([
+        [0, 0, 255, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]));
+    });
+
     test('oversized col (4+ slots) → unchanged (pad up only, no trim)', () {
       // WLED only consumes the first 3 slots, but the documented fix is
       // "pad up only" — preserves the caller's data shape and avoids

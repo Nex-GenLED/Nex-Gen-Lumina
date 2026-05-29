@@ -608,7 +608,16 @@ class WledNotifier extends Notifier<WledStateModel> {
         Color? primaryColor;
         int ww = state.warmWhite;
 
-        for (final c in cols) {
+        // Solid mode (fx=0) only uses col[0]; col[1]/col[2] in solid are
+        // residual values from prior writes (audit 2026-05-29). Take just
+        // the primary slot so the preview and the persisted-label
+        // fingerprint stay aligned with what the device is actually
+        // rendering. Non-solid effects can legitimately use multi-slot
+        // colors, so they parse all entries as before.
+        final Iterable<dynamic> colsToParse =
+            effectId == 0 ? cols.take(1) : cols;
+
+        for (final c in colsToParse) {
           if (c is List && c.length >= 3) {
             final rr = (c[0] as num).toInt().clamp(0, 255);
             final gg = (c[1] as num).toInt().clamp(0, 255);

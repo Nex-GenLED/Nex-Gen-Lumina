@@ -296,7 +296,14 @@ class WledService implements WledRepository {
       payload['seg'] = [segUpdate];
     }
 
-    return _postJson(payload);
+    // Route through applyJson so normalizeWledPayload pads col[] to 3 slots.
+    // Direct _postJson left slot[1]/[2] on the device holding the prior
+    // pattern's values; the next poll then returned all three and the
+    // dashboard rendered a "blend" with a fingerprint that no longer
+    // matched the persisted Now Playing label intent. expandForParticipation
+    // pass-through (Rule 5: seg has explicit id) preserves the targeted-
+    // single-seg shape this method has always sent.
+    return applyJson(payload);
   }
 
   Future<bool> _postJson(Map<String, dynamic> data) async {
@@ -671,10 +678,22 @@ class WledService implements WledRepository {
       return false;
     }
 
+    // Pre-normalize the caller's state so the saved preset's seg.col is
+    // padded to all 3 slots (Bug B). Without this, a caller-supplied
+    // {col: [oneRGBW]} would persist as a 1-slot preset; loadPreset would
+    // then leave the device's col[1]/[2] holding the prior pattern's
+    // values — recreating the same stale-slot leak setState had.
+    // normalizeWledPayload ignores the top-level psave field (it only
+    // touches seg entries), so injecting psave after normalization is
+    // safe and produces the same wire shape as before plus padding.
+    // Normalized BEFORE the simulation hook so sim-mode tests observe the
+    // exact shape the live HTTP path produces.
+    final normalizedState = normalizeWledPayload(state);
+
     if (_simulate) {
       lastSimulatedPresetSave = (
         presetId: presetId,
-        state: state,
+        state: normalizedState,
         presetName: presetName,
       );
       debugPrint('📤 WLED savePreset (simulated): preset $presetId');
@@ -685,7 +704,7 @@ class WledService implements WledRepository {
       // WLED saves presets via /json/state with "psave" field
       // The "psave" field tells WLED to save the included state to that preset slot
       final payload = <String, dynamic>{
-        ...state,
+        ...normalizedState,
         'psave': presetId,
       };
 

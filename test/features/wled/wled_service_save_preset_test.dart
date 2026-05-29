@@ -111,5 +111,80 @@ void main() {
       expect(service.lastSimulatedPresetSave, isNotNull);
       expect(service.lastSimulatedPresetSave!.presetId, 42);
     });
+
+    // Audit 2026-05-29 — savePreset must run state through
+    // normalizeWledPayload so the persisted preset's seg.col is padded to
+    // all 3 slots. Without this, loadPreset later restores a 1-slot preset
+    // and the controller's col[1]/col[2] keep the prior pattern's values
+    // (same root cause as the setState bypass).
+    test('1-slot col seg → captured state has col padded to 3 slots', () async {
+      final ok = await service.savePreset(
+        presetId: 7,
+        state: <String, dynamic>{
+          'on': true,
+          'bri': 200,
+          'seg': [
+            <String, dynamic>{
+              'fx': 0,
+              'col': [
+                [0, 0, 255, 0],
+              ],
+            },
+          ],
+        },
+      );
+
+      expect(ok, isTrue);
+      final captured = service.lastSimulatedPresetSave;
+      expect(captured, isNotNull);
+      final seg = (captured!.state['seg'] as List).first as Map;
+      expect(seg['col'], equals([
+        [0, 0, 255, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]));
+    });
+
+    test('2-slot col seg → captured state has col padded to 3 slots', () async {
+      final ok = await service.savePreset(
+        presetId: 8,
+        state: <String, dynamic>{
+          'on': true,
+          'seg': [
+            <String, dynamic>{
+              'fx': 28,
+              'col': [
+                [255, 0, 0, 0],
+                [255, 215, 0, 0],
+              ],
+            },
+          ],
+        },
+      );
+
+      expect(ok, isTrue);
+      final seg = (service.lastSimulatedPresetSave!.state['seg'] as List)
+          .first as Map;
+      expect(seg['col'], equals([
+        [255, 0, 0, 0],
+        [255, 215, 0, 0],
+        [0, 0, 0, 0],
+      ]));
+    });
+
+    test('no-seg payload → captured state passes through unchanged', () async {
+      // normalizeWledPayload short-circuits when seg is missing/empty, so
+      // the on/bri-only payload must round-trip unchanged.
+      final ok = await service.savePreset(
+        presetId: 9,
+        state: {'on': true, 'bri': 128},
+      );
+
+      expect(ok, isTrue);
+      final captured = service.lastSimulatedPresetSave!.state;
+      expect(captured['on'], isTrue);
+      expect(captured['bri'], 128);
+      expect(captured.containsKey('seg'), isFalse);
+    });
   });
 }
