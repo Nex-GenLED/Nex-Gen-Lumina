@@ -158,6 +158,12 @@ class WledService implements WledRepository {
   ({int presetId, Map<String, dynamic> state, String? presetName})?
       lastSimulatedPresetSave;
 
+  /// Most recent simulated [setState] wire payload — captured AFTER
+  /// [normalizeWledPayload] runs, so tests can assert col-pad behavior
+  /// at the exact shape that would reach the controller. Audit 2026-05-29.
+  @visibleForTesting
+  Map<String, dynamic>? lastSimulatedSetStatePayload;
+
   /// Force simulated savePreset() to return false. Default true.
   /// Used by integration tests covering the "savePreset failure:
   /// applyConfig not attempted, lease registry rolled back" path.
@@ -268,18 +274,12 @@ class WledService implements WledRepository {
   }
 
   Future<bool> setState({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite}) async {
-    if (_simulate) {
-      if (on != null) _simOn = on;
-      if (brightness != null) _simBri = brightness.clamp(0, 255);
-      if (speed != null) _simSpeed = speed.clamp(0, 255);
-      if (color != null) _simColor = color;
-      return true;
-    }
+    // Build the wire payload up front so the sim path can capture the same
+    // shape the live path sends. Lets the wire-level tests assert col-pad
+    // behavior without HttpOverrides; sim state updates below are unchanged.
     final Map<String, dynamic> payload = {};
     if (on != null) payload['on'] = on;
     if (brightness != null) payload['bri'] = brightness.clamp(0, 255);
-
-    // Build a single segment update that can include both speed and color/white.
     final Map<String, dynamic> segUpdate = {'id': 0};
     if (speed != null) segUpdate['sx'] = speed.clamp(0, 255);
     if (color != null || white != null) {
@@ -294,6 +294,17 @@ class WledService implements WledRepository {
     }
     if (segUpdate.length > 1) {
       payload['seg'] = [segUpdate];
+    }
+
+    if (_simulate) {
+      if (on != null) _simOn = on;
+      if (brightness != null) _simBri = brightness.clamp(0, 255);
+      if (speed != null) _simSpeed = speed.clamp(0, 255);
+      if (color != null) _simColor = color;
+      // Capture the POST-normalize payload — same shape applyJson would
+      // send to the device. Audit 2026-05-29.
+      lastSimulatedSetStatePayload = normalizeWledPayload(payload);
+      return true;
     }
 
     // Route through applyJson so normalizeWledPayload pads col[] to 3 slots.

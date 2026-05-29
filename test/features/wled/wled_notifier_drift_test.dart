@@ -389,6 +389,32 @@ void main() {
           reason: 'non-solid effects keep all non-zero col slots');
     });
 
+    test('fx=83 (Solid Pattern, multi-color) with multi-slot col: all retained',
+        () {
+      // Regression guard called out by the audit spec: WLED's effect 83
+      // ("Solid Pattern") is a NAMED multi-color effect distinct from
+      // fx=0 (true Solid). It legitimately consumes col[0..2], so the
+      // solid-mode guard must scope to fx==0 ONLY and pass fx=83 through.
+      final container = _makeContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(wledStateProvider.notifier);
+      notifier.applyStateDataForTest(stateWithCol(
+        fx: 83,
+        col: const [
+          [255, 0, 0, 0],
+          [255, 255, 255, 0],
+          [0, 0, 255, 0],
+        ],
+      ));
+
+      final state = container.read(wledStateProvider);
+      expect(state.effectId, 83);
+      expect(state.colorSequence.length, 3,
+          reason: 'fx=83 (Solid Pattern) intentionally uses all three slots — '
+              'guard must NOT trim it');
+    });
+
     test('fx=0 with single-slot col: parsed unchanged', () {
       final container = _makeContainer();
       addTearDown(container.dispose);
