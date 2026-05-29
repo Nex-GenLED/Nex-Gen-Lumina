@@ -38,44 +38,74 @@ class ConnectivityService {
       }
     }
 
-    // iOS-only: NEHotspotNetwork.fetchCurrent (the API network_info_plus
-    // uses under the hood on iOS 14+) returns nil unless Core Location
-    // has an active session — even with the wifi-info entitlement AND
-    // location permission granted. permission_handler only READS / GRANTS
-    // the permission; it doesn't activate a CLLocationManager session.
+    // iOS-only: CNCopyCurrentNetworkInfo (the API network_info_plus uses
+    // under the hood on iOS 14+) returns nil unless Core Location has an
+    // active session — even with the wifi-info entitlement AND location
+    // permission granted. permission_handler only READS / GRANTS the
+    // permission; it doesn't activate a CLLocationManager session.
     //
-    // Two-stage warm-up:
-    //   1. getLastKnownPosition — returns the cached fix INSTANTLY (no GPS
-    //      wait). May be enough on its own to mark Core Location as
-    //      recently-active. Returns null indoors with no prior fix.
-    //   2. getCurrentPosition — belt-and-suspenders. Waits for a fresh fix,
-    //      can time out indoors (the leading theory for why the 6d28e40
-    //      warm-up alone wasn't enough).
-    //
-    // Both outcomes are intentionally non-fatal — every failure mode falls
-    // through to the SSID attempt below, which then propagates a specific
-    // reason via _lastSsidFailureReason.
+    // Three layers can each independently break SSID; the bare network_info
+    // null result can't tell them apart. Capture each so the UI can name
+    // the actual layer:
+    //   • LAYER 2 (permission) — Geolocator.checkPermission() at call time.
+    //     Catches the "Settings shows granted but runtime says denied" gap.
+    //   • LAYER 3 (Core Location dormant) — getLastKnownPosition then
+    //     getCurrentPosition. If neither yields a fix, Core Location is
+    //     dormant and CNCopyCurrentNetworkInfo will return nil regardless
+    //     of entitlement.
+    //   • LAYER 1 (entitlement) — only suspected when layers 2 + 3 are clean
+    //     AND getWifiName still returns null. That's the
+    //     entitlement-not-in-binary signal.
+    String? iosWarmupReason;
     if (Platform.isIOS) {
+      // Layer 2: runtime permission state (not just Settings — we want what
+      // the Geolocator plugin sees at this instant).
+      final perm = await Geolocator.checkPermission();
+      debugPrint('SSID: checkPermission -> ${perm.name}');
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        iosWarmupReason = 'location_permission_${perm.name}';
+      }
+
+      // Layer 3: warmup — Core Location must be ACTIVELY in use for
+      // CNCopyCurrentNetworkInfo to return non-nil on iOS 14+. Stage 1 is
+      // the cached fix (instant). Stage 2 is a fresh fix (may time out
+      // indoors). Either succeeding is sufficient.
       debugPrint('SSID: warmup START');
+      bool warmupOk = false;
+      String? warmupError;
       try {
         final last = await Geolocator.getLastKnownPosition();
         debugPrint(
             'SSID: getLastKnownPosition -> ${last == null ? "null" : "position"}');
+        if (last != null) warmupOk = true;
       } catch (e) {
         debugPrint('SSID: getLastKnownPosition threw $e');
+        warmupError = 'last_known:$e';
       }
-      try {
-        await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.low,
-            timeLimit: Duration(seconds: 3),
-          ),
-        );
-        debugPrint('SSID: getCurrentPosition -> position');
-      } on TimeoutException catch (_) {
-        debugPrint('SSID: getCurrentPosition -> timeout');
-      } catch (e) {
-        debugPrint('SSID: getCurrentPosition -> error:$e');
+      if (!warmupOk) {
+        try {
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.low,
+              timeLimit: Duration(seconds: 3),
+            ),
+          );
+          debugPrint('SSID: getCurrentPosition -> position');
+          warmupOk = true;
+        } on TimeoutException catch (_) {
+          debugPrint('SSID: getCurrentPosition -> timeout');
+          warmupError = 'current_position:timeout';
+        } catch (e) {
+          debugPrint('SSID: getCurrentPosition -> error:$e');
+          warmupError = 'current_position:$e';
+        }
+      }
+      // Only set the layer-3 signal if layer 2 is clean — don't overwrite
+      // a permission failure with a downstream warmup failure.
+      if (iosWarmupReason == null && !warmupOk) {
+        iosWarmupReason =
+            'corelocation_warmup_failed:${warmupError ?? "unknown"}';
       }
     }
 
@@ -84,7 +114,15 @@ class ConnectivityService {
       String? ssid = await _networkInfo.getWifiName();
       if (ssid == null) {
         debugPrint('SSID: getWifiName -> null');
-        _lastSsidFailureReason = 'getwifiname_null';
+        // Layer-1 (entitlement) is implicated ONLY when both upstream
+        // layers were healthy. Otherwise propagate the actual upstream
+        // failure so the UI red bar names the real layer.
+        if (Platform.isIOS) {
+          _lastSsidFailureReason =
+              iosWarmupReason ?? 'getwifiname_null_entitlement_suspect';
+        } else {
+          _lastSsidFailureReason = 'getwifiname_null';
+        }
         _cachedSsid = null;
         _cacheTime = DateTime.now();
         return null;

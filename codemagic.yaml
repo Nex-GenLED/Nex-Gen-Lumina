@@ -47,6 +47,35 @@ workflows:
           pod install --repo-update
       - name: Build IPA
         script: flutter build ipa --release
+      - name: Dump signed entitlements
+        # Read-only diagnostic for #61 SSID layer disambiguation. `flutter
+        # build ipa` swallows the xcodebuild ProcessProductPackaging block,
+        # so we inspect the signed binary directly. Prints two things:
+        #   1. Entitlements actually compiled into the signed Runner.app
+        #      (codesign -d --entitlements :-) — what iOS will enforce.
+        #   2. Entitlements the embedded provisioning profile GRANTS — the
+        #      profile's capability surface.
+        # If `com.apple.developer.networking.wifi-info` is in the profile
+        # but NOT in the binary, archive/export is stripping it (layer 1
+        # confirmed). If it's in the binary, layer 1 is ruled out and the
+        # cause is Core Location dormancy at runtime (the in-app
+        # instrumentation will name it as corelocation_warmup_failed).
+        script: |
+          APP="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
+          if [ ! -d "$APP" ]; then
+            APP=$(find build/ios -name "Runner.app" -type d | head -1)
+          fi
+          echo "=== signed app location ==="
+          echo "$APP"
+          echo "=== codesign entitlements (what the binary carries) ==="
+          codesign -d --entitlements :- "$APP" 2>&1 || true
+          echo "=== embedded provisioning profile entitlements (what the profile grants) ==="
+          if [ -f "$APP/embedded.mobileprovision" ]; then
+            security cms -D -i "$APP/embedded.mobileprovision" 2>&1 | \
+              plutil -extract Entitlements xml1 -o - - 2>&1 || true
+          else
+            echo "(no embedded.mobileprovision at $APP)"
+          fi
     artifacts:
       - build/ios/ipa/*.ipa
     publishing:
