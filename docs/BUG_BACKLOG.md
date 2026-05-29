@@ -1,6 +1,6 @@
 # Lumina — Bug & Work Backlog
 
-**Last updated:** 2026-05-29 (post-closeout: #62/#81 unified + #82 shipped)
+**Last updated:** 2026-05-29 (post-closeout + on-device save-path audit: #84 crash, #85 lost-save)
 **Branch context:** `submission/app-store-v1`
 **Firestore project (source of truth):** `icrt6menwsv2d8all8oijs021b06s5`
 > ⚠️ NOT `nex-gen-lumina-22751` — a stale CLI override pointed there on 2026-05-27 and nearly caused a wrong-project rules deploy. Always run `firebase use icrt6menwsv2d8all8oijs021b06s5` and confirm before any `firebase deploy`.
@@ -99,6 +99,22 @@ Follow-up commit 7ddb8cc closed additional coverage gaps per audit spec:
 5. Rapid brightness-slider drag (setState path) → no symptom.
 6. Repeat 1-5 in remote mode (CloudRelayRepository path).
 Move to CLOSED only after this sequence runs and is documented.
+
+### #84 — CRASH on Save Design (Home → adjustment → Save Design → name → Save)
+**Status:** OPEN, NOT traced. NOT a b7f335a regression (diff didn't touch save handlers) — pre-existing latent crash, newly hit. Three candidates (audit 2026-05-29), root cause needs stack trace:
+1. (most likely) `_showSaveCustomDialog:129` — no try/catch around `await saveCurrentAsDesignProvider`; `main.dart` has NO global error sink (no `runZonedGuarded` / `FlutterError.onError` / `PlatformDispatcher.onError`) → uncaught async exception SIGABRTs on iOS release.
+2. post-save `ref.read(notifier)` BEFORE `mounted` check → "Notifier after dispose" (known crash mode per CLAUDE.md).
+3. deprecated `.red/.green/.blue` in `saveCurrentAsDesignProvider:477-480` — may be REMOVED in CI's Flutter version → runtime throw.
+
+**NEXT:** pull Crashlytics stack trace → confirm which candidate → confident fix. Also add a global `PlatformDispatcher.onError` sink in `main.dart` (hardening, prevents future uncaught-async app-death) regardless of which. Do NOT shotgun all three blind.
+
+### #85 — Lost save: writers ≠ My Designs reader (finish A3)
+**Status:** OPEN. Regression-by-omission from b7f335a (surfaced `/designs/` only; A3 called for `/patterns/` too). THREE save writers, THREE collections:
+- Now Playing tap → `/designs/` → visible ✓
+- `EditPatternScreen` SAVE → `/patterns/` → INVISIBLE
+- Adjustment panel "Save As Custom Pattern" → `/favorites/` → INVISIBLE
+
+**Fix (finish A3, ~3-5h):** `EditablePattern → LibraryNode` adapter (symmetric to `_customDesignToLibraryNode`, `isSavedPattern` flag, `pattern_{id}` prefix); wire `patternsStreamProvider` into the 3 injection sites (`patternCategoriesProvider`, `childNodes`, `libraryNodeByIdProvider` — merge + sort by `updatedAt`); add `isSavedPattern` branch in `pattern_theme_selection.dart`. Repoint the `/favorites/` "Save As Custom Pattern" writer to `saveCurrentAsDesignProvider` (consolidate to `/designs/`) rather than surfacing a third stream.
 
 ---
 
