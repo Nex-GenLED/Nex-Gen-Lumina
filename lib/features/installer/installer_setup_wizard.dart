@@ -20,6 +20,7 @@ import 'package:nexgen_command/features/commercial/brand/brand_design_generator.
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
+import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/installation_model.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -889,6 +890,48 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         userJson,
         SetOptions(merge: true),
       );
+
+      // Register the installer-collected Game Day teams (#63 E1, step 3).
+      //
+      // The customer's user-doc write above already persists the free-text
+      // team names into sports_teams / sports_team_priority. This loop
+      // additionally creates /users/{userId}/game_day_autopilot/{slug}
+      // docs (enabled:false — adding ≠ enabling, per the E5 decision) so
+      // gameDayTeamsProvider's AND-intersection between the profile
+      // arrays and the subcollection actually surfaces these teams on
+      // the customer's first sign-in. Without this loop the AND
+      // collapses to empty and My Teams stays blank post-install (the
+      // root cause E1 closes).
+      //
+      // Non-blocking by design: any failure here logs and is skipped so
+      // a flaky Firestore call or an unrecognized team name can't abort
+      // the install. Asymmetric with toggleAutopilot's create branch
+      // (which propagates the same errors) — user-initiated toggles
+      // surface failure; background installer commit must not block
+      // customer setup.
+      //
+      // Unresolved free-text (no kTeamColors match) is logged and
+      // skipped — the name remains in sports_teams from the user-doc
+      // write above (NOT silently dropped), to be picked up by the
+      // v1.0.1 Local Team Color Discovery flow.
+      final installerTeams = draft?.sportsTeams ?? const <String>[];
+      if (installerTeams.isNotEmpty) {
+        final teamRegService = ref.read(teamRegistrationServiceProvider);
+        for (final raw in installerTeams) {
+          final slug =
+              TeamRegistrationService.resolveFreeTextToKTeamSlug(raw);
+          if (slug == null) {
+            debugPrint(
+                'Installer: unresolved team "$raw" (no kTeamColors match)');
+            continue;
+          }
+          try {
+            await teamRegService.addTeam(uid: userId, teamSlug: slug);
+          } catch (e) {
+            debugPrint('Installer: addTeam("$slug") failed (non-blocking): $e');
+          }
+        }
+      }
 
       // For commercial installs: write the route-guard-required fields
       // and a commercial_locations/primary stub so the customer lands on
