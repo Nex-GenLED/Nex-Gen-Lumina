@@ -1126,7 +1126,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
-                                  onPressed: () => _showSavePatternDialog(context, ref, state),
+                                  // #85 W3 fix: routes to _showSaveCustomDialog (W1 path) →
+                                  // saveCurrentAsDesignProvider → /designs/. The legacy
+                                  // _showSavePatternDialog wrote to /favorites/ which has no
+                                  // My Designs reader; the SnackBar lied "saved" while the
+                                  // design vanished. Both dialogs capture the same
+                                  // wledStateProvider snapshot, so this redirect preserves the
+                                  // user-tweaked state (slider tweaks are device-applied and
+                                  // round-trip through wledStateProvider).
+                                  onPressed: () => _showSaveCustomDialog(context, ref),
                                   icon: const Icon(Icons.save_alt_rounded),
                                   label: const Text('Save As Custom Pattern'),
                                   style: OutlinedButton.styleFrom(
@@ -1410,109 +1418,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         ),
       );
     });
-  }
-
-  Future<void> _showSavePatternDialog(BuildContext context, WidgetRef ref, WledStateModel state) async {
-    final nameController = TextEditingController();
-
-    final patternName = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        title: const Text('Save Custom Pattern'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Save the current settings as a new custom pattern that you can apply anytime.',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: nameController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Pattern Name',
-                hintText: 'e.g., My Evening Glow',
-                filled: true,
-                fillColor: Colors.black26,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexGenPalette.line),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexGenPalette.cyan),
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = nameController.text.trim();
-              if (name.isNotEmpty) Navigator.pop(ctx, name);
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: NexGenPalette.cyan,
-              foregroundColor: Colors.black,
-            ),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (patternName == null || patternName.isEmpty) return;
-
-    final c = state.color;
-    final payload = {
-      'on': true,
-      'bri': state.brightness,
-      'seg': [
-        {
-          'fx': state.effectId,
-          'sx': state.speed,
-          'ix': state.intensity,
-          'pal': 0,
-          'col': [[
-            (c.r * 255.0).round().clamp(0, 255),
-            (c.g * 255.0).round().clamp(0, 255),
-            (c.b * 255.0).round().clamp(0, 255),
-            state.warmWhite,
-          ]],
-        }
-      ],
-    };
-
-    try {
-      final patternId = 'custom_${DateTime.now().millisecondsSinceEpoch}';
-      await ref.read(favoritesNotifierProvider.notifier).addFavorite(
-        patternId: patternId,
-        patternName: patternName,
-        patternData: payload,
-        autoAdded: false,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Pattern "$patternName" saved to favorites'), backgroundColor: Colors.green.shade700),
-        );
-        setState(() => _adjustmentPanelExpanded = false);
-      }
-    } catch (e) {
-      debugPrint('Failed to save pattern: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save pattern: $e'), backgroundColor: Colors.red.shade700),
-        );
-      }
-    }
   }
 
   static _SkyTheme _getSkyTheme(DateTime now) {

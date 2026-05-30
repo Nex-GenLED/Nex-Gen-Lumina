@@ -5,7 +5,10 @@ import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for managing custom designs in Firestore.
 class DesignService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  DesignService({FirebaseFirestore? firestore})
+      : _firestore = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _firestore;
 
   /// Gets the designs collection reference for a user
   CollectionReference<Map<String, dynamic>> _designsRef(String userId) {
