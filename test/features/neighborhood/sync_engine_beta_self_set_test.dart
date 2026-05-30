@@ -11,7 +11,6 @@
 // is scheduled to a Timer that never fires during the test — only the
 // pre-timing self-set path is exercised.
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';

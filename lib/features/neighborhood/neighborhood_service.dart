@@ -456,6 +456,11 @@ class NeighborhoodService {
   }
 
   /// Stops the current sync (clears active pattern).
+  ///
+  /// Legacy single-flag stop — preserved for autopilot session-manager
+  /// teardown (sync_session_manager.dart:331). The user-driven two-tier
+  /// stop now routes through [selfLeaveSync] (member) or [endGroupSync]
+  /// (owner).
   Future<void> stopSync(String groupId) async {
     await _neighborhoodsRef.doc(groupId).update({
       'isActive': false,
@@ -464,6 +469,81 @@ class NeighborhoodService {
     });
 
     debugPrint('Stopped sync for group: $groupId');
+  }
+
+  /// Member self-leave — flips ONLY the caller's own
+  /// `/neighborhoods/{groupId}/members/{uid}.isParticipating` to false.
+  /// Does NOT touch `g.isActive` or any other member's doc. The
+  /// asymmetric trigger (syncEngineControllerProvider) sees own flag
+  /// false → this member tears down only; other members are unaffected.
+  ///
+  /// Scoped self-write — permitted by the existing rule at
+  /// firestore.rules:1252 (request.auth.uid == memberUid).
+  Future<void> selfLeaveSync(String groupId) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+    await _neighborhoodsRef
+        .doc(groupId)
+        .collection('members')
+        .doc(uid)
+        .update({'isParticipating': false});
+    debugPrint('Self-left sync for group: $groupId (uid=$uid)');
+  }
+
+  /// Owner-only end-of-group. Fans the per-member `isParticipating=false`
+  /// clear across every member, then (only on full per-member success)
+  /// clears the group doc's `isActive`/`activePatternId`/`activePatternName`.
+  ///
+  /// Per-member writes are PER-MEMBER (not a single atomic batch) so a
+  /// single failed write is captured rather than rolling back all member
+  /// writes. If ANY member write fails, the method throws
+  /// [EndGroupSyncPartialFailure] with the failing UIDs and the group
+  /// doc is LEFT untouched — so the session stays "active" and the owner
+  /// is prompted to retry. Owner cross-member writes are permitted by the
+  /// existing rule at firestore.rules:1253 (creatorUid == request.auth.uid).
+  ///
+  /// Caller MUST handle [EndGroupSyncPartialFailure] and surface it.
+  Future<void> endGroupSync(
+    String groupId,
+    List<String> memberUids,
+  ) async {
+    final failures = <String, Object>{};
+
+    await Future.wait(memberUids.map((uid) async {
+      try {
+        await writeMemberStopFlag(groupId, uid);
+      } catch (e) {
+        failures[uid] = e;
+      }
+    }));
+
+    if (failures.isNotEmpty) {
+      debugPrint(
+        'endGroupSync partial failure for group $groupId: '
+        '${failures.length}/${memberUids.length} member writes failed',
+      );
+      throw EndGroupSyncPartialFailure(groupId: groupId, failures: failures);
+    }
+
+    await _neighborhoodsRef.doc(groupId).update({
+      'isActive': false,
+      'activePatternId': null,
+      'activePatternName': null,
+    });
+    debugPrint(
+        'endGroupSync complete for group $groupId (cleared ${memberUids.length} member flags)');
+  }
+
+  /// Per-member stop-flag write. Extracted for test override — subclass
+  /// and override to inject a failure on a specific UID without standing
+  /// up a custom Firestore mock that fails one path.
+  @visibleForTesting
+  Future<void> writeMemberStopFlag(String groupId, String memberUid) async {
+    await _neighborhoodsRef
+        .doc(groupId)
+        .collection('members')
+        .doc(memberUid)
+        .update({'isParticipating': false});
   }
 
   /// Stream of the latest sync command for a group.
@@ -743,4 +823,26 @@ class NeighborhoodService {
         .get();
     return snapshot.docs.map((doc) => NeighborhoodMember.fromFirestore(doc)).toList();
   }
+}
+
+/// Thrown when [NeighborhoodService.endGroupSync] could not clear every
+/// member's `isParticipating` flag. The group doc is LEFT untouched so
+/// the session stays "active" — the owner can retry. UI must surface
+/// this rather than swallow.
+class EndGroupSyncPartialFailure implements Exception {
+  EndGroupSyncPartialFailure({
+    required this.groupId,
+    required this.failures,
+  });
+
+  final String groupId;
+
+  /// memberUid → underlying error.
+  final Map<String, Object> failures;
+
+  @override
+  String toString() =>
+      'EndGroupSyncPartialFailure(groupId=$groupId, '
+      'failedMemberCount=${failures.length}, '
+      'failedUids=${failures.keys.toList()})';
 }

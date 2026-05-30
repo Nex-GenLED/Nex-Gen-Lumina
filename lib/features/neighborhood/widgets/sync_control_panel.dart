@@ -1,5 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../neighborhood_service.dart';
 
 import '../../wled/library_hierarchy_models.dart';
 import '../../wled/pattern_providers.dart';
@@ -1059,12 +1062,23 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   // ACTION BUTTON + SYNC LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /// True if the currently signed-in user is the group's creator/owner.
+  /// Owner sees "End Group Sync" (clears flags for all members); non-owner
+  /// sees "Leave Sync" (clears only their own flag). Do NOT reuse the
+  /// `group.isCreator` getter — that's a non-empty check on creatorUid,
+  /// not an identity comparison against the current user.
+  bool get _iAmOwner =>
+      widget.group.creatorUid == FirebaseAuth.instance.currentUser?.uid;
+
   Widget _buildActionButton(bool isActive) {
     // Can always start complement mode; for standard mode need a pattern or per-house assignments
     final bool canStart = isActive ||
         _selectedSyncType == SyncType.complement ||
         _globalPattern != null ||
         _perHouseAssignments.isNotEmpty;
+
+    final String activeLabel =
+        _iAmOwner ? 'End Group Sync' : 'Leave Sync';
 
     return SizedBox(
       width: double.infinity,
@@ -1073,7 +1087,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
             ? _stopSync
             : (canStart ? _startSync : null),
         icon: Icon(isActive ? Icons.stop : Icons.play_arrow),
-        label: Text(isActive ? 'Stop Neighborhood Sync' : 'Start Neighborhood Sync'),
+        label: Text(isActive ? activeLabel : 'Start Neighborhood Sync'),
         style: ElevatedButton.styleFrom(
           backgroundColor: isActive
               ? Colors.red.shade700
@@ -1162,8 +1176,39 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     ref.read(syncEngineActiveProvider.notifier).state = true;
   }
 
-  void _stopSync() {
-    ref.read(neighborhoodNotifierProvider.notifier).stopSync();
+  /// Two-tier stop. Branches on owner identity:
+  ///   - Owner → endGroupSync (per-member fan-clear + group-doc clear).
+  ///     Surfaces [EndGroupSyncPartialFailure] via SnackBar without
+  ///     touching local manuallyActive state (session stays "active"
+  ///     for retry).
+  ///   - Non-owner → selfLeaveSync (own-flag clear only). Group keeps
+  ///     running for everyone else.
+  Future<void> _stopSync() async {
+    final notifier = ref.read(neighborhoodNotifierProvider.notifier);
+    try {
+      if (_iAmOwner) {
+        await notifier.endGroupSync(
+          widget.group.id,
+          widget.group.memberUids,
+        );
+      } else {
+        await notifier.selfLeaveSync(widget.group.id);
+      }
+    } on EndGroupSyncPartialFailure catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "End Group didn't fully complete (${e.failures.length} "
+            'member(s) — please retry)',
+          ),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      // Leave manuallyActive=true so the engine stays mounted for retry.
+      return;
+    }
+    if (!mounted) return;
     ref.read(syncEngineActiveProvider.notifier).state = false;
   }
 }

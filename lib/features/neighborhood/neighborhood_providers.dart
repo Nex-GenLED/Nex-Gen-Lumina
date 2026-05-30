@@ -326,6 +326,16 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     }
   }
 
+  /// Member self-leave — passthrough to [NeighborhoodService.selfLeaveSync].
+  /// Caller-driven (no swallowing) so the UI can surface failures.
+  Future<void> selfLeaveSync(String groupId) =>
+      _service.selfLeaveSync(groupId);
+
+  /// Owner end-group — passthrough to [NeighborhoodService.endGroupSync].
+  /// May throw [EndGroupSyncPartialFailure]; UI MUST handle.
+  Future<void> endGroupSync(String groupId, List<String> memberUids) =>
+      _service.endGroupSync(groupId, memberUids);
+
   /// Regenerates the invite code (creator only).
   Future<String?> regenerateInviteCode() async {
     final groupId = ref.read(activeNeighborhoodIdProvider);
