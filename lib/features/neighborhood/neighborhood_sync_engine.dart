@@ -26,7 +26,7 @@ import 'services/sync_teardown_resolver.dart';
 /// 1. Calculate delay offsets for each member based on position and LED count
 /// 2. Execute sync commands at precisely timed intervals
 /// 3. Listen for incoming sync commands and schedule local execution
-class NeighborhoodSyncEngine {
+class NeighborhoodSyncEngine with WidgetsBindingObserver {
   final Ref _ref;
   ProviderSubscription<AsyncValue<SyncCommand?>>? _commandSubscription;
   Timer? _scheduledExecution;
@@ -44,7 +44,47 @@ class NeighborhoodSyncEngine {
   /// the device state was never sync-altered and we leave it alone.
   bool _hasAppliedThisSession = false;
 
-  NeighborhoodSyncEngine(this._ref);
+  NeighborhoodSyncEngine(this._ref) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// On app paused or detached: if our own isParticipating flag is true,
+  /// flip it back to false via [NeighborhoodService.selfLeaveSync].
+  /// Covers backgrounding + clean kill — a member who closes the app
+  /// tears down only themselves, not the group. Does NOT cover crash:
+  /// the crash-safe heartbeat reaper (NeighborhoodMember.lastSeen
+  /// staleness via Cloud Function) is documented follow-up.
+  ///
+  /// Fire-and-forget — the OS may suspend the process before the
+  /// Firestore write reaches the wire. Firestore's local cache queues
+  /// it for the next resume.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(handleAppLifecyclePauseForTest());
+    }
+  }
+
+  /// Lifecycle pause handler. Extracted as [@visibleForTesting] so unit
+  /// tests can exercise the gate logic + clear path without needing a
+  /// real WidgetsBinding lifecycle event to be dispatched.
+  @visibleForTesting
+  Future<void> handleAppLifecyclePauseForTest() async {
+    final groupId = _ref.read(activeNeighborhoodIdProvider);
+    final member = _ref.read(currentUserMemberProvider);
+    if (groupId == null || member == null || !member.isParticipating) {
+      return;
+    }
+    try {
+      await _ref
+          .read(neighborhoodNotifierProvider.notifier)
+          .selfLeaveSync(groupId);
+    } catch (e) {
+      debugPrint('App-pause self-leave failed: $e');
+    }
+  }
 
   /// Checks if the current member should participate in the given sync command.
   bool _shouldParticipateInSync(NeighborhoodMember member, SyncCommand command) {
@@ -716,6 +756,7 @@ class NeighborhoodSyncEngine {
 
   /// Disposes of resources.
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     stopListening();
   }
 }
