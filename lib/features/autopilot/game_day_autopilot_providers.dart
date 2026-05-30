@@ -28,6 +28,7 @@ import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../sports_alerts/services/team_registration_service.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
 import 'autopilot_providers.dart';
@@ -510,15 +511,39 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         freshConfig = stale.copyWith(enabled: enabled, updatedAt: now);
       }
     } else {
-      // Create a new config from kTeamColors.
-      final team = kTeamColors[teamSlug];
-      if (team == null) {
+      // Create a new config from kTeamColors. Delegates the subcollection
+      // doc + profile array writes to the shared TeamRegistrationService
+      // (#63 step 2). The service writes the doc with enabled:false (E5
+      // decision: adding ≠ enabling). When the caller asked for
+      // enabled:true (the historical create-and-enable path), a follow-up
+      // update flips it — preserves the one-shot create+enable contract
+      // without forking subcollection-write paths.
+      try {
+        await ref.read(teamRegistrationServiceProvider).addTeam(
+              uid: user.uid,
+              teamSlug: teamSlug,
+            );
+      } on ArgumentError {
         debugPrint(
             '[GameDayAutopilot] toggleAutopilot: unknown team slug "$teamSlug"');
-        throw ArgumentError.value(
-            teamSlug, 'teamSlug', 'Unknown team — not in kTeamColors');
+        rethrow;
       }
 
+      // addTeam validated the slug; this lookup is guaranteed to hit.
+      final team = kTeamColors[teamSlug]!;
+
+      if (enabled) {
+        await docRef.update({
+          'enabled': true,
+          'updated_at': Timestamp.fromDate(now),
+        });
+      }
+
+      // In-memory freshConfig for the splice — mirrors the doc state the
+      // service just wrote, plus the optional enable flip. Identical
+      // field shape to the pre-refactor inline write so
+      // _populateCalendarInBackground / computeEnabledConfigsForTeam see
+      // the same value.
       freshConfig = GameDayAutopilotConfig(
         teamSlug: teamSlug,
         teamName: team.teamName,
@@ -530,12 +555,6 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         createdAt: now,
         updatedAt: now,
       );
-      await docRef.set(freshConfig.toFirestore());
-
-      // Profile is the source of truth for My Teams on the Game Day screen.
-      // Record this explicit user selection there so it survives cache
-      // invalidations and so the UI filter picks it up.
-      await _addTeamToProfile(user.uid, team.teamName);
     }
 
     // If disabling, cancel any active session.
@@ -550,37 +569,6 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     // [freshConfig] lets the splice path bypass any Firestore stream lag
     // so the just-toggled team is guaranteed to be in the populate set.
     _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
-  }
-
-  /// Append [teamName] to the user's profile `sports_team_priority` and
-  /// `sports_teams` lists (case-insensitive dedupe). Errors are logged but
-  /// do not fail the outer [toggleAutopilot] call — the subcollection doc
-  /// is still written and the team is still added to Game Day.
-  Future<void> _addTeamToProfile(String uid, String teamName) async {
-    try {
-      final profileRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
-      final snap = await profileRef.get();
-      final data = snap.data() ?? const <String, dynamic>{};
-      List<String> asStringList(dynamic raw) =>
-          (raw as List?)?.map((e) => e.toString()).toList() ?? <String>[];
-      final priority = asStringList(data['sports_team_priority']);
-      final teams = asStringList(data['sports_teams']);
-      final key = teamName.trim().toLowerCase();
-
-      final updates = <String, dynamic>{};
-      if (!priority.any((t) => t.trim().toLowerCase() == key)) {
-        updates['sports_team_priority'] = [...priority, teamName];
-      }
-      if (!teams.any((t) => t.trim().toLowerCase() == key)) {
-        updates['sports_teams'] = [...teams, teamName];
-      }
-      if (updates.isEmpty) return;
-      updates['updated_at'] = Timestamp.fromDate(DateTime.now());
-      await profileRef.set(updates, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('[GameDayAutopilot] Failed to sync team to profile: $e');
-    }
   }
 
   /// Toggle the score celebration flash for a team. Writes
@@ -654,18 +642,15 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       throw StateError('You must be signed in to remove a Game Day team.');
     }
 
-    await _removeTeamFromProfile(user.uid, teamName);
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('game_day_autopilot')
-          .doc(teamSlug)
-          .delete();
-    } catch (e) {
-      debugPrint('[GameDayAutopilot] Failed to delete config $teamSlug: $e');
-    }
+    // Profile strip + subcollection delete funnel through the shared
+    // service (#63 step 2). Session cancel + notifier state prune stay
+    // here — those are orchestration concerns local to this controller,
+    // not the service's job.
+    await ref.read(teamRegistrationServiceProvider).removeTeam(
+          uid: user.uid,
+          teamSlug: teamSlug,
+          teamName: teamName,
+        );
 
     try {
       ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
@@ -673,36 +658,6 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       debugPrint('[GameDayAutopilot] Failed to cancel session $teamSlug: $e');
     }
     state = Map.from(state)..remove(teamSlug);
-  }
-
-  /// Remove [teamName] from the user's profile `sports_team_priority` and
-  /// `sports_teams` lists (case-insensitive match). No-op if absent.
-  Future<void> _removeTeamFromProfile(String uid, String teamName) async {
-    final profileRef =
-        FirebaseFirestore.instance.collection('users').doc(uid);
-    final snap = await profileRef.get();
-    final data = snap.data() ?? const <String, dynamic>{};
-    List<String> asStringList(dynamic raw) =>
-        (raw as List?)?.map((e) => e.toString()).toList() ?? <String>[];
-    final priority = asStringList(data['sports_team_priority']);
-    final teams = asStringList(data['sports_teams']);
-    final key = teamName.trim().toLowerCase();
-
-    final newPriority =
-        priority.where((t) => t.trim().toLowerCase() != key).toList();
-    final newTeams =
-        teams.where((t) => t.trim().toLowerCase() != key).toList();
-
-    final updates = <String, dynamic>{};
-    if (newPriority.length != priority.length) {
-      updates['sports_team_priority'] = newPriority;
-    }
-    if (newTeams.length != teams.length) {
-      updates['sports_teams'] = newTeams;
-    }
-    if (updates.isEmpty) return;
-    updates['updated_at'] = Timestamp.fromDate(DateTime.now());
-    await profileRef.set(updates, SetOptions(merge: true));
   }
 
   /// Fire-and-forget calendar population after a team toggle. Always runs
