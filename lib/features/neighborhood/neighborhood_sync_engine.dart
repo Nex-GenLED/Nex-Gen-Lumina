@@ -684,16 +684,38 @@ final syncEngineActiveProvider = StateProvider<bool>((ref) {
   return false;
 });
 
-/// Auto-start/stop sync engine based on active state OR active group membership.
+/// Auto-start/stop sync engine with asymmetric start-broad / teardown-narrow
+/// semantics. Symptom-2 fix for the 3dbca29 cross-member revert regression.
+///
+/// START broad: mount the listener on any of three signals so the first-sync
+/// chicken-and-egg doesn't strand the member — own [NeighborhoodMember.isParticipating]
+/// is false until the engine receives a SyncCommand and self-sets it (Prompt 3
+/// β-self-set), so [isInActiveSyncProvider] must still mount the listener.
+///
+/// TEARDOWN narrow: stopListening fires ONLY when ALL three signals are
+/// false. Under the OLD trigger, [isInActiveSyncProvider] dropping alone
+/// called stopListening on every member, which fired _executeTeardown on
+/// every home that had applied — the 3dbca29 regression. Under this rewrite,
+/// hasActiveGroup dropping while [isInActiveSyncProvider]'s read-side own
+/// flag stays true keeps the listener mounted — only that member's own flag
+/// going false (member-stop UI or owner endGroupSync fan-clear) can route
+/// them through stopListening + teardown.
+///
+/// [isInActiveSyncProvider] is preserved for the (currently unbuilt) "warn
+/// user before changing lights" UI surface and for the START condition here.
+/// It must NEVER drive the apply/teardown gate going forward — that
+/// decoupling IS the fix.
 ///
 /// Must be watched somewhere in the widget tree (e.g., NeighborhoodSyncScreen)
 /// for the engine to start listening for incoming sync commands.
 final syncEngineControllerProvider = Provider<void>((ref) {
   final manuallyActive = ref.watch(syncEngineActiveProvider);
+  final myMember = ref.watch(currentUserMemberProvider);
+  final iAmParticipating = myMember?.isParticipating ?? false;
   final hasActiveGroup = ref.watch(isInActiveSyncProvider);
   final engine = ref.watch(neighborhoodSyncEngineProvider);
 
-  if (manuallyActive || hasActiveGroup) {
+  if (manuallyActive || iAmParticipating || hasActiveGroup) {
     engine.startListening();
   } else {
     engine.stopListening();
