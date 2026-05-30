@@ -24,12 +24,6 @@ class DesignLibraryBrowser extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final categoriesAsync = ref.watch(patternCategoriesProvider);
-    final designsAsync = ref.watch(designsStreamProvider);
-
-    // Check if user has saved designs
-    final hasSavedDesigns = designsAsync.whenOrNull(
-      data: (designs) => designs.isNotEmpty,
-    ) ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,8 +55,15 @@ class DesignLibraryBrowser extends ConsumerWidget {
         // Category grid
         categoriesAsync.when(
           data: (categories) {
-            // Calculate total items: add 1 for saved designs card if user has saved designs
-            final totalItems = hasSavedDesigns ? categories.length + 1 : categories.length;
+            // The special _SavedDesignsCategoryCard at index 0 substitutes for
+            // the my_designs entry that patternCategoriesProvider always
+            // prepends — filter it out of the iteration to avoid rendering
+            // the same surface twice (once styled, once as the generic
+            // _DesignLibraryCategoryCard).
+            final realCategories = categories
+                .where((c) => c.id != kMyDesignsCategoryId)
+                .toList(growable: false);
+            final totalItems = realCategories.length + 1;
 
             return GridView.builder(
               shrinkWrap: true,
@@ -75,14 +76,13 @@ class DesignLibraryBrowser extends ConsumerWidget {
               ),
               itemCount: totalItems,
               itemBuilder: (context, index) {
-                // If we have saved designs, show the saved designs card first
-                if (hasSavedDesigns && index == 0) {
+                // #85 companion: always render — empty designs shows the card
+                // with a zero-count badge / empty-state placeholder, not a
+                // missing surface.
+                if (index == 0) {
                   return const _SavedDesignsCategoryCard();
                 }
-
-                // Adjust index for regular categories if saved designs card is shown
-                final categoryIndex = hasSavedDesigns ? index - 1 : index;
-                final category = categories[categoryIndex];
+                final category = realCategories[index - 1];
                 return _DesignLibraryCategoryCard(category: category);
               },
             );

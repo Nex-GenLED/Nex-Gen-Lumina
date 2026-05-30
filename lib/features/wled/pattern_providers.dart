@@ -98,11 +98,14 @@ final patternCategoriesProvider = FutureProvider<List<PatternCategory>>((ref) as
   final repo = ref.watch(patternRepositoryProvider);
   final baseCategories = await repo.getCategories();
 
-  // Only inject when there's something to show — avoids dangling empty
-  // category for brand-new accounts before the first design is saved.
-  final designs = ref.watch(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
-  if (designs.isEmpty) return baseCategories;
-
+  // ALWAYS prepend the synthetic my_designs category — the empty case renders
+  // an empty-state placeholder inside the drill-in view rather than hiding the
+  // category. #85 companion: previously this short-circuited to baseCategories
+  // when designs was empty, which combined with a parallel writer-bug to make
+  // a writer-drift "lost save" present as "the My Designs surface disappeared
+  // entirely," costing a debugging detour. Always rendering the surface means
+  // a future writer-drift can only make the surface look EMPTY (visible bug)
+  // rather than VANISH (silent bug).
   return <PatternCategory>[
     const PatternCategory(
       id: kMyDesignsCategoryId,

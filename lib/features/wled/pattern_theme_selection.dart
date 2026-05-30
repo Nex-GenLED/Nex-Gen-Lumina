@@ -366,7 +366,23 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           ],
                         );
                       }
-                      return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug);
+                      return LibraryNodeGrid(
+                        children: children,
+                        parentAccent: widget.parentAccent,
+                        parentGradient: widget.parentGradient,
+                        teamSlug: widget.teamSlug,
+                        // #85 companion: meaningful empty-state when the My
+                        // Designs surface is reached but no designs exist yet.
+                        // The surface is always rendered (no longer gated on
+                        // designs.isNotEmpty) so the user sees the category
+                        // and the next-step guidance, not a missing folder.
+                        emptyMessage: widget.nodeId == kMyDesignsCategoryId
+                            ? 'No saved designs yet.\n\nFrom the dashboard, '
+                                'tap Now Playing → "Save Custom" or use '
+                                '"Save As Custom Pattern" on the adjustment '
+                                'panel to save a design.'
+                            : null,
+                      );
                     },
                     loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
                     error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug),

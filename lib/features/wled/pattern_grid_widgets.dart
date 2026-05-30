@@ -28,6 +28,10 @@ class LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
   final Color? parentAccent;
   final List<Color>? parentGradient;
+  /// Optional override for the empty-children placeholder. Defaults to a
+  /// generic "No items found" if null. Per-surface callers (e.g. the
+  /// my_designs drill-in) pass a more meaningful empty-state message.
+  final String? emptyMessage;
   /// Override the default folder card aspect ratio (width / height).
   /// Higher values produce shorter cards.
   final double? folderAspectRatio;
@@ -38,15 +42,19 @@ class LibraryNodeGrid extends StatelessWidget {
   /// persistence path continues working at depth.
   final String? teamSlug;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug});
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage});
 
   @override
   Widget build(BuildContext context) {
     if (children.isEmpty) {
       return Center(
-        child: Text(
-          'No items found',
-          style: TextStyle(color: NexGenPalette.textSecondary),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            emptyMessage ?? 'No items found',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: NexGenPalette.textSecondary),
+          ),
         ),
       );
     }

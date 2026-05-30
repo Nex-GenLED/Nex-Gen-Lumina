@@ -157,15 +157,26 @@ void main() {
     });
   });
 
-  group('patternCategoriesProvider — synthetic prepend', () {
-    test('empty designs → no synthetic injection', () async {
+  group('patternCategoriesProvider — synthetic prepend (always)', () {
+    // ASSERTION INVERTED in the #85 companion fix. Previously the synthetic
+    // my_designs category was only prepended when designs.isNotEmpty, which
+    // combined with a writer-drift to make a lost save present as a
+    // disappeared surface (debugging detour for #85). The category is now
+    // ALWAYS prepended; the drill-in view shows a meaningful empty-state
+    // placeholder when designs is empty.
+    test('empty designs → "My Designs" STILL prepended as first category '
+        '(#85 companion: surface visible-with-empty-state, never absent)',
+        () async {
       final c = _container(const []);
       addTearDown(c.dispose);
       await _primeDesignsStream(c);
       final cats = await c.read(patternCategoriesProvider.future);
-      expect(cats.any((cat) => cat.id == kMyDesignsCategoryId), isFalse,
-          reason:
-              'No saved designs → My Designs category should not appear (would dangle empty)');
+      expect(cats, isNotEmpty);
+      expect(cats.first.id, kMyDesignsCategoryId,
+          reason: '#85 companion regression guard: if this fails because '
+              'my_designs is missing from categories, a future edit has '
+              're-introduced the writer-drift-hides-surface bug class');
+      expect(cats.first.name, 'My Designs');
     });
 
     test('non-empty designs → "My Designs" prepended as first category',
