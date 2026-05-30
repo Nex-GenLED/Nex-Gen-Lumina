@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,7 +53,7 @@ class FavoritePattern {
       name: data['name'] as String? ?? 'Unnamed Pattern',
       usageCount: data['usageCount'] as int? ?? 0,
       lastUsed: (data['lastUsed'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      wledPayload: data['wledPayload'] as Map<String, dynamic>? ?? {},
+      wledPayload: decodeWledPayload(data['wledPayload']),
       autoAdded: data['autoAdded'] as bool? ?? false,
       actionColorValues: (data['actionColorValues'] as List?)?.cast<int>(),
       backgroundColorValue: data['backgroundColorValue'] as int?,
@@ -62,6 +64,29 @@ class FavoritePattern {
       colorGroupSize: data['colorGroupSize'] as int?,
       direction: data['direction'] as String?,
     );
+  }
+
+  /// Decodes `wledPayload` from a Firestore document, tolerating both shapes:
+  /// - **String (current):** `jsonEncode`d by `addFavorite` so Firestore's
+  ///   native iOS codec doesn't reject nested arrays like `col: [[r,g,b,w]]`
+  ///   (#84 root cause — uncatchable SIGABRT in `FSTUserDataReader`).
+  /// - **Map (legacy):** docs that somehow persisted as raw Map before the
+  ///   jsonEncode fix landed; pass through so reads of old data don't throw.
+  /// Returns `{}` for null / empty / unparseable input.
+  @visibleForTesting
+  static Map<String, dynamic> decodeWledPayload(dynamic raw) {
+    if (raw is String) {
+      if (raw.isEmpty) return <String, dynamic>{};
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return <String, dynamic>{};
+      }
+      return <String, dynamic>{};
+    }
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
   }
 
   Map<String, dynamic> toFirestore() {
@@ -170,7 +195,11 @@ class FavoritesNotifier extends Notifier<void> {
         'name': patternName,
         'usageCount': 1,
         'lastUsed': FieldValue.serverTimestamp(),
-        'wledPayload': patternData,
+        // #84 — jsonEncode to avoid native FSTUserDataReader rejecting
+        // nested arrays like `'col': [[r,g,b,w]]` (uncatchable SIGABRT).
+        // Mirrors the 8 other WLED-payload write paths; see
+        // user_service.dart:298-300 for the canonical comment.
+        'wledPayload': jsonEncode(patternData),
         'autoAdded': autoAdded,
       }), SetOptions(merge: true));
     } catch (e, st) {

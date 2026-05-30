@@ -172,13 +172,34 @@ class UserService {
       return result;
     }
 
-    // Recursively sanitize lists
+    // Recursively sanitize lists.
+    //
+    // Firestore's native iOS codec (FSTUserDataReader) rejects directly-
+    // nested arrays — `[[…]]` raises NSInvalidArgumentException → objc_terminate
+    // → uncatchable SIGABRT, the #84 native-abort signature. Throw a Dart
+    // exception when we see a list element that is itself a list, so the
+    // caller's try/catch (and the BUG84-sanitize captureBug84 hook above)
+    // sees a clean error instead of a silent platform-channel crash.
+    //
+    // Upstream fix is to jsonEncode the offending field. See
+    // user_service.dart:298-300 (logPatternUsage), favorites_providers.dart
+    // (addFavorite), scenes/schedules/autopilot/remote_command models —
+    // all eight other WLED-payload write paths already do this.
     if (value is List) {
       final result = <dynamic>[];
       for (var i = 0; i < value.length; i++) {
         final item = value[i];
         if (item == null) continue;
         final childPath = '$path[$i]';
+        if (item is List) {
+          throw FirestoreSerializationError(
+            path: childPath,
+            valueType: item.runtimeType,
+            valuePreview:
+                'nested list (arrays-of-arrays not Firestore-safe); '
+                'jsonEncode this field upstream',
+          );
+        }
         final sanitized = _sanitizeValue(item, childPath);
         if (sanitized != null) result.add(sanitized);
       }

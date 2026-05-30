@@ -25,6 +25,8 @@
 //   6. Unknown type throws FirestoreSerializationError with the correct
 //      key path (this is the diagnostic surface that #84 hinges on).
 
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart' show Color, Colors;
 import 'package:flutter_test/flutter_test.dart';
@@ -162,41 +164,90 @@ void main() {
   group(
     'sanitizeForFirestore — CustomDesign-shape payload (#84 actual flow)',
     () {
-      test(
-        'payload mirroring _showSavePatternDialog produces only primitive leaves',
-        () {
-          // Mirrors the literal at wled_dashboard_page.dart:1475-1492 — the
-          // exact shape the adjustment-panel "Save As Custom Pattern" button
-          // writes through favoritesNotifierProvider.addFavorite.
-          final payload = {
-            'on': true,
-            'bri': 200,
-            'seg': [
-              {
-                'fx': 0,
-                'sx': 128,
-                'ix': 128,
-                'pal': 0,
-                'col': [
-                  [255, 0, 0, 0], // R, G, B, warmWhite — all int
-                ],
-              }
+      // The raw "Save As Custom Pattern" payload at wled_dashboard_page.dart:1475-1492.
+      // The literal `'col': [[r,g,b,w]]` is `List<List<int>>` — WLED's color-slot
+      // schema. Firestore's native iOS codec rejects directly-nested arrays
+      // with NSInvalidArgumentException → objc_terminate → uncatchable SIGABRT
+      // (#84). Previous version of this test asserted the sanitizer let it
+      // through; that codified the bug. Post-fix, the sanitizer THROWS on the
+      // raw shape and the addFavorite write path jsonEncodes the payload
+      // first so the encoded form passes cleanly.
+      final rawPayload = {
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {
+            'fx': 0,
+            'sx': 128,
+            'ix': 128,
+            'pal': 0,
+            'col': [
+              [255, 0, 0, 0],
             ],
-          };
+          }
+        ],
+      };
+
+      test(
+        'raw payload (post-Fix-B) throws on nested arrays-of-arrays with correct path',
+        () {
+          try {
+            UserService.sanitizeForFirestore({
+              'name': 'My Test Pattern',
+              'usageCount': 1,
+              'lastUsed': FieldValue.serverTimestamp(),
+              'wledPayload': rawPayload,
+              'autoAdded': false,
+            });
+            fail('expected FirestoreSerializationError on nested arrays');
+          } on FirestoreSerializationError catch (e) {
+            // Path points at the inner array element — the offending list-in-list.
+            expect(e.path, 'wledPayload.seg[0].col[0]');
+            expect(e.valuePreview, contains('nested list'));
+            expect(e.valuePreview, contains('jsonEncode'));
+          }
+        },
+      );
+
+      test(
+        'jsonEncoded payload (post-Fix-A) sanitizes cleanly with only primitive leaves',
+        () {
+          // What favorites_providers.dart addFavorite now writes: wledPayload
+          // is a String, not a Map. Firestore happily accepts arbitrary
+          // String values, so nested-array structure is fully neutralized.
           final wrapped = {
             'name': 'My Test Pattern',
             'usageCount': 1,
             'lastUsed': FieldValue.serverTimestamp(),
-            'wledPayload': payload,
+            'wledPayload': jsonEncode(rawPayload),
             'autoAdded': false,
           };
-          // Should NOT throw — this is the exact happy-path shape.
           final out = UserService.sanitizeForFirestore(wrapped);
           expect(out['name'], 'My Test Pattern');
           expect(out['autoAdded'], false);
-          expect(out['wledPayload'], isA<Map>());
-          // Walk every leaf, assert it's Firestore-encodable.
+          expect(out['wledPayload'], isA<String>());
+          // Round-trips: decode the persisted string yields original structure.
+          final decoded = jsonDecode(out['wledPayload'] as String);
+          expect(decoded, equals(rawPayload));
           _assertAllLeavesEncodable(out, path: 'wrapped');
+        },
+      );
+
+      test(
+        'top-level List<List<int>> input throws (covers any future caller)',
+        () {
+          // Same class of bug, simpler shape — proves Fix B catches it even
+          // when the nested array isn't buried under wledPayload.
+          expect(
+            () => UserService.sanitizeForFirestore({
+              'matrix': [
+                [1, 2, 3],
+                [4, 5, 6],
+              ],
+            }),
+            throwsA(isA<FirestoreSerializationError>()
+                .having((e) => e.path, 'path', 'matrix[0]')),
+          );
         },
       );
     },
@@ -217,29 +268,31 @@ void main() {
         () {
       // This is the precise diagnostic that #84 needs from production: when
       // the next save crash hits, the snackbar/debug_errors entry tells us
-      // EXACTLY which leaf is offending (e.g. wledPayload.seg[0].col[0][3])
-      // so the sanitizer can grow an explicit branch for that type.
+      // EXACTLY which leaf is offending so the sanitizer can grow an
+      // explicit branch for that type. Shape avoids nested-list (covered
+      // separately by Fix-B tests) to isolate dotted-key + list-index
+      // path precision.
       try {
         UserService.sanitizeForFirestore({
           'wledPayload': {
             'seg': [
               {
-                'col': [
-                  [255, 0, 0, const _UnknownLeaf('warmWhite')],
-                ],
+                'extra': {
+                  'tag': const _UnknownLeaf('warmWhite'),
+                },
               },
             ],
           },
         });
         fail('expected FirestoreSerializationError to be thrown');
       } on FirestoreSerializationError catch (e) {
-        expect(e.path, 'wledPayload.seg[0].col[0][3]');
+        expect(e.path, 'wledPayload.seg[0].extra.tag');
         expect(e.valueType, _UnknownLeaf);
         expect(e.valuePreview, contains('UnknownLeaf'));
         // The toString format is what surfaces in the user-facing snackbar
         // and in any /debug_errors/ doc — verify it's diagnostic.
         final msg = e.toString();
-        expect(msg, contains('wledPayload.seg[0].col[0][3]'));
+        expect(msg, contains('wledPayload.seg[0].extra.tag'));
         expect(msg, contains('_UnknownLeaf'));
       }
     });
