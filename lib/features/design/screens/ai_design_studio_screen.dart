@@ -260,16 +260,21 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   }
 
   Widget _buildActionButtons(BuildContext context) {
+    // Save + Apply are DISABLED pending #86 (Design Studio
+    // ComposedPattern→CustomDesign adapter + WLED apply path). Until #86
+    // implements the actual save and apply, these buttons render in their
+    // Flutter-default disabled style so users see the feature is unavailable
+    // rather than being misled by a fake success snackbar.
     return Container(
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          // Save design button
+          // Save design button — disabled pending #86
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: _handleSaveDesign,
+              onPressed: null,
               icon: const Icon(Icons.save_outlined),
-              label: const Text('Save'),
+              label: const Text('Save (coming soon)'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white70,
                 side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
@@ -282,13 +287,13 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
           ),
           const SizedBox(width: 12),
 
-          // Apply to lights button
+          // Apply to lights button — disabled pending #86
           Expanded(
             flex: 2,
             child: ElevatedButton.icon(
-              onPressed: _handleApplyToLights,
+              onPressed: null,
               icon: const Icon(Icons.lightbulb),
-              label: const Text('Apply to Lights'),
+              label: const Text('Apply to Lights (coming soon)'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NexGenPalette.cyan,
                 foregroundColor: Colors.black,
@@ -449,31 +454,14 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     }
   }
 
-  void _handleSaveDesign() {
-    final pattern = ref.read(composedPatternProvider);
-    if (pattern == null) return;
-
-    // TODO: Implement save to library
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Design saved to library'),
-        backgroundColor: NexGenPalette.cyan,
-      ),
-    );
-  }
-
-  void _handleApplyToLights() {
-    final pattern = ref.read(composedPatternProvider);
-    if (pattern == null) return;
-
-    // TODO: Send to WLED devices
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Applying design to lights...'),
-        backgroundColor: NexGenPalette.cyan,
-      ),
-    );
-  }
+  // _handleSaveDesign and _handleApplyToLights intentionally removed. They
+  // were stubs that showed false-success snackbars without persisting
+  // anything (no Firestore write) or applying anything (no WLED call). The
+  // buttons in _buildActionButtons are disabled (onPressed: null) until
+  // #86 wires Save through DesignService.saveDesign and Apply through the
+  // canonical apply path. See the project memory for #86 for the
+  // ComposedPattern → CustomDesign schema decision (option a flat-resolve
+  // vs option b preserve-AI-metadata).
 }
 
 /// Quick idea chip widget.
