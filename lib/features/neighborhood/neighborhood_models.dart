@@ -311,6 +311,14 @@ class NeighborhoodMember {
   /// of all channels. Read by the apply path, not stored verbatim.
   final List<int>? participatingChannelIndices;
 
+  /// Per-member live-sync apply gate. Set true by the engine when this
+  /// member receives a SyncCommand and begins applying; cleared by
+  /// member-stop UI, owner endGroupSync fan-clear, and app-close
+  /// lifecycle. Drives the asymmetric trigger's teardown narrow gate —
+  /// decoupled from shared `g.isActive` so one member's stop does not
+  /// cascade a revert to other members.
+  final bool isParticipating;
+
   const NeighborhoodMember({
     required this.oderId,
     required this.displayName,
@@ -324,6 +332,7 @@ class NeighborhoodMember {
     this.participationStatus = MemberParticipationStatus.active,
     this.optedOutScheduleIds = const [],
     this.participatingChannelIndices,
+    this.isParticipating = false,
   });
 
   factory NeighborhoodMember.fromFirestore(DocumentSnapshot doc) {
@@ -344,6 +353,7 @@ class NeighborhoodMember {
       participatingChannelIndices: rawParticipating is List
           ? rawParticipating.map((e) => (e as num).toInt()).toList()
           : null,
+      isParticipating: data['isParticipating'] as bool? ?? false,
     );
   }
 
@@ -361,6 +371,7 @@ class NeighborhoodMember {
       'optedOutScheduleIds': optedOutScheduleIds,
       if (participatingChannelIndices != null)
         'participatingChannelIndices': participatingChannelIndices,
+      'isParticipating': isParticipating,
     };
   }
 
@@ -378,6 +389,7 @@ class NeighborhoodMember {
     List<String>? optedOutScheduleIds,
     List<int>? participatingChannelIndices,
     bool clearParticipatingChannelIndices = false,
+    bool? isParticipating,
   }) {
     return NeighborhoodMember(
       oderId: oderId ?? this.oderId,
@@ -394,6 +406,7 @@ class NeighborhoodMember {
       participatingChannelIndices: clearParticipatingChannelIndices
           ? null
           : (participatingChannelIndices ?? this.participatingChannelIndices),
+      isParticipating: isParticipating ?? this.isParticipating,
     );
   }
 
