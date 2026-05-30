@@ -11,11 +11,37 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
+import 'package:nexgen_command/models/user_model.dart';
 
 /// Repository provider for the Pattern Library.
 /// For now we use an in-memory mock; can be swapped to Firestore later.
+///
+/// The ref.listen on currentUserProfileProvider populates the Explore
+/// "My Teams" folder (#63 E3, step 4). updateMyTeams / clearMyTeams had
+/// zero call sites pre-fix, so _myTeamsNodes was always [] and the
+/// always-rendered "My Teams" folder collapsed to empty.
+///
+/// Lifecycle: this is a provider-scoped ref.listen, NOT a widget
+/// State.dispose() callback (the #84 failure mode). Riverpod auto-
+/// cancels the subscription when the provider disposes; no onDispose
+/// cleanup needed. fireImmediately:true covers warm-start (profile
+/// already loaded). Subsequent profile mutations (add-team writes →
+/// stream emits) re-fire and rebuild the My Teams cache.
 final patternRepositoryProvider = Provider<PatternRepository>((ref) {
   final repo = PatternRepository();
+  ref.listen<AsyncValue<UserModel?>>(
+    currentUserProfileProvider,
+    (prev, next) {
+      next.whenData((profile) {
+        if (profile == null) {
+          repo.clearMyTeams();
+        } else {
+          repo.updateMyTeams(profile.sportsTeams);
+        }
+      });
+    },
+    fireImmediately: true,
+  );
   return repo;
 });
 
