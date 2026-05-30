@@ -451,8 +451,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       _scheduleLocalExecution(command);
 
   /// Test-only entry point for `_executePattern`. Used by Bundle 3b.3c
-  /// regression tests to assert the empty-participation skip-apply
-  /// path and the post-removal single-seg-no-id payload shape.
+  /// regression tests for the post-removal single-seg-no-id payload
+  /// shape, and by the Symptom 1 regression guard that asserts empty
+  /// participation NO LONGER short-circuits the apply.
   @visibleForTesting
   Future<void> executePatternForTest(SyncCommand command) =>
       _executePattern(command);
@@ -515,14 +516,17 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       // will read this; Bundle 3 only writes it). Fire-and-forget.
       unawaited(saveLocalParticipatingChannels(participating));
 
-      if (participating.isEmpty) {
-        debugPrint(
-          'Sync skip-apply: no participating channels for this member '
-          '(explicit=${currentMember?.participatingChannelIndices}, '
-          'segments=${segments.length}, deviceChannels=$deviceChannelIds)',
-        );
-        return;
-      }
+      // (REMOVED) The b4a6f46 empty-participation skip-apply gate used
+      // to short-circuit here. Symptom 1 of the multi-home regression:
+      // for any member whose roofline had no isPrimary-flagged segment,
+      // the gate silently no-op'd the apply and only the presser's home
+      // ever ran the sync. Per CHANNEL_MAPPING_AUDIT_2026-05.md:459 the
+      // participatingChannelIndices field is dead schema (no UI writes
+      // it, no picker exists, every shipped member null) — so the gate
+      // was defending semantics no UI could produce. Dropped; every
+      // joined home applies. When/if partial-channel participation
+      // ships with a real picker, re-add the gate with defaults
+      // co-designed against the picker.
 
       // ── PRE-SYNC SCENE CAPTURE ─────────────────────────────────────
       // First applicable command per listening session: snapshot the
@@ -541,8 +545,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       // Build single-seg-no-id with fx. The applyJson chokepoint
       // ([expandForParticipation] in wled_payload_utils.dart) reads the
       // persisted cache and rule-7-expands this entry per participating
-      // channel id. Empty-participation skip-apply happens above; we
-      // never reach this builder with an empty list.
+      // channel id. With the Symptom 1 gate dropped, empty-participation
+      // calls still reach this builder — the chokepoint Rule 2
+      // pass-through is the no-op safety net.
       final payload = {
         'on': true,
         'bri': memberPattern.brightness,

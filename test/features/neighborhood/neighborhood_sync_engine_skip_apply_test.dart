@@ -1,19 +1,23 @@
-// Tests for Bundle 3b.3c — sync engine's empty-participation skip-apply.
+// SYMPTOM 1 REGRESSION GUARD — the b4a6f46 empty-participation skip-apply
+// gate has been DROPPED. This file's original purpose (assert the gate)
+// has been INVERTED: it now asserts the gate is gone and stays gone.
 //
-// After Bundle 3b.3c removes the inline per-channel seg-building from
-// `_executePattern`, the engine's behavior on empty participation must
-// still be: do NOT call wledRepo.applyJson. This is the skip-apply gate
-// preserved through the refactor (it sits ABOVE the seg-building, so
-// removing the building doesn't affect it — but the regression we're
-// preventing is: rule 2 in `expandForParticipation` passes empty
-// through, so the skip MUST happen at the engine layer).
+// Why: b4a6f46 added `if (participating.isEmpty) return;` to
+// _executePattern. Any member whose roofline had no isPrimary-flagged
+// segment silently no-op'd every sync command, and only the presser's
+// home ever ran — Symptom 1 of the multi-home regression. Per
+// CHANNEL_MAPPING_AUDIT_2026-05.md:459, participatingChannelIndices is
+// dead schema (no UI writes it, no picker exists). The gate was
+// defending semantics no UI could produce.
 //
-// Tests cover:
-//   1. member.participatingChannelIndices == [] → applyJson NOT called.
+// Tests now cover:
+//   1. member.participatingChannelIndices == [] → applyJson IS called
+//      (regression guard — if this test fails because applyJson is no
+//      longer being called on empty participation, the gate has been
+//      re-introduced and Symptom 1 is back).
 //   2. member.participatingChannelIndices == [0, 1] → applyJson IS
 //      called with single-seg, no id, has fx (chokepoint-expandable
-//      shape — no longer the multi-seg-with-ids that Bundle 3 built
-//      inline).
+//      shape — Bundle 3b.3c assertion preserved).
 //
 // Driven via @visibleForTesting `executePatternForTest` on the engine.
 
@@ -32,15 +36,20 @@ import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  // Engine constructor calls WidgetsBinding.instance.addObserver (Prompt 5
+  // app-lifecycle observer); test binding must be initialized.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     resetParticipationCacheForTest();
   });
 
-  group('Bundle 3b.3c — sync engine empty-participation skip-apply', () {
+  group('Symptom 1 regression guard — empty participation MUST NOT skip-apply', () {
     test(
         'member.participatingChannelIndices == [] → wledRepo.applyJson '
-        'is NOT called (empty-skip preserved through 3b.3c)', () async {
+        'IS called (b4a6f46 gate dropped — every joined home applies)',
+        () async {
       final repo = _RecordingWledRepository();
       final member = _baseMember(participatingChannelIndices: const []);
 
@@ -54,10 +63,10 @@ void main() {
       final engine = container.read(neighborhoodSyncEngineProvider);
       await engine.executePatternForTest(_baseCommand());
 
-      expect(repo.applyJsonCalls, isEmpty,
-          reason: 'empty participation must short-circuit before the '
-              'apply call — rule 2 in expandForParticipation passes empty '
-              'THROUGH, so the skip must happen here');
+      expect(repo.applyJsonCalls, hasLength(1),
+          reason: 'Symptom 1 regression guard: if applyJson is NOT called '
+              'on empty participation, the b4a6f46 skip-apply gate has been '
+              're-introduced and only the presser will see lights run');
     });
 
     test(

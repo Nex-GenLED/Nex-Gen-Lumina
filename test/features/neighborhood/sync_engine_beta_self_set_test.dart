@@ -18,6 +18,10 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
 
 void main() {
+  // Engine constructor calls WidgetsBinding.instance.addObserver (Prompt 5
+  // app-lifecycle observer); test binding must be initialized.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('β self-set on SyncCommand receive', () {
     test('member.isParticipating=false → markSelfParticipating called once '
         'with (command.groupId, member.oderId)', () async {

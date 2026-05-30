@@ -31,6 +31,10 @@ import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  // Engine constructor calls WidgetsBinding.instance.addObserver (Prompt 5
+  // app-lifecycle observer); test binding must be initialized.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     resetParticipationCacheForTest();
@@ -67,18 +71,37 @@ void main() {
     });
 
     test(
-        'opted-out member (empty participating channels): NO capture, NO '
-        'apply, NO scene written (skip-apply preserves state)', () async {
+        'paused member (participationStatus=paused): NO capture, NO apply, '
+        'NO scene written — _shouldParticipateInSync short-circuits before '
+        'the capture/apply path', () async {
+      // NOTE: this test originally used participatingChannelIndices=[] to
+      // trigger the b4a6f46 empty-participation skip-apply gate. That gate
+      // was dropped (Symptom 1 fix); empty participation now applies. The
+      // remaining no-apply paths in _scheduleLocalExecution are: paused
+      // member, opted-out member, offline member, and member-not-in-
+      // memberDelays. We exercise paused here.
       final repo = _CapturingRepo(stateToReturn: {'on': true});
+      final pausedMember = NeighborhoodMember(
+        oderId: 'u1',
+        displayName: 'House A',
+        positionIndex: 0,
+        isOnline: true, // explicit so the gate fires on paused, not isOnline
+        lastSeen: DateTime.utc(2026, 5, 22),
+        participationStatus: MemberParticipationStatus.paused,
+        participatingChannelIndices: const [0, 1],
+      );
       final container = _makeContainer(
         repo: repo,
-        currentMember: _baseMember(participatingChannelIndices: const []),
+        currentMember: pausedMember,
         deviceChannels: const [_ch0, _ch1],
       );
       addTearDown(container.dispose);
       final engine = container.read(neighborhoodSyncEngineProvider);
 
-      await engine.executePatternForTest(_baseCommand());
+      // executePatternForTest bypasses _scheduleLocalExecution's
+      // participation check (it goes straight to _executePattern), so we
+      // drive via the scheduler entry point to exercise the gate.
+      engine.scheduleLocalExecutionForTest(_baseCommand());
 
       expect(repo.getStateCallCount, 0,
           reason: 'capture sits below the participation gate');

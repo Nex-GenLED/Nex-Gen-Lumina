@@ -29,6 +29,10 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
 
 void main() {
+  // Engine constructor calls WidgetsBinding.instance.addObserver (Prompt 5
+  // app-lifecycle observer); test binding must be initialized.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('syncEngineControllerProvider — asymmetric start/teardown trigger', () {
     test('all-false → stopListening (the only stop case)', () {
       final spy = _runTrigger(
