@@ -46,7 +46,29 @@ workflows:
           pod cache clean --all
           pod install --repo-update
       - name: Build IPA
-        script: flutter build ipa --release
+        # `--split-debug-info=<dir>` emits the Dart AOT symbol file
+        # (`app.ios-arm64.symbols`) to <dir> instead of leaving Dart
+        # symbols only in the embedded App.framework. The release binary
+        # is still stripped (no behavior change, no signing change, no
+        # entitlements change), but now we have a portable symbols file
+        # we can artifact and pass to `flutter symbolize` from any
+        # platform — no Mac/atos and no ASC dSYM round-trip needed.
+        #
+        # CLAUDE.md's "build/debug-info/ — Keep these files — never
+        # commit … never delete after a release" note assumed builds
+        # were producing this directory; this commit makes the CI
+        # actually do so.
+        #
+        # Usage post-build:
+        #   flutter symbolize -i app.ios-arm64.symbols -d stack.txt
+        # The .symbols file is small (~MB), versioned per build, and
+        # only matches stack traces from THIS exact build. Keep one
+        # copy per shipped build.
+        #
+        # No --obfuscate: that would rename Dart symbols in the binary
+        # so the symbols file is the ONLY way to read frames, which is
+        # a heavier change than this diagnostic-only intent warrants.
+        script: flutter build ipa --release --split-debug-info=build/debug-info/ios
       - name: Dump signed entitlements
         # Read-only diagnostic for #61 SSID layer disambiguation.
         #
@@ -97,6 +119,12 @@ workflows:
           fi
     artifacts:
       - build/ios/ipa/*.ipa
+      # Dart AOT symbol file from --split-debug-info. Per-build artifact;
+      # download from the Codemagic build page and feed to:
+      #   flutter symbolize -i app.ios-arm64.symbols -d <crash_stack>.txt
+      # to resolve App.framework offsets to Dart function names. Runs on
+      # any platform with the Flutter SDK installed (no Mac required).
+      - build/debug-info/ios/*.symbols
     publishing:
       app_store_connect:
         auth: integration
