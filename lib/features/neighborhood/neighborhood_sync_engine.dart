@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -343,6 +344,25 @@ class NeighborhoodSyncEngine {
       return;
     }
 
+    // β self-set: flip our own per-member apply gate so the asymmetric
+    // trigger (syncEngineControllerProvider) keeps the listener mounted
+    // independent of hasActiveGroup, and so member-stop / owner-end
+    // fan-clear can drop us cleanly via the per-member flag.
+    //
+    // Scoped self-write (request.auth.uid == memberUid) — already
+    // permitted by the existing /neighborhoods/{groupId}/members/{memberUid}
+    // rule (firestore.rules:1252). No rule change.
+    //
+    // Idempotent: skip if our flag is already true (avoids re-writes on
+    // every subsequent command in the same session).
+    //
+    // Fire-and-forget: a failed flag-write degrades to the hasActiveGroup
+    // START fallback (we stay mounted because some group is active), and
+    // the user-visible apply still proceeds.
+    if (!currentMember.isParticipating) {
+      unawaited(markSelfParticipating(command.groupId, currentMember.oderId));
+    }
+
     final now = DateTime.now();
     final startTime = command.startTimestamp.add(Duration(milliseconds: myDelay));
 
@@ -361,6 +381,34 @@ class NeighborhoodSyncEngine {
       });
     }
   }
+
+  /// Writes `isParticipating: true` to this member's doc at
+  /// `/neighborhoods/{groupId}/members/{memberUid}` (merge), so the
+  /// asymmetric trigger keeps the listener mounted via the per-member
+  /// gate. Errors are logged but never thrown — apply must proceed.
+  ///
+  /// Visible for testing so spy subclasses can record calls without
+  /// hitting a real Firestore in unit tests.
+  @visibleForTesting
+  Future<void> markSelfParticipating(String groupId, String memberUid) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('neighborhoods')
+          .doc(groupId)
+          .collection('members')
+          .doc(memberUid)
+          .set({'isParticipating': true}, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Sync self-mark participating failed: $e');
+    }
+  }
+
+  /// Test-only entry point for `_scheduleLocalExecution`. Lets the β
+  /// self-set test exercise the receive-time self-write path without
+  /// standing up a real Firestore command stream.
+  @visibleForTesting
+  void scheduleLocalExecutionForTest(SyncCommand command) =>
+      _scheduleLocalExecution(command);
 
   /// Test-only entry point for `_executePattern`. Used by Bundle 3b.3c
   /// regression tests to assert the empty-participation skip-apply
