@@ -83,7 +83,7 @@ class UserService {
   static Map<String, dynamic> sanitizeForFirestore(Map<String, dynamic> data) {
     final result = <String, dynamic>{};
     for (final entry in data.entries) {
-      final sanitized = _sanitizeValue(entry.value);
+      final sanitized = _sanitizeValue(entry.value, entry.key);
       if (sanitized != null) {
         result[entry.key] = sanitized;
       }
@@ -96,7 +96,12 @@ class UserService {
       sanitizeForFirestore(data);
 
   /// Sanitize a single value for Firestore. Returns null if the value is null.
-  static dynamic _sanitizeValue(dynamic value) {
+  ///
+  /// [path] is the dotted/indexed key path from the root map (e.g.
+  /// `wledPayload.seg[0].col[0][3]`) — included in any thrown
+  /// [FirestoreSerializationError] so a non-encodable leaf can be located
+  /// from the snackbar / `/debug_errors/` doc without a stack trace.
+  static dynamic _sanitizeValue(dynamic value, [String path = '']) {
     if (value == null) return null;
 
     // Already Firestore-safe primitives
@@ -111,7 +116,10 @@ class UserService {
     }
 
     // Firestore-native types
-    if (value is Timestamp || value is GeoPoint || value is FieldValue) {
+    if (value is Timestamp ||
+        value is GeoPoint ||
+        value is FieldValue ||
+        value is DocumentReference) {
       return value;
     }
 
@@ -130,9 +138,11 @@ class UserService {
     if (value is Map) {
       final result = <String, dynamic>{};
       for (final entry in value.entries) {
-        final sanitized = _sanitizeValue(entry.value);
+        final keyStr = entry.key.toString();
+        final childPath = path.isEmpty ? keyStr : '$path.$keyStr';
+        final sanitized = _sanitizeValue(entry.value, childPath);
         if (sanitized != null) {
-          result[entry.key.toString()] = sanitized;
+          result[keyStr] = sanitized;
         }
       }
       return result;
@@ -140,17 +150,47 @@ class UserService {
 
     // Recursively sanitize lists
     if (value is List) {
-      return value
-          .where((item) => item != null)
-          .map((item) => _sanitizeValue(item))
-          .where((item) => item != null)
-          .toList();
+      final result = <dynamic>[];
+      for (var i = 0; i < value.length; i++) {
+        final item = value[i];
+        if (item == null) continue;
+        final childPath = '$path[$i]';
+        final sanitized = _sanitizeValue(item, childPath);
+        if (sanitized != null) result.add(sanitized);
+      }
+      return result;
     }
 
-    // Fallback: convert unknown types to string to prevent SIGABRT
-    debugPrint('⚠️ Firestore sanitizer: converting unknown type '
-        '${value.runtimeType} to string');
-    return value.toString();
+    // Unknown type — throw with the offending key path and runtime type so
+    // the next save attempt fails CLEANLY (caught by the writer's try/catch
+    // and surfaced via snackbar / global error sink) instead of slipping
+    // through to the iOS platform-channel codec, which throws a native
+    // NSException → SIGABRT (#84 native-abort symptom signature).
+    //
+    // The previous toString() fallback masked the leak — a `value.toString()`
+    // is a valid String at the Dart level, but if value's `toString` itself
+    // returns something the codec doesn't like, or if a downstream consumer
+    // expected the original type, we'd still crash without diagnostic. A
+    // hard fail with the path is strictly more useful: snackbar tells Tyler
+    // exactly which field broke, and we add an explicit branch above for
+    // that type the next iteration.
+    throw FirestoreSerializationError(
+      path: path,
+      valueType: value.runtimeType,
+      valuePreview: _safePreview(value),
+    );
+  }
+
+  /// Best-effort string preview of a value for error diagnostics. Never
+  /// throws — falls back to the runtime type name if `toString()` itself
+  /// blows up.
+  static String _safePreview(dynamic value) {
+    try {
+      final s = value.toString();
+      return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+    } catch (_) {
+      return '<${value.runtimeType}: toString failed>';
+    }
   }
 
   /// Update specific fields in user profile by ID
@@ -888,5 +928,38 @@ class UserService {
       }
     }
     return result;
+  }
+}
+
+/// Thrown when [UserService.sanitizeForFirestore] encounters a value with
+/// no encodable representation (not a primitive, not a Firestore-native
+/// type, not a Map/List/Color/DateTime).
+///
+/// The [path] locates the offending leaf from the root of the sanitized map
+/// (e.g. `channels[0].color_groups[0].color[3]`). [valueType] names the
+/// Dart class so a future sanitizer iteration can add explicit handling.
+/// [valuePreview] is a truncated `toString()` for context.
+///
+/// Caught by the existing try/catch in every write path that wraps
+/// `sanitizeForFirestore` (favorites_providers `addFavorite`,
+/// design_service `createDesign`/`updateDesign`, etc.). Re-thrown to the
+/// outer handler so the user sees a snackbar instead of a SIGABRT. #84.
+class FirestoreSerializationError implements Exception {
+  final String path;
+  final Type valueType;
+  final String valuePreview;
+
+  const FirestoreSerializationError({
+    required this.path,
+    required this.valueType,
+    required this.valuePreview,
+  });
+
+  @override
+  String toString() {
+    final loc = path.isEmpty ? '<root>' : path;
+    return 'FirestoreSerializationError: non-encodable value at "$loc" '
+        '(type: $valueType, preview: $valuePreview). '
+        'Add explicit handling in UserService._sanitizeValue.';
   }
 }
