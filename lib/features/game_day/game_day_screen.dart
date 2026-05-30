@@ -708,9 +708,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                     duration: Duration(seconds: 2),
                   ),
                 );
+                // Manual Refresh — bypass the 7-day weekly gate (#63 E5
+                // Sub-Change D). Background timer + post-launch refresh
+                // stay force:false so the gate fires as intended for
+                // implicit refreshes.
                 await ref
                     .read(gameDayAutopilotNotifierProvider.notifier)
-                    .refreshAllCalendars();
+                    .refreshAllCalendars(force: true);
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(

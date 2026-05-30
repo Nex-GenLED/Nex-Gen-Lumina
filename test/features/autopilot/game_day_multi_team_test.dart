@@ -62,16 +62,42 @@ void main() {
       },
     );
 
-    test('disabled justWrittenConfig is dropped (falls to stream fallback)',
-        () {
-      final royals = _config(slug: 'mlb_royals', enabled: false);
-      final result = computeEnabledConfigsForTeam(
-        teamSlug: 'mlb_royals',
-        streamConfigs: const [],
-        justWrittenConfig: royals,
-      );
-      expect(result, isEmpty);
-    });
+    test(
+      'disabled justWrittenConfig is an explicit exclusion '
+      '(#63 E5 teardown — was "falls to stream fallback" pre-fix)',
+      () {
+        final royals = _config(slug: 'mlb_royals', enabled: false);
+        final result = computeEnabledConfigsForTeam(
+          teamSlug: 'mlb_royals',
+          streamConfigs: const [],
+          justWrittenConfig: royals,
+        );
+        expect(result, isEmpty);
+      },
+    );
+
+    test(
+      'disabled justWrittenConfig + stream STILL has the team as enabled '
+      '(disable stream-lag scenario) — team must be EXCLUDED. '
+      '#63 E5 regression sentinel: pre-tightening, this would re-include '
+      'the team and rewrite its calendar entries.',
+      () {
+        // Caller just wrote enabled:false; Firestore stream hasn't
+        // propagated yet so it still carries the pre-disable (enabled)
+        // value. Without the explicit-exclusion semantics the populate
+        // path would treat the team as enabled and rewrite its games.
+        final staleEnabledRoyals = _config(slug: 'mlb_royals', enabled: true);
+        final freshDisabledRoyals =
+            _config(slug: 'mlb_royals', enabled: false);
+        final result = computeEnabledConfigsForTeam(
+          teamSlug: 'mlb_royals',
+          streamConfigs: [staleEnabledRoyals],
+          justWrittenConfig: freshDisabledRoyals,
+        );
+        expect(result, isEmpty,
+            reason: 'Disabled justWrittenConfig must veto the stream.');
+      },
+    );
   });
 
   group('computeEnabledConfigsForTeam — multi-team', () {

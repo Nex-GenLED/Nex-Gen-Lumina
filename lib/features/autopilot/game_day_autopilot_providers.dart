@@ -333,15 +333,18 @@ final path1GameDaySnapshotResolutionProvider =
 /// populated for a just-toggled team. The just-written config is spliced in
 /// directly so the populate path can't drop it due to Firestore stream lag.
 ///
-/// Logic:
+/// Semantics (#63 E5 teardown tightened the disabled case):
 ///   1. Take every enabled config from the stream EXCEPT the just-toggled
 ///      team's (to avoid double-populating it).
-///   2. Append the just-written config if it was provided and is enabled
-///      (this is the freshly-written value, so it's guaranteed current —
-///      it overrides any stale stream snapshot for this slug).
-///   3. If no just-written config was provided, fall back to the stream's
+///   2. If [justWrittenConfig] was provided:
+///        - enabled → splice it in (overrides stale stream snapshot).
+///        - disabled → explicit EXCLUSION; no stream fallback for this
+///          slug. This is what protects the disable-path from re-
+///          including the team when Firestore hasn't yet propagated the
+///          enabled:false write.
+///   3. If no [justWrittenConfig] was provided, fall back to the stream's
 ///      value for this team (covers callers that don't have the fresh
-///      config in hand).
+///      config in hand — e.g. background refresh).
 ///
 /// The result is the set of teams to write calendar entries for. Pure
 /// function — extracted for unit-testability without standing up the full
@@ -352,13 +355,45 @@ List<GameDayAutopilotConfig> computeEnabledConfigsForTeam({
   required List<GameDayAutopilotConfig> streamConfigs,
   required GameDayAutopilotConfig? justWrittenConfig,
 }) {
-  return <GameDayAutopilotConfig>[
-    ...streamConfigs.where((c) => c.enabled && c.teamSlug != teamSlug),
-    if (justWrittenConfig != null && justWrittenConfig.enabled)
-      justWrittenConfig
-    else
-      ...streamConfigs.where((c) => c.enabled && c.teamSlug == teamSlug),
-  ];
+  final exceptToggled =
+      streamConfigs.where((c) => c.enabled && c.teamSlug != teamSlug);
+  if (justWrittenConfig == null) {
+    // No fresh config: trust the stream for this slug too.
+    return streamConfigs.where((c) => c.enabled).toList();
+  }
+  if (justWrittenConfig.enabled) {
+    return [...exceptToggled, justWrittenConfig];
+  }
+  // Disabled justWrittenConfig is an explicit exclusion — do NOT fall
+  // back to the (potentially stale) stream value for this slug.
+  return exceptToggled.toList();
+}
+
+/// Predicate for [_clearFutureGameDayCalendarEntries]: should the entry
+/// at [dateKey] be removed during a Game Day calendar regen?
+///
+/// Returns true iff ALL hold:
+///   1. type == CalendarEntryType.autopilot
+///   2. sourceTag == CalendarEntrySourceTag.gameDay (#63 sub-change A —
+///      the locked filter that prevents neighborhood-sync entries from
+///      being collateral-wiped; those carry sourceTag.neighborhoodSync)
+///   3. dateKey parses to a valid date
+///   4. that date is not before [todayStart] (history preserved)
+///
+/// Pure function — extracted for unit-testability without scaffolding
+/// the calendar provider or notifier graph.
+@visibleForTesting
+bool shouldClearGameDayEntry({
+  required String dateKey,
+  required CalendarEntry entry,
+  required DateTime todayStart,
+}) {
+  if (entry.type != CalendarEntryType.autopilot) return false;
+  if (entry.sourceTag != CalendarEntrySourceTag.gameDay) return false;
+  final date = DateTime.tryParse(dateKey);
+  if (date == null) return false;
+  if (date.isBefore(todayStart)) return false;
+  return true;
 }
 
 class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
@@ -557,10 +592,22 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       );
     }
 
-    // If disabling, cancel any active session.
+    // If disabling: cancel session + prune local state, then run the
+    // clear-and-repopulate path so the just-disabled team's future
+    // entries are stripped while remaining enabled teams' entries are
+    // preserved.
+    //
+    // Pass [freshConfig] (which carries enabled:false here) — the
+    // splice contract treats a disabled justWrittenConfig as an
+    // EXPLICIT exclusion (computeEnabledConfigsForTeam, branch 2).
+    // Without this, computeEnabledConfigsForTeam's null-justWritten
+    // fallback would re-include the team from the (possibly stale)
+    // Firestore stream snapshot, and the disabled team's entries would
+    // be re-populated instead of teared down. (#63 E5 teardown.)
     if (!enabled) {
       ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
       state = Map.from(state)..remove(teamSlug);
+      _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
       return;
     }
 
@@ -713,8 +760,17 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Future<void> _doPopulateCalendars(
     List<GameDayAutopilotConfig> enabledConfigs,
   ) async {
+    // #63 E5 teardown edge: clear runs UNCONDITIONALLY before the empty-
+    // set check so disabling the LAST enabled team still strips its
+    // future entries. Pre-fix this early-returned before the clear, so
+    // the final disable left the last team's games stranded on the
+    // calendar.
+    await _clearFutureGameDayCalendarEntries();
+
     if (enabledConfigs.isEmpty) {
-      debugPrint('[GameDayAutopilot] No enabled configs to populate');
+      debugPrint('[GameDayAutopilot] No enabled configs to populate '
+          '(post-clear, e.g. last team disabled)');
+      await _writeGameDayLastGenerated();
       return;
     }
 
@@ -722,8 +778,6 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         '[GameDayAutopilot] Populating calendar for '
         '${enabledConfigs.length} enabled team(s): '
         '${enabledConfigs.map((c) => c.teamSlug).join(", ")}');
-
-    await _clearFutureGameDayCalendarEntries();
 
     final service = ref.read(gameDayAutopilotServiceProvider);
     var totalEntries = 0;
@@ -764,13 +818,24 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     return true;
   }
 
-  /// Removes future calendar entries with type=autopilot. Preserves past
-  /// entries (history), user entries, holiday entries, and auto-typed
-  /// baseline entries (warm-white daily, etc.). Game Day is the only
-  /// system writing CalendarEntryType.autopilot today, so this is
-  /// effectively "clear the next 7 days of game-day rows" — which lets
-  /// the regenerate write fresh entries without leaving stale rows for
-  /// rescheduled/cancelled games.
+  /// Removes future calendar entries written by Game Day autopilot.
+  /// Preserves past entries (history), user entries, holiday entries,
+  /// auto-typed baseline entries (warm-white daily, etc.), AND
+  /// neighborhood-sync autopilot entries (which share
+  /// CalendarEntryType.autopilot but are tagged
+  /// CalendarEntrySourceTag.neighborhoodSync).
+  ///
+  /// Pre-#63 this filtered only by `type != autopilot`, which collateral-
+  /// wiped neighborhood-sync rows every time game-day populate ran. The
+  /// sourceTag tightening (Sub-Change A) scopes the clear to game-day
+  /// entries specifically. sourceTag is already written by
+  /// game_day_autopilot_service.dart:_buildCalendarEntry and persisted
+  /// by CalendarEntry.toJson — pure read-side scope, no schema change.
+  ///
+  /// Legacy in-flight game-day entries with sourceTag:null are left
+  /// stranded in the future window only (acceptable: they age out, and
+  /// past entries are already preserved by the isBefore(todayStart)
+  /// guard below).
   Future<void> _clearFutureGameDayCalendarEntries() async {
     try {
       final notifier = ref.read(calendarScheduleProvider.notifier);
@@ -780,11 +845,13 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
       final keysToRemove = <String>[];
       entries.forEach((dateKey, entry) {
-        if (entry.type != CalendarEntryType.autopilot) return;
-        final date = DateTime.tryParse(dateKey);
-        if (date == null) return;
-        if (date.isBefore(todayStart)) return; // Preserve history
-        keysToRemove.add(dateKey);
+        if (shouldClearGameDayEntry(
+          dateKey: dateKey,
+          entry: entry,
+          todayStart: todayStart,
+        )) {
+          keysToRemove.add(dateKey);
+        }
       });
 
       for (final key in keysToRemove) {
