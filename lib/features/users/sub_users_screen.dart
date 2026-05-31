@@ -105,7 +105,13 @@ class _SubUsersScreenState extends ConsumerState<SubUsersScreen> {
     }
 
     final subUsersAsync = ref.watch(subUsersProvider(_installationId!));
-    final pendingInvitesAsync = ref.watch(pendingInvitationsProvider(_installationId!));
+    // Scope pending-invite stream to this primary's uid so it satisfies the
+    // per-doc /invitations read rule (rules aren't filters). The build only
+    // runs past the _installationId guard for a signed-in user.
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final pendingInvitesAsync = ref.watch(
+      pendingInvitationsProvider((installationId: _installationId!, uid: uid)),
+    );
 
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Manage Users')),
@@ -243,7 +249,23 @@ class _SubUsersScreenState extends ConsumerState<SubUsersScreen> {
               );
             },
             loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            // Don't swallow stream errors silently — a denied read (rule/index
+            // gap) previously made the PENDING INVITATIONS section vanish with
+            // no signal. Surface a subtle inline error + log so the next gap is
+            // visible instead of invisible.
+            error: (e, _) {
+              debugPrint('SubUsersScreen: pending invitations stream error: $e');
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  "Couldn't load pending invitations.",
+                  style: TextStyle(
+                    color: Colors.red.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),

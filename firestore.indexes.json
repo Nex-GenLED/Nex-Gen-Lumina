@@ -245,6 +245,50 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "installation_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "primary_user_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "invitee_email",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "installation_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "primary_user_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ]
 }
