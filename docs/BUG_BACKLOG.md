@@ -115,10 +115,14 @@ Move to CLOSED only after this sequence runs and is documented.
 ### #85 — Lost save: writers ≠ My Designs reader (finish A3)
 **Status:** OPEN. Regression-by-omission from b7f335a (surfaced `/designs/` only; A3 called for `/patterns/` too). THREE save writers, THREE collections:
 - Now Playing tap → `/designs/` → visible ✓
-- `EditPatternScreen` SAVE → `/patterns/` → INVISIBLE
+- ~~`EditPatternScreen` SAVE → `/patterns/` → INVISIBLE~~ → **RESOLVED (W2, 2026-05-30).** Audit confirmed `/patterns/` had zero readers and `CustomDesign`/`/designs/` is a structurally lossy target (`EditablePattern`'s per-pixel render model + `colorGroupSize`/`backgroundColor`/`centerOut` don't map). Rather than route to `/designs/`, the dead `/patterns/` Firestore write was removed and the button relabeled **"SAVE TO DEVICE"** (preset-only via `repo.savePreset` HTTP `psave`, now awaited with honest success/failure). App-side persistence on this screen is the `FavoriteHeartButton` → `/favorites/` (a read surface). Firmware impact: none.
 - Adjustment panel "Save As Custom Pattern" → `/favorites/` → INVISIBLE
 
 **Fix (finish A3, ~3-5h):** `EditablePattern → LibraryNode` adapter (symmetric to `_customDesignToLibraryNode`, `isSavedPattern` flag, `pattern_{id}` prefix); wire `patternsStreamProvider` into the 3 injection sites (`patternCategoriesProvider`, `childNodes`, `libraryNodeByIdProvider` — merge + sort by `updatedAt`); add `isSavedPattern` branch in `pattern_theme_selection.dart`. Repoint the `/favorites/` "Save As Custom Pattern" writer to `saveCurrentAsDesignProvider` (consolidate to `/designs/`) rather than surfacing a third stream.
+
+**Deferred follow-ups from W2 (not blocking):**
+- **Favorites typed-column fidelity:** `FavoriteHeartButton` (`edit_pattern_screen.dart`) passes `_pattern.toJson()` into `addFavorite`, which stores the blob under `wledPayload` and leaves the typed `FavoritePattern` columns (`actionColorValues`, `backgroundColorValue`, `effectId`, `speed`, `intensity`, `brightness`, `colorGroupSize`, `direction`) null. Data is recoverable from the blob (lossless) but under the wrong key/shape. Worth populating the typed columns so favorites reads don't depend on decoding `wledPayload`.
+- **Vestigial rule:** `firestore.rules:588-593` (`/users/{userId}/patterns/`) is now write-free. Harmless either way; fold into a future rules cleanup rather than a standalone deploy.
 
 ---
 

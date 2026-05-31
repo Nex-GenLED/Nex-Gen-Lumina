@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
@@ -15,7 +14,6 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
@@ -110,38 +108,50 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     );
   }
 
-  Future<void> _savePattern() async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
+  /// Saves the current pattern as a WLED preset on the physical controller
+  /// (HTTP `psave`, not a firmware change). App-side persistence is handled
+  /// separately by the FavoriteHeartButton (writes to /favorites/, a read
+  /// surface). This intentionally does NOT write to Firestore: the old
+  /// /users/{uid}/patterns/ write had zero readers and produced a
+  /// false-success (#85 W2).
+  Future<void> _saveToDevice() async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No device connected'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+      return;
+    }
 
     final updatedPattern = _pattern.copyWith(name: _nameController.text.trim());
 
     try {
-      await FirebaseFirestore.instance
-          .doc('users/${user.uid}/patterns/${updatedPattern.id}')
-          .set(UserService.sanitizeForFirestore(updatedPattern.toJson()), SetOptions(merge: true));
+      final totalPixels = await repo.getTotalLedCount() ?? 150;
+      final presetId = presetIdForUserPattern(updatedPattern.id);
+      final ok = await repo.savePreset(
+        presetId: presetId,
+        state: updatedPattern.toWledPayload(totalPixels),
+        presetName: updatedPattern.name,
+      );
 
-      // Also save as WLED preset if possible
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        final totalPixels = await repo.getTotalLedCount() ?? 150;
-        final presetId = presetIdForUserPattern(updatedPattern.id);
-        await repo.savePreset(
-          presetId: presetId,
-          state: updatedPattern.toWledPayload(totalPixels),
-          presetName: updatedPattern.name,
-        );
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Saved: ${updatedPattern.name}'),
-            backgroundColor: NexGenPalette.gunmetal,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        ok
+            ? SnackBar(
+                content: Text('Saved to device: ${updatedPattern.name}'),
+                backgroundColor: NexGenPalette.gunmetal,
+                duration: const Duration(seconds: 2),
+              )
+            : SnackBar(
+                content: const Text('Failed to save to device'),
+                backgroundColor: Colors.red.shade800,
+              ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -165,9 +175,9 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: _savePattern,
+            onPressed: _saveToDevice,
             child: Text(
-              'SAVE',
+              'SAVE TO DEVICE',
               style: TextStyle(
                 color: NexGenPalette.cyan,
                 fontWeight: FontWeight.w700,
