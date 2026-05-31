@@ -183,6 +183,12 @@ class ComposedPattern {
   Map<String, dynamic> toJson() => {
         'name': name,
         'description': description,
+        // #86 option-b: persist the layered AI source-of-truth so a saved
+        // Studio design can be re-opened as an AI design (re-edit layers),
+        // not just as flat channels. DesignIntent carries layers/zones/
+        // motion/ambiguity-resolutions/confidence/originalPrompt. Without
+        // this line the differentiated AI value is lost on save.
+        'source_intent': sourceIntent?.toJson(),
         'color_groups': colorGroups.map((g) => {
               'start_led': g.startLed,
               'end_led': g.endLed,

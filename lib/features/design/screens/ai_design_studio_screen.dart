@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
@@ -25,6 +26,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
   bool _showManualControls = false;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -260,21 +262,34 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   }
 
   Widget _buildActionButtons(BuildContext context) {
-    // Save + Apply are DISABLED pending #86 (Design Studio
-    // ComposedPattern→CustomDesign adapter + WLED apply path). Until #86
-    // implements the actual save and apply, these buttons render in their
-    // Flutter-default disabled style so users see the feature is unavailable
-    // rather than being misled by a fake success snackbar.
+    // #86: SAVE is implemented (option-b — preserves the AI sourceIntent +
+    // derived channels; writes /users/{uid}/designs/{autoId} via
+    // DesignService.saveDesign). APPLY remains DISABLED: it is firmware-gated
+    // — the composer's wledPayload has three hardware-fidelity issues
+    // (single whole-roofline seg vs the device's multi-bus split; RGB-only
+    // static `i` payload dropping the W channel; relay payload size) that need
+    // real-controller verification before wiring. Tracked as the remaining
+    // #86 sub-task. Apply renders in its disabled style so users aren't misled
+    // by a fake success snackbar (the #85 lesson).
     return Container(
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          // Save design button — disabled pending #86
+          // Save design button — #86 option-b
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.save_outlined),
-              label: const Text('Save (coming soon)'),
+              onPressed: _isSaving ? null : _handleSaveDesign,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_isSaving ? 'Saving…' : 'Save'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white70,
                 side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
@@ -287,7 +302,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
           ),
           const SizedBox(width: 12),
 
-          // Apply to lights button — disabled pending #86
+          // Apply to lights button — disabled pending #86 firmware-gated apply
           Expanded(
             flex: 2,
             child: ElevatedButton.icon(
@@ -454,14 +469,60 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     }
   }
 
-  // _handleSaveDesign and _handleApplyToLights intentionally removed. They
-  // were stubs that showed false-success snackbars without persisting
-  // anything (no Firestore write) or applying anything (no WLED call). The
-  // buttons in _buildActionButtons are disabled (onPressed: null) until
-  // #86 wires Save through DesignService.saveDesign and Apply through the
-  // canonical apply path. See the project memory for #86 for the
-  // ComposedPattern → CustomDesign schema decision (option a flat-resolve
-  // vs option b preserve-AI-metadata).
+  /// #86 option-b SAVE. Persists the current [ComposedPattern] as a
+  /// [CustomDesign] via the canonical [saveComposedDesignProvider]: derived
+  /// per-channel denormalization (My Designs previews + legacy apply) PLUS the
+  /// full composedPattern map preserving the AI sourceIntent for re-edit.
+  ///
+  /// The write is awaited BEFORE any success UI — no optimistic success (the
+  /// #85 lesson). A failed/empty result surfaces a red snackbar; a throw is
+  /// caught and surfaced the same way. composedPattern is jsonEncoded inside
+  /// CustomDesign.toFirestore so its nested arrays never hit the #84 codec.
+  Future<void> _handleSaveDesign() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    try {
+      final saveFn = ref.read(saveComposedDesignProvider);
+      final designId = await saveFn();
+
+      if (!mounted) return;
+
+      if (designId == null || designId.isEmpty) {
+        // No composed pattern or no signed-in user — nothing was written.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Couldn't save — no design or you're signed out."),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Saved to My Designs'),
+          backgroundColor: NexGenPalette.cyan,
+        ),
+      );
+    } catch (e) {
+      debugPrint('DesignStudio save error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Couldn't save that design — please try again."),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  // _handleApplyToLights intentionally NOT implemented. Apply is firmware-
+  // gated — see the comment in _buildActionButtons. The "Apply to Lights"
+  // button stays disabled (onPressed: null) until the composer payload's
+  // three hardware-fidelity issues are verified on a real controller. That is
+  // the remaining #86 sub-task and ships in a separate prompt.
 }
 
 /// Quick idea chip widget.

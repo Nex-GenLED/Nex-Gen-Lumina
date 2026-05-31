@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_service.dart';
+import 'package:nexgen_command/features/design/design_studio_providers.dart';
+import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -500,6 +503,127 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
       ownerId: user.uid,
       channels: channels,
       brightness: wledState.brightness,
+    );
+
+    final service = ref.read(designServiceProvider);
+    return service.saveDesign(user.uid, design);
+  };
+});
+
+// =============================================================================
+// #86 — Design Studio (AI ComposedPattern) → CustomDesign save (option-b)
+// =============================================================================
+
+/// Splits an AI [ComposedPattern]'s whole-roofline [LedColorGroup]s into
+/// per-channel [ChannelDesign]s using the device's [WledSegment] boundaries.
+///
+/// `ComposedPattern.colorGroups` are *absolute* LED ranges across the entire
+/// roofline (0..totalPixels). `ChannelDesign.colorGroups` are *segment-local*
+/// (0-based within the channel), matching the convention used by
+/// `CurrentDesignNotifier.createNew` / `saveCurrentAsDesignProvider`. We clip
+/// each absolute group to each segment's `[start, stop)` window and re-base it.
+///
+/// Effect/speed/intensity/reverse are pattern-global, applied to every channel.
+/// When the device exposes no segments (offline), we emit a single channel 0
+/// spanning all pixels so the design still previews and applies.
+List<ChannelDesign> channelsFromComposedPattern(
+  ComposedPattern pattern,
+  List<WledSegment> segments,
+) {
+  if (segments.isEmpty) {
+    final endLed = pattern.totalPixels > 0 ? pattern.totalPixels - 1 : 0;
+    return [
+      ChannelDesign(
+        channelId: 0,
+        channelName: 'All',
+        included: true,
+        colorGroups: pattern.colorGroups.isNotEmpty
+            ? List<LedColorGroup>.from(pattern.colorGroups)
+            : [LedColorGroup(startLed: 0, endLed: endLed, color: const [255, 255, 255, 0])],
+        effectId: pattern.effectId,
+        speed: pattern.speed,
+        intensity: pattern.intensity,
+        reverse: pattern.reverse,
+        ledCount: pattern.totalPixels,
+      ),
+    ];
+  }
+
+  return segments.map((seg) {
+    final localGroups = <LedColorGroup>[];
+    for (final g in pattern.colorGroups) {
+      // No overlap with this segment's [start, stop) window.
+      if (g.endLed < seg.start || g.startLed >= seg.stop) continue;
+      final clippedStart = g.startLed < seg.start ? seg.start : g.startLed;
+      final clippedEnd = g.endLed >= seg.stop ? seg.stop - 1 : g.endLed;
+      localGroups.add(LedColorGroup(
+        startLed: clippedStart - seg.start,
+        endLed: clippedEnd - seg.start,
+        color: g.color,
+      ));
+    }
+    return ChannelDesign(
+      channelId: seg.id,
+      channelName: seg.name,
+      included: true,
+      // Faithful denormalization: segments the pattern doesn't cover get an
+      // empty group list (toWledPayload defaults those to white) rather than a
+      // fabricated color.
+      colorGroups: localGroups,
+      effectId: pattern.effectId,
+      speed: pattern.speed,
+      intensity: pattern.intensity,
+      reverse: pattern.reverse,
+      ledCount: seg.ledCount,
+    );
+  }).toList();
+}
+
+/// Assembles a [CustomDesign] from an AI [ComposedPattern] (#86 option-b):
+/// derived per-channel denormalization (so My Designs previews + legacy
+/// `toWledPayload` work) PLUS the full `composedPattern` map preserving the AI
+/// source-of-truth (`sourceIntent`/layers) for future re-edit.
+CustomDesign customDesignFromComposedPattern({
+  required ComposedPattern pattern,
+  required List<WledSegment> segments,
+  required String ownerId,
+  String? name,
+}) {
+  final now = DateTime.now();
+  return CustomDesign(
+    id: '',
+    name: (name == null || name.trim().isEmpty) ? pattern.name : name.trim(),
+    description: pattern.description,
+    createdAt: now,
+    updatedAt: now,
+    ownerId: ownerId,
+    channels: channelsFromComposedPattern(pattern, segments),
+    brightness: pattern.brightness,
+    composedPattern: pattern.toJson(),
+  );
+}
+
+/// Save the AI Design Studio's current [ComposedPattern] as a [CustomDesign].
+///
+/// Routes through the canonical [DesignService.saveDesign] writer (same one
+/// W1/W3/W4 use → `/users/{uid}/designs/{autoId}`). Returns the new doc id, or
+/// null if there is no composed pattern / no signed-in user. Throws are left to
+/// the caller to surface (no optimistic success — see #85).
+final saveComposedDesignProvider = Provider<Future<String?> Function({String? name})>((ref) {
+  return ({String? name}) async {
+    final pattern = ref.read(composedPatternProvider);
+    if (pattern == null) return null;
+
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) return null;
+
+    final segments = ref.read(zoneSegmentsProvider).valueOrNull ?? const <WledSegment>[];
+
+    final design = customDesignFromComposedPattern(
+      pattern: pattern,
+      segments: segments,
+      ownerId: user.uid,
+      name: name,
     );
 
     final service = ref.read(designServiceProvider);

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
@@ -35,6 +37,24 @@ class CustomDesign {
   /// Segment pattern configuration (anchor color, spacing, etc.)
   final Map<String, dynamic>? segmentPatternConfig;
 
+  /// AI source-of-truth from the Design Studio (#86 option-b).
+  ///
+  /// When this design was created by the AI Design Studio, this holds the
+  /// full `ComposedPattern.toJson()` — including the layered `sourceIntent`
+  /// (zones/colors/motion/ambiguity-resolutions) and the composed
+  /// `wled_payload`. `channels` (above) is a *derived denormalization* of
+  /// this, so legacy read paths (My Designs previews, `toWledPayload`) keep
+  /// working unchanged; this field is the additive AI layer that lets a
+  /// Studio design be re-opened and re-edited as an AI design later.
+  ///
+  /// `null` for every non-Studio design (manual editor, Now-Playing save,
+  /// brand seeds) — those behave exactly as before this field existed.
+  ///
+  /// Persisted jsonEncoded (see `toFirestore`/`fromFirestoreData`) because it
+  /// embeds arrays-of-arrays (`col:[[r,g,b,w]]`) that the native iOS Firestore
+  /// codec aborts on (#84). In-memory it is a decoded `Map`.
+  final Map<String, dynamic>? composedPattern;
+
   const CustomDesign({
     required this.id,
     required this.name,
@@ -50,6 +70,7 @@ class CustomDesign {
     this.templateType,
     this.segmentColorGroups,
     this.segmentPatternConfig,
+    this.composedPattern,
   });
 
   CustomDesign copyWith({
@@ -67,6 +88,7 @@ class CustomDesign {
     PatternTemplateType? templateType,
     List<LedColorGroup>? segmentColorGroups,
     Map<String, dynamic>? segmentPatternConfig,
+    Map<String, dynamic>? composedPattern,
   }) {
     return CustomDesign(
       id: id ?? this.id,
@@ -83,6 +105,7 @@ class CustomDesign {
       templateType: templateType ?? this.templateType,
       segmentColorGroups: segmentColorGroups ?? this.segmentColorGroups,
       segmentPatternConfig: segmentPatternConfig ?? this.segmentPatternConfig,
+      composedPattern: composedPattern ?? this.composedPattern,
     );
   }
 
@@ -118,6 +141,26 @@ class CustomDesign {
       );
     }
 
+    // #86 option-b: composed_pattern is stored jsonEncoded (a String) so its
+    // nested arrays-of-arrays never reach Firestore's native codec (#84).
+    // Decode back to a Map here. Legacy designs lack the field → null →
+    // behave exactly as before. Defensive: tolerate a raw Map too (in case a
+    // pre-encode write ever landed) and a corrupt/undecodable String → null.
+    Map<String, dynamic>? parsedComposedPattern;
+    final rawComposed = data['composed_pattern'];
+    if (rawComposed is String && rawComposed.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawComposed);
+        if (decoded is Map<String, dynamic>) {
+          parsedComposedPattern = decoded;
+        }
+      } catch (_) {
+        parsedComposedPattern = null;
+      }
+    } else if (rawComposed is Map) {
+      parsedComposedPattern = Map<String, dynamic>.from(rawComposed);
+    }
+
     return CustomDesign(
       id: id,
       name: data['name'] as String? ?? 'Untitled',
@@ -138,6 +181,7 @@ class CustomDesign {
               ?.map((g) => LedColorGroup.fromJson(g as Map<String, dynamic>))
               .toList(),
       segmentPatternConfig: data['segment_pattern_config'] as Map<String, dynamic>?,
+      composedPattern: parsedComposedPattern,
     );
   }
 
@@ -158,6 +202,13 @@ class CustomDesign {
       if (segmentColorGroups != null)
         'segment_color_groups': segmentColorGroups!.map((g) => g.toJson()).toList(),
       if (segmentPatternConfig != null) 'segment_pattern_config': segmentPatternConfig,
+      // #86 + #84: jsonEncode the composed pattern to a String. Its embedded
+      // wled_payload holds arrays-of-arrays (col:[[r,g,b,w]]) which the native
+      // iOS Firestore codec aborts on (SIGABRT). Encoding to a String renders
+      // it an opaque primitive to UserService.sanitizeForFirestore (which
+      // otherwise THROWS on nested lists) — mirrors logPatternUsage's
+      // 'wled': jsonEncode(wled). Decoded back in fromFirestoreData.
+      if (composedPattern != null) 'composed_pattern': jsonEncode(composedPattern),
     };
   }
 
