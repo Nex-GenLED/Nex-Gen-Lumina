@@ -314,11 +314,11 @@ class LibraryNodeCard extends StatelessWidget {
   }
 
   /// Get gradient color pair for folder nodes, matching the visual style
-  /// used by _DesignLibraryCategoryCard and _SubCategoryCard.
+  /// used by the Design Library category cards.
   List<Color> _getGradientForNode() {
     final id = node.id;
 
-    // Category gradients (matching _DesignLibraryCategoryCard)
+    // Category gradients
     if (id == LibraryCategoryIds.architectural) return const [Color(0xFFFFB347), Color(0xFFFF7043)];
     if (id == LibraryCategoryIds.holidays) return const [Color(0xFFFF4444), Color(0xFFC2185B)];
     if (id == LibraryCategoryIds.sports) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
