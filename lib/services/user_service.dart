@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
@@ -6,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/services/debug_capture.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 
 /// Service for managing user data in Firestore
@@ -62,7 +64,15 @@ class UserService {
         cleanedData,
         SetOptions(merge: true),
       );
-    } catch (e) {
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      await captureBug84(
+        marker: 'BUG84-userdoc-write',
+        step: 'write-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      );
       debugPrint('Error updating user: $e');
       rethrow;
     }
@@ -81,14 +91,28 @@ class UserService {
   ///
   /// Static so all write paths (update, set, add) can use it.
   static Map<String, dynamic> sanitizeForFirestore(Map<String, dynamic> data) {
-    final result = <String, dynamic>{};
-    for (final entry in data.entries) {
-      final sanitized = _sanitizeValue(entry.value, entry.key);
-      if (sanitized != null) {
-        result[entry.key] = sanitized;
+    try {
+      final result = <String, dynamic>{};
+      for (final entry in data.entries) {
+        final sanitized = _sanitizeValue(entry.value, entry.key);
+        if (sanitized != null) {
+          result[entry.key] = sanitized;
+        }
       }
+      return result;
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      // Fire-and-forget from sync context; the outer awaited capture in
+      // updateUser/addFavorite catches is the reliable flush point.
+      unawaited(captureBug84(
+        marker: 'BUG84-sanitize',
+        step: 'top-level-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      ));
+      rethrow;
     }
-    return result;
   }
 
   // Keep the old name as a forwarding alias for internal callers.
@@ -100,7 +124,7 @@ class UserService {
   /// [path] is the dotted/indexed key path from the root map (e.g.
   /// `wledPayload.seg[0].col[0][3]`) — included in any thrown
   /// [FirestoreSerializationError] so a non-encodable leaf can be located
-  /// from the snackbar without a stack trace.
+  /// from the snackbar / `/debug_errors/` doc without a stack trace.
   static dynamic _sanitizeValue(dynamic value, [String path = '']) {
     if (value == null) return null;
 
@@ -154,8 +178,8 @@ class UserService {
     // nested arrays — `[[…]]` raises NSInvalidArgumentException → objc_terminate
     // → uncatchable SIGABRT, the #84 native-abort signature. Throw a Dart
     // exception when we see a list element that is itself a list, so the
-    // caller's try/catch sees a clean error instead of a silent
-    // platform-channel crash.
+    // caller's try/catch (and the BUG84-sanitize captureBug84 hook above)
+    // sees a clean error instead of a silent platform-channel crash.
     //
     // Upstream fix is to jsonEncode the offending field. See
     // user_service.dart:298-300 (logPatternUsage), favorites_providers.dart
@@ -195,6 +219,15 @@ class UserService {
     // hard fail with the path is strictly more useful: snackbar tells Tyler
     // exactly which field broke, and we add an explicit branch above for
     // that type the next iteration.
+    // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+    // Tells us the guard IS firing and on which field+type. Fire-and-forget
+    // from sync context; the outer awaited capture is the reliable flush.
+    unawaited(captureBug84(
+      marker: 'BUG84-unencodable',
+      step: 'before-throw',
+      path: path,
+      valueType: value.runtimeType.toString(),
+    ));
     throw FirestoreSerializationError(
       path: path,
       valueType: value.runtimeType,

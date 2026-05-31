@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/debug_capture.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 /// Model representing a favorite pattern with usage metadata.
@@ -201,7 +202,15 @@ class FavoritesNotifier extends Notifier<void> {
         'wledPayload': jsonEncode(patternData),
         'autoAdded': autoAdded,
       }), SetOptions(merge: true));
-    } catch (e) {
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      await captureBug84(
+        marker: 'BUG84-fav-write',
+        step: 'write-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      );
       debugPrint('Failed to add favorite: $e');
       rethrow;
     }
