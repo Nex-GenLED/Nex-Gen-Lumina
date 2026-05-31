@@ -214,11 +214,6 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                   child: CustomScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     slivers: [
-                      // 1. My Saved Designs section
-                      SliverToBoxAdapter(
-                        child: pagePadding(child: const MySavedDesignsSection()),
-                      ),
-
                       // 2. Recent Patterns section
                       SliverToBoxAdapter(
                         child: pagePadding(child: const RecentPatternsSection()),
