@@ -336,12 +336,72 @@ class _PendingPost {
   });
 }
 
+/// Pure, deterministic background-poll cadence policy for [WledNotifier].
+///
+/// Extracted so the throttle/backoff logic is unit-testable without a
+/// ProviderContainer. The goal is to stop the phone overwhelming its own
+/// bridge with status polls — measured: 90% of all command timeouts were the
+/// remote getState poll firing every 10s into a serial bridge queue.
+///
+///   • Remote base 10s / local base 1.5s (unchanged steady-state).
+///   • Backgrounded → poll rarely (remote 60s) / slowly (local 10s): the user
+///     isn't watching live state, so don't flood the queue.
+///   • Failure backoff applies ONLY once the bridge is already marked offline
+///     (consecutiveFailures >= downgradeThreshold). The first N failures stay
+///     at base cadence so the offline indicator still trips on time; afterward
+///     we stop hammering a dead bridge, capped at [maxBackoff], still polling
+///     often enough to notice recovery.
+class PollCadencePolicy {
+  static const remoteBase = Duration(seconds: 10);
+  static const localBase = Duration(milliseconds: 1500);
+  static const remoteBackground = Duration(seconds: 60);
+  static const localBackground = Duration(seconds: 10);
+  static const maxBackoff = Duration(seconds: 120);
+
+  static Duration intervalFor({
+    required bool isRemote,
+    required bool backgrounded,
+    required int consecutiveFailures,
+    required int downgradeThreshold,
+  }) {
+    final base = isRemote ? remoteBase : localBase;
+    if (backgrounded) return isRemote ? remoteBackground : localBackground;
+    // Failure backoff is remote-only: a LAN failure flips offline immediately
+    // and a fast local retry is cheap. Kicks in only after the offline
+    // threshold so the indicator isn't slowed.
+    if (isRemote && consecutiveFailures >= downgradeThreshold) {
+      final over = consecutiveFailures - downgradeThreshold; // 0,1,2,...
+      final shift = (over + 1).clamp(1, 4); // mult 2,4,8,16
+      final backed = base * (1 << shift);
+      return backed > maxBackoff ? maxBackoff : backed;
+    }
+    return base;
+  }
+}
+
+/// Thin lifecycle observer that forwards app foreground/background transitions
+/// to [WledNotifier] so it can adjust poll cadence. Kept separate so the
+/// notifier doesn't have to be a WidgetsBindingObserver itself.
+class _WledPollLifecycleObserver extends WidgetsBindingObserver {
+  _WledPollLifecycleObserver(this.onState);
+  final void Function(AppLifecycleState) onState;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => onState(state);
+}
+
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
-  Timer? _reconnectTimer;
   bool _posting = false;
   bool _polling = false;
   bool _infoQueried = false;
+
+  /// True while the app is backgrounded — drives poll-cadence backoff so a
+  /// suspended app doesn't keep flooding the bridge queue with status polls.
+  bool _appBackgrounded = false;
+
+  /// Set in onDispose so the self-scheduling poller stops rescheduling after
+  /// the notifier is torn down.
+  bool _disposed = false;
 
   /// Per-transient-type in-flight gate + latest-wins pending slot.
   ///
@@ -412,110 +472,148 @@ class WledNotifier extends Notifier<WledStateModel> {
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
+    // Lifecycle-aware poll backoff: when the app is backgrounded the user
+    // isn't watching live state, so we poll far less often (don't flood the
+    // bridge queue). Registration is defensive — a plain unit test without a
+    // WidgetsBinding simply runs without lifecycle backoff (the cadence policy
+    // is still exercised directly in PollCadencePolicy tests).
+    final lifecycleObserver = _WledPollLifecycleObserver((appState) {
+      final bg = appState == AppLifecycleState.paused ||
+          appState == AppLifecycleState.hidden ||
+          appState == AppLifecycleState.detached;
+      if (bg == _appBackgrounded) return;
+      _appBackgrounded = bg;
+      if (!bg) {
+        // Resumed: refresh immediately, then return to fast cadence.
+        unawaited(_pollOnce());
+      }
+      _scheduleNextPoll();
+    });
+    try {
+      WidgetsBinding.instance.addObserver(lifecycleObserver);
+    } catch (_) {
+      // No binding (unit test) — lifecycle backoff is inert here.
+    }
     _startPolling();
     ref.onDispose(() {
+      _disposed = true;
+      try {
+        WidgetsBinding.instance.removeObserver(lifecycleObserver);
+      } catch (_) {}
       _poller?.cancel();
       _poller = null;
-      _reconnectTimer?.cancel();
-      _reconnectTimer = null;
     });
     return s;
   }
 
   void _startPolling() {
     _poller?.cancel();
-    // Remote mode pays 5-10s per Firestore round-trip under healthy load
-    // and can spike to 30-40s when the bridge queue stalls. A 1.5s LAN-tuned
-    // cadence was the original Item #76 cause; 3s helped but still ran
-    // faster than typical bridge service time and grew the queue under
-    // load (diag 2026-05-12 12:53-12:57). 10s in remote mode matches the
-    // observed service time so the queue stays at depth ≤ 1 thanks to the
-    // _polling in-flight gate below. Local-mode 1.5s unchanged.
-    final pollMs = ref.read(isRemoteModeProvider) ? 10000 : 1500;
-    // Cold-start hydration: Timer.periodic fires its first callback AFTER
-    // `pollMs`, so without this the dashboard sits on WledStateModel.initial()
-    // for the full poll period before any request is issued (BRIDGE_LATENCY
-    // _AUDIT_2026-05 §1). Fire a one-shot fetch unawaited so it races the
-    // first periodic tick instead of blocking it. `_pollOnce` is re-entry-
-    // safe (`_polling` guard) and null-repo-safe; on null repo it returns
-    // silently and the periodic loop will retry once the repository resolves.
+    // Cold-start hydration: fire one immediate fetch so the dashboard doesn't
+    // sit on WledStateModel.initial() for a full poll interval (BRIDGE_LATENCY
+    // _AUDIT_2026-05 §1). `_pollOnce` is re-entry-safe (`_polling` guard) and
+    // null-repo-safe; on null repo it returns silently and the scheduled loop
+    // retries once the repository resolves.
     unawaited(_pollOnce());
-    _poller = Timer.periodic(Duration(milliseconds: pollMs), (_) async {
-      final service = ref.read(wledRepositoryProvider);
-      if (service == null) return;
-      if (_posting) return; // avoid fighting with user updates
-      // In remote mode, CloudRelayRepository.getState() can take up to 45s
-      // waiting for the bridge to respond. Without this guard, the periodic
-      // timer would fire concurrent getState() calls that all time out
-      // together, instantly hitting the 3-failure threshold and marking the
-      // bridge dead. Caps Firestore-side queue depth at 1.
-      if (_polling) {
-        // Surfaced so diag logs show when remote-mode latency exceeded the
-        // poll interval and a tick was suppressed. Expected occasionally
-        // under heavy bridge load; sustained skips indicate a stall.
-        debugPrint('🔍 BridgeRouter: poll skipped (previous in-flight)');
-        return;
-      }
-      _polling = true;
-      try {
-        final data = await service.getState();
-        final isRemote = ref.read(isRemoteModeProvider);
-        if (data == null) {
-          if (isRemote) {
-            _consecutiveRemoteFailures++;
-            // Fix D: defer state.connected flip until threshold reached in
-            // remote mode. A single null/timeout poll is normal during bridge
-            // queue spikes (10-30s round-trips) and shouldn't trigger the
-            // disconnected indicator. The same threshold gates both the dot
-            // and bridgeReachableProvider so they flip together.
-            if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
-              if (state.connected) {
-                state = state.copyWith(connected: false);
-              }
-              ref.read(bridgeReachableProvider.notifier).state = false;
-            }
-          } else {
-            // Local mode: flip immediately as before — LAN HTTP failure is
-            // more likely real (no queue layer to absorb transient spikes).
+    _scheduleNextPoll();
+  }
+
+  /// Self-scheduling background poll (replaces the old fixed Timer.periodic).
+  ///
+  /// One-shot timer that reschedules itself after every tick, with the
+  /// interval computed by [PollCadencePolicy] — so the cadence adapts to
+  /// app-background state and to consecutive-failure backoff. This is the
+  /// SINGLE getState stream to the bridge: the previous separate 10s reconnect
+  /// timer (unguarded, ran concurrently with this poller, doubling load on an
+  /// already-struggling bridge) has been removed. This poller never stops on
+  /// its own, so it also owns recovery detection.
+  void _scheduleNextPoll() {
+    if (_disposed) return;
+    _poller?.cancel();
+    final interval = PollCadencePolicy.intervalFor(
+      isRemote: ref.read(isRemoteModeProvider),
+      backgrounded: _appBackgrounded,
+      consecutiveFailures: _consecutiveRemoteFailures,
+      downgradeThreshold: _maxRemoteFailuresBeforeDowngrade,
+    );
+    _poller = Timer(interval, () async {
+      await _runPollTick();
+      _scheduleNextPoll();
+    });
+  }
+
+  /// One background poll attempt. Preserves the original periodic-callback
+  /// semantics — in-flight + posting guards, remote-failure counting, the
+  /// 3-strike offline downgrade, and the one-shot RGBW query — only the
+  /// scheduling moved out into [_scheduleNextPoll].
+  Future<void> _runPollTick() async {
+    final service = ref.read(wledRepositoryProvider);
+    if (service == null) return;
+    if (_posting) return; // avoid fighting with user updates
+    // In-flight guard: in remote mode CloudRelayRepository.getState() can take
+    // up to 45s. Skipping while one is pending prevents the poll pile-up that
+    // floods the bridge's serial queue — caps in-flight depth at 1.
+    if (_polling) {
+      debugPrint('🔍 BridgeRouter: poll skipped (previous in-flight)');
+      return;
+    }
+    _polling = true;
+    try {
+      final data = await service.getState();
+      final isRemote = ref.read(isRemoteModeProvider);
+      if (data == null) {
+        if (isRemote) {
+          _consecutiveRemoteFailures++;
+          // Fix D: defer state.connected flip until threshold reached in
+          // remote mode. A single null/timeout poll is normal during bridge
+          // queue spikes and shouldn't trigger the disconnected indicator.
+          // The same threshold gates both the dot and bridgeReachableProvider
+          // so they flip together. Backoff (PollCadencePolicy) only engages
+          // AFTER this threshold, so the indicator still trips on time.
+          if (_consecutiveRemoteFailures >= _maxRemoteFailuresBeforeDowngrade) {
             if (state.connected) {
               state = state.copyWith(connected: false);
             }
-            // Repository transitioned remote → local at some point; clear
-            // any stacked remote failures so the next remote session starts
-            // fresh (Fix D reset semantics).
-            _consecutiveRemoteFailures = 0;
+            ref.read(bridgeReachableProvider.notifier).state = false;
           }
-          _ensureReconnectTimer();
-          return;
+        } else {
+          // Local mode: flip immediately as before — LAN HTTP failure is
+          // more likely real (no queue layer to absorb transient spikes).
+          if (state.connected) {
+            state = state.copyWith(connected: false);
+          }
+          // Repository transitioned remote → local at some point; clear
+          // any stacked remote failures so the next remote session starts
+          // fresh (Fix D reset semantics).
+          _consecutiveRemoteFailures = 0;
         }
-        _cancelReconnectTimer();
-        // Reset the consecutive-failure counter on ANY successful poll — a
-        // successful local-mode session shouldn't carry stale remote failures
-        // forward (Fix D reset semantics).
-        _consecutiveRemoteFailures = 0;
-        if (isRemote) {
-          ref.read(bridgeReachableProvider.notifier).state = true;
-        }
-        try {
-          _applyStateData(data);
-        } catch (e) {
-          debugPrint('WLED parse state error: $e');
-        }
-      } finally {
-        _polling = false;
+        return;
       }
+      // Reset the consecutive-failure counter on ANY successful poll — also
+      // collapses the failure backoff back to base cadence on the next
+      // schedule, and clears the offline indicator.
+      _consecutiveRemoteFailures = 0;
+      if (isRemote) {
+        ref.read(bridgeReachableProvider.notifier).state = true;
+      }
+      try {
+        _applyStateData(data);
+      } catch (e) {
+        debugPrint('WLED parse state error: $e');
+      }
+    } finally {
+      _polling = false;
+    }
 
-      // Query RGBW support once after connection
-      if (!_infoQueried) {
-        _infoQueried = true;
-        try {
-          final rgbw = await service.supportsRgbw();
-          state = state.copyWith(supportsRgbw: rgbw);
-        } catch (e) {
-          debugPrint('supportsRgbw check failed: $e');
-        }
+    // Query RGBW support once after connection
+    if (!_infoQueried) {
+      _infoQueried = true;
+      try {
+        final rgbw = await service.supportsRgbw();
+        state = state.copyWith(supportsRgbw: rgbw);
+      } catch (e) {
+        debugPrint('supportsRgbw check failed: $e');
       }
-    });
+    }
   }
 
   /// Single immediate state fetch — used right after a command completes so
@@ -780,6 +878,32 @@ class WledNotifier extends Notifier<WledStateModel> {
   @visibleForTesting
   bool get hasReconciledOnStartupForTest => _hasReconciledOnStartup;
 
+  // ── Poll-throttle test hooks (cut bridge backpressure) ──────────────
+  @visibleForTesting
+  Future<void> debugPollOnce() => _pollOnce();
+
+  @visibleForTesting
+  Future<void> debugRunPollTick() => _runPollTick();
+
+  @visibleForTesting
+  bool get debugIsPolling => _polling;
+
+  @visibleForTesting
+  int get debugConsecutiveFailures => _consecutiveRemoteFailures;
+
+  @visibleForTesting
+  set debugBackgrounded(bool v) => _appBackgrounded = v;
+
+  /// The interval the next scheduled poll would use, given current failure /
+  /// background state. Mirrors what [_scheduleNextPoll] reads.
+  @visibleForTesting
+  Duration debugNextPollInterval() => PollCadencePolicy.intervalFor(
+        isRemote: ref.read(isRemoteModeProvider),
+        backgrounded: _appBackgrounded,
+        consecutiveFailures: _consecutiveRemoteFailures,
+        downgradeThreshold: _maxRemoteFailuresBeforeDowngrade,
+      );
+
   /// Fetches preset names from the WLED controller and sets the active label.
   /// If the requested preset isn't in the cached map (e.g. it was added
   /// after we first fetched), drop the cache and retry once.
@@ -828,31 +952,6 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
-  void _ensureReconnectTimer() {
-    if (_reconnectTimer?.isActive == true) return;
-    _reconnectTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
-      final service = ref.read(wledRepositoryProvider);
-      if (service == null) return;
-      try {
-        final data = await service.getState();
-        if (data != null) {
-          _cancelReconnectTimer();
-          _applyStateData(data);
-          _startPolling();
-        }
-      } catch (e) {
-        debugPrint('Reconnect ping failed: $e');
-      }
-    });
-  }
-
-  void _cancelReconnectTimer() {
-    if (_reconnectTimer != null) {
-      _reconnectTimer!.cancel();
-      _reconnectTimer = null;
-    }
-  }
-
   /// Force refresh connection state - call when app resumes from background
   Future<void> refreshConnection() async {
     debugPrint('🔄 WledNotifier: Refreshing connection...');
@@ -882,7 +981,6 @@ class WledNotifier extends Notifier<WledStateModel> {
       final data = await service.getState();
       if (data != null) {
         debugPrint('🔄 WledNotifier: Connection restored');
-        _cancelReconnectTimer();
         // Full state parse — colors, effect, speed, reverse, etc.
         _applyStateData(data);
         // Query RGBW support if not yet done
@@ -900,12 +998,12 @@ class WledNotifier extends Notifier<WledStateModel> {
       } else {
         debugPrint('🔄 WledNotifier: Connection failed, starting reconnect timer');
         state = state.copyWith(connected: false);
-        _ensureReconnectTimer();
+        _scheduleNextPoll();
       }
     } catch (e) {
       debugPrint('🔄 WledNotifier: Refresh failed: $e');
       state = state.copyWith(connected: false);
-      _ensureReconnectTimer();
+      _scheduleNextPoll();
     }
   }
 
@@ -1308,7 +1406,7 @@ class WledNotifier extends Notifier<WledStateModel> {
 
       if (!ok && state.connected) {
         state = state.copyWith(connected: false);
-        _ensureReconnectTimer();
+        _scheduleNextPoll();
       }
       if (!ok) {
         // Surface failure so the dashboard can show a non-blocking snackbar.
