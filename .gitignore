@@ -108,9 +108,18 @@ coverage/
 .env.*
 *.keystore
 *service-account*.json
+*serviceaccount*.json
 *mint-admin.json
 *firebase-adminsdk*.json
+*-adminsdk-*.json
 **/key.properties
+# Explicit: this admin SDK key lives on-disk for local diag scripts only —
+# never commit it (also covered by *firebase-adminsdk*.json above).
+android/app/*-firebase-adminsdk-*.json
+
+# Pulled diagnostic data from read-only Firestore scans (may contain device
+# state / IPs). Keep local — never commit.
+scripts/diag-*.json
 
 # Bridge firmware secrets — config.h files contain real credentials.
 # Use config.h.example as the committed template.
