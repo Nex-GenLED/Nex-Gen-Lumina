@@ -37,7 +37,7 @@ class CloudRelayRepository implements WledRepository {
   /// Webhook URL for DIY mode. Leave empty for ESP32 Bridge mode.
   final String webhookUrl;
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore;
 
   /// Timeout for waiting for command execution.
   ///
@@ -47,7 +47,11 @@ class CloudRelayRepository implements WledRepository {
   /// keeps the snackbar from firing while the bridge is still completing
   /// the command. Pair-tuned with the 3s remote poll cadence in
   /// WledNotifier (Item #76 latency fix).
-  static const _commandTimeout = Duration(seconds: 45);
+  ///
+  /// Instance field (defaulting to [_kDefaultCommandTimeout]) so tests can
+  /// inject a short window; production behaviour is unchanged at 45s.
+  static const _kDefaultCommandTimeout = Duration(seconds: 45);
+  final Duration _commandTimeout;
 
   /// Polling interval — retained as a fallback knob, but the primary
   /// completion path is a Firestore `snapshots()` listener now. The poll
@@ -61,7 +65,10 @@ class CloudRelayRepository implements WledRepository {
     required this.controllerId,
     required this.controllerIp,
     required this.webhookUrl,
-  });
+    FirebaseFirestore? firestore,
+    Duration? commandTimeout,
+  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+        _commandTimeout = commandTimeout ?? _kDefaultCommandTimeout;
 
   /// Reference to the commands collection for this user.
   CollectionReference<Map<String, dynamic>> get _commandsRef =>
@@ -118,15 +125,27 @@ class CloudRelayRepository implements WledRepository {
       diagSub?.cancel();
 
       if (result == null) {
-        debugPrint('❌ CloudRelay: Command sent but not confirmed by controller. '
-            'Bridge may be offline. (type=$type, docId=$commandId)');
-        debugPrint('BridgeDiag: command TIMEOUT at ${_commandTimeout.inMilliseconds}ms, type=$type, controllerId=$controllerId');
-        // Mark as timeout
-        await docRef.update({'status': 'timeout'});
+        // The watchdog elapsed without the listener observing a terminal
+        // status. DO NOT blind-overwrite status:'timeout' (#52) — the bridge
+        // may have completed the command while our snapshots() listener
+        // silently died (swallowed onError / parse throw), leaving a
+        // populated `result` we never saw. Do ONE authoritative,
+        // transactional read: a late result MUST win. Only stamp 'timeout'
+        // when the doc genuinely has no result and is still non-terminal.
+        final reconciled = await _reconcileAfterWatchdog(docRef, type, commandId);
+        if (reconciled != null) {
+          debugPrint('🔍 BridgeRouter: send result=completed (late, post-watchdog reconcile), error=none');
+          return reconciled.result;
+        }
+        debugPrint('❌ CloudRelay: genuine timeout — no result after ${_commandTimeout.inSeconds}s '
+            '(type=$type, docId=$commandId)');
         return null;
       }
 
-      if (result.status == CommandStatus.completed) {
+      // Result-derived success: treat the command as succeeded when the doc
+      // is marked completed OR carries a populated result, regardless of the
+      // status label (defense-in-depth against a stale/raced status field).
+      if (result.status == CommandStatus.completed || _hasResult(result)) {
         // End-to-end latency from Firestore createdAt to completedAt. Both
         // are server timestamps, so this is independent of client clock skew.
         final completedAt = result.completedAt;
@@ -179,18 +198,36 @@ class CloudRelayRepository implements WledRepository {
         if (!snap.exists) return;
         try {
           final command = RemoteCommand.fromFirestore(snap);
-          if (command.isComplete) {
+          // Resolve on a terminal status OR a populated result — a parse-safe
+          // success is detected even if the status label lags. The catch
+          // below keeps a parse throw from ending detection (the stream stays
+          // subscribed; the watchdog reconcile is the final backstop).
+          if (command.isComplete || _hasResult(command)) {
             resolve(command);
           }
         } catch (e) {
           debugPrint('CloudRelay: snapshot parse error: $e');
         }
       },
-      onError: (e) {
-        // Don't bail on transient stream errors — let the timeout decide
-        // whether this is fatal. Matches the resilience of the prior
-        // polling loop which also continued through individual .get() errors.
-        debugPrint('CloudRelay: snapshot listener error: $e');
+      onError: (e) async {
+        // A stream error must NOT silently kill detection (#52): the prior
+        // code only debugPrinted, so a transient error left the listener dead
+        // while the bridge later completed the command into a `result` we
+        // never observed. Do a one-shot fallback get(); resolve if the doc is
+        // already terminal/has a result, otherwise let the watchdog + reconcile
+        // transaction make the final call.
+        debugPrint('CloudRelay: snapshot listener error: $e — fallback get()');
+        try {
+          final snap = await _commandsRef.doc(commandId).get();
+          if (snap.exists) {
+            final command = RemoteCommand.fromFirestore(snap);
+            if (command.isComplete || _hasResult(command)) {
+              resolve(command);
+            }
+          }
+        } catch (e2) {
+          debugPrint('CloudRelay: fallback get() after listener error failed: $e2');
+        }
       },
     );
 
@@ -198,6 +235,77 @@ class CloudRelayRepository implements WledRepository {
 
     return completer.future;
   }
+
+  /// True when the command doc carries a populated WLED result payload —
+  /// the authoritative "this command actually succeeded" signal (#52). A
+  /// command that returned valid state SUCCEEDED regardless of how long it
+  /// took or what the status field happens to read.
+  static bool _hasResult(RemoteCommand c) =>
+      c.result != null && c.result!.isNotEmpty;
+
+  /// Authoritative post-watchdog reconciliation (#52).
+  ///
+  /// Called only when [_waitForCompletion] elapsed without observing a
+  /// terminal status. Reads the doc and decides the final outcome ATOMICALLY
+  /// so a late bridge result can never be clobbered by a blind timeout write:
+  ///
+  ///   • result populated (or status already `completed`) → SUCCESS; returns
+  ///     the [RemoteCommand]. No write — never stamp 'timeout' over a result.
+  ///   • status already `failed`                          → terminal failure;
+  ///     returns null. No timeout write.
+  ///   • still `pending`/`executing` with no result        → genuine timeout;
+  ///     stamps status:'timeout' inside the SAME transaction and returns null.
+  ///
+  /// Doing the read + conditional write in one transaction (rather than
+  /// get()-then-update()) closes the smaller race the naive fix would
+  /// reintroduce: between a separate get and update, the bridge could write a
+  /// result that the update would then overwrite. Within the transaction the
+  /// decision is consistent, and any bridge write that lands after commit
+  /// (completed + result) wins on the persisted doc anyway.
+  Future<RemoteCommand?> _reconcileAfterWatchdog(
+    DocumentReference<Map<String, dynamic>> docRef,
+    String type,
+    String commandId,
+  ) async {
+    try {
+      return await _firestore.runTransaction<RemoteCommand?>((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) return null;
+        final cmd = RemoteCommand.fromFirestore(snap);
+
+        // Late success — the listener missed it but the result is here.
+        if (_hasResult(cmd) || cmd.status == CommandStatus.completed) {
+          return cmd;
+        }
+        // Bridge explicitly failed — honor it; do not relabel as timeout.
+        if (cmd.status == CommandStatus.failed) {
+          return null;
+        }
+        // Genuine no-response: only NOW is 'timeout' correct, and only while
+        // the doc is still non-terminal and result-less.
+        if (cmd.status == CommandStatus.pending ||
+            cmd.status == CommandStatus.executing) {
+          tx.update(docRef, {'status': 'timeout'});
+        }
+        return null;
+      });
+    } catch (e) {
+      // Transaction failure (offline, contention exhaustion) — fall back to
+      // treating this as a timeout for the caller. We deliberately do NOT
+      // blind-write status here; leaving the doc as-is lets a later bridge
+      // write still land correctly.
+      debugPrint('CloudRelay: watchdog reconcile txn failed for $commandId: $e — treating as timeout');
+      return null;
+    }
+  }
+
+  /// Test-only hook to drive [_reconcileAfterWatchdog] against a known doc
+  /// state (the reconcile success-branch is otherwise hard to reach when the
+  /// snapshots() listener resolves normally). Not used in production.
+  @visibleForTesting
+  Future<RemoteCommand?> debugReconcileAfterWatchdog(
+          DocumentReference<Map<String, dynamic>> docRef) =>
+      _reconcileAfterWatchdog(docRef, 'getState', docRef.id);
 
   /// Execute a command and return success/failure boolean.
   Future<bool> _executeBool(String type, Map<String, dynamic> payload) async {
