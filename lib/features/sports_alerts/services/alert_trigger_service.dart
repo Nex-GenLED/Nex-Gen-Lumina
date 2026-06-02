@@ -5,11 +5,23 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../../models/autopilot_override.dart';
 import '../../../services/autopilot_scheduler.dart';
+import '../../wled/wled_payload_utils.dart' show applyChannelFilter;
 import '../../wled/wled_service.dart';
+import '../../wled/zone_providers.dart'
+    show DeviceChannel, deviceChannelsFromConfig;
 import '../data/team_colors.dart';
 import '../models/score_alert_config.dart';
 import '../models/score_alert_event.dart';
 import '../models/sport_type.dart';
+
+/// One step of a score-celebration animation: a WLED payload whose `seg` is a
+/// single NO-ID template (the caller channel-filters it across all configured
+/// channels), held for [hold] before the next step.
+class AlertAnimationStep {
+  final Map<String, dynamic> payload;
+  final Duration hold;
+  const AlertAnimationStep(this.payload, this.hold);
+}
 
 /// Notification channel for sports score alerts.
 const _kAndroidChannel = AndroidNotificationDetails(
@@ -31,6 +43,21 @@ const _kNotificationDetails = NotificationDetails(
 /// Uses the existing [WledService] HTTP integration to send JSON payloads
 /// to the Dig-Octa / WLED controller. Captures the current zone state before
 /// each animation and restores it afterwards.
+///
+/// **Two-level targeting (channel-2 fix):**
+///   - [_controllerIps] is the OUTER loop — one entry per *physical
+///     controller* (separate IP), sourced from `activeAreaControllerIpsProvider`
+///     (linked-residential set or all discovered controllers). This is genuine
+///     multi-CONTROLLER fan-out, NOT dead plumbing.
+///   - For EACH controller, channels are resolved from that controller's own
+///     hardware buses ([_resolveChannels] → [deviceChannelsFromConfig]) and the
+///     animation payloads are routed through [applyChannelFilter] so every
+///     configured channel (bus) is addressed — not just seg 0 / channel 1.
+///
+/// Resolving channels per-controller (rather than receiving them from a
+/// provider, as the Game Day fix does) is required because this service also
+/// runs inside the sports background isolate, which has no Riverpod container —
+/// and because channels differ per controller.
 ///
 /// When an [AutopilotScheduler] is provided (i.e. autopilot is active), state
 /// capture and restoration are delegated to the scheduler via the override
@@ -92,11 +119,23 @@ class AlertTriggerService {
       for (final ip in _controllerIps) {
         final svc = WledService('http://$ip');
         try {
+          // Resolve THIS controller's channels from its own hardware buses so
+          // the celebration fans out across every configured channel (the
+          // channel-2 fix), independent of the participation cache.
+          final channels = await _resolveChannels(svc);
+          if (channels.isEmpty) {
+            // U1 gate: can't read this controller's channel config — skip it
+            // rather than fall back to a seg-0-only (channel-1-only) write.
+            debugPrint(
+                '[AlertTrigger] $ip: no channels resolved — skipping (U1 gate)');
+            continue;
+          }
+
           // Only do our own capture/restore if autopilot is NOT managing it
           final previousState =
               (token == null) ? await _captureZoneState(svc) : <String, dynamic>{};
 
-          await _applyAlertAnimation(event.eventType, teamColors, svc);
+          await _applyAlertAnimation(event.eventType, teamColors, svc, channels);
 
           if (token == null) {
             await _restoreZoneState(svc, previousState);
@@ -179,225 +218,180 @@ class AlertTriggerService {
   }
 
   // ---------------------------------------------------------------------------
+  // Channel resolution
+  // ---------------------------------------------------------------------------
+
+  /// Resolve a controller's channels from its own hardware buses
+  /// (`/json/cfg → hw.led.ins[]`). Returns an empty list when the config can't
+  /// be read — the caller treats that as the U1 "skip this controller" gate.
+  Future<List<DeviceChannel>> _resolveChannels(WledService svc) async {
+    try {
+      return deviceChannelsFromConfig(await svc.getConfig());
+    } catch (e) {
+      debugPrint('[AlertTrigger] resolveChannels failed: $e');
+      return const [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // LED animation sequences
   // ---------------------------------------------------------------------------
 
-  /// Dispatch the correct animation for the given [eventType].
+  /// Play the celebration for [eventType] on a single controller, fanning each
+  /// step out across [channels] via [applyChannelFilter] (multi-seg-with-ids →
+  /// survives the participation chokepoint by Rule 4, lighting EVERY channel).
+  ///
+  /// Animation content (effects / speeds / colors / timing) is identical to the
+  /// previous per-method sequences — see [buildAnimationSteps]. Only the channel
+  /// targeting changes: hardcoded `id:0` → per-channel fan-out.
   Future<void> _applyAlertAnimation(
     AlertEventType eventType,
     TeamColors team,
     WledService svc,
+    List<DeviceChannel> channels,
   ) async {
-    switch (eventType) {
-      case AlertEventType.touchdown:
-      case AlertEventType.goal:
-        await _animateTouchdownGoal(team, svc);
-
-      case AlertEventType.fieldGoal:
-        await _animateFieldGoal(team, svc);
-
-      case AlertEventType.safety:
-        await _animateSafety(team, svc);
-
-      case AlertEventType.run:
-        await _animateRun(team, svc);
-
-      case AlertEventType.quarterEndWinning:
-        await _animateQuarterEnd(team, svc);
-
-      case AlertEventType.clutchBasket:
-        await _animateClutchBasket(team, svc);
-
-      case AlertEventType.soccerGoal:
-        await _animateSoccerGoal(team, svc);
-
-      case AlertEventType.turnover:
-        // Phase 2 — no animation yet.
-        break;
+    final ids = channels.map((c) => c.id).toList();
+    for (final step in buildAnimationSteps(eventType, team)) {
+      await svc.applyJson(applyChannelFilter(step.payload, ids, channels));
+      await Future<void>.delayed(step.hold);
     }
   }
 
-  /// Touchdown / Goal: 15s total.
-  /// Strobe (2s) → Color Wipe (5s) → Running Lights (8s).
-  Future<void> _animateTouchdownGoal(TeamColors team, WledService svc) async {
-    final colors = _teamColorArray(team);
-
-    // Phase 1: Strobe — effect ID 2
-    await svc.applyJson({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {'id': 0, 'fx': 2, 'sx': 240, 'ix': 255, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 2));
-
-    // Phase 2: Color Wipe — effect ID 9
-    await svc.applyJson({
-      'seg': [
-        {'id': 0, 'fx': 9, 'sx': 180, 'ix': 200, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 5));
-
-    // Phase 3: Running Lights — effect ID 63
-    await svc.applyJson({
-      'seg': [
-        {'id': 0, 'fx': 63, 'sx': 128, 'ix': 200, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 8));
-  }
-
-  /// Field Goal: 8s — Pulse/breathing in team primary (3 pulses).
-  /// Breathe effect = ID 2 (Breathe) at moderate speed.
-  Future<void> _animateFieldGoal(TeamColors team, WledService svc) async {
-    final primary = colorToRgbw(team.primary);
-
-    // Breathe effect ID 2 → actually WLED "Breathe" is fx 2 when
-    // using the standard effect list; for pulse we use Breath (ID 2)
-    // with speed tuned for ~3 pulses in 8s.
-    await svc.applyJson({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {
-          'id': 0,
-          'fx': 2,
-          'sx': 110,
-          'ix': 255,
-          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
-        },
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 8));
-  }
-
-  /// Safety: 6s — fast flash in team primary.
-  /// Strobe effect (ID 23 = Strobe Mega) at max speed.
-  Future<void> _animateSafety(TeamColors team, WledService svc) async {
-    final primary = colorToRgbw(team.primary);
-
-    await svc.applyJson({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {
-          'id': 0,
-          'fx': 23,
-          'sx': 255,
-          'ix': 255,
-          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
-        },
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 6));
-  }
-
-  /// Run scored: 6s (max 10s) — Theater Chase in team colors.
-  /// Theater Chase = effect ID 5.
-  Future<void> _animateRun(TeamColors team, WledService svc) async {
-    final colors = _teamColorArray(team);
-
-    await svc.applyJson({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {'id': 0, 'fx': 5, 'sx': 160, 'ix': 200, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 6));
-  }
-
-  /// Quarter end winning: 10s — slow breathe in team primary.
-  Future<void> _animateQuarterEnd(TeamColors team, WledService svc) async {
-    final primary = colorToRgbw(team.primary);
-
-    await svc.applyJson({
-      'on': true,
-      'bri': 200,
-      'seg': [
-        {
-          'id': 0,
-          'fx': 2,
-          'sx': 60,
-          'ix': 255,
-          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
-        },
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 10));
-  }
-
-  /// Clutch basket: 5s — rapid flash in team primary.
-  Future<void> _animateClutchBasket(TeamColors team, WledService svc) async {
-    final primary = colorToRgbw(team.primary);
-
-    await svc.applyJson({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {
-          'id': 0,
-          'fx': 23,
-          'sx': 240,
-          'ix': 255,
-          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
-        },
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 5));
-  }
-
-  /// Soccer Goal: 20s total.
-  /// Slow Build Chase (6s) → Peak Flash (4s) → Celebration Running (6s) → Slow Fade (4s).
-  /// Goals are rare in soccer — the celebration is deliberately longer and
-  /// builds from a slow chase into a dramatic strobe peak before fading.
-  Future<void> _animateSoccerGoal(TeamColors team, WledService svc) async {
+  /// Pure builder for a celebration's ordered animation steps. Each step's `seg`
+  /// is a single NO-ID template (the player channel-filters it). Exposed for
+  /// unit tests that lock the animation content + prove the channel fan-out.
+  ///
+  /// Sequences (unchanged from the legacy per-event methods):
+  ///   - touchdown / goal      15s: Strobe fx2 (2s) → Wipe fx9 (5s) → Running fx63 (8s)
+  ///   - fieldGoal              8s: Breathe fx2
+  ///   - safety                 6s: Strobe Mega fx23
+  ///   - run                    6s: Theater Chase fx5
+  ///   - quarterEndWinning     10s: slow Breathe fx2
+  ///   - clutchBasket           5s: rapid Strobe fx23
+  ///   - soccerGoal            20s: Chase fx28 (6s) → Strobe fx23 (4s) → Running fx63 (6s) → Breathe fx2 (4s)
+  ///   - turnover                  : no animation (Phase 2)
+  static List<AlertAnimationStep> buildAnimationSteps(
+    AlertEventType eventType,
+    TeamColors team,
+  ) {
     final colors = _teamColorArray(team);
     final primary = colorToRgbw(team.primary);
+    List<List<int>> primaryOnly() => [
+          List<int>.from(primary),
+          [0, 0, 0, 0],
+          [0, 0, 0, 0],
+        ];
 
-    // Phase 1: Slow Build Chase — Chase effect (fx:28) at moderate speed
-    await svc.applyJson({
-      'on': true,
-      'bri': 180,
-      'seg': [
-        {'id': 0, 'fx': 28, 'sx': 100, 'ix': 200, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 6));
+    switch (eventType) {
+      case AlertEventType.touchdown:
+      case AlertEventType.goal:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 2, 'sx': 240, 'ix': 255, 'col': colors},
+            ],
+          }, const Duration(seconds: 2)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 9, 'sx': 180, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 5)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 63, 'sx': 128, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 8)),
+        ];
 
-    // Phase 2: Peak Flash — Strobe Mega (fx:23) at max brightness
-    await svc.applyJson({
-      'bri': 255,
-      'seg': [
-        {'id': 0, 'fx': 23, 'sx': 200, 'ix': 255, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 4));
+      case AlertEventType.fieldGoal:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 2, 'sx': 110, 'ix': 255, 'col': primaryOnly()},
+            ],
+          }, const Duration(seconds: 8)),
+        ];
 
-    // Phase 3: Celebration — Running Lights (fx:63) with both team colors
-    await svc.applyJson({
-      'seg': [
-        {'id': 0, 'fx': 63, 'sx': 140, 'ix': 220, 'col': colors},
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 6));
+      case AlertEventType.safety:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 23, 'sx': 255, 'ix': 255, 'col': primaryOnly()},
+            ],
+          }, const Duration(seconds: 6)),
+        ];
 
-    // Phase 4: Slow Fade — Breathe (fx:2) at low speed for fade-out
-    await svc.applyJson({
-      'bri': 120,
-      'seg': [
-        {
-          'id': 0,
-          'fx': 2,
-          'sx': 40,
-          'ix': 200,
-          'col': [primary, [0, 0, 0, 0], [0, 0, 0, 0]],
-        },
-      ],
-    });
-    await Future<void>.delayed(const Duration(seconds: 4));
+      case AlertEventType.run:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 5, 'sx': 160, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 6)),
+        ];
+
+      case AlertEventType.quarterEndWinning:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 200,
+            'seg': [
+              {'fx': 2, 'sx': 60, 'ix': 255, 'col': primaryOnly()},
+            ],
+          }, const Duration(seconds: 10)),
+        ];
+
+      case AlertEventType.clutchBasket:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 23, 'sx': 240, 'ix': 255, 'col': primaryOnly()},
+            ],
+          }, const Duration(seconds: 5)),
+        ];
+
+      case AlertEventType.soccerGoal:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 180,
+            'seg': [
+              {'fx': 28, 'sx': 100, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 6)),
+          AlertAnimationStep({
+            'bri': 255,
+            'seg': [
+              {'fx': 23, 'sx': 200, 'ix': 255, 'col': colors},
+            ],
+          }, const Duration(seconds: 4)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 63, 'sx': 140, 'ix': 220, 'col': colors},
+            ],
+          }, const Duration(seconds: 6)),
+          AlertAnimationStep({
+            'bri': 120,
+            'seg': [
+              {'fx': 2, 'sx': 40, 'ix': 200, 'col': primaryOnly()},
+            ],
+          }, const Duration(seconds: 4)),
+        ];
+
+      case AlertEventType.turnover:
+        // Phase 2 — no animation yet.
+        return const [];
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -405,7 +399,7 @@ class AlertTriggerService {
   // ---------------------------------------------------------------------------
 
   /// Build the WLED 3-slot color array: [primary, secondary, black].
-  List<List<int>> _teamColorArray(TeamColors team) => [
+  static List<List<int>> _teamColorArray(TeamColors team) => [
         colorToRgbw(team.primary),
         colorToRgbw(team.secondary),
         [0, 0, 0, 0],

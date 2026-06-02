@@ -71,11 +71,17 @@ class DeviceChannel {
   });
 }
 
-/// Derives channels from hardware bus configuration (`/json/cfg → hw.led.ins[]`).
-/// Each bus becomes one channel with its LED range and GPIO pin.
-final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
-  final hwConfig = ref.watch(deviceHardwareConfigProvider).valueOrNull;
-  if (hwConfig == null || hwConfig.buses.isEmpty) return [];
+/// Pure bus → channel derivation: each WLED bus (`hw.led.ins[]` entry) becomes
+/// one [DeviceChannel] with its LED range and GPIO pin. Shared by
+/// [deviceChannelsProvider] (UI isolate, via Riverpod) and the Riverpod-free
+/// paths that must resolve channels straight from a [WledHardwareConfig] —
+/// e.g. [AlertTriggerService] resolving each controller's channels inside the
+/// background isolate, where no provider container exists.
+///
+/// Returns an empty list for a null/empty config (caller treats that as the U1
+/// "nothing to target" gate). Keep this in lockstep with [deviceChannelsProvider].
+List<DeviceChannel> deviceChannelsFromConfig(WledHardwareConfig? hwConfig) {
+  if (hwConfig == null || hwConfig.buses.isEmpty) return const [];
   return hwConfig.buses.asMap().entries.map((e) {
     final i = e.key;
     final bus = e.value;
@@ -87,6 +93,13 @@ final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
       gpioPin: bus.pin.isNotEmpty ? bus.pin.first : -1,
     );
   }).toList();
+}
+
+/// Derives channels from hardware bus configuration (`/json/cfg → hw.led.ins[]`).
+/// Each bus becomes one channel with its LED range and GPIO pin.
+final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
+  final hwConfig = ref.watch(deviceHardwareConfigProvider).valueOrNull;
+  return deviceChannelsFromConfig(hwConfig);
 });
 
 /// Tracks which channel (bus) IDs the user has explicitly selected for
