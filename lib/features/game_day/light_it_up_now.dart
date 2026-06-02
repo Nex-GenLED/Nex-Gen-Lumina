@@ -24,6 +24,7 @@
 import '../autopilot/game_day_autopilot_config.dart';
 import '../neighborhood/models/group_game_day_autopilot.dart';
 import '../neighborhood/services/path2_host_broadcast.dart';
+import '../wled/zone_providers.dart' show DeviceChannel;
 import 'game_day_apply.dart';
 
 /// Outcome of the unified Light-it-Up-Now button. The UI branches on
@@ -66,17 +67,24 @@ class LightItUpAppliedButBroadcastFailed extends LightItUpNowOutcome {
 ///                         at the UI layer).
 /// - [groupId]           : active neighborhood; null disables broadcast
 ///                         even if [broadcastToGroup] is true (defensive).
+/// - [participatingChannels] / [deviceChannels] : forwarded to
+///                         [applyGameDayConfigToDevice] so the local apply
+///                         enumerates ALL configured channels (channel-2 fix).
 Future<LightItUpNowOutcome> lightItUpNow({
   required ApplyPayloadWithLabelCall applyPayloadWithLabel,
   required ConfigureForTeamCall configureForTeam,
   required GameDayAutopilotConfig config,
   required bool broadcastToGroup,
   required String? groupId,
+  required List<int> participatingChannels,
+  required List<DeviceChannel> deviceChannels,
   DateTime? now,
 }) async {
   final applied = await applyGameDayConfigToDevice(
     applyPayloadWithLabel: applyPayloadWithLabel,
     config: config,
+    participatingChannels: participatingChannels,
+    deviceChannels: deviceChannels,
   );
   if (!applied) {
     return const LightItUpApplyFailed();

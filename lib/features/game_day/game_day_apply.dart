@@ -19,6 +19,8 @@
 import 'dart:ui' show Color;
 
 import '../autopilot/game_day_autopilot_config.dart';
+import '../wled/wled_payload_utils.dart' show applyChannelFilter;
+import '../wled/zone_providers.dart' show DeviceChannel;
 
 /// Shape of [WledNotifier.applyPayloadWithLabel], lifted to a top-
 /// level typedef so this helper does not import the notifier.
@@ -34,12 +36,28 @@ typedef ApplyPayloadWithLabelCall = Future<bool> Function(
 /// [applyPayloadWithLabel] with `'${config.shortTeamName} Game Day'`
 /// as the persistent label hint so Now Playing reads correctly.
 ///
+/// [participatingChannels] is the effective channel-id list
+/// (`effectiveChannelIdsProvider`) and [deviceChannels] the hardware-bus
+/// channel list (`deviceChannelsProvider`). Both callers pass them in so
+/// this helper stays Riverpod-free while owning the SINGLE multi-channel
+/// payload build — neither call site can drift on channel targeting.
+///
 /// Returns the underlying [applyPayloadWithLabel] result: true on
-/// successful device write, false otherwise.
+/// successful device write, false otherwise. Returns false WITHOUT
+/// applying when [participatingChannels] is empty (U1 gate — see below).
 Future<bool> applyGameDayConfigToDevice({
   required ApplyPayloadWithLabelCall applyPayloadWithLabel,
   required GameDayAutopilotConfig config,
+  required List<int> participatingChannels,
+  required List<DeviceChannel> deviceChannels,
 }) async {
+  // U1 empty-gate. `effectiveChannelIdsProvider` returns [] until the
+  // hardware buses load (or when participation gates everything out), so an
+  // empty list means there is nothing to target — bail rather than POST a
+  // payload that can't be aimed. Mirrors applySavedDesign
+  // (apply_saved_design.dart:50-54).
+  if (participatingChannels.isEmpty) return false;
+
   final primary = Color(config.primaryColorValue);
   final secondary = Color(config.secondaryColorValue);
   final basePayload = <String, dynamic>{
@@ -59,10 +77,28 @@ Future<bool> applyGameDayConfigToDevice({
     ],
   };
 
-  // User's named saved design wins over the auto-built basic payload.
-  // Matches the same precedence rule [_activateNow] uses on the Path 1
-  // Game Day Fan Zone screen — the two callers must NOT diverge.
-  final effectivePayload = config.savedDesignPayload ?? basePayload;
+  // Pre-enumerate channels on the auto-built payload so it lights ALL
+  // configured channels regardless of participation-cache warmth — mirrors
+  // applySavedDesign (apply_saved_design.dart:56-61). The basic payload is a
+  // single-seg-no-id "broadcast intent" shape; without this it falls through
+  // `expandForParticipation` Rule 1 on a cold/null participation cache and
+  // only seg 0 (channel 1) is written, leaving channel 2 dark. The filter
+  // produces a multi-seg-with-ids payload that survives the chokepoint via
+  // Rule 4 and lights every channel.
+  final filteredBase =
+      applyChannelFilter(basePayload, participatingChannels, deviceChannels);
+
+  // User's named saved design wins over the auto-built basic payload — same
+  // precedence rule [_activateNow] uses on the Path 1 Game Day Fan Zone
+  // screen; the two callers must NOT diverge.
+  //
+  // The saved payload is ALREADY channel-filtered + multi-seg-with-ids: the
+  // Game Day design picker runs applyChannelFilter before persisting
+  // (pattern_theme_selection.dart:693/719), so it survives the chokepoint via
+  // Rule 4 on its own. Forward it verbatim — re-running applyChannelFilter
+  // would template off seg.first and FLATTEN a per-channel design down to
+  // channel 0's look.
+  final effectivePayload = config.savedDesignPayload ?? filteredBase;
 
   return applyPayloadWithLabel(
     effectivePayload,

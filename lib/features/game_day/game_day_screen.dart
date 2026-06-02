@@ -15,6 +15,7 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
 import '../wled/wled_providers.dart';
+import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
@@ -466,6 +467,8 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       applyPayloadWithLabel:
           ref.read(wledStateProvider.notifier).applyPayloadWithLabel,
       config: config,
+      participatingChannels: ref.read(effectiveChannelIdsProvider),
+      deviceChannels: ref.read(deviceChannelsProvider),
     );
     if (!context.mounted) return;
 

@@ -7,6 +7,15 @@ import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart
 import 'package:nexgen_command/features/game_day/light_it_up_now.dart';
 import 'package:nexgen_command/features/neighborhood/models/group_game_day_autopilot.dart';
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+
+// 2-channel device, forwarded to applyGameDayConfigToDevice so the local
+// apply enumerates all channels. These tests stub applyPayloadWithLabel and
+// only care that the channels thread through, so the values are nominal.
+const _twoChannels = [
+  DeviceChannel(id: 0, name: 'Channel 1', start: 0, stop: 128, gpioPin: 2),
+  DeviceChannel(id: 1, name: 'Channel 2', start: 128, stop: 188, gpioPin: 1),
+];
 
 void main() {
   group('lightItUpNow', () {
@@ -61,7 +70,9 @@ void main() {
           return stubAssembled();
         },
         config: configFor(),
-        broadcastToGroup: false,
+        participatingChannels: const [0, 1],
+        deviceChannels: _twoChannels,
+        broadcastToGroup:false,
         groupId: 'group-abc',
       );
       expect(outcome, isA<LightItUpApplied>());
@@ -85,7 +96,9 @@ void main() {
         }) async =>
             assembled,
         config: configFor(),
-        broadcastToGroup: true,
+        participatingChannels: const [0, 1],
+        deviceChannels: _twoChannels,
+        broadcastToGroup:true,
         groupId: 'group-abc',
         now: now,
       );
@@ -112,7 +125,9 @@ void main() {
           return stubAssembled();
         },
         config: configFor(),
-        broadcastToGroup: true, // would broadcast if apply succeeded
+        participatingChannels: const [0, 1],
+        deviceChannels: _twoChannels,
+        broadcastToGroup:true, // would broadcast if apply succeeded
         groupId: 'group-abc',
       );
       expect(outcome, isA<LightItUpApplyFailed>());
@@ -134,7 +149,9 @@ void main() {
         }) async =>
             throw boom,
         config: configFor(),
-        broadcastToGroup: true,
+        participatingChannels: const [0, 1],
+        deviceChannels: _twoChannels,
+        broadcastToGroup:true,
         groupId: 'group-abc',
       );
       expect(outcome, isA<LightItUpAppliedButBroadcastFailed>());
@@ -158,7 +175,9 @@ void main() {
           return stubAssembled();
         },
         config: configFor(),
-        broadcastToGroup: true,
+        participatingChannels: const [0, 1],
+        deviceChannels: _twoChannels,
+        broadcastToGroup:true,
         groupId: null,
       );
       expect(outcome, isA<LightItUpApplied>());

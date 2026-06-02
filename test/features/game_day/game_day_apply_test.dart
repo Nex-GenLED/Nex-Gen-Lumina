@@ -1,15 +1,24 @@
 // Tests for [applyGameDayConfigToDevice] — the shared payload builder
 // + apply path used by both Path 1's _activateNow and Path 2's "Light
-// it Up Now". Verifies the basic payload shape, the
-// savedDesignPayload override precedence, and the label hint format.
+// it Up Now". Verifies the multi-channel payload shape (channel-2 fix),
+// the savedDesignPayload override precedence, the U1 empty-gate, and the
+// label hint format.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
 import 'package:nexgen_command/features/game_day/game_day_apply.dart';
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 void main() {
   group('applyGameDayConfigToDevice', () {
+    // A 2-channel device (matches the hardware probe on 192.168.1.250:
+    // seg 0 = 0-128 Front Roofline, seg 1 = 128-188 Side Accent).
+    const twoChannels = [
+      DeviceChannel(id: 0, name: 'Channel 1', start: 0, stop: 128, gpioPin: 2),
+      DeviceChannel(id: 1, name: 'Channel 2', start: 128, stop: 188, gpioPin: 1),
+    ];
+
     GameDayAutopilotConfig configFor({
       String teamSlug = 'mlb_royals',
       String teamName = 'Kansas City Royals',
@@ -42,8 +51,11 @@ void main() {
     }
 
     test(
-        'sends a basic payload built from the config when savedDesignPayload '
-        'is null', () async {
+        'cold/null participation cache, 2-channel device → addresses BOTH '
+        'seg 0 AND seg 1 (channel-2 skip fix). The helper pre-enumerates '
+        'channels itself instead of relying on the chokepoint, so the '
+        'auto-built single-seg-no-id payload no longer falls through to '
+        'seg 0 only.', () async {
       late Map<String, dynamic> captured;
       String? capturedLabel;
       final ok = await applyGameDayConfigToDevice(
@@ -53,45 +65,103 @@ void main() {
           return true;
         },
         config: configFor(),
+        participatingChannels: const [0, 1],
+        deviceChannels: twoChannels,
       );
 
       expect(ok, isTrue);
       expect(captured['on'], isTrue);
       expect(captured['bri'], 220, reason: 'brightness from config');
-      expect(captured['seg'], isA<List>());
-      final seg = (captured['seg'] as List).first as Map<String, dynamic>;
-      expect(seg['fx'], 52);
-      expect(seg['sx'], 200);
-      expect(seg['ix'], 180);
-      expect(seg['pal'], 0);
-      final cols = seg['col'] as List;
-      expect(cols.length, 2);
-      // Primary 0xFF004687 → r=0, g=70, b=135 ; alpha never sent
-      expect(cols[0], [0, 70, 135, 0]);
-      // Secondary 0xFFBD9B60 → r=189, g=155, b=96
-      expect(cols[1], [189, 155, 96, 0]);
-      // Post Fix 3 Part 2 (2026-05-23): shortTeamName now prefers
-      // teamShortName(teamName) — the curated short-name lookup — so a
-      // production "Kansas City Royals" config resolves to "Royals
-      // Game Day" instead of the pre-fix "Mlb_royals Game Day" leak.
-      // The underscore + league prefix that used to surface in Now
-      // Playing is gone.
+
+      final segs = captured['seg'] as List;
+      expect(segs.length, 2, reason: 'one seg per configured channel');
+
+      final seg0 = segs[0] as Map<String, dynamic>;
+      final seg1 = segs[1] as Map<String, dynamic>;
+      expect(seg0['id'], 0);
+      expect(seg1['id'], 1, reason: 'channel 2 (seg 1) MUST be addressed');
+
+      // start/stop come from the hardware bus config on each channel.
+      expect(seg0['start'], 0);
+      expect(seg0['stop'], 128);
+      expect(seg1['start'], 128);
+      expect(seg1['stop'], 188);
+
+      // Both segs are explicitly lit (per-seg on:true — channel-2-dark fix).
+      expect(seg0['on'], isTrue);
+      expect(seg1['on'], isTrue);
+
+      // The template effect/colors are preserved on every channel.
+      for (final seg in [seg0, seg1]) {
+        expect(seg['fx'], 52);
+        expect(seg['sx'], 200);
+        expect(seg['ix'], 180);
+        expect(seg['pal'], 0);
+        final cols = seg['col'] as List;
+        expect(cols.length, 2);
+        expect(cols[0], [0, 70, 135, 0]); // primary 0xFF004687
+        expect(cols[1], [189, 155, 96, 0]); // secondary 0xFFBD9B60
+      }
+
+      // Post Fix 3 Part 2 (2026-05-23): shortTeamName prefers the curated
+      // teamShortName(teamName) lookup, so "Kansas City Royals" resolves to
+      // "Royals Game Day".
       expect(capturedLabel, 'Royals Game Day');
     });
 
     test(
-        'savedDesignPayload overrides the auto-built basic payload — the '
-        'user\'s named design wins (same precedence as Path 1 _activateNow)',
+        'single-channel device → addresses ONLY seg 0 (explicit [0] still '
+        'correct — does not broadcast to channels the user excluded)',
+        () async {
+      late Map<String, dynamic> captured;
+      await applyGameDayConfigToDevice(
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
+          captured = payload;
+          return true;
+        },
+        config: configFor(),
+        participatingChannels: const [0],
+        deviceChannels: twoChannels,
+      );
+
+      final segs = captured['seg'] as List;
+      expect(segs.length, 1);
+      expect((segs[0] as Map)['id'], 0);
+      expect((segs[0] as Map).containsKey('start'), isTrue,
+          reason: 'start/stop set from the channel-0 bus range');
+    });
+
+    test(
+        'U1 empty-gate: no configured channels → returns false and NEVER '
+        'calls applyPayloadWithLabel (matches applySavedDesign — bail when '
+        'the device/hardware config is not ready)', () async {
+      var applyCalls = 0;
+      final ok = await applyGameDayConfigToDevice(
+        applyPayloadWithLabel: (payload, {required labelHint}) async {
+          applyCalls += 1;
+          return true;
+        },
+        config: configFor(),
+        participatingChannels: const [],
+        deviceChannels: twoChannels,
+      );
+
+      expect(ok, isFalse);
+      expect(applyCalls, 0,
+          reason: 'an empty channel list means there is nothing to target');
+    });
+
+    test(
+        'savedDesignPayload overrides the auto-built payload AND is forwarded '
+        'verbatim — the picker already channel-filtered it (multi-seg-with-'
+        'ids), so re-filtering would flatten a per-channel design',
         () async {
       final custom = <String, dynamic>{
         'on': true,
         'bri': 100,
         'seg': [
-          {
-            'fx': 99,
-            'palette_id': 42,
-            'meta': 'user-custom-design',
-          }
+          {'id': 0, 'fx': 99, 'col': [[10, 20, 30, 0]]},
+          {'id': 1, 'fx': 99, 'col': [[40, 50, 60, 0]]},
         ],
       };
       late Map<String, dynamic> captured;
@@ -100,11 +170,14 @@ void main() {
           captured = payload;
           return true;
         },
-        config: configFor(savedDesignPayload: custom, savedDesignName: 'Crown Royale'),
+        config: configFor(
+            savedDesignPayload: custom, savedDesignName: 'Crown Royale'),
+        participatingChannels: const [0, 1],
+        deviceChannels: twoChannels,
       );
       expect(captured, same(custom),
-          reason: 'must forward the savedDesignPayload object verbatim, '
-              'NOT a merged dict — the chokepoint owns participation');
+          reason: 'must forward the savedDesignPayload object verbatim, NOT '
+              'a re-filtered dict — the picker owns its per-channel shape');
     });
 
     test('clamps brightness to 0-255 — caller is shielded from bad config',
@@ -116,6 +189,8 @@ void main() {
           return true;
         },
         config: configFor(brightness: 999),
+        participatingChannels: const [0, 1],
+        deviceChannels: twoChannels,
       );
       expect(captured['bri'], 255);
     });
@@ -127,6 +202,8 @@ void main() {
           return false;
         },
         config: configFor(),
+        participatingChannels: const [0, 1],
+        deviceChannels: twoChannels,
       );
       expect(ok, isFalse);
     });
@@ -144,7 +221,10 @@ void main() {
           capturedLabel = labelHint;
           return true;
         },
-        config: configFor(teamSlug: 'kansas-city-royals', teamName: 'Kansas City Royals'),
+        config: configFor(
+            teamSlug: 'kansas-city-royals', teamName: 'Kansas City Royals'),
+        participatingChannels: const [0, 1],
+        deviceChannels: twoChannels,
       );
       expect(capturedLabel, 'Royals Game Day');
     });

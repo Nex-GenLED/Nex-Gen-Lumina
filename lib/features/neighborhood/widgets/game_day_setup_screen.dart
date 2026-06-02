@@ -42,6 +42,7 @@ import '../../game_day/light_it_up_now.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../wled/wled_providers.dart';
+import '../../wled/zone_providers.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
@@ -558,6 +559,8 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
       config: config,
       broadcastToGroup: _broadcastToGroup,
       groupId: groupId,
+      participatingChannels: ref.read(effectiveChannelIdsProvider),
+      deviceChannels: ref.read(deviceChannelsProvider),
     );
 
     if (!mounted) return;
