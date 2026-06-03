@@ -219,35 +219,56 @@ List<Map<String, dynamic>> buildSkikbilyBuses(
   WledHardwareConfig? currentConfig,
 ) {
   const int pixelsPerChannel = 100;
-  const int channelCount = 4;
+  const int defaultChannelCount = 4;
   // Per WLED busses.cpp, type 30 is SK6812 RGBW in current builds. Unified
   // with hardware_config_screen.dart (the manual editor). For RGBW bus types
   // WLED appends the W channel automatically, so order=1 sends R→G→B→W —
   // the Lumina default ("RGB" in WLED's UI dropdown).
   const int ledType = 30; // SK6812 RGBW
   const int colorOrder = 1; // RGB (W appended automatically on RGBW bus type)
-  // SKIKBILY hardware always has 4 channels. A fresh WLED ships with one
-  // default bus, so we can't size the config from the old one — always emit
-  // 4 buses. Pins come from the existing config when present (preserves
-  // manual installer overrides), else the SKIKBILY default GPIOs.
+  // Pins come from the existing config when present (preserves manual
+  // installer overrides), else the SKIKBILY default GPIOs.
   const defaultPins = [16, 3, 1, 4];
+
+  final existingBuses = currentConfig?.buses ?? const <WledLedBus>[];
+
+  // PRESERVE-don't-overwrite the device's real bus count + per-bus pixel count
+  // (#12, the `len` twin of the rev/gc clobber fixed in 625226f). A fresh WLED
+  // ships with a single default bus; the moment Lumina (or an installer)
+  // provisions the real channels it has ≥2 buses. So treat ≥2 buses as
+  // "provisioned": keep its EXACT bus count and carry each bus's `len` through
+  // unchanged. This function used to force 4 × 100 px unconditionally, which
+  // overwrote a genuine 128/60 install to 100/100 on every install AND every
+  // Re-sync (systemic — any install ≠ 100×4 got clobbered). A fresh /
+  // unprovisioned device (null, or the lone WLED default bus) still gets the
+  // full SKIKBILY 4-channel × 100 px profile so install provisions all
+  // channels. len/pin/rev/skip are DEVICE-owned (preserve); type/order are
+  // Lumina-asserted (override) — the same preserve-vs-assert split as 625226f.
+  // (Deferred: unmodeled per-bus fields ref/rgbwm/freq/ledma still aren't
+  // carried — they'd need a merge over the raw `hw.led.ins[]` rather than the
+  // typed WledLedBus model. See report / #12 follow-up.)
+  final bool provisioned = existingBuses.length >= 2;
+  final int channelCount =
+      provisioned ? existingBuses.length : defaultChannelCount;
 
   final List<Map<String, dynamic>> buses = [];
   int startAddress = 0;
   for (int i = 0; i < channelCount; i++) {
-    final existing = (currentConfig != null && i < currentConfig.buses.length)
-        ? currentConfig.buses[i]
-        : null;
+    final existing = i < existingBuses.length ? existingBuses[i] : null;
+    // Preserve the device's real pixel count on a provisioned device; a fresh
+    // bus has no meaningful len yet, so assert the SKIKBILY 100-px default.
+    final int len =
+        provisioned ? (existing?.len ?? pixelsPerChannel) : pixelsPerChannel;
     buses.add({
       'start': startAddress,
-      'len': pixelsPerChannel,
+      'len': len,
       'pin': existing?.pin ?? [defaultPins[i]],
       'type': ledType,
       'order': colorOrder,
-      'rev': existing?.rev ?? false, // PRESERVE manual bus direction
-      'skip': 0,
+      'rev': existing?.rev ?? false, // PRESERVE manual bus direction (625226f)
+      'skip': existing?.skip ?? 0, // PRESERVE manual skip
     });
-    startAddress += pixelsPerChannel;
+    startAddress += len;
   }
   return buses;
 }
