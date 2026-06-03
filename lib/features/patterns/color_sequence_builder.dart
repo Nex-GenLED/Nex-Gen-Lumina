@@ -100,6 +100,10 @@ class _ColorSequenceBuilderState extends State<ColorSequenceBuilder> {
       context: context,
       backgroundColor: NexGenPalette.gunmetal90,
       isScrollControlled: true,
+      // #9: disable sheet drag-to-dismiss so a downward color-wheel drag isn't
+      // partially claimed by the sheet's pull-to-close recognizer. Cancel button
+      // + tap-outside still dismiss.
+      enableDrag: false,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _ColorPickerSheet(initialColor: initialColor),
     );

@@ -353,6 +353,10 @@ class CurrentColorsEditorScreen extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      // #9: disable sheet drag-to-dismiss so a downward color-wheel drag isn't
+      // partially claimed by the sheet's pull-to-close recognizer. Cancel button
+      // + tap-outside still dismiss.
+      enableDrag: false,
       builder: (context) => _ColorPickerModal(
         initialColor: currentColor,
         onColorSelected: (color) {
