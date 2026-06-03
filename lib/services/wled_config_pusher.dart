@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/models/controller_type.dart';
 
@@ -92,44 +93,14 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
     debugPrint('[WledConfig] Current config: <unreadable>');
   }
 
-  const int pixelsPerChannel = 100;
-  const int channelCount = 4;
-  // Unified with hardware_config_screen.dart (the manual editor) which uses
-  // type 30. Per WLED busses.cpp, type 30 is SK6812 RGBW in current builds;
-  // type 22 was the older SK6812 RGBW mapping the pusher used to ship.
-  const int ledType = 30; // SK6812 RGBW
-  // WLED standard color-order enum is 3-letter only (0=GRB, 1=RGB, 2=BRG,
-  // 3=RBG, 4=BGR, 5=GBR). For RGBW bus types (22, 30, 31) WLED appends the
-  // W channel automatically — so order=1 on a type-30 bus sends R→G→B→W,
-  // which is the Lumina default ("RGB" in WLED's UI dropdown).
-  const int colorOrder = 1; // RGB (W appended automatically on RGBW bus type)
-  // SKIKBILY hardware always has 4 channels. A fresh WLED ships with one
-  // default bus, so we can't size the new config from the old one — we
-  // always emit 4 buses. Pin assignments come from the existing config
-  // when present (preserves manual installer overrides) and fall back to
-  // the SKIKBILY default GPIOs for any slot the device hasn't populated.
-  const defaultPins = [16, 3, 1, 4];
-
-  final List<Map<String, dynamic>> buses = [];
-  int startAddress = 0;
-  for (int i = 0; i < channelCount; i++) {
-    List<int> pins;
-    if (currentConfig != null && i < currentConfig.buses.length) {
-      pins = currentConfig.buses[i].pin;
-    } else {
-      pins = [defaultPins[i]];
-    }
-    buses.add({
-      'start': startAddress,
-      'len': pixelsPerChannel,
-      'pin': pins,
-      'type': ledType,
-      'order': colorOrder,
-      'rev': false,
-      'skip': 0,
-    });
-    startAddress += pixelsPerChannel;
-  }
+  // Build the SKIKBILY 4-bus profile, preserving each channel's existing
+  // GPIO pins AND its manual reverse (rev) flag from the device. The pusher
+  // used to hardcode rev:false, which silently undid an installer's
+  // bus-direction flip on every Re-sync / re-apply (config half of #3/#4).
+  // See buildSkikbilyBuses.
+  final buses = buildSkikbilyBuses(currentConfig);
+  final startAddress =
+      buses.fold<int>(0, (sum, b) => sum + (b['len'] as int));
 
   // 2. Derive mDNS name from MAC address (last 4 hex chars).
   final info = await service.getInfo();
@@ -151,17 +122,42 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   //    but WLED expects milliwatts at the configured voltage. For 5 V strips
   //    20 000 mW ≈ 4 A (safe for LRS-350-24 supplies). We specify 20 000 as
   //    the per-controller cap — the same value used on existing installs.
-  final hwPayload = {
-    'hw': {
-      'led': {
-        'total': startAddress,
-        'maxpwr': 20000,
-        'ins': buses,
+  // Preserve the device's gamma-correction config (hw.led.gc) if the
+  // firmware exposes it. The typed getConfig() drops gc, so read it from the
+  // raw cfg. Omitting gc on a hw.led write can let WLED reset gamma on the
+  // bus rebuild; re-asserting the device's own value is a no-op when gc is
+  // absent (as on current Lumina firmware) and protective when present
+  // (config half of #3/#4). This is a second cheap GET on install/Re-sync —
+  // both rare, non-hot-path operations.
+  final rawCfg = await _fetchRawConfig(controllerIp);
+  final existingGc = ((rawCfg?['hw'] as Map?)?['led'] as Map?)?['gc'];
+
+  const int maxPwrMw = 20000;
+  // No-op gate: when the device already matches the SKIKBILY profile exactly
+  // (on every field we write), skip the hw.led push so we don't trigger a
+  // WLED bus rebuild — which would needlessly drop unmodeled per-bus fields
+  // (ref/rgbwm/freq/ledma) and reset gamma on firmware that has gc.
+  final hwUnchanged = currentConfig != null &&
+      currentConfig.totalLeds == startAddress &&
+      currentConfig.maxPowerMw == maxPwrMw &&
+      ledInsMatches(currentConfig.buses, buses);
+
+  if (hwUnchanged) {
+    debugPrint('[WledConfig] hw.led unchanged — skipping config push');
+  } else {
+    final hwPayload = {
+      'hw': {
+        'led': buildLedConfig(
+          total: startAddress,
+          maxpwr: maxPwrMw,
+          ins: buses,
+          gc: existingGc,
+        ),
       },
-    },
-  };
-  final hwResult = await _postConfig(controllerIp, hwPayload);
-  if (!hwResult.success) return hwResult;
+    };
+    final hwResult = await _postConfig(controllerIp, hwPayload);
+    if (!hwResult.success) return hwResult;
+  }
 
   // mDNS rename is cosmetic — failure is a warning, not a rollback.
   final warnings = <String>[];
@@ -210,6 +206,100 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   }
 
   return WledConfigPushResult(success: true, warnings: warnings);
+}
+
+/// Builds the SKIKBILY default `hw.led.ins` bus array (4 channels × 100 px,
+/// type 30 / order 1), preserving each channel's existing GPIO pins and
+/// manual reverse (`rev`) flag from [currentConfig]. Channels the device
+/// hasn't populated yet fall back to the SKIKBILY default GPIOs with
+/// rev:false. Preserving rev stops a Re-sync / re-apply from silently
+/// undoing an installer's bus-direction flip (config half of #3/#4).
+@visibleForTesting
+List<Map<String, dynamic>> buildSkikbilyBuses(
+  WledHardwareConfig? currentConfig,
+) {
+  const int pixelsPerChannel = 100;
+  const int channelCount = 4;
+  // Per WLED busses.cpp, type 30 is SK6812 RGBW in current builds. Unified
+  // with hardware_config_screen.dart (the manual editor). For RGBW bus types
+  // WLED appends the W channel automatically, so order=1 sends R→G→B→W —
+  // the Lumina default ("RGB" in WLED's UI dropdown).
+  const int ledType = 30; // SK6812 RGBW
+  const int colorOrder = 1; // RGB (W appended automatically on RGBW bus type)
+  // SKIKBILY hardware always has 4 channels. A fresh WLED ships with one
+  // default bus, so we can't size the config from the old one — always emit
+  // 4 buses. Pins come from the existing config when present (preserves
+  // manual installer overrides), else the SKIKBILY default GPIOs.
+  const defaultPins = [16, 3, 1, 4];
+
+  final List<Map<String, dynamic>> buses = [];
+  int startAddress = 0;
+  for (int i = 0; i < channelCount; i++) {
+    final existing = (currentConfig != null && i < currentConfig.buses.length)
+        ? currentConfig.buses[i]
+        : null;
+    buses.add({
+      'start': startAddress,
+      'len': pixelsPerChannel,
+      'pin': existing?.pin ?? [defaultPins[i]],
+      'type': ledType,
+      'order': colorOrder,
+      'rev': existing?.rev ?? false, // PRESERVE manual bus direction
+      'skip': 0,
+    });
+    startAddress += pixelsPerChannel;
+  }
+  return buses;
+}
+
+/// Assembles the `hw.led` config object, carrying the device's existing
+/// gamma config ([gc]) through verbatim when present. When [gc] is null the
+/// key is omitted entirely — identical to the historical payload, so
+/// firmware without a gc field is unaffected (config half of #3/#4).
+@visibleForTesting
+Map<String, dynamic> buildLedConfig({
+  required int total,
+  required int maxpwr,
+  required List<Map<String, dynamic>> ins,
+  dynamic gc,
+}) {
+  return {
+    'total': total,
+    'maxpwr': maxpwr,
+    'ins': ins,
+    if (gc != null) 'gc': gc,
+  };
+}
+
+/// True when the device's [current] bus list matches [proposed] on every
+/// field Lumina writes (start/len/pin/type/order/rev/skip). Used to skip a
+/// redundant hw.led push (and the WLED bus rebuild it triggers) on a no-op
+/// Re-sync. Compares only written fields — unmodeled per-bus fields
+/// (ref/rgbwm/freq/ledma) are intentionally ignored.
+@visibleForTesting
+bool ledInsMatches(
+  List<WledLedBus> current,
+  List<Map<String, dynamic>> proposed,
+) {
+  if (current.length != proposed.length) return false;
+  for (var i = 0; i < current.length; i++) {
+    final c = current[i];
+    final p = proposed[i];
+    if (c.start != p['start'] ||
+        c.len != p['len'] ||
+        c.type != p['type'] ||
+        c.order != p['order'] ||
+        c.skip != p['skip'] ||
+        c.rev != p['rev']) {
+      return false;
+    }
+    final pPin = (p['pin'] as List).map((e) => e as int).toList();
+    if (c.pin.length != pPin.length) return false;
+    for (var j = 0; j < pPin.length; j++) {
+      if (c.pin[j] != pPin[j]) return false;
+    }
+  }
+  return true;
 }
 
 /// Pushes the customer's home coordinates and WLED tz enum into the

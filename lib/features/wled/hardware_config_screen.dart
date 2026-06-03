@@ -7,6 +7,43 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
+/// Builds the `hw.led.ins` array from the per-port UI state, preserving each
+/// port's existing reverse (`rev`) flag from [originalBuses] so a Hardware
+/// Config save doesn't reset a manual bus-direction flip (config half of
+/// #3/#4). Ports map to buses by index, matching how the screen loads them
+/// in [_HardwareConfigScreenState._applyHardwareConfig]. Ports beyond
+/// [originalBuses] (genuinely new channels) default to rev:false.
+@visibleForTesting
+List<Map<String, dynamic>> buildHardwareConfigBuses({
+  required List<bool> enabled,
+  required List<int> counts,
+  required List<int> pins,
+  required int ledType,
+  List<WledLedBus>? originalBuses,
+}) {
+  final List<Map<String, dynamic>> segs = [];
+  int startAddress = 0;
+  for (var i = 0; i < enabled.length; i++) {
+    if (!enabled[i]) continue;
+    final count = counts[i];
+    if (count <= 0) continue;
+    final existing = (originalBuses != null && i < originalBuses.length)
+        ? originalBuses[i]
+        : null;
+    segs.add({
+      'start': startAddress,
+      'len': count,
+      'pin': [pins[i]],
+      'order': 1,
+      'rev': existing?.rev ?? false, // PRESERVE manual bus direction
+      'skip': 0,
+      'type': ledType,
+    });
+    startAddress += count;
+  }
+  return segs;
+}
+
 class HardwareConfigScreen extends ConsumerStatefulWidget {
   const HardwareConfigScreen({super.key});
 
@@ -178,24 +215,13 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
   }
 
   List<Map<String, dynamic>> _buildBusesForCfg() {
-    final List<Map<String, dynamic>> segs = [];
-    int startAddress = 0;
-    for (var i = 0; i < _portCount; i++) {
-      if (!_enabled[i]) continue;
-      final count = _parseCount(i);
-      if (count <= 0) continue;
-      segs.add({
-        'start': startAddress,
-        'len': count,
-        'pin': [_pins[i]],
-        'order': 1,
-        'rev': false,
-        'skip': 0,
-        'type': _ledType,
-      });
-      startAddress += count;
-    }
-    return segs;
+    return buildHardwareConfigBuses(
+      enabled: _enabled,
+      counts: List.generate(_portCount, _parseCount),
+      pins: _pins,
+      ledType: _ledType,
+      originalBuses: _originalConfig?.buses,
+    );
   }
 
   Future<void> _save() async {
