@@ -49,6 +49,12 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   /// the device state was never sync-altered and we leave it alone.
   bool _hasAppliedThisSession = false;
 
+  /// Id of the last teardown command we acted on. Dedups teardown across
+  /// re-subscribes: `fireImmediately` replays the latest command on every
+  /// fresh subscription, so without this a resume would re-run the
+  /// off/restore repeatedly.
+  String? _lastHandledTeardownId;
+
   NeighborhoodSyncEngine(this._ref) {
     WidgetsBinding.instance.addObserver(this);
   }
@@ -363,6 +369,17 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     final command = next.valueOrNull;
     if (command == null) return;
 
+    // Teardown signal: an explicit "revert now" command (owner End Group /
+    // self-leave) broadcast on the same channel as design commands. Handle it
+    // BEFORE the design dedup so it always lands, and route it to the local
+    // teardown restore instead of applying a pattern. Returns without ever
+    // touching the design-apply / β-self-set path (which would re-flag the
+    // member participating and re-light them).
+    if (command.isTeardown) {
+      handleTeardownCommand(command);
+      return;
+    }
+
     // Dedup: same command id as the previous emission → no re-apply. New
     // command broadcasts always carry a fresh auto-id (broadcastSyncCommand),
     // so a genuine design change is never suppressed; only a redundant
@@ -379,6 +396,45 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   /// members can't be overridden across libraries).
   @visibleForTesting
   void onNewSyncCommand(SyncCommand command) => _scheduleLocalExecution(command);
+
+  /// Acts on a teardown command — the reliable replacement for the flag-trigger
+  /// revert. Runs the local teardown restore (schedule → autopilot → pre-sync
+  /// scene → off via [executeMemberTeardown]) instead of applying a design.
+  ///
+  /// - Scope: a self-leave teardown carries [SyncCommand.targetMemberUid]; we
+  ///   ignore it if it's not for us. A null target = whole-group teardown.
+  /// - Dedup: skipped if we already handled this teardown id (guards the
+  ///   `fireImmediately` replay on every re-subscribe/resume).
+  /// - Gates: clears the apply gates so the flag-trigger's [stopListening]
+  ///   doesn't ALSO fire a redundant teardown, and so the next session
+  ///   captures fresh.
+  ///
+  /// NOT gated on [_hasAppliedThisSession]: a member returning from background
+  /// has that flag reset by [startListening] yet may still be showing the
+  /// ended pattern — honoring the explicit signal is exactly what reverts them
+  /// (and closes the defect-#2 replay loop, since the teardown is now latest).
+  @visibleForTesting
+  void handleTeardownCommand(SyncCommand command) {
+    final myId = _ref.read(currentUserMemberProvider)?.oderId;
+    if (command.targetMemberUid != null && command.targetMemberUid != myId) {
+      return;
+    }
+    if (_lastHandledTeardownId == command.id) return;
+    _lastHandledTeardownId = command.id;
+
+    debugPrint('Received teardown command ${command.id} '
+        '(target=${command.targetMemberUid ?? "ALL"}) — reverting');
+
+    _hasCapturedThisSession = false;
+    _hasAppliedThisSession = false;
+    dispatchTeardown();
+  }
+
+  /// Test seam: dispatches the local teardown restore (fire-and-forget).
+  /// Overridable so unit tests can assert the teardown-command path fires
+  /// without standing up a real WLED repo inside [_executeTeardown].
+  @visibleForTesting
+  void dispatchTeardown() => unawaited(_executeTeardown());
 
   /// Re-subscribes the command stream after a transient error, debounced so
   /// an error storm doesn't hot-loop invalidation. Mirrors the #52 fix

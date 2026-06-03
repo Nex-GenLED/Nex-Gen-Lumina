@@ -207,6 +207,76 @@ void main() {
       expect(group.data()!['isActive'], isFalse);
     });
   });
+
+  // ── Teardown command broadcast (the reliable revert signal) ──────────────
+  Future<void> seedDesignCommand(String id) async {
+    await firestore
+        .collection('neighborhoods')
+        .doc(groupId)
+        .collection('commands')
+        .doc(id)
+        .set({
+      'groupId': groupId,
+      'effectId': 5,
+      'colors': [0xFF0000],
+      'speed': 128,
+      'intensity': 128,
+      'brightness': 200,
+      'startTimestamp': Timestamp.fromDate(DateTime.utc(2026, 6, 3, 11)),
+      'memberDelays': <String, int>{},
+      'timingConfig': <String, dynamic>{},
+      'syncType': 'sequentialFlow',
+      'isTeardown': false,
+      'id': id,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> readCommands() async {
+    final snap = await firestore
+        .collection('neighborhoods')
+        .doc(groupId)
+        .collection('commands')
+        .get();
+    return snap.docs.map((d) => d.data()).toList();
+  }
+
+  group('teardown command broadcast', () {
+    test('endGroupSync writes a GLOBAL teardown command AND purges the '
+        'lingering design command (defect-#2 replay loop closed)', () async {
+      await seedGroup(creatorUid: 'u1', memberUids: const ['u1', 'u2']);
+      await seedDesignCommand('design1');
+
+      await service.endGroupSync(groupId, ['u1', 'u2']);
+
+      final cmds = await readCommands();
+      expect(cmds.length, 1,
+          reason: 'design command purged; only the teardown remains so a '
+              'resume replay can never re-light the ended pattern');
+      expect(cmds.single['isTeardown'], isTrue);
+      expect(cmds.single.containsKey('targetMemberUid'), isFalse,
+          reason: 'global teardown → every member reverts (no target)');
+    });
+
+    test('selfLeaveSync writes a SELF-TARGETED teardown command; design '
+        'command kept and group stays active (others keep running)', () async {
+      await seedGroup(creatorUid: 'owner', memberUids: const ['u1', 'u2']);
+      await seedDesignCommand('design1');
+
+      await service.selfLeaveSync(groupId); // auth uid == u1
+
+      final cmds = await readCommands();
+      expect(cmds.length, 2,
+          reason: 'design command kept (others need it) + targeted teardown');
+      final teardown = cmds.firstWhere((c) => c['isTeardown'] == true);
+      expect(teardown['targetMemberUid'], 'u1',
+          reason: 'scoped to the leaver so it does not revert the group');
+
+      final group =
+          await firestore.collection('neighborhoods').doc(groupId).get();
+      expect(group.data()!['isActive'], isTrue,
+          reason: 'self-leave never ends the group');
+    });
+  });
 }
 
 /// Minimal FirebaseAuth stub. NeighborhoodService only reads

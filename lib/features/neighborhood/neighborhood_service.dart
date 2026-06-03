@@ -487,7 +487,52 @@ class NeighborhoodService {
         .collection('members')
         .doc(uid)
         .update({'isParticipating': false});
+    // Broadcast a SELF-targeted teardown command on the same /commands channel
+    // propagation uses, so this member's listener reliably reverts (the
+    // flag-trigger was unreliable — its `|| hasActiveGroup` term kept the
+    // leaver mounted while the group stayed active). targetMemberUid scopes it
+    // to the leaver so the rest of the group keeps running. NOT deleting the
+    // design command here — other members still need it.
+    await writeTeardownCommand(groupId, targetMemberUid: uid);
     debugPrint('Self-left sync for group: $groupId (uid=$uid)');
+  }
+
+  /// Writes an explicit teardown ("revert now") command to
+  /// `/neighborhoods/{groupId}/commands`. This is the positive signal the
+  /// member's command listener acts on — replacing reliance on the
+  /// unreliable local flag-trigger. [targetMemberUid] null = all members
+  /// revert (owner End Group); non-null = only that member (self-leave).
+  ///
+  /// startTimestamp is `now`, so the orderBy-desc `watchLatestCommand` query
+  /// returns THIS command as the latest — superseding any lingering design
+  /// command so a fireImmediately/resume replay re-applies the TEARDOWN, not
+  /// the ended pattern (the defect-#2 re-arm loop).
+  @visibleForTesting
+  Future<void> writeTeardownCommand(
+    String groupId, {
+    String? targetMemberUid,
+  }) async {
+    final docRef =
+        _neighborhoodsRef.doc(groupId).collection('commands').doc();
+    final command = SyncCommand.teardown(
+      groupId: groupId,
+      startTimestamp: DateTime.now(),
+      targetMemberUid: targetMemberUid,
+    );
+    await docRef.set({
+      ...command.toFirestore(),
+      'id': docRef.id,
+    });
+  }
+
+  /// Deletes all command docs for a group. Used by [endGroupSync] to purge
+  /// lingering design commands so they can never be replayed to re-light a
+  /// member after the group ends (defect #2). Owner-permitted (same access
+  /// the dissolve/delete paths already exercise).
+  Future<void> _clearGroupCommands(String groupId) async {
+    final commands =
+        await _neighborhoodsRef.doc(groupId).collection('commands').get();
+    await Future.wait(commands.docs.map((d) => d.reference.delete()));
   }
 
   /// Owner-only end-of-group. Fans the per-member `isParticipating=false`
@@ -524,6 +569,14 @@ class NeighborhoodService {
       );
       throw EndGroupSyncPartialFailure(groupId: groupId, failures: failures);
     }
+
+    // Purge lingering design commands, then broadcast a single GLOBAL teardown
+    // command (targetMemberUid: null → every member reverts). This is the
+    // positive "revert now" signal on the proven command channel; the purge +
+    // teardown-as-latest closes the defect-#2 replay loop (a resuming member
+    // replays the TEARDOWN, never the ended pattern).
+    await _clearGroupCommands(groupId);
+    await writeTeardownCommand(groupId);
 
     await _neighborhoodsRef.doc(groupId).update({
       'isActive': false,

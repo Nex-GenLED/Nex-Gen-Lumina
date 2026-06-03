@@ -650,6 +650,20 @@ class SyncCommand {
   final String? patternName;
   final String? scheduleId;
 
+  /// True when this command is an explicit teardown ("revert now") signal
+  /// rather than a design to apply. Broadcast on the SAME /commands channel
+  /// propagation uses, so it reliably reaches members (the flag-trigger was
+  /// unreliable — see the End-Group revert audit). The engine branches on
+  /// this in handleCommandSnapshot and runs the local teardown restore
+  /// instead of applying a pattern. Legacy commands decode to false.
+  final bool isTeardown;
+
+  /// For a teardown command: which member should revert. null = ALL members
+  /// (owner End Group). Non-null = only that member's uid (self-leave), so a
+  /// member leaving doesn't tear down everyone else. Ignored when
+  /// [isTeardown] is false.
+  final String? targetMemberUid;
+
   /// WLED palette/grouping/spacing for the GLOBAL pattern. Carried so
   /// [getPatternForMember] can rebuild a faithful seg (with pal:5 "Colors
   /// Only") instead of one that defaults to the rainbow palette. Defaults match
@@ -686,6 +700,8 @@ class SyncCommand {
     this.syncType = SyncType.sequentialFlow,
     this.patternName,
     this.scheduleId,
+    this.isTeardown = false,
+    this.targetMemberUid,
     this.pal = 5,
     this.grp = 1,
     this.spc = 0,
@@ -693,6 +709,33 @@ class SyncCommand {
     this.complementTheme,
     this.memberPatternOverrides,
   });
+
+  /// Builds a minimal teardown command — the explicit "revert now" signal
+  /// broadcast on the same `/commands` channel that propagation uses. A
+  /// member's listener branches on [isTeardown] and runs its local teardown
+  /// restore (schedule → autopilot → pre-sync scene → off) instead of
+  /// applying a design. [targetMemberUid] null = all members revert (owner
+  /// End Group); non-null = only that member (self-leave).
+  factory SyncCommand.teardown({
+    required String groupId,
+    required DateTime startTimestamp,
+    String? targetMemberUid,
+  }) {
+    return SyncCommand(
+      id: '',
+      groupId: groupId,
+      effectId: 0,
+      colors: const [],
+      speed: 128,
+      intensity: 128,
+      brightness: 0,
+      startTimestamp: startTimestamp,
+      memberDelays: const {},
+      timingConfig: const SyncTimingConfig(),
+      isTeardown: true,
+      targetMemberUid: targetMemberUid,
+    );
+  }
 
   factory SyncCommand.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -729,6 +772,8 @@ class SyncCommand {
       syncType: SyncTypeExtension.fromJson(data['syncType']),
       patternName: data['patternName'],
       scheduleId: data['scheduleId'],
+      isTeardown: data['isTeardown'] as bool? ?? false,
+      targetMemberUid: data['targetMemberUid'] as String?,
       // Legacy commands omit these; default to the catalog invariant (Colors
       // Only) so they apply selected colors instead of the rainbow palette.
       pal: data['pal'] ?? 5,
@@ -754,6 +799,8 @@ class SyncCommand {
       'syncType': syncType.toJson(),
       'patternName': patternName,
       'scheduleId': scheduleId,
+      'isTeardown': isTeardown,
+      if (targetMemberUid != null) 'targetMemberUid': targetMemberUid,
       'pal': pal,
       'grp': grp,
       'spc': spc,
