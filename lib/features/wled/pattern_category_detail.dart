@@ -14,6 +14,7 @@ import 'package:nexgen_command/models/smart_pattern.dart';
 import 'package:nexgen_command/features/patterns/pattern_generator_service.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/widgets/color_behavior_badge.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -545,8 +546,41 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
             const SizedBox(height: 12),
             Row(children: [
               TextButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved to Favorites')));
+                onPressed: () async {
+                  // S4 (Audit-2): previously this only showed a success toast
+                  // and persisted nothing. Wire it to the same favorites-write
+                  // FavoriteHeartButton uses, and gate the toast on the result.
+                  final user = ref.read(authStateProvider).value;
+                  if (user == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please sign in to save favorites')),
+                      );
+                    }
+                    return;
+                  }
+                  try {
+                    await ref.read(favoritesNotifierProvider.notifier).addFavorite(
+                          patternId: _current.id,
+                          patternName: _current.name,
+                          patternData: _current.toJson(),
+                        );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Saved to Favorites')),
+                      );
+                    }
+                  } catch (e) {
+                    debugPrint('Save to Favorites failed: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Failed to save to Favorites'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
+                  }
                 },
                 icon: const Icon(Icons.favorite_border, color: NexGenPalette.cyan),
                 label: const Text('Save to Favorites'),
