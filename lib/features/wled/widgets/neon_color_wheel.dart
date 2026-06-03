@@ -44,17 +44,36 @@ class _NeonColorWheelState extends State<NeonColorWheel> {
             ),
           ),
         ),
-        // Gesture layer
+        // Gesture layer.
+        //
+        // The wheel is shown inside an isScrollControlled modal bottom sheet
+        // (enableDrag defaults to true). That sheet installs a vertical
+        // drag-to-dismiss recognizer which competes with — and steals —
+        // ordinary pan gestures over the wheel, so finger-drags (especially
+        // vertical/diagonal ones) moved the sheet instead of the picker and
+        // only direct taps registered.
+        //
+        // Fix: a raw [Listener] handles tracking. Pointer events bypass the
+        // gesture arena entirely, so onPointerDown (tap-to-set) and
+        // onPointerMove (continuous drag) always reach the wheel regardless of
+        // what an ancestor recognizer claims. The wrapping GestureDetector
+        // claims pan so the parent sheet doesn't ALSO drag-to-dismiss while the
+        // user is choosing a color; its empty handlers exist only to win the
+        // arena — the actual position→color mapping runs from the Listener.
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             dragStartBehavior: DragStartBehavior.down,
-            onPanDown: (d) => _updateFromLocal(d.localPosition, radius),
-            onPanStart: _handlePan,
-            onPanUpdate: _handlePan,
+            onPanDown: (_) {},
+            onPanStart: (_) {},
+            onPanUpdate: (_) {},
             onPanEnd: (_) {},
-            onTapDown: (d) => _updateFromLocal(d.localPosition, radius),
-            child: const SizedBox.expand(),
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: (e) => _updateFromLocal(e.localPosition, radius),
+              onPointerMove: (e) => _updateFromLocal(e.localPosition, radius),
+              child: const SizedBox.expand(),
+            ),
           ),
         ),
         // Thumb
@@ -69,16 +88,6 @@ class _NeonColorWheelState extends State<NeonColorWheel> {
         ),
       ]),
     );
-  }
-
-  void _handlePan(details) {
-    final size = widget.size;
-    final radius = size / 2;
-    if (details is DragStartDetails) {
-      _updateFromLocal(details.localPosition, radius);
-    } else if (details is DragUpdateDetails) {
-      _updateFromLocal(details.localPosition, radius);
-    }
   }
 
   void _updateFromLocal(Offset local, double radius) {
