@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/services/notifications_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -264,15 +265,15 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
   Future<void> _applyFallback(String actionName, WledRepository repo) async {
     final lower = actionName.toLowerCase();
     if (lower.contains('turn off')) {
-      await repo.setState(on: false);
+      await repo.setState(on: false); // power off is global — no seg needed
       return;
     }
     if (lower.contains('relax')) {
-      await repo.setState(on: true, brightness: 180, color: const Color(0xFFFFD6AA));
+      await _applyColorFallback(actionName, 180, const Color(0xFFFFD6AA), repo);
       return;
     }
     if (lower.contains('warm')) {
-      await repo.setState(on: true, brightness: 200, color: const Color(0xFFFFD6AA));
+      await _applyColorFallback(actionName, 200, const Color(0xFFFFD6AA), repo);
       return;
     }
     if (lower.contains('party')) {
@@ -298,7 +299,31 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       return;
     }
     // Default: gentle on
-    await repo.setState(on: true, brightness: 170, color: const Color(0xFFCCE7FF));
+    await _applyColorFallback(actionName, 170, const Color(0xFFCCE7FF), repo);
+  }
+
+  /// Welcome-home solid-colour fallback. Routes through the Class-1
+  /// channel-aware chokepoint (applyToDevice) so it lights EVERY effective
+  /// channel, not just bus 0. If the U1 gate blocks (cold start before the
+  /// hardware config loads / no channel map), falls back to the legacy
+  /// setState so welcome-home still lights something rather than nothing.
+  Future<void> _applyColorFallback(
+    String label,
+    int bri,
+    Color c,
+    WledRepository repo,
+  ) async {
+    final rgbw = rgbToRgbw(c.red, c.green, c.blue);
+    final ok = await ref.read(wledStateProvider.notifier).applyToDevice({
+      'on': true,
+      'bri': bri,
+      'seg': [
+        {'fx': 0, 'col': [rgbw]},
+      ],
+    }, labelHint: label);
+    if (!ok) {
+      await repo.setState(on: true, brightness: bri, color: c);
+    }
   }
 }
 
