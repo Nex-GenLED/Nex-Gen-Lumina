@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 
@@ -176,37 +177,106 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 6,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // "All" chip — resets to unified mode
-          _buildChip(
-            label: hasZoneNames ? 'All Zones' : 'All',
-            selected: isAllMode,
-            onTap: () {
-              ref.read(selectedChannelIdsProvider.notifier).state = null;
-            },
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              // "All" chip — resets to unified mode
+              _buildChip(
+                label: hasZoneNames ? 'All Zones' : 'All',
+                selected: isAllMode,
+                onTap: () {
+                  ref.read(selectedChannelIdsProvider.notifier).state = null;
+                },
+              ),
+              // Individual channel/zone chips. Non-participating channels (U1)
+              // render disabled — user can't target a channel that's been
+              // marked "not in shows" via the participation field.
+              for (final ch in channels)
+                Builder(builder: (_) {
+                  final isParticipating = participatingSet == null ||
+                      participatingSet.contains(ch.id);
+                  return _buildChip(
+                    label: zoneLabels[ch.id] ?? ch.name,
+                    selected: isAllMode || selectedIds.contains(ch.id),
+                    disabled: !isParticipating,
+                    onTap: isParticipating
+                        ? () => _toggleChannel(ch.id, channels, selectedIds)
+                        : null,
+                    channelColor: kChannelColors[ch.id % kChannelColors.length],
+                  );
+                }),
+            ],
           ),
-          // Individual channel/zone chips. Non-participating channels (U1)
-          // render disabled — user can't target a channel that's been
-          // marked "not in shows" via the participation field.
-          for (final ch in channels)
-            Builder(builder: (_) {
-              final isParticipating =
-                  participatingSet == null || participatingSet.contains(ch.id);
-              return _buildChip(
-                label: zoneLabels[ch.id] ?? ch.name,
-                selected: isAllMode || selectedIds.contains(ch.id),
-                disabled: !isParticipating,
-                onTap: isParticipating
-                    ? () => _toggleChannel(ch.id, channels, selectedIds)
-                    : null,
-                channelColor: kChannelColors[ch.id % kChannelColors.length],
-              );
-            }),
+          const SizedBox(height: 10),
+          // Recovery affordance: from a partial-on state (e.g. "1 on, 2 off")
+          // there was no way to get every channel back on — and a colour
+          // change only hit the lit channels because the selector filtered to
+          // them. "All Channels On" re-selects all channels AND powers each
+          // one on, so a subsequent colour change affects everything again.
+          _buildAllOnButton(),
         ],
       ),
+    );
+  }
+
+  Widget _buildAllOnButton() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _turnAllOn,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: NexGenPalette.cyan.withValues(alpha: 0.45),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.lightbulb_outline,
+                size: 16,
+                color: NexGenPalette.cyan,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'All Channels On',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: NexGenPalette.cyan,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Recover from a partial-on channel state: clear the selector filter so
+  /// every channel is selected again (subsequent colour/effect changes hit
+  /// all channels), then power every channel on through the EXISTING apply
+  /// path. The empty seg template carries no fx/col, so applyChannelFilter
+  /// just adds `{id, on:true}` per channel — lighting each one without
+  /// altering its current colour. Honors participation (applyToDevice targets
+  /// effectiveChannelIds), matching the rest of the dashboard.
+  Future<void> _turnAllOn() async {
+    ref.read(selectedChannelIdsProvider.notifier).state = null;
+    await ref.read(wledStateProvider.notifier).applyToDevice(
+      {
+        'on': true,
+        'seg': [<String, dynamic>{}],
+      },
+      labelHint: null,
     );
   }
 
