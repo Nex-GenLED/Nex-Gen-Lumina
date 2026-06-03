@@ -198,9 +198,14 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
       final repository = ref.read(wledRepositoryProvider);
       if (repository == null) return false;
 
-      // Build WLED payload with current colors
+      // Build WLED payload with current colors and route through the
+      // Class-1 chokepoint so it targets every effective channel (not just
+      // bus 0). applyToDevice runs the U1 gate + applyChannelFilter before
+      // the device write.
       final payload = _buildWledPayload();
-      final success = await repository.applyJson(payload);
+      final success = await ref
+          .read(wledStateProvider.notifier)
+          .applyToDevice(payload, labelHint: null);
 
       if (success) {
         // Refresh WLED state to sync UI
@@ -283,24 +288,24 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
     }
   }
 
-  /// Builds WLED JSON payload from current state
-  /// Applies to ALL segments for consistent multi-segment control
-  /// Uses 'pal': 5 ("Colors Only") to ensure effects use segment colors
+  /// Builds a RAW broadcast-intent WLED payload from current state. Emitted
+  /// as a single template seg with NO `id` so the [applyToDevice] chokepoint
+  /// fans it out to every effective channel via [applyChannelFilter] — this
+  /// is what makes Current Colors apply to all buses, not just bus 0.
+  /// Uses 'pal': 5 ("Colors Only") to ensure effects use segment colors.
   Map<String, dynamic> _buildWledPayload() {
     // Convert colors to RGBW format
     final colArray = state.colors.take(3).map((c) {
       return [(c.r * 255.0).round().clamp(0, 255), (c.g * 255.0).round().clamp(0, 255), (c.b * 255.0).round().clamp(0, 255), 0]; // Force W=0 for saturated colors
     }).toList();
 
-    // Apply to all segments by using segment ID -1 or creating individual segment updates
-    // For simplicity, we'll use a single segment update that applies to the main segment
-    // In a multi-segment system, this should be enhanced to apply to all segments
     return {
       'on': true,
       'bri': state.brightness,
       'seg': [
         {
-          'id': 0, // Primary segment - WLED will typically apply this to visible segments
+          // No 'id' — applyToDevice/applyChannelFilter replicates this
+          // template per effective channel id.
           'fx': state.effectId,
           'sx': state.speed,
           'ix': state.intensity,

@@ -332,14 +332,17 @@ Future<void> _runSchedule(Ref ref) async {
       ).firstOrNull;
 
       if (pattern != null) {
-        await repo.applyJson(pattern.toWledPayload());
+        await ref
+            .read(wledStateProvider.notifier)
+            .applyToDevice(pattern.toWledPayload(), labelHint: null);
         ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
 
         // Track usage
         ref.trackPatternUsage(pattern: pattern, source: 'voice');
       } else {
         debugPrint('Voice: Pattern "$patternName" not found, applying generic');
-        await repo.applyJson({'on': true, 'bri': 200, 'seg': [{'id': 0, 'fx': 0}]});
+        await ref.read(wledStateProvider.notifier).applyToDevice(
+            {'on': true, 'bri': 200, 'seg': [{'fx': 0}]}, labelHint: null);
         ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
       }
     } else if (actionLower.contains('turn on') || actionLower == 'on') {

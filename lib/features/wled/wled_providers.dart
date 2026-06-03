@@ -1254,6 +1254,60 @@ class WledNotifier extends Notifier<WledStateModel> {
     return true;
   }
 
+  /// Class-1 multi-channel chokepoint. The SINGLE apply path every
+  /// aesthetic-command site that builds a RAW broadcast payload routes
+  /// through (Current Colors, Lumina AI, Audio, Geofence, Voice, library
+  /// Scenes). Mirrors the reference fix in
+  /// [applySavedDesign](apply_saved_design.dart:50-63) and
+  /// [game_day_apply.dart:88].
+  ///
+  /// Guarantees, in order:
+  ///   1. **U1 gate** — reads [effectiveChannelIdsProvider] (channel selector
+  ///      ∩ participation ∩ device buses). Empty → skip-apply, return false.
+  ///      Never POST an empty seg array.
+  ///   2. **[applyChannelFilter]** (RAW payloads only — see discriminator) —
+  ///      rewrites the single template seg into one seg per effective channel
+  ///      id, each with explicit `id`/`start`/`stop`/`on:true`. The result is
+  ///      multi-seg-with-ids that survives the [expandForParticipation]
+  ///      chokepoint via Rule 4, and is **cache-independent** — it does NOT
+  ///      depend on the SharedPreferences participation cache being warm
+  ///      (dissolving the Class-3 cold-cache dependency for these paths).
+  ///   3. **[applyPayloadWithLabel]** — the device write + preview/label
+  ///      fan-out (`labelHint` semantics unchanged: non-null = persistent
+  ///      Now Playing label; null = transient / caller sets its own label).
+  ///
+  /// **Double-filter guard (Phase-3).** Only RAW broadcast-intent payloads
+  /// (a single template seg with NO explicit `id`) are expanded. An
+  /// ALREADY-filtered multi-seg / id-bearing payload (custom scenes, saved
+  /// designs, getState snapshots — these reach this method via the Lumina AI
+  /// command router's scene path, [lumina_command_router.dart] `_executeScene`)
+  /// passes straight through: re-filtering would template off `seg.first` and
+  /// flatten per-channel looks to bus-0 (the saved-design trap from the Game
+  /// Day fix). This mirrors [expandForParticipation]'s raw-vs-prefiltered
+  /// discriminator and keeps the helper idempotent and safe for any caller.
+  Future<bool> applyToDevice(
+    Map<String, dynamic> payload, {
+    required String? labelHint,
+  }) async {
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      debugPrint('applyToDevice: skip (U1 gate — no effective channels)');
+      return false;
+    }
+
+    // Discriminator: expand only a single template seg with no explicit id.
+    final seg = payload['seg'];
+    final isRawBroadcast = seg is List &&
+        seg.length == 1 &&
+        seg.first is Map &&
+        !(seg.first as Map).containsKey('id');
+
+    final outgoing = isRawBroadcast
+        ? applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider))
+        : payload;
+    return applyPayloadWithLabel(outgoing, labelHint: labelHint);
+  }
+
   /// Test-only knob: rewind the poll-suppression timestamp so the next
   /// poll behaves as if the [_kLocalApplyPollSuppressWindow] has expired.
   /// Lets tests verify post-window behavior without sleeping 2 real seconds.

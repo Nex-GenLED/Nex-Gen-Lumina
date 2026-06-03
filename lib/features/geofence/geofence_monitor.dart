@@ -276,12 +276,14 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       return;
     }
     if (lower.contains('party')) {
-      await repo.applyJson({
+      // Route through the Class-1 chokepoint so the party scene lights every
+      // effective channel, not just bus 0. No per-seg 'id' — applyToDevice
+      // fans the template out per effective channel.
+      await ref.read(wledStateProvider.notifier).applyToDevice({
         'on': true,
         'bri': 190,
         'seg': [
           {
-            'id': 0,
             'fx': 27,
             'sx': 200,
             'ix': 180,
@@ -292,7 +294,7 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
             ]
           }
         ]
-      });
+      }, labelHint: actionName);
       return;
     }
     // Default: gentle on

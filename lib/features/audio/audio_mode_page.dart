@@ -47,12 +47,13 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     setState(() => _sensitivity = value);
     _sensitivityDebounce?.cancel();
     _sensitivityDebounce = Timer(const Duration(milliseconds: 300), () {
-      final repo = ref.read(wledRepositoryProvider);
-      repo?.applyJson({
+      // Route through the Class-1 chokepoint so sensitivity reaches every
+      // effective channel, not just bus 0.
+      ref.read(wledStateProvider.notifier).applyToDevice({
         'seg': [
-          {'id': 0, 'si': value.round()}
+          {'si': value.round()}
         ]
-      });
+      }, labelHint: null);
     });
   }
 
@@ -69,17 +70,16 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return;
 
-    final success = await repo.applyJson({
+    final success = await ref.read(wledStateProvider.notifier).applyToDevice({
       'on': true,
       'seg': [
         {
-          'id': 0,
           'fx': effectId,
           'sx': 128,
           'ix': 128,
         }
       ]
-    });
+    }, labelHint: null);
 
     if (success && mounted) {
       ref.read(wledStateProvider.notifier).applyPreviewSync(
@@ -94,18 +94,17 @@ class _AudioModePageState extends ConsumerState<AudioModePage>
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return;
 
-    final success = await repo.applyJson({
+    final success = await ref.read(wledStateProvider.notifier).applyToDevice({
       'on': true,
       'seg': [
         {
-          'id': 0,
           'fx': 0,
           'col': [
             [255, 255, 255, 180]
           ],
         }
       ]
-    });
+    }, labelHint: null);
 
     if (success && mounted) {
       ref.read(wledStateProvider.notifier).applyPreviewSync(

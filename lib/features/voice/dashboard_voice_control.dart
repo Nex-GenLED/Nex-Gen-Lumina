@@ -186,7 +186,7 @@ class VoiceCommandHandler {
         'bri': 200,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 0, // Solid effect
             'col': [
               [255, 180, 100, 255], // Warm white: amber RGB + full W
@@ -195,7 +195,7 @@ class VoiceCommandHandler {
         ],
       };
 
-      await repo.applyJson(payload);
+      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 180, 100)],
         effectId: 0,
@@ -220,7 +220,7 @@ class VoiceCommandHandler {
         'bri': 255,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 0, // Solid effect
             'col': [
               [0, 0, 0, 255], // Pure W channel — dedicated white LED
@@ -229,7 +229,7 @@ class VoiceCommandHandler {
         ],
       };
 
-      await repo.applyJson(payload);
+      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 255, 255)],
         effectId: 0,
@@ -255,7 +255,7 @@ class VoiceCommandHandler {
         'bri': 255,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 28, // Chase effect
             'sx': 150, // Medium-fast speed
             'col': [
@@ -267,7 +267,7 @@ class VoiceCommandHandler {
         ],
       };
 
-      await repo.applyJson(payload);
+      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [
           const Color.fromARGB(255, 255, 0, 0),
