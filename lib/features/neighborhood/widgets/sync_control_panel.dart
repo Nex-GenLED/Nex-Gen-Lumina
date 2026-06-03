@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../neighborhood_service.dart';
 
 import '../../wled/library_hierarchy_models.dart';
+import '../../wled/pattern_grid_widgets.dart';
 import '../../wled/pattern_providers.dart';
 import '../../wled/wled_effects_catalog.dart';
 import '../neighborhood_models.dart';
@@ -646,6 +647,11 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      // #8: the sheet's drag-to-dismiss recognizer otherwise wins the gesture
+      // arena over the fixed-height grid's scroll, making below-fold rows
+      // unreachable. Disable drag so the grid owns vertical drags; the user
+      // still dismisses via the X / close control in the sheet header.
+      enableDrag: false,
       builder: (ctx) => _PatternPickerSheet(
         title: memberName != null ? 'Choose for $memberName' : 'Choose Pattern',
         onSelected: (assignment) {
@@ -1801,7 +1807,7 @@ class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
           itemCount: children.length,
           itemBuilder: (context, index) {
             final node = children[index];
-            return _FolderPickerCard(
+            return FolderPickerCard(
               node: node,
               onTap: () {
                 if (node.isPalette) {
@@ -2002,15 +2008,28 @@ class _PalettePickerCard extends StatelessWidget {
 }
 
 /// Card for a folder/category node inside the picker.
-class _FolderPickerCard extends StatelessWidget {
+///
+/// Public (not `_`-prefixed) so the #7 fallback rendering can be widget-tested
+/// directly. Not exported for general reuse — the Week-3 consolidation replaces
+/// this bespoke picker with LibraryBrowserScreen.
+class FolderPickerCard extends StatelessWidget {
   final LibraryNode node;
   final VoidCallback onTap;
 
-  const _FolderPickerCard({required this.node, required this.onTap});
+  const FolderPickerCard({super.key, required this.node, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final colors = node.previewColors ?? node.themeColors ?? [Colors.grey.shade700, Colors.grey.shade800];
+    // #7: leaf palettes carry real colors (previewColors/themeColors); but
+    // categories/folders never populate either (previewColors was never wired
+    // up in the data layer), so they would fall to a blank grey card. Reuse the
+    // Explore card's shared iconography — a per-id icon + per-category accent —
+    // for those nodes instead. Leaf palette cards keep their gradient bar.
+    final paletteColors = node.previewColors ?? node.themeColors;
+    final accent =
+        paletteColors == null ? LibraryNodeCard.folderThemeColor(node) : null;
+    final folderIcon = accent == null ? null : LibraryNodeCard.iconForNode(node);
+    final colors = paletteColors ?? [accent!, accent];
 
     return InkWell(
       onTap: onTap,
@@ -2040,7 +2059,9 @@ class _FolderPickerCard extends StatelessWidget {
                   gradient: LinearGradient(colors: colors),
                   borderRadius: BorderRadius.circular(2),
                 ),
-              ),
+              )
+            else if (folderIcon != null)
+              Icon(folderIcon, color: accent, size: 26),
             const Spacer(),
             Text(
               node.name,

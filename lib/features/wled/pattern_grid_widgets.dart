@@ -114,7 +114,10 @@ class LibraryNodeCard extends StatelessWidget {
 
   const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug});
 
-  IconData _iconForNode() {
+  /// Per-id icon for a library category/folder/palette node. Public+static so
+  /// other surfaces (e.g. the Sync pattern picker's folder cards) reuse the same
+  /// iconography instead of rendering a blank card. (#7)
+  static IconData iconForNode(LibraryNode node) {
     final id = node.id;
 
     // Category icons
@@ -189,8 +192,11 @@ class LibraryNodeCard extends StatelessWidget {
     return Icons.folder_outlined;
   }
 
-  /// Get themed color for folder nodes (static, not flowing gradient)
-  Color _getFolderThemeColor() {
+  /// Get themed color for folder nodes (static, not flowing gradient).
+  /// Public+static so other surfaces (e.g. the Sync pattern picker) reuse the
+  /// same per-category accent instead of falling back to blank grey. (#7)
+  /// [parentAccent] is an optional route-supplied fallback (null where unused).
+  static Color folderThemeColor(LibraryNode node, {Color? parentAccent}) {
     final id = node.id;
 
     // Category colors
@@ -408,7 +414,7 @@ class LibraryNodeCard extends StatelessWidget {
     if (parentGradient != null && parentGradient!.length >= 2) return parentGradient!;
 
     // Default: derive from theme color
-    final c = _getFolderThemeColor();
+    final c = folderThemeColor(node, parentAccent: parentAccent);
     return [c, c.withValues(alpha: 0.5)];
   }
 
@@ -480,8 +486,8 @@ class LibraryNodeCard extends StatelessWidget {
   /// inside a Kelvin temperature folder). Renders as a row matching palette cards,
   /// with an 8-dot gradient preview fading from full to ~30% brightness.
   Widget _buildCompactFolderCard(BuildContext context) {
-    final accentColor = _getFolderThemeColor();
-    final icon = _iconForNode();
+    final accentColor = folderThemeColor(node, parentAccent: parentAccent);
+    final icon = iconForNode(node);
     final colors = node.themeColors;
     final baseColor = (colors != null && colors.isNotEmpty) ? colors.first : accentColor;
 
@@ -578,8 +584,8 @@ class LibraryNodeCard extends StatelessWidget {
   /// Build a subfolder card with gradient background, glow orb, icon, and pixel strip
   Widget _buildFolderCard(BuildContext context) {
     final gradientColors = _getGradientForNode();
-    final accentColor = _getFolderThemeColor();
-    final icon = _iconForNode();
+    final accentColor = folderThemeColor(node, parentAccent: parentAccent);
+    final icon = iconForNode(node);
 
     return Material(
       color: Colors.transparent,
