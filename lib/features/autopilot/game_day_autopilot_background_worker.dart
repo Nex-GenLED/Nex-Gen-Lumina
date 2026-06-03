@@ -408,8 +408,11 @@ class GameDayAutopilotBackgroundWorker {
     // stale-slot defense the WledService chokepoint applies — the
     // background isolate can't reach that chokepoint at apply time.
     if (config.designMode == 'saved' && config.savedDesignPayload != null) {
-      return normalizeWledPayload(
-        Map<String, dynamic>.from(config.savedDesignPayload!),
+      return expandForChannels(
+        normalizeWledPayload(
+          Map<String, dynamic>.from(config.savedDesignPayload!),
+        ),
+        config.participatingChannelIds,
       );
     }
 
@@ -437,8 +440,48 @@ class GameDayAutopilotBackgroundWorker {
 
     // TeamDesignCatalog payloads carry a 2-slot col ([primary, secondary]).
     // Normalize pads to 3 so the device's third slot is overwritten
-    // explicitly instead of holding the prior pattern's color.
-    return normalizeWledPayload(Map<String, dynamic>.from(design.wledPayload));
+    // explicitly instead of holding the prior pattern's color. Team payloads
+    // are RAW single-seg-no-id → expandForChannels fans them across the
+    // participating channels (the #29 fix).
+    return expandForChannels(
+      normalizeWledPayload(Map<String, dynamic>.from(design.wledPayload)),
+      config.participatingChannelIds,
+    );
+  }
+
+  /// Expands a background Game Day payload to target the config's RESOLVED
+  /// participating channels (#29). Mirrors the foreground fix
+  /// (game_day_apply.dart:88) and the Class-1 raw-vs-prefiltered discriminator:
+  ///   • null ids       → pass through (legacy single-seg; lights ch1 only —
+  ///                      no worse than before).
+  ///   • [] ids         → explicit opt-out: returns seg:[] so the dispatcher
+  ///                      skip-applies (see [_applyToControllers]).
+  ///   • RAW single-seg → applyChannelFilter to the participating set. No
+  ///     (no id)          DeviceChannel list ⇒ no start/stop; WLED retains the
+  ///                      install-time segment ranges (same contract as the
+  ///                      sync worker / buildParticipatingSegArray).
+  ///   • already multi- → pass through untouched (a saved design carries its
+  ///     seg / id-bearing  own per-channel segs; re-filtering would template
+  ///                      off seg.first and flatten it to bus 0).
+  @visibleForTesting
+  static Map<String, dynamic> expandForChannels(
+    Map<String, dynamic> base,
+    List<int>? participatingChannelIds,
+  ) {
+    if (participatingChannelIds == null) return base; // legacy fallback
+    if (participatingChannelIds.isEmpty) {
+      // Explicit opt-out — signal skip via an empty seg array.
+      final r = Map<String, dynamic>.from(base);
+      r['seg'] = const <Map<String, dynamic>>[];
+      return r;
+    }
+    final seg = base['seg'];
+    final isRaw = seg is List &&
+        seg.length == 1 &&
+        seg.first is Map &&
+        !(seg.first as Map).containsKey('id');
+    if (!isRaw) return base; // pre-filtered (saved design) — don't flatten
+    return applyChannelFilter(base, participatingChannelIds);
   }
 
   /// Build a celebration flash payload in team colors.
@@ -448,32 +491,37 @@ class GameDayAutopilotBackgroundWorker {
   ) {
     final primary = Color(config.primaryColorValue);
     final secondary = Color(config.secondaryColorValue);
-    return normalizeWledPayload({
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {
-          'fx': 11, // Sparkle
-          'sx': 240,
-          'ix': 240,
-          'pal': 0,
-          'col': [
-            [
-              (primary.r * 255).round(),
-              (primary.g * 255).round(),
-              (primary.b * 255).round(),
-              0,
+    // RAW single-seg-no-id → expandForChannels fans the celebration flash
+    // across the participating channels too (same #29 fix as the base show).
+    return expandForChannels(
+      normalizeWledPayload({
+        'on': true,
+        'bri': 255,
+        'seg': [
+          {
+            'fx': 11, // Sparkle
+            'sx': 240,
+            'ix': 240,
+            'pal': 0,
+            'col': [
+              [
+                (primary.r * 255).round(),
+                (primary.g * 255).round(),
+                (primary.b * 255).round(),
+                0,
+              ],
+              [
+                (secondary.r * 255).round(),
+                (secondary.g * 255).round(),
+                (secondary.b * 255).round(),
+                0,
+              ],
             ],
-            [
-              (secondary.r * 255).round(),
-              (secondary.g * 255).round(),
-              (secondary.b * 255).round(),
-              0,
-            ],
-          ],
-        }
-      ],
-    });
+          }
+        ],
+      }),
+      config.participatingChannelIds,
+    );
   }
 
   /// Dispatch a WLED payload to the user's controllers via the
@@ -481,6 +529,14 @@ class GameDayAutopilotBackgroundWorker {
   /// in the bridge queue, so this works whether the user is on home WiFi
   /// or remote — no direct HTTP to controller IPs.
   Future<void> _applyToControllers(Map<String, dynamic> payload) async {
+    // Skip-apply on an explicit-opt-out payload (empty seg array from
+    // expandForChannels []-case) — never POST an empty seg. A top-level-only
+    // payload like {'on': false} has no 'seg' key and is NOT skipped.
+    final seg = payload['seg'];
+    if (seg is List && seg.isEmpty) {
+      debugPrint('[GameDayBg] skip-apply: no participating channels');
+      return;
+    }
     final hostUid = await loadGameDayUserUid();
     if (hostUid == null) {
       debugPrint('[GameDayBg] No user UID — cannot dispatch pattern');

@@ -228,12 +228,40 @@ final enabledAutopilotConfigsProvider =
 /// Kept alive by [gameDayBackgroundPersistenceKeepAliveProvider] which is
 /// watched from main_scaffold.dart.
 final _gameDayBackgroundPersistenceProvider = Provider<void>((ref) {
+  // Resolve participation inputs once (roofline + device channels) so each
+  // persisted config carries its RESOLVED participating channel set for the
+  // background isolate (#29). Watching both means this re-runs — and
+  // re-persists with the correct set — once device channels finish loading.
+  final rooflineAsync = ref.watch(currentRooflineConfigProvider);
+  final segments = rooflineAsync.maybeWhen(
+    data: (c) => c?.segments ?? const <RooflineSegment>[],
+    orElse: () => const <RooflineSegment>[],
+  );
+  final deviceChannelIds =
+      ref.watch(deviceChannelsProvider).map((c) => c.id).toList();
+
   // Persist configs on any change
   final configsAsync = ref.watch(gameDayAutopilotConfigsProvider);
   configsAsync.whenData((configs) {
-    final bgConfigs = configs
-        .map(BackgroundGameDayAutopilotConfig.fromConfig)
-        .toList();
+    final bgConfigs = configs.map((config) {
+      final resolved = resolveParticipatingChannels(
+        explicit: config.participatingChannelIndices,
+        segments: segments,
+        allDeviceChannelIds: deviceChannelIds,
+      );
+      // null = legacy fallback (worker keeps the single-seg payload → lights
+      // ch1) when there's no explicit choice AND nothing meaningful resolved
+      // (no channel info yet, or roofline excludes all) — never go dark from
+      // incomplete data. An explicit user opt-out ([]) is honored verbatim so
+      // the worker skip-applies.
+      final List<int>? channelIds = config.participatingChannelIndices != null
+          ? resolved
+          : (resolved.isEmpty ? null : resolved);
+      return BackgroundGameDayAutopilotConfig.fromConfig(
+        config,
+        participatingChannelIds: channelIds,
+      );
+    }).toList();
     unawaited(saveGameDayConfigsForBackground(bgConfigs));
   });
 

@@ -61,6 +61,15 @@ class BackgroundGameDayAutopilotConfig {
   // Score celebrations (future — background will handle these in D3+)
   final bool scoreCelebrationEnabled;
 
+  /// Resolved participating channel (bus) ids for this config, computed at
+  /// schedule time in a Riverpod context (roofline + device channels) and read
+  /// by the background isolate to target the right channels (#29).
+  ///   null → unresolved / legacy: worker falls back to the single-seg payload
+  ///          (lights ch1 only — no worse than before).
+  ///   []   → explicit opt-out of all channels: worker skip-applies.
+  ///   [..] → resolved participating set: worker expands per-channel.
+  final List<int>? participatingChannelIds;
+
   const BackgroundGameDayAutopilotConfig({
     required this.teamSlug,
     required this.teamName,
@@ -82,6 +91,7 @@ class BackgroundGameDayAutopilotConfig {
     this.onTimeOverride,
     this.offTimeOverride,
     required this.scoreCelebrationEnabled,
+    this.participatingChannelIds,
   });
 
   Map<String, dynamic> toJson() => {
@@ -105,6 +115,7 @@ class BackgroundGameDayAutopilotConfig {
         'onTimeOverride': onTimeOverride,
         'offTimeOverride': offTimeOverride,
         'scoreCelebrationEnabled': scoreCelebrationEnabled,
+        'participatingChannelIds': participatingChannelIds,
       };
 
   factory BackgroundGameDayAutopilotConfig.fromJson(
@@ -134,13 +145,23 @@ class BackgroundGameDayAutopilotConfig {
       onTimeOverride: json['onTimeOverride'] as String?,
       offTimeOverride: json['offTimeOverride'] as String?,
       scoreCelebrationEnabled: json['scoreCelebrationEnabled'] ?? false,
+      participatingChannelIds: (json['participatingChannelIds'] as List?)
+          ?.whereType<num>()
+          .map((n) => n.toInt())
+          .toList(),
     );
   }
 
   /// Build from a full GameDayAutopilotConfig (called from UI layer).
+  ///
+  /// [participatingChannelIds] is the RESOLVED participating set (see field
+  /// doc) — the caller computes it in a Riverpod context and passes it in,
+  /// since the resolver needs roofline + device channels this factory can't
+  /// reach. Defaults to null (legacy) when the caller can't resolve.
   factory BackgroundGameDayAutopilotConfig.fromConfig(
-    GameDayAutopilotConfig config,
-  ) {
+    GameDayAutopilotConfig config, {
+    List<int>? participatingChannelIds,
+  }) {
     return BackgroundGameDayAutopilotConfig(
       teamSlug: config.teamSlug,
       teamName: config.teamName,
@@ -162,6 +183,7 @@ class BackgroundGameDayAutopilotConfig {
       onTimeOverride: config.onTimeOverride,
       offTimeOverride: config.offTimeOverride,
       scoreCelebrationEnabled: config.scoreCelebrationEnabled,
+      participatingChannelIds: participatingChannelIds,
     );
   }
 
