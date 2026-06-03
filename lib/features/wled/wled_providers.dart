@@ -1407,10 +1407,36 @@ class WledNotifier extends Notifier<WledStateModel> {
     bool ok = false;
     try {
       // Check if a channel filter is active (user selected specific channels).
-      final effectiveChannels = ref.read(effectiveChannelIdsProvider);
+      var effectiveChannels = ref.read(effectiveChannelIdsProvider);
+
+      // Only segment-level props need per-channel targeting. Power/brightness
+      // are device-global (top-level write), so they must NOT pay the
+      // cold-resolve latency below — a power tap stays instant on a cold/
+      // offline device.
+      final needsChannels = speed != null || color != null || white != null;
+
+      if (effectiveChannels.isEmpty && needsChannels) {
+        // Cold start: device channels derive from the hardware config, which
+        // may still be loading (FutureProvider unresolved in the first seconds
+        // after launch / device select). Resolve it once — bounded so a slider
+        // drag never blocks on a slow/offline config fetch — then re-read.
+        // Without this a colour/speed change in that window falls to a bus-0
+        // single-seg setState on a multi-bus install (Ellie, Blue Line).
+        try {
+          await ref
+              .read(deviceHardwareConfigProvider.future)
+              .timeout(const Duration(seconds: 3), onTimeout: () => null);
+          effectiveChannels = ref.read(effectiveChannelIdsProvider);
+        } catch (_) {
+          // Genuine no-config / fetch error — fall through to setState below.
+        }
+      }
 
       if (effectiveChannels.isEmpty) {
-        // No segment info available yet — fall back to legacy single-segment.
+        // Still no channel map: device has no resolvable buses. setState sends
+        // a top-level GLOBAL write for power/brightness (correct on any
+        // device); colour/speed fall to seg 0 — the only segment addressable
+        // without a channel map.
         ok = await service.setState(
           on: on,
           brightness: brightness,
@@ -1443,7 +1469,11 @@ class WledNotifier extends Notifier<WledStateModel> {
         if (segTemplate.isNotEmpty) {
           final deviceCh = ref.read(deviceChannelsProvider);
           payload['seg'] = effectiveChannels.map((id) {
-            final s = <String, dynamic>{'id': id, ...segTemplate};
+            // 'on': true per seg — a colour/speed tweak must relight a
+            // targeted channel that is currently off (the channel-2-dark
+            // class; mirrors applyChannelFilter). Scoped to the channels
+            // being targeted; non-targeted channels are omitted, not touched.
+            final s = <String, dynamic>{'id': id, ...segTemplate, 'on': true};
             for (final ch in deviceCh) {
               if (ch.id == id) {
                 s['start'] = ch.start;
