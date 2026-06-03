@@ -16,6 +16,9 @@ import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_notification_service.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
@@ -250,6 +253,19 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
         debugPrint('WLED refresh on resume failed: $e');
       }
 
+      // Neighborhood Sync: returning from background must recover live
+      // propagation WITHOUT a full relaunch. Refresh the user's group list
+      // (so a sync that STARTED while suspended is detected and auto-tuned
+      // by the app-level resolver below) and re-subscribe the command stream
+      // (so a design CHANGED while suspended — or a stream that closed in the
+      // background — is re-applied to the lights via fireImmediately replay).
+      try {
+        ref.invalidate(userNeighborhoodsProvider);
+        ref.read(neighborhoodSyncEngineProvider).handleAppResume();
+      } catch (e) {
+        debugPrint('Neighborhood sync resume re-apply failed: $e');
+      }
+
       // App came to foreground - run learning service tasks
       final learningService = BackgroundLearningService();
 
@@ -270,6 +286,39 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // ── Neighborhood Sync: APP-LEVEL listener scope ──────────────────────
+    // The sync receive-and-apply listener used to be mounted only by
+    // NeighborhoodSyncScreen, so a member not on that screen never applied
+    // live design changes (the restart-required bug). Watching the controller
+    // here — in the always-mounted root — keeps the listener alive whenever
+    // the app is foregrounded, regardless of the active route. The controller
+    // returns void and its trigger condition (manuallyActive || iAmParticipating
+    // || hasActiveGroup) still gates whether it actually subscribes, so this
+    // is inert until the user has real sync involvement.
+    ref.watch(syncEngineControllerProvider);
+
+    // Resolve the active group app-wide. activeNeighborhoodIdProvider defaults
+    // to null and was only set on the sync screen; the command stream keys off
+    // it, so without this an off-screen receiver had nothing to watch. Only
+    // ever broadens (never clobbers an explicit on-screen selection) — see
+    // resolveAutoActiveGroupId.
+    // No fireImmediately: the StreamProvider is still loading at first build,
+    // so its initial value arrives as a normal change (outside build) — a
+    // fireImmediately callback would mutate activeNeighborhoodIdProvider
+    // synchronously during build, which Riverpod disallows.
+    ref.listen<AsyncValue<List<NeighborhoodGroup>>>(
+      userNeighborhoodsProvider,
+      (prev, next) {
+        final groups = next.valueOrNull;
+        if (groups == null) return;
+        final currentId = ref.read(activeNeighborhoodIdProvider);
+        final resolved = resolveAutoActiveGroupId(currentId, groups);
+        if (resolved != currentId) {
+          ref.read(activeNeighborhoodIdProvider.notifier).state = resolved;
+        }
+      },
+    );
+
     // Auto-regenerate autopilot schedule when it becomes stale
     ref.listen<bool>(needsScheduleRegenerationProvider, (prev, next) {
       if (next == true) {

@@ -547,6 +547,13 @@ class NeighborhoodService {
   }
 
   /// Stream of the latest sync command for a group.
+  ///
+  /// The parse is guarded: a single unparseable command doc is mapped to
+  /// `null` (treated as "no command") rather than throwing out of `.map`,
+  /// which would error-terminate the whole stream and permanently kill the
+  /// listener until an app relaunch (#52 dead-listener class). A genuine
+  /// Firestore stream error (permission / disconnect) is still allowed to
+  /// surface so the engine can detect it and re-subscribe.
   Stream<SyncCommand?> watchLatestCommand(String groupId) {
     return _neighborhoodsRef
         .doc(groupId)
@@ -556,7 +563,16 @@ class NeighborhoodService {
         .snapshots()
         .map((snapshot) {
       if (snapshot.docs.isEmpty) return null;
-      return SyncCommand.fromFirestore(snapshot.docs.first);
+      final doc = snapshot.docs.first;
+      try {
+        return SyncCommand.fromFirestore(doc);
+      } catch (e) {
+        debugPrint(
+          'watchLatestCommand: skipping unparseable command doc '
+          '${doc.id} in group $groupId (stream kept alive): $e',
+        );
+        return null;
+      }
     });
   }
 

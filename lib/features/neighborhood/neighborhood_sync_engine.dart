@@ -30,6 +30,11 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   final Ref _ref;
   ProviderSubscription<AsyncValue<SyncCommand?>>? _commandSubscription;
   Timer? _scheduledExecution;
+
+  /// Debounced re-subscribe timer for the command stream. Set when the
+  /// command StreamProvider surfaces an error (so a single transient
+  /// Firestore error doesn't permanently kill the listener — #52 class).
+  Timer? _resubscribeTimer;
   bool _isListening = false;
 
   /// True once we've captured the pre-sync snapshot for this listening
@@ -311,19 +316,104 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
 
     _commandSubscription = _ref.listen<AsyncValue<SyncCommand?>>(
       latestSyncCommandProvider,
-      (previous, next) {
-        final command = next.valueOrNull;
-        if (command == null) return;
-
-        // Check if this is a new command (not the same as previous)
-        final prevCommand = previous?.valueOrNull;
-        if (prevCommand?.id == command.id) return;
-
-        debugPrint('Received new sync command: ${command.patternName}');
-        _scheduleLocalExecution(command);
-      },
+      handleCommandSnapshot,
+      // fireImmediately replays the CURRENT command on (re)subscribe rather
+      // than waiting for the next change. This is the fix for the
+      // restart-required propagation bug: a stop→start churn (the asymmetric
+      // trigger explicitly allows hasActiveGroup to drop and re-raise) used
+      // to re-subscribe against an already-resolved, non-autoDispose
+      // StreamProvider and silently MISS the active design until the next
+      // change. With fireImmediately the active design is re-applied on every
+      // fresh subscription. The id-dedup below still prevents a double-apply
+      // of the SAME command within a single subscription's lifetime.
+      fireImmediately: true,
     );
   }
+
+  /// Handles one emission from [latestSyncCommandProvider]. Extracted from
+  /// the `ref.listen` callback so it is unit-testable without standing up a
+  /// real Firestore command stream.
+  ///
+  /// Three branches:
+  ///  - error  → the stream surfaced an error. Don't die silently (#52
+  ///             class): schedule a debounced re-subscribe and bail.
+  ///  - no cmd → nothing to apply (empty collection / unparseable doc that
+  ///             [NeighborhoodService.watchLatestCommand] mapped to null).
+  ///  - new cmd→ apply, unless it's the same id we last applied on this
+  ///             subscription (dedup — guards fireImmediately replay from
+  ///             double-applying when no real change occurred).
+  @visibleForTesting
+  void handleCommandSnapshot(
+    AsyncValue<SyncCommand?>? previous,
+    AsyncValue<SyncCommand?> next,
+  ) {
+    if (next.hasError) {
+      debugPrint('Sync command stream error: ${next.error} — '
+          'scheduling re-subscribe (listener stays alive)');
+      scheduleCommandStreamResubscribe();
+      return;
+    }
+
+    final command = next.valueOrNull;
+    if (command == null) return;
+
+    // Dedup: same command id as the previous emission → no re-apply. New
+    // command broadcasts always carry a fresh auto-id (broadcastSyncCommand),
+    // so a genuine design change is never suppressed; only a redundant
+    // replay of the already-applied command is.
+    final prevCommand = previous?.valueOrNull;
+    if (prevCommand?.id == command.id) return;
+
+    debugPrint('Received new sync command: ${command.patternName}');
+    onNewSyncCommand(command);
+  }
+
+  /// Apply seam for a newly-received sync command. Public + visibleForTesting
+  /// so spy subclasses can record receipt without a real WLED apply (private
+  /// members can't be overridden across libraries).
+  @visibleForTesting
+  void onNewSyncCommand(SyncCommand command) => _scheduleLocalExecution(command);
+
+  /// Re-subscribes the command stream after a transient error, debounced so
+  /// an error storm doesn't hot-loop invalidation. Mirrors the #52 fix
+  /// pattern (e005a02): a stream error must never end the listener.
+  @visibleForTesting
+  void scheduleCommandStreamResubscribe() {
+    if (!_isListening) return;
+    _resubscribeTimer?.cancel();
+    _resubscribeTimer = Timer(
+      const Duration(seconds: 2),
+      resubscribeCommandStreamNow,
+    );
+  }
+
+  /// Invalidates [latestSyncCommandProvider] so [NeighborhoodService.watchLatestCommand]
+  /// re-subscribes with a fresh Firestore listener. Combined with
+  /// fireImmediately on the engine's listen, this replays + re-applies the
+  /// current design. Safe to call when idle — the provider resolves to null
+  /// when no group is active.
+  @visibleForTesting
+  void resubscribeCommandStreamNow() {
+    try {
+      _ref.invalidate(latestSyncCommandProvider);
+    } catch (e) {
+      debugPrint('Command stream re-subscribe failed: $e');
+    }
+  }
+
+  /// Re-asserts sync after the app returns to the foreground. The OS may have
+  /// suspended the process across a design change, and a backgrounded
+  /// Firestore stream can close. Re-subscribing the command stream heals a
+  /// dead stream AND (via fireImmediately) re-applies the current design, so
+  /// returning from background recovers WITHOUT a full relaunch.
+  void handleAppResume() {
+    resubscribeCommandStreamNow();
+  }
+
+  /// Test seam: force the listening flag so resume / re-subscribe gating can
+  /// be exercised without standing up the real command subscription.
+  @visibleForTesting
+  set isListeningForTest(bool value) => _isListening = value;
 
   /// Stops listening for sync commands.
   ///
@@ -352,6 +442,8 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     _commandSubscription = null;
     _scheduledExecution?.cancel();
     _scheduledExecution = null;
+    _resubscribeTimer?.cancel();
+    _resubscribeTimer = null;
     debugPrint(
       'Stopped neighborhood sync listener'
       '${shouldTeardown ? ' (teardown dispatched)' : ''}',
@@ -815,3 +907,40 @@ final syncEngineControllerProvider = Provider<void>((ref) {
     engine.stopListening();
   }
 });
+
+/// Resolves which neighborhood group [activeNeighborhoodIdProvider] should
+/// point at, app-wide, given the current explicit selection and the live
+/// list of the user's groups.
+///
+/// Why this exists: the live command listener ([latestSyncCommandProvider]
+/// and [currentUserMemberProvider]) keys off [activeNeighborhoodIdProvider],
+/// which defaults to null and was only ever set by the Neighborhood Sync
+/// screen (on group tap / create / join). A receiver who never opened that
+/// screen had no resolved group, so the app-level listener had nothing to
+/// watch — the core of the restart-required propagation bug. Hoisting this
+/// resolution to an always-mounted scope (see main.dart) lets the listener
+/// target the right group regardless of which screen the user is on.
+///
+/// Policy (only ever broadens, never clears an explicit selection):
+///  - no groups            → keep current (don't clobber a stale id mid-leave)
+///  - current id still valid→ keep it (respect explicit on-screen selection)
+///  - any group is actively syncing → target it (so a receiver auto-tunes to
+///    the live sync)
+///  - exactly one group    → target it (so we're already watching when a
+///    sync starts — covers the common two-home single-group case)
+///  - multi-group, none active, no valid selection → leave null (ambiguous;
+///    defer to explicit on-screen selection)
+String? resolveAutoActiveGroupId(
+  String? currentId,
+  List<NeighborhoodGroup> groups,
+) {
+  if (groups.isEmpty) return currentId;
+  if (currentId != null && groups.any((g) => g.id == currentId)) {
+    return currentId;
+  }
+  for (final g in groups) {
+    if (g.isActive) return g.id;
+  }
+  if (groups.length == 1) return groups.first.id;
+  return currentId;
+}
