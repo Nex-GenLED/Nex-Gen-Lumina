@@ -90,13 +90,21 @@ class CloudAIProcessor {
     final parsed = _extractJson(response);
 
     if (parsed == null) {
-      // No JSON in the response — surface the prose as-is so the user sees
-      // what Claude actually said (e.g. an unknown-entity color guess, a
+      // No *parseable* JSON in the response — surface the prose so the user
+      // sees what Claude actually said (e.g. an unknown-entity color guess, a
       // brainstorm of ideas, a clarifying question). wledPayload stays null
       // and previewColors defaults to const [], so _AssistantBubble renders
       // a plain conversational bubble with no apply card.
+      //
+      // CRITICAL: `_extractJson` also returns null when the model embedded a
+      // WLED payload that failed to jsonDecode (trailing comma, prose braces
+      // widening the first-{…last-} span, truncation, etc.). In that case the
+      // raw response still contains the proprietary payload, so we must scrub
+      // any JSON-object block before display — otherwise the raw payload leaks
+      // into the chat bubble alongside the recommendation.
+      final scrubbed = stripJsonForDisplay(response);
       return LuminaCommandResult(
-        responseText: response.trim(),
+        responseText: scrubbed.isEmpty ? 'Done.' : scrubbed,
         tier: ProcessingTier.cloud,
       );
     }
@@ -194,10 +202,14 @@ class CloudAIProcessor {
       }
     }
 
-    // Clean verbal text: remove JSON substring and code fences
+    // Clean verbal text: remove the extracted JSON substring, then defensively
+    // scrub any *other* JSON-object block the span-extractor may have missed
+    // (e.g. the model emitted two objects, or extra prose-wrapped JSON). The
+    // payload itself lives in `wled` above — it is never sourced from `verbal`,
+    // so scrubbing the display text cannot affect what gets applied to lights.
     var verbal = response.trim();
     verbal = verbal.replaceFirst(parsed.substring, '');
-    verbal = _cleanText(verbal);
+    verbal = stripJsonForDisplay(verbal);
     if (verbal.isEmpty) verbal = 'Done.';
 
     // Determine command type from parsed data
@@ -341,6 +353,89 @@ class CloudAIProcessor {
     cleaned = cleaned.replaceAll(RegExp(r"'''"), '');
     cleaned = cleaned.replaceAll(RegExp(r'\n\s*\n'), '\n');
     return cleaned.trim();
+  }
+
+  /// Removes any embedded JSON payload from text destined for the chat bubble.
+  ///
+  /// Lumina's transport returns prose with the WLED JSON appended (or fenced).
+  /// The payload is extracted separately for the apply-to-device path; this
+  /// function exists purely to guarantee that the *display* text never carries
+  /// the raw, proprietary payload — even when the payload was malformed enough
+  /// to defeat [_extractJson] (the leak in the `parsed == null` fallback).
+  ///
+  /// It strips balanced `{…}` blocks that look like JSON objects (i.e. contain
+  /// a `"key":` pair) and any leftover code-fence markers. Prose braces with no
+  /// quoted-key pattern (e.g. "a 2:1 ratio {roughly}") are preserved, so plain
+  /// conversational replies pass through untouched.
+  @visibleForTesting
+  static String stripJsonForDisplay(String text) {
+    var cleaned = _cleanText(_stripJsonObjects(text));
+    // Collapse the gap left where a JSON block sat between two prose fragments
+    // (e.g. "Done! {…} Enjoy!" → "Done!  Enjoy!" → "Done! Enjoy!").
+    cleaned = cleaned.replaceAll(RegExp(r'[ \t]{2,}'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r' +\n'), '\n');
+    cleaned = cleaned.replaceAll(RegExp(r'\n +'), '\n');
+    return cleaned.trim();
+  }
+
+  /// Walks [text] and drops every balanced top-level `{…}` block that looks
+  /// like a JSON object. Brace matching is string-aware so braces inside
+  /// quoted values don't throw off the depth count.
+  static String _stripJsonObjects(String text) {
+    final out = StringBuffer();
+    int i = 0;
+    while (i < text.length) {
+      if (text[i] == '{') {
+        final end = _matchingBrace(text, i);
+        if (end != -1) {
+          final block = text.substring(i, end + 1);
+          if (_looksLikeJsonObject(block)) {
+            i = end + 1; // skip the entire JSON object
+            continue;
+          }
+        }
+      }
+      out.write(text[i]);
+      i++;
+    }
+    return out.toString();
+  }
+
+  /// Returns the index of the `}` that closes the `{` at [start], or -1 if
+  /// unbalanced. Ignores braces and quotes that appear inside JSON strings.
+  static int _matchingBrace(String text, int start) {
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    for (int i = start; i < text.length; i++) {
+      final ch = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == r'\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+      } else if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  /// A block "looks like" a JSON object when it contains at least one quoted
+  /// key followed by a colon — the discriminator that separates a real payload
+  /// from incidental prose braces.
+  static bool _looksLikeJsonObject(String block) {
+    return RegExp(r'"[^"]*"\s*:').hasMatch(block);
   }
 }
 
