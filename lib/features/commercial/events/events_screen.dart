@@ -196,8 +196,19 @@ class _ActiveEventBanner extends ConsumerWidget {
       return;
     }
     try {
-      await repo.applyJson(payload);
+      // applyJson returns false (does NOT throw) on a device-write failure —
+      // gate the success toast on it (Audit-2 S10).
+      final success = await repo.applyJson(payload);
       if (!context.mounted) return;
+      if (!success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Apply failed — check your connection.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Applied "${event.designName ?? event.name}".'),

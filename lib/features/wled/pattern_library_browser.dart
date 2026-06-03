@@ -355,7 +355,18 @@ class RecentPatternsSection extends ConsumerWidget {
           return;
         }
         payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+        // applyJson returns false (does NOT throw) on a device-write failure
+        // — gate the label/toast so we don't claim "Applied:" on a failed
+        // write (Audit-2 S8).
+        final success = await repo.applyJson(payload);
+        if (!success) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+            );
+          }
+          return;
+        }
       }
 
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(pattern.name, ref.read(wledStateProvider));

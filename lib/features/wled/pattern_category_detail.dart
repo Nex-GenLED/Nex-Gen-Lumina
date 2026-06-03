@@ -102,7 +102,18 @@ class _GradientPatternCard extends ConsumerWidget {
               return;
             }
             payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-            await repo.applyJson(payload);
+            // applyJson returns false (does NOT throw) on a device-write
+            // failure — gate success on it so we don't claim "applied!" when
+            // the lights never changed (Audit-2 S6).
+            final success = await repo.applyJson(payload);
+            if (!success) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+                );
+              }
+              return;
+            }
             // Update home dashboard preview AND Explore hero from the
             // as-sent payload + arm poll-overwrite suppression.
             ref.read(wledStateProvider.notifier).applyPreviewSync(
@@ -245,7 +256,17 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
         return;
       }
       payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
+      // Gate label/toast on the write result — don't say "Playing:" when the
+      // device write failed (Audit-2 S7).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (toast && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(_current.name, ref.read(wledStateProvider));
       if (toast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playing: ${_current.name}')));
@@ -278,7 +299,13 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
           return;
         }
         payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+        // Background debounced push — surface failure non-blockingly instead
+        // of swallowing it with debugPrint only (Audit-2 S layout push).
+        final success = await repo.applyJson(payload);
+        if (!success && mounted) {
+          ref.read(wledCommandFailureProvider.notifier).state =
+              WledCommandFailure("Couldn't update your lights — check your connection");
+        }
       } catch (e) {
         debugPrint('Apply grp/spc failed: $e');
       }
@@ -502,7 +529,13 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                       return;
                     }
                     palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
-                    await repo.applyJson(palPayload);
+                    // Surface a failed sequence/palette push instead of only
+                    // debugPrint (Audit-2 S sequence push).
+                    final success = await repo.applyJson(palPayload);
+                    if (!success && mounted) {
+                      ref.read(wledCommandFailureProvider.notifier).state =
+                          WledCommandFailure("Couldn't update your lights — check your connection");
+                    }
                   } catch (e) {
                     debugPrint('Apply custom palette failed: $e');
                   }

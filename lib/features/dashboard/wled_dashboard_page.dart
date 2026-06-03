@@ -1199,10 +1199,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   } catch (e) {
                     debugPrint('Error in AI suggestion applyPreviewSync: $e');
                   }
-                }
-                ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
+                  // Only record usage + claim success when the write landed
+                  // (Audit-2 S14 — toast was outside the if(success) block).
+                  ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+                    );
+                  }
                 }
               }
               break;

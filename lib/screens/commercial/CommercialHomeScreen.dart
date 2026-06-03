@@ -327,10 +327,17 @@ class _ActiveEventBanner extends ConsumerWidget {
       return;
     }
     try {
-      await repo.applyJson(payload);
+      // applyJson returns false (does NOT throw) on a device-write failure —
+      // gate the label set AND the success toast on it (Audit-2 commercial).
+      final success = await repo.applyJson(payload);
+      if (!context.mounted) return;
+      if (!success) {
+        _toast(context, 'Apply failed — check your connection.',
+            color: Colors.redAccent);
+        return;
+      }
       ref.read(activePresetLabelProvider.notifier).state =
           event.designName ?? event.name;
-      if (!context.mounted) return;
       _toast(context, 'Applied "${event.designName ?? event.name}".',
           color: NexGenPalette.cyan);
     } catch (e) {
@@ -454,9 +461,16 @@ class _QuickActionsSection extends ConsumerWidget {
       return;
     }
     try {
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = label;
+      // applyJson returns false (does NOT throw) on a device-write failure —
+      // gate the label set AND the success toast on it (Audit-2 commercial).
+      final success = await repo.applyJson(payload);
       if (!context.mounted) return;
+      if (!success) {
+        _toast(context, 'Apply failed — check your connection.',
+            color: Colors.redAccent);
+        return;
+      }
+      ref.read(activePresetLabelProvider.notifier).state = label;
       _toast(context, 'Applied "$label".', color: NexGenPalette.cyan);
     } catch (e) {
       if (!context.mounted) return;
@@ -671,9 +685,16 @@ class _BrandTab extends ConsumerWidget {
       return;
     }
     try {
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = label;
+      // applyJson returns false (does NOT throw) on a device-write failure —
+      // gate the label set AND the success toast on it (Audit-2 commercial).
+      final success = await repo.applyJson(payload);
       if (!context.mounted) return;
+      if (!success) {
+        _toast(context, 'Apply failed — check your connection.',
+            color: Colors.redAccent);
+        return;
+      }
+      ref.read(activePresetLabelProvider.notifier).state = label;
       _toast(context, 'Applied "$label".', color: NexGenPalette.cyan);
     } catch (e) {
       if (!context.mounted) return;

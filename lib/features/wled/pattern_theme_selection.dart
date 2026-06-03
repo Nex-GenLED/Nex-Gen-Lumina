@@ -691,7 +691,19 @@ class _CompactPatternItemCard extends ConsumerWidget {
         return;
       }
       payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
+      // applyJson returns false (does NOT throw) on a device-write failure.
+      // Gate EVERYTHING downstream on it — label, local state, AND the Game
+      // Day persist — so we never persist/label a design the lights aren't
+      // actually showing (Audit-2 S9, the worst case: persist-on-failure).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern')),
+          );
+        }
+        return;
+      }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       _updateLocalState(ref);
 
@@ -781,7 +793,17 @@ class _CompactPatternItemCard extends ConsumerWidget {
         return;
       }
       payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
+      // Gate label AND Game Day persist on the write result — don't persist a
+      // design the device rejected (Audit-2 S9, solid-color variant).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern')),
+          );
+        }
+        return;
+      }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
 
       // Game Day persistence — see _handleTap for full rationale.

@@ -195,7 +195,11 @@ class VoiceCommandHandler {
         ],
       };
 
-      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      // applyToDevice returns false (does NOT throw) on a device-write
+      // failure — gate the spoken confirmation on it so the assistant never
+      // claims success when the lights didn't change (Audit-2 S15).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — warm white wasn't applied";
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 180, 100)],
         effectId: 0,
@@ -229,7 +233,9 @@ class VoiceCommandHandler {
         ],
       };
 
-      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      // Gate the spoken confirmation on the actual write outcome (Audit-2 S16).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — bright white wasn't applied";
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 255, 255)],
         effectId: 0,
@@ -267,7 +273,9 @@ class VoiceCommandHandler {
         ],
       };
 
-      await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      // Gate the spoken confirmation on the actual write outcome (Audit-2 S17).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — festive pattern wasn't applied";
       ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [
           const Color.fromARGB(255, 255, 0, 0),

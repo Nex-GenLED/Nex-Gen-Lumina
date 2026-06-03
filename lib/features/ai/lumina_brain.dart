@@ -441,38 +441,47 @@ class LuminaBrain {
       chosenName = raw.startsWith('* ') ? raw.substring(2) : raw;
     }
 
-    // Apply via the repository
+    // Apply via the repository. applyToDevice returns false (does NOT throw)
+    // on a device-write failure — gate the spoken confirmation on it so the
+    // AI never claims "Audio Mode is on" when the write failed (Audit-2 S18,
+    // brand-critical: the assistant must not lie about device state).
     final repo = ref.read(wledRepositoryProvider);
-    if (repo != null) {
-      await ref.read(wledStateProvider.notifier).applyToDevice({
-        'on': true,
-        'bri': 220,
-        'seg': [
-          {
-            // No 'id' — applyToDevice fans this out per effective channel.
-            'fx': chosenId,
-            'sx': 128,
-            'ix': 180,
-            'col': [
-              [255, 255, 255, 180]
-            ],
-          }
-        ]
-      }, labelHint: null);
+    if (repo == null) {
+      return 'Audio Mode needs a connected controller. '
+          'Make sure your system is online first.';
+    }
+    final ok = await ref.read(wledStateProvider.notifier).applyToDevice({
+      'on': true,
+      'bri': 220,
+      'seg': [
+        {
+          // No 'id' — applyToDevice fans this out per effective channel.
+          'fx': chosenId,
+          'sx': 128,
+          'ix': 180,
+          'col': [
+            [255, 255, 255, 180]
+          ],
+        }
+      ]
+    }, labelHint: null);
+    if (!ok) {
+      return "I couldn't reach your lights to start Audio Mode — "
+          "check your connection and try again.";
+    }
 
-      // Update local preview so the dashboard reflects the change immediately.
-      try {
-        ref.read(wledStateProvider.notifier).applyPreviewSync(
-          colors: [const Color(0xFF00D4FF)],
-          effectId: chosenId,
-          effectName: chosenName,
-          brightness: 220,
-          speed: 128,
-          intensity: 180,
-        );
-      } catch (e) {
-        debugPrint('Audio intent applyPreviewSync error: $e');
-      }
+    // Update local preview so the dashboard reflects the change immediately.
+    try {
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
+        colors: [const Color(0xFF00D4FF)],
+        effectId: chosenId,
+        effectName: chosenName,
+        brightness: 220,
+        speed: 128,
+        intensity: 180,
+      );
+    } catch (e) {
+      debugPrint('Audio intent applyPreviewSync error: $e');
     }
 
     return "Audio Mode is on — your lights will now pulse to whatever's "
