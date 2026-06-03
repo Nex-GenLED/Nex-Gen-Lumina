@@ -650,6 +650,14 @@ class SyncCommand {
   final String? patternName;
   final String? scheduleId;
 
+  /// WLED palette/grouping/spacing for the GLOBAL pattern. Carried so
+  /// [getPatternForMember] can rebuild a faithful seg (with pal:5 "Colors
+  /// Only") instead of one that defaults to the rainbow palette. Defaults match
+  /// the catalog invariant; legacy commands without these keys decode to them.
+  final int pal;
+  final int grp;
+  final int spc;
+
   /// Member-specific color overrides for Complement Mode.
   /// Key: member userId, Value: list of colors (as int values) for that member.
   /// If a member is not in this map, they use the default [colors] field.
@@ -678,6 +686,9 @@ class SyncCommand {
     this.syncType = SyncType.sequentialFlow,
     this.patternName,
     this.scheduleId,
+    this.pal = 5,
+    this.grp = 1,
+    this.spc = 0,
     this.memberColorOverrides,
     this.complementTheme,
     this.memberPatternOverrides,
@@ -718,6 +729,11 @@ class SyncCommand {
       syncType: SyncTypeExtension.fromJson(data['syncType']),
       patternName: data['patternName'],
       scheduleId: data['scheduleId'],
+      // Legacy commands omit these; default to the catalog invariant (Colors
+      // Only) so they apply selected colors instead of the rainbow palette.
+      pal: data['pal'] ?? 5,
+      grp: data['grp'] ?? 1,
+      spc: data['spc'] ?? 0,
       memberColorOverrides: colorOverrides,
       complementTheme: data['complementTheme'],
       memberPatternOverrides: patternOverrides,
@@ -738,6 +754,9 @@ class SyncCommand {
       'syncType': syncType.toJson(),
       'patternName': patternName,
       'scheduleId': scheduleId,
+      'pal': pal,
+      'grp': grp,
+      'spc': spc,
       if (memberColorOverrides != null) 'memberColorOverrides': memberColorOverrides,
       if (complementTheme != null) 'complementTheme': complementTheme,
       if (memberPatternOverrides != null)
@@ -797,6 +816,9 @@ class SyncCommand {
       speed: speed,
       intensity: intensity,
       brightness: brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
     );
   }
 }
@@ -1074,6 +1096,19 @@ class SyncPatternAssignment {
   final int intensity;
   final int brightness;
 
+  /// WLED palette id. Defaults to 5 ("Colors Only"), matching the catalog
+  /// invariant (GradientPattern.toWledPayload / generatePatternsForNode). This
+  /// MUST survive into the applied seg — omitting it makes WLED fall back to
+  /// its default rainbow palette, which overrides the selected [colors] in
+  /// [col] and produces chaotic multi-color flashing on hardware.
+  final int pal;
+
+  /// WLED segment grouping (`grp`). Default 1 = no grouping (neutral).
+  final int grp;
+
+  /// WLED segment spacing (`spc`). Default 0 = no spacing (neutral).
+  final int spc;
+
   /// Optional full WLED payload for advanced patterns.
   final Map<String, dynamic>? wledPayload;
 
@@ -1084,6 +1119,9 @@ class SyncPatternAssignment {
     this.speed = 128,
     this.intensity = 128,
     this.brightness = 200,
+    this.pal = 5,
+    this.grp = 1,
+    this.spc = 0,
     this.wledPayload,
   });
 
@@ -1096,6 +1134,11 @@ class SyncPatternAssignment {
     int effectId = 0;
     int speed = 128;
     int intensity = 128;
+    // Default to the catalog invariant so a payload that omits these still
+    // applies "Colors Only" rather than the rainbow default.
+    int pal = 5;
+    int grp = 1;
+    int spc = 0;
     final colors = <int>[];
 
     final seg = payload['seg'];
@@ -1105,6 +1148,12 @@ class SyncPatternAssignment {
         effectId = (firstSeg['fx'] as int?) ?? 0;
         speed = (firstSeg['sx'] as int?) ?? 128;
         intensity = (firstSeg['ix'] as int?) ?? 128;
+        // Preserve the source design's palette/grouping/spacing so a catalog
+        // PatternItem's pal:5 (and any special palette like pal:6) survives the
+        // round-trip into the applied sync payload.
+        pal = (firstSeg['pal'] as int?) ?? pal;
+        grp = (firstSeg['grp'] as int?) ?? grp;
+        spc = (firstSeg['spc'] as int?) ?? spc;
 
         final col = firstSeg['col'];
         if (col is List) {
@@ -1126,6 +1175,9 @@ class SyncPatternAssignment {
       speed: speed,
       intensity: intensity,
       brightness: (payload['bri'] as int?) ?? brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
       wledPayload: payload,
     );
   }
@@ -1138,6 +1190,9 @@ class SyncPatternAssignment {
     int speed = 128,
     int intensity = 128,
     int brightness = 200,
+    int pal = 5,
+    int grp = 1,
+    int spc = 0,
   }) {
     return SyncPatternAssignment(
       name: name,
@@ -1146,6 +1201,9 @@ class SyncPatternAssignment {
       speed: speed,
       intensity: intensity,
       brightness: brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
     );
   }
 
@@ -1160,6 +1218,9 @@ class SyncPatternAssignment {
         'speed': speed,
         'intensity': intensity,
         'brightness': brightness,
+        'pal': pal,
+        'grp': grp,
+        'spc': spc,
       };
 
   factory SyncPatternAssignment.fromJson(Map<String, dynamic> json) {
@@ -1170,6 +1231,11 @@ class SyncPatternAssignment {
       speed: json['speed'] ?? 128,
       intensity: json['intensity'] ?? 128,
       brightness: json['brightness'] ?? 200,
+      // Legacy commands (written before pal/grp/spc shipped) omit these keys;
+      // default to the catalog invariant so they no longer rainbow-flash.
+      pal: json['pal'] ?? 5,
+      grp: json['grp'] ?? 1,
+      spc: json['spc'] ?? 0,
     );
   }
 }

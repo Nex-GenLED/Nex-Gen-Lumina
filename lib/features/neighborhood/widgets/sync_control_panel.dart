@@ -1153,6 +1153,11 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
         timingConfig: timingConfig,
         syncType: _selectedSyncType,
         patternName: global.name,
+        // Carry the selected design's palette/grouping/spacing so the applied
+        // seg keeps pal:5 ("Colors Only") instead of the rainbow default.
+        pal: global.pal,
+        grp: global.grp,
+        spc: global.spc,
       );
 
       // Attach per-house overrides if any
@@ -1171,6 +1176,9 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
           syncType: command.syncType,
           patternName: command.patternName,
           scheduleId: command.scheduleId,
+          pal: command.pal,
+          grp: command.grp,
+          spc: command.spc,
           memberColorOverrides: command.memberColorOverrides,
           complementTheme: command.complementTheme,
           memberPatternOverrides: Map<String, SyncPatternAssignment>.from(_perHouseAssignments),

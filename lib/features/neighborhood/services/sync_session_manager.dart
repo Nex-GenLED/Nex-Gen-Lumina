@@ -490,6 +490,9 @@ class SyncSessionManager {
       timingConfig: const SyncTimingConfig(),
       syncType: SyncType.simultaneous,
       patternName: event.name,
+      pal: assignment.pal,
+      grp: assignment.grp,
+      spc: assignment.spc,
     );
 
     // Attach per-participant overrides if specified
@@ -510,6 +513,9 @@ class SyncSessionManager {
         timingConfig: command.timingConfig,
         syncType: command.syncType,
         patternName: command.patternName,
+        pal: command.pal,
+        grp: command.grp,
+        spc: command.spc,
         memberPatternOverrides: overrides,
       );
     }

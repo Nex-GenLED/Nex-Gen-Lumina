@@ -214,6 +214,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     SyncType syncType = SyncType.sequentialFlow,
     String? patternName,
     String? scheduleId,
+    int pal = 5,
+    int grp = 1,
+    int spc = 0,
     Map<String, List<int>>? memberColorOverrides,
     String? complementTheme,
   }) {
@@ -260,6 +263,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       syncType: syncType,
       patternName: patternName,
       scheduleId: scheduleId,
+      pal: pal,
+      grp: grp,
+      spc: spc,
       memberColorOverrides: memberColorOverrides,
       complementTheme: complementTheme,
     );
@@ -648,6 +654,13 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
             'fx': memberPattern.effectId,
             'sx': memberPattern.speed,
             'ix': memberPattern.intensity,
+            // CRITICAL: carry pal:5 ("Colors Only") through to the applied seg.
+            // Without it WLED falls back to its default rainbow palette, which
+            // overrides the selected `col` colors → chaotic flashing. grp/spc
+            // preserve any grouping/spacing the source design specified.
+            'pal': memberPattern.pal,
+            'grp': memberPattern.grp,
+            'spc': memberPattern.spc,
             'col': colorArrays.take(3).toList(),
           },
         ],
