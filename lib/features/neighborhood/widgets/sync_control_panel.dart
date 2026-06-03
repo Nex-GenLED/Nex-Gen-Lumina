@@ -7,6 +7,7 @@ import '../neighborhood_service.dart';
 import '../../wled/library_hierarchy_models.dart';
 import '../../wled/pattern_grid_widgets.dart';
 import '../../wled/pattern_providers.dart';
+import '../../wled/pattern_repository.dart';
 import '../../wled/wled_effects_catalog.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
@@ -17,29 +18,112 @@ import '../services/path1_game_day_snapshot.dart';
 import 'game_day_setup_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FEATURED PATTERNS — Curated quick-picks for the horizontal strip
+// FEATURED PATTERNS — Curated quick-picks sourced from the LIVE catalog (#11b)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Popular effect + color combos well-suited for roofline neighborhood syncs.
-/// Not a hard cap — the full Explore Patterns library is always 1 tap away.
-const _kFeaturedPatterns = <SyncPatternAssignment>[
-  SyncPatternAssignment(name: 'Cyan Chase', effectId: 28, colors: [0x00BCD4, 0xFFFFFF], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Warm Meteor', effectId: 77, colors: [0xFF9800, 0xFFEB3B], speed: 140, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Ocean Flow', effectId: 106, colors: [0x2196F3, 0x00BCD4], speed: 100, intensity: 180, brightness: 200),
-  SyncPatternAssignment(name: 'Crimson Wipe', effectId: 3, colors: [0xF44336, 0xFFFFFF], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Purple Pulse', effectId: 2, colors: [0x9C27B0, 0xE91E63], speed: 90, intensity: 200, brightness: 200),
-  SyncPatternAssignment(name: 'Running Lights', effectId: 15, colors: [0x00E5FF, 0x6E2FFF], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Emerald Ripple', effectId: 80, colors: [0x4CAF50, 0x2196F3], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Fire Scan', effectId: 10, colors: [0xFF0000, 0xFFD700], speed: 160, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Solid White', effectId: 0, colors: [0xFFFFFF], speed: 128, intensity: 128, brightness: 255),
-  SyncPatternAssignment(name: 'Warm White', effectId: 0, colors: [0xFFD4A0], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Rainbow Chase', effectId: 28, colors: [0xFF0000, 0x00FF00, 0x0000FF], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Soft Breathe', effectId: 2, colors: [0x00BCD4], speed: 60, intensity: 255, brightness: 180),
-  SyncPatternAssignment(name: 'Candy Wipe', effectId: 3, colors: [0xFF69B4, 0xFFFFFF], speed: 128, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Electric Storm', effectId: 80, colors: [0x6E2FFF, 0x00E5FF], speed: 200, intensity: 200, brightness: 220),
-  SyncPatternAssignment(name: 'Gold Scan', effectId: 10, colors: [0xFFD700, 0xFFFFFF], speed: 120, intensity: 128, brightness: 200),
-  SyncPatternAssignment(name: 'Sunset Flow', effectId: 106, colors: [0xFF5722, 0xFFEB3B], speed: 80, intensity: 160, brightness: 200),
+/// A curated reference INTO the live pattern catalog. It points at a real
+/// palette node by [nodeId] and pairs it with a roofline-friendly [effectId].
+///
+/// Critically it carries NO colors or display name of its own — both are
+/// resolved at build time from the catalog node (see [resolveFeaturedPatterns]).
+/// If a node id is later renamed or removed as the catalog evolves, the entry is
+/// OMITTED (never rendered as a phantom/broken card) rather than drifting out of
+/// sync. This replaces the old hardcoded `_kFeaturedPatterns` array of
+/// fabricated names ("Warm Meteor", "Cyan Chase", …) that matched no real
+/// catalog design.
+class FeaturedPatternRef {
+  final String nodeId;
+  final int effectId;
+  final int speed;
+  final int intensity;
+  final int brightness;
+
+  const FeaturedPatternRef(
+    this.nodeId,
+    this.effectId, {
+    this.speed = 128,
+    this.intensity = 128,
+    this.brightness = 200,
+  });
+}
+
+/// Curated Popular strip — real catalog palette ids paired with a sync-friendly
+/// effect. Resolved through the SAME plumbing Browse-All uses (palette node →
+/// [SyncPatternAssignment.fromLibraryNode]) so Popular and Browse-All converge
+/// on one catalog instead of diverging. Any id that no longer resolves drops
+/// out silently — it can never go phantom.
+const kFeaturedSyncRefs = <FeaturedPatternRef>[
+  FeaturedPatternRef('arch_k3000_all', 0, brightness: 200),                 // Warm white wash
+  FeaturedPatternRef('arch_k5000_all', 0, brightness: 220),                 // Crisp daylight white
+  FeaturedPatternRef('xmas_classic', 28, speed: 128),                       // Red/green chase
+  FeaturedPatternRef('xmas_candycane', 3, speed: 128),                      // Candy-cane wipe
+  FeaturedPatternRef('xmas_grinch', 15, speed: 128),                        // Grinch running lights
+  FeaturedPatternRef('july4_classic', 28, speed: 140),                      // Red/white/blue chase
+  FeaturedPatternRef('july4_fireworks', 80, speed: 160, intensity: 200),    // Fireworks sparkle
+  FeaturedPatternRef('halloween_classic', 77, speed: 150),                  // Orange meteor
+  FeaturedPatternRef('halloween_pumpkinpatch', 10, speed: 140),             // Pumpkin scan
+  FeaturedPatternRef('summer_ocean', 106, speed: 100, intensity: 180),      // Ocean twinkle
+  FeaturedPatternRef('summer_sunset', 2, speed: 70, intensity: 200),        // Sunset breathe
+  FeaturedPatternRef('summer_tropical', 15, speed: 128),                    // Tropical running
+  FeaturedPatternRef('spring_cherryblossom', 2, speed: 60, intensity: 220), // Soft pink breathe
+  FeaturedPatternRef('autumn_fallleaves', 10, speed: 120),                  // Fall-leaves scan
+  FeaturedPatternRef('forest_pine', 15, speed: 110),                        // Pine-forest running
+  FeaturedPatternRef('ocean_deep', 106, speed: 100, intensity: 180),        // Deep-sea twinkle
 ];
+
+/// Defense-in-depth guard: a resolved assignment is safe to SHOW and APPLY only
+/// if it has at least one color AND a real WLED effect id. A malformed entry
+/// (empty `col` / unknown `fx`) must be SKIPPED — fail-safe, never fail-chaotic.
+/// (pal:5 already prevents the palette-override chaos; this stops a future
+/// phantom/malformed catalog entry from ever reaching the lights.)
+bool isWellFormedSyncAssignment(SyncPatternAssignment a) {
+  if (a.colors.isEmpty) return false;
+  if (WledEffectsCatalog.getById(a.effectId) == null) return false;
+  return true;
+}
+
+/// Resolve curated [refs] against the LIVE catalog via [repo]. Each ref is
+/// looked up by id; only refs that resolve to a real palette node AND yield a
+/// well-formed assignment survive. Built the SAME way Browse-All builds picks
+/// ([SyncPatternAssignment.fromLibraryNode]) so the two paths stay identical.
+///
+/// A ref whose id is not in the catalog (renamed/removed), is not a color
+/// palette, or resolves to a malformed payload is OMITTED — never surfaced as a
+/// phantom card and never applied to hardware.
+Future<List<SyncPatternAssignment>> resolveFeaturedPatterns(
+  PatternRepository repo,
+  List<FeaturedPatternRef> refs,
+) async {
+  final out = <SyncPatternAssignment>[];
+  for (final ref in refs) {
+    final node = await repo.getNodeById(ref.nodeId);
+    // Omit: id renamed/removed as the catalog evolved, or not a color palette.
+    if (node == null || !node.isPalette) continue;
+    final colors = node.themeColors;
+    if (colors == null || colors.isEmpty) continue;
+    final assignment = SyncPatternAssignment.fromLibraryNode(
+      name: node.name,
+      themeColors: colors,
+      effectId: ref.effectId,
+      speed: ref.speed,
+      intensity: ref.intensity,
+      brightness: ref.brightness,
+    );
+    // Safety guard before the entry can ever be shown / applied.
+    if (!isWellFormedSyncAssignment(assignment)) continue;
+    out.add(assignment);
+  }
+  return out;
+}
+
+/// Live-catalog-sourced Popular strip. Watches the same repository Browse-All
+/// uses and resolves the curated refs into real designs. An empty result hides
+/// the strip entirely (it never renders phantom cards).
+final featuredSyncPatternsProvider =
+    FutureProvider<List<SyncPatternAssignment>>((ref) async {
+  final repo = ref.watch(patternRepositoryProvider);
+  return resolveFeaturedPatterns(repo, kFeaturedSyncRefs);
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SYNC CONTROL PANEL — Unified Setup Flow
@@ -286,6 +370,13 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildForEveryoneSection() {
+    // Popular is sourced LIVE from the catalog (#11b) — same plumbing Browse-All
+    // uses. valueOrNull while loading; an empty result hides the strip rather
+    // than showing phantom cards.
+    final featuredAsync = ref.watch(featuredSyncPatternsProvider);
+    final featured =
+        featuredAsync.valueOrNull ?? const <SyncPatternAssignment>[];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -307,25 +398,36 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
         const SizedBox(height: 10),
 
         // Current selection (from library browse)
-        if (_globalPattern != null && !_isFeaturedPattern(_globalPattern!))
+        if (_globalPattern != null && !_isFeaturedPattern(_globalPattern!, featured))
           _buildLibrarySelectionCard(),
 
-        // "Popular" label
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Text(
-            'Popular',
-            style: TextStyle(
-              color: Colors.grey.shade500,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+        // "Popular" strip — only when the catalog resolved at least one design.
+        if (featured.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Popular',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
-        ),
-
-        // Featured horizontal strip
-        _buildFeaturedStrip(),
-        const SizedBox(height: 12),
+          _buildFeaturedStrip(featured),
+          const SizedBox(height: 12),
+        ] else if (featuredAsync.isLoading) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyan),
+              ),
+            ),
+          ),
+        ],
 
         // Browse All button
         _buildBrowseAllButton(),
@@ -333,8 +435,11 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     );
   }
 
-  bool _isFeaturedPattern(SyncPatternAssignment pattern) {
-    return _kFeaturedPatterns.any((f) =>
+  bool _isFeaturedPattern(
+    SyncPatternAssignment pattern,
+    List<SyncPatternAssignment> featured,
+  ) {
+    return featured.any((f) =>
         f.name == pattern.name &&
         f.effectId == pattern.effectId);
   }
@@ -387,14 +492,14 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     );
   }
 
-  Widget _buildFeaturedStrip() {
+  Widget _buildFeaturedStrip(List<SyncPatternAssignment> featured) {
     return SizedBox(
       height: 88,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: _kFeaturedPatterns.length,
+        itemCount: featured.length,
         itemBuilder: (ctx, i) {
-          final pattern = _kFeaturedPatterns[i];
+          final pattern = featured[i];
           final isSelected = _globalPattern != null &&
               _globalPattern!.name == pattern.name &&
               _globalPattern!.effectId == pattern.effectId;
@@ -1141,6 +1246,21 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
             effectId: 0,
             colors: [0xFFFFFF],
           );
+
+      // Defense-in-depth: never push a malformed design (empty col / unknown
+      // fx) to the neighborhood. A phantom/broken Popular or Browse-All entry
+      // would otherwise reach the lights; fail-safe by refusing to start.
+      if (!isWellFormedSyncAssignment(global)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              "That design can't be applied — please pick another.",
+            ),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+        return;
+      }
 
       command = engine.createSyncCommand(
         groupId: widget.group.id,
