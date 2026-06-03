@@ -52,12 +52,37 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
   GeofenceConfig? _config;
   bool _started = false;
 
+  /// Debounced re-subscribe timer for the config stream. Set when the config
+  /// listener surfaces a stream-level error (#52 dead-listener class); fires a
+  /// fresh subscription so live config edits keep applying after a transient
+  /// Firestore error instead of going dead until app relaunch.
+  Timer? _cfgResubscribeTimer;
+
+  /// Factory for the config-doc snapshot stream. In production it returns
+  /// `docRef.snapshots()`; a fresh stream per call so a re-subscribe gets a
+  /// new listener. Held as a field (rather than re-reading auth) so the #52
+  /// re-subscribe path can rebuild the listener, and so a test can inject a
+  /// controllable stream.
+  Stream<DocumentSnapshot<Map<String, dynamic>>> Function()? _configStreamFactory;
+
+  /// Debounce before re-subscribing the config stream after an error. Mirrors
+  /// the engine's 2s debounce (e005a02) so an error storm doesn't hot-loop new
+  /// listeners. Overridable in tests.
+  @visibleForTesting
+  Duration configResubscribeDelay = const Duration(seconds: 2);
+
+  /// Test-only view of the parsed config, to assert that live edits keep
+  /// applying across a stream error / re-subscribe.
+  @visibleForTesting
+  GeofenceConfig? get configForTest => _config;
+
   @override
   GeofenceState build() {
     // Lazy start; app can call start() explicitly after permissions.
     ref.onDispose(() {
       _posSub?.cancel();
       _cfgSub?.cancel();
+      _cfgResubscribeTimer?.cancel();
     });
     return GeofenceState.initial();
   }
@@ -173,31 +198,86 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('geofences').doc('welcome_home');
-    _cfgSub = docRef.snapshots().listen((snap) {
-      if (!snap.exists) {
-        state = state.copyWith(enabled: false);
-        return;
-      }
-      try {
-        final data = snap.data();
-        if (data == null) return;
-        _config = GeofenceConfig.fromMap(data);
-        state = state.copyWith(enabled: true);
-      } catch (e) {
-        debugPrint('Geofence cfg parse error: $e');
-      }
-    });
+    _configStreamFactory = () => docRef.snapshots();
+    _subscribeConfig();
 
     // Position stream
     final settings = const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 25);
     _posSub = Geolocator.getPositionStream(locationSettings: settings).listen(_onPosition, onError: (e) => debugPrint('Position stream error: $e'));
   }
 
+  /// Subscribes (or re-subscribes) to the geofence config doc.
+  ///
+  /// The CONFIG stream previously had no `onError` — only the inner parse was
+  /// guarded — so one stream-level error (a transient Firestore disconnect /
+  /// permission blip) killed the subscription permanently (#52 dead-listener
+  /// class). Live enable/disable + radius edits then stopped applying and
+  /// automation ran on stale config until app relaunch. Mirrors the position
+  /// stream's `onError` (above) and the engine's debounced re-subscribe
+  /// (e005a02): on a stream error, log + schedule a re-subscribe so the
+  /// listener survives.
+  void _subscribeConfig() {
+    final factory = _configStreamFactory;
+    if (factory == null) return;
+    _cfgSub?.cancel();
+    _cfgSub = factory().listen(
+      _onConfigSnapshot,
+      onError: (e) {
+        debugPrint('Geofence cfg stream error: $e — scheduling re-subscribe');
+        _scheduleConfigResubscribe();
+      },
+    );
+  }
+
+  /// Handles one config-doc emission. Unchanged from the original inline
+  /// listener body — the parse guard still swallows a bad doc so a single
+  /// malformed config can't take down the stream.
+  void _onConfigSnapshot(DocumentSnapshot<Map<String, dynamic>> snap) {
+    if (!snap.exists) {
+      state = state.copyWith(enabled: false);
+      return;
+    }
+    try {
+      final data = snap.data();
+      if (data == null) return;
+      _config = GeofenceConfig.fromMap(data);
+      state = state.copyWith(enabled: true);
+    } catch (e) {
+      debugPrint('Geofence cfg parse error: $e');
+    }
+  }
+
+  /// Debounced re-subscribe after a config-stream error, so an error storm
+  /// doesn't hot-loop new listeners. Mirrors the #52 fix (e005a02).
+  void _scheduleConfigResubscribe() {
+    if (!_started) return;
+    _cfgResubscribeTimer?.cancel();
+    _cfgResubscribeTimer = Timer(configResubscribeDelay, () {
+      if (_started) _subscribeConfig();
+    });
+  }
+
+  /// Test seam: drives the config subscription off an injected stream factory
+  /// (re-invoked on every re-subscribe — return a fresh stream each call),
+  /// bypassing auth + Firestore so the #52 re-subscribe path is exercisable
+  /// without a live backend.
+  @visibleForTesting
+  void startConfigForTest(
+    Stream<DocumentSnapshot<Map<String, dynamic>>> Function() factory,
+  ) {
+    _started = true;
+    _configStreamFactory = factory;
+    _subscribeConfig();
+  }
+
   Future<void> stop() async {
+    _cfgResubscribeTimer?.cancel();
+    _cfgResubscribeTimer = null;
     await _posSub?.cancel();
     await _cfgSub?.cancel();
     _posSub = null;
     _cfgSub = null;
+    _configStreamFactory = null;
     _started = false;
     state = state.copyWith(enabled: false);
   }
