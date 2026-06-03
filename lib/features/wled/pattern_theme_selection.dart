@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
@@ -1076,22 +1078,54 @@ class _EffectPainter extends CustomPainter {
     }
   }
 
+  // Render category derived from the single authoritative effect-id → category
+  // map ([WledEffectsCatalog]) shared by every preview surface (#6). The old
+  // hardcoded id switch disagreed with canonical WLED — e.g. it mislabeled id
+  // 54 ("Chase 3") as fire and id 37 ("Chase 2") as twinkle — so the same
+  // effect previewed differently here than on the roofline / tile.
   _ET get _effectType {
-    switch (effectId) {
-      case 0: return _ET.solid;
-      case 1: case 2: return _ET.breathing;
-      case 3: case 4: return _ET.wipe;
-      case 6: case 10: case 11: case 13: case 14: return _ET.scan;
-      case 12: case 18: return _ET.fade;
-      case 22: case 23: case 24: case 25: case 41: case 42: return _ET.running;
-      case 43: case 44: return _ET.theater;
-      case 37: case 46: case 47: return _ET.twinkle;
-      case 51: case 63: case 65: return _ET.gradient;
-      case 49: case 54: case 74: case 75: return _ET.fire;
-      case 78: case 108: case 109: return _ET.meteor;
-      case 52: case 67: case 70: case 73: return _ET.wave;
-      case 76: case 77: case 120: case 121: return _ET.sparkle;
-      default: return _ET.chase;
+    final effect = WledEffectsCatalog.getById(effectId);
+    if (effect == null) return _ET.chase;
+    switch (effect.category) {
+      case 'Basic':
+        if (effectId == 2 ||
+            effectId == 56 ||
+            effectId == 86 ||
+            effectId == 100) {
+          return _ET.breathing;
+        }
+        if (effectId == 12 || effectId == 18) return _ET.fade;
+        return _ET.solid;
+      case 'Wipe':
+        return _ET.wipe;
+      case 'Chase':
+        return _ET.chase;
+      case 'Meteor':
+        return _ET.meteor;
+      case 'Scanner':
+        return _ET.scan;
+      case 'Sparkle':
+        return _ET.sparkle;
+      case 'Holiday':
+        return _ET.twinkle;
+      case 'Fire':
+        return _ET.fire;
+      case 'Fireworks':
+        return _ET.sparkle;
+      case 'Ripple':
+      case 'Ambient':
+      case 'Noise':
+        return _ET.wave;
+      case 'Rainbow':
+        return _ET.gradient;
+      case 'Strobe':
+        return _ET.breathing;
+      case 'Game':
+        return _ET.running;
+      case '2D':
+      case 'Audio':
+      default:
+        return _ET.chase;
     }
   }
 

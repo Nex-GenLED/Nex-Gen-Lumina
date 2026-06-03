@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
 
 /// The effect types available for the compact LED preview strip.
 ///
@@ -17,40 +19,53 @@ enum EffectType {
 }
 
 /// Map a raw WLED effect ID to the preview [EffectType].
+///
+/// Routes through [WledEffectsCatalog] — the single authoritative
+/// effect-id → category map shared by every preview surface (#6). The previous
+/// hardcoded id sets disagreed with canonical WLED ids (and with the other
+/// preview surfaces), so the chat strip could categorize an effect differently
+/// than the roofline or the tile preview. This strip has no fire/strobe
+/// renderer, so those categories fall back to [EffectType.chase].
 EffectType effectTypeFromWledId(int effectId) {
-  // Solid
-  if (effectId == 0) return EffectType.solid;
+  final effect = WledEffectsCatalog.getById(effectId);
+  if (effect == null) return EffectType.chase;
 
-  // Breathe / pulse
-  if (effectId == 2 || effectId == 25) return EffectType.breathe;
-
-  // Chase / running / theater
-  if (const {3, 4, 14, 15, 28, 29, 33, 34, 47, 48, 64, 87, 111, 112, 115}
-      .contains(effectId)) {
-    return EffectType.chase;
+  switch (effect.category) {
+    case 'Basic':
+      if (effectId == 2 ||
+          effectId == 56 ||
+          effectId == 86 ||
+          effectId == 100) {
+        return EffectType.breathe;
+      }
+      if (effectId == 12 || effectId == 18) return EffectType.fade;
+      if (effectId == 46) return EffectType.gradient;
+      return EffectType.solid;
+    case 'Sparkle':
+      return EffectType.sparkle;
+    case 'Holiday':
+      return EffectType.twinkle;
+    case 'Fireworks':
+      return EffectType.sparkle;
+    case 'Rainbow':
+      return EffectType.rainbow;
+    case 'Ambient':
+    case 'Ripple':
+    case 'Noise':
+      return EffectType.gradient;
+    case 'Chase':
+    case 'Scanner':
+    case 'Wipe':
+    case 'Meteor':
+    case 'Game':
+    case 'Strobe': // no strobe renderer here — closest motion is chase
+    case 'Fire': // no fire renderer here — closest motion is chase
+      return EffectType.chase;
+    case '2D':
+    case 'Audio':
+    default:
+      return EffectType.chase;
   }
-
-  // Rainbow / color cycling
-  if (const {9, 10, 102}.contains(effectId)) return EffectType.rainbow;
-
-  // Gradient / blends
-  if (const {46, 89, 101}.contains(effectId)) return EffectType.gradient;
-
-  // Twinkle
-  if (const {49, 50, 74, 108, 109, 117, 118}.contains(effectId)) {
-    return EffectType.twinkle;
-  }
-
-  // Sparkle
-  if (const {52, 65, 66, 78, 80}.contains(effectId)) {
-    return EffectType.sparkle;
-  }
-
-  // Fade / dissolve
-  if (const {1, 13, 38}.contains(effectId)) return EffectType.fade;
-
-  // Default animated effects → chase
-  return EffectType.chase;
 }
 
 /// Pure-function effect engine.

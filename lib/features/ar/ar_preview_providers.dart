@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/features/wled/effect_database.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
 import 'package:nexgen_command/models/roofline_mask.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 
@@ -105,36 +106,58 @@ enum EffectCategory {
   morphing,   // Morphing/color-shifting
 }
 
-/// Helper to categorize WLED effects by consulting EffectDatabase.
+/// Helper to categorize WLED effects for preview rendering.
+///
+/// Routes through [WledEffectsCatalog] — the single authoritative
+/// effect-id → category map shared by every preview surface (#6). This
+/// previously consulted the divergent `EffectDatabase`, whose id space
+/// disagreed with canonical WLED (e.g. id 37 = "Candle"/flickering there vs
+/// "Chase 2" in WLED), which made chases mis-render as flame on the roofline.
+/// Now the roofline, the tile preview, the theme-selection strip, and the
+/// chat strip all derive their render category from the same catalog category.
 EffectCategory categorizeEffect(int effectId) {
-  final meta = EffectDatabase.getEffect(effectId);
-  if (meta == null) return EffectCategory.chase;
+  final effect = WledEffectsCatalog.getById(effectId);
+  if (effect == null) return EffectCategory.chase;
 
-  // Effects that override user colors get the rainbow renderer
-  if (!meta.respectsColors) return EffectCategory.rainbow;
-
-  switch (meta.motionType) {
-    case MotionType.static:
+  switch (effect.category) {
+    case 'Basic':
+      // Basic spans static, breathe, and fade variants — sub-classify by id
+      // to mirror the tile preview (effect_preview_widget.getPreviewType).
+      if (effectId == 2 ||
+          effectId == 12 ||
+          effectId == 18 ||
+          effectId == 56 ||
+          effectId == 86 ||
+          effectId == 100) {
+        return EffectCategory.breathe;
+      }
       return EffectCategory.solid;
-    case MotionType.pulsing:
-      return EffectCategory.breathe;
-    case MotionType.flowing:
+    case 'Wipe':
+    case 'Ripple':
+    case 'Ambient':
       return EffectCategory.wave;
-    case MotionType.chasing:
+    case 'Chase':
+    case 'Meteor':
       return EffectCategory.chase;
-    case MotionType.twinkling:
-      return EffectCategory.twinkle;
-    case MotionType.flickering:
-      return EffectCategory.fire;
-    case MotionType.explosive:
-      return EffectCategory.explosive;
-    case MotionType.scanning:
+    case 'Scanner':
       return EffectCategory.scanning;
-    case MotionType.dripping:
-      return EffectCategory.dripping;
-    case MotionType.bouncing:
+    case 'Sparkle':
+    case 'Holiday':
+      return EffectCategory.twinkle;
+    case 'Fire':
+      return EffectCategory.fire;
+    case 'Fireworks':
+      return EffectCategory.explosive;
+    case 'Rainbow':
+      return EffectCategory.rainbow;
+    case 'Strobe':
+      return EffectCategory.breathe;
+    case 'Game':
       return EffectCategory.bouncing;
-    case MotionType.morphing:
+    case 'Noise':
+    case '2D':
+    case 'Audio':
+    default:
       return EffectCategory.morphing;
   }
 }
