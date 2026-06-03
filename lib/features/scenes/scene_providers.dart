@@ -140,14 +140,23 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
       final payload = scene.toWledPayload();
       debugPrint('🎬 Applying scene "${scene.name}": $payload');
 
-      // Route the device write + label + visual cache through the
-      // applyPayloadWithLabel chokepoint. The prior bare applyJson left
-      // the visual cache stale (the roofline hero kept showing the
-      // pre-scene render). The chokepoint fans wledState +
-      // activePresetLabel together.
-      final success = await ref
-          .read(wledStateProvider.notifier)
-          .applyPayloadWithLabel(payload, labelHint: scene.name);
+      // Route the device write + label + visual cache through the notifier
+      // so wledState + activePresetLabel fan together (the prior bare
+      // applyJson left the roofline hero showing the pre-scene render).
+      //
+      // Class-1 multi-channel split by scene type:
+      //   • library  → RAW single-seg (no per-seg id). Route through
+      //     applyToDevice so applyChannelFilter fans it across every
+      //     effective channel (not just bus 0).
+      //   • custom   → CustomDesign.toWledPayload already emits per-channel
+      //     id-bearing segs (pre-filtered). Must NOT be re-filtered —
+      //     applyChannelFilter would template off seg.first and flatten
+      //     per-channel colors. Goes straight through the chokepoint.
+      //   • snapshot/system → full-device-state blob; also pre-shaped.
+      final notifier = ref.read(wledStateProvider.notifier);
+      final success = scene.type == SceneType.library
+          ? await notifier.applyToDevice(payload, labelHint: scene.name)
+          : await notifier.applyPayloadWithLabel(payload, labelHint: scene.name);
 
       // Immediately update local state with scene colors and preset label
       // This prevents the UI from showing stale colors during the polling delay
