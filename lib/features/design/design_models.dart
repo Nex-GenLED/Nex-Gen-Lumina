@@ -243,7 +243,12 @@ class CustomDesign {
         'fx': fx,
         'sx': channel.speed,
         'ix': channel.intensity,
-        'rev': channel.reverse,
+        // #4 (firmware-free half): emit 'rev' ONLY when the design explicitly
+        // reverses this channel. reverse defaults false, so always writing it
+        // forced rev:false on every apply — clobbering the device's manual
+        // per-segment direction. Omitting the key when false lets the apply
+        // PRESERVE the controller's current seg.rev instead of overriding it.
+        if (channel.reverse) 'rev': true,
       });
     }
 
