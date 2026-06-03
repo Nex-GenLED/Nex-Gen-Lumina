@@ -165,7 +165,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     if (repo == null) return;
 
     try {
-      final ok = await repo.applyJson(payload);
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
       if (ok) {
         ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
               colorSequence: s.colors,

@@ -595,7 +595,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         final repo = ref.read(wledRepositoryProvider);
         if (repo != null) {
           try {
-            final ok = await repo.applyJson(result.wledPayload!);
+            final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
             if (ok && mounted) {
               if (preview != null) {
                 ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -666,7 +666,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       final repo = ref.read(wledRepositoryProvider);
       if (repo != null) {
         try {
-          final ok = await repo.applyJson(result.wledPayload!);
+          final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
           if (ok && mounted) {
             if (preview != null) {
               ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -1310,7 +1310,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     if (repo == null) return;
 
     try {
-      final ok = await repo.applyJson(wled);
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(wled, labelHint: null);
       if (ok && mounted) {
         if (preview != null) {
           ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(

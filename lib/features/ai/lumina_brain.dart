@@ -444,12 +444,12 @@ class LuminaBrain {
     // Apply via the repository
     final repo = ref.read(wledRepositoryProvider);
     if (repo != null) {
-      await repo.applyJson({
+      await ref.read(wledStateProvider.notifier).applyToDevice({
         'on': true,
         'bri': 220,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': chosenId,
             'sx': 128,
             'ix': 180,
@@ -458,7 +458,7 @@ class LuminaBrain {
             ],
           }
         ]
-      });
+      }, labelHint: null);
 
       // Update local preview so the dashboard reflects the change immediately.
       try {

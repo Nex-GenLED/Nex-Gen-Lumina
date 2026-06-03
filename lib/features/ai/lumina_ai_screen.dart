@@ -255,7 +255,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         final repo = ref.read(wledRepositoryProvider);
         if (repo != null) {
           try {
-            final ok = await repo.applyJson(result.wledPayload!);
+            final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
             if (ok && mounted) {
               if (preview != null) {
                 ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -325,7 +325,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       final repo = ref.read(wledRepositoryProvider);
       if (repo != null) {
         try {
-          final ok = await repo.applyJson(result.wledPayload!);
+          final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
           if (ok && mounted) {
             if (preview != null) {
               ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -422,7 +422,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
         final repo = ref.read(wledRepositoryProvider);
         if (repo != null) {
           try {
-            await repo.applyJson(firstWled);
+            await ref.read(wledStateProvider.notifier).applyToDevice(firstWled, labelHint: null);
             debugPrint('📅 Night 1 preview applied to lights');
           } catch (e) {
             debugPrint('📅 Night 1 preview apply failed: $e');
@@ -632,7 +632,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
     if (repo == null) return;
 
     try {
-      final ok = await repo.applyJson(wled);
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(wled, labelHint: null);
       if (ok && mounted) {
         if (preview != null) {
           ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
