@@ -225,19 +225,40 @@ class ScheduleSyncService {
       savedPresetIds.add(2);
     }
 
+    // Legacy brightness-level presets referenced by [_presetForAction] for
+    // Brightness schedules: 3=Dim(20%), 4=Low(40%), 5=Medium(60%). Previously
+    // these were NEVER written, so a Brightness schedule armed a macro pointing
+    // at a nonexistent preset and silently no-op'd (same dead-macro class as the
+    // pattern bug). Saved here (idempotent, like 1/2) so the macros resolve.
+    // on:true so a brightness schedule also wakes the controller from off.
+    // bri = round(pct * 255 / 100): 20%→51, 40%→102, 60%→153, matching the
+    // 20/40/60% buckets in _presetForAction.
+    const legacyBrightnessPresets = <int, (int, String)>{
+      3: (51, 'NGL Dim'),
+      4: (102, 'NGL Low'),
+      5: (153, 'NGL Medium'),
+    };
+    for (final entry in legacyBrightnessPresets.entries) {
+      final (bri, name) = entry.value;
+      final saved = await repo.savePreset(
+        presetId: entry.key,
+        state: {'on': true, 'bri': bri},
+        presetName: name,
+      );
+      if (!saved) {
+        presetErrors.add('Failed to save preset ${entry.key} ($name)');
+      } else {
+        savedPresetIds.add(entry.key);
+      }
+    }
+
     int nextPresetId = _firstSchedulePresetId;
 
     for (final schedule in enabled) {
-      if (nextPresetId > _lastSchedulePresetId) {
-        break;
-      }
-
-      // Assign preset ID if schedule has a WLED payload
-      final presetId = schedule.presetId ?? nextPresetId;
-      if (schedule.presetId == null) nextPresetId++;
-
-      // If this schedule uses audio reactivity, build a WLED payload
-      // with a random audio-reactive effect from the controller
+      // If this schedule uses audio reactivity, build a WLED payload with a
+      // random audio-reactive effect from the controller. This can turn an
+      // otherwise payload-less schedule into a payload-bearing one, so it MUST
+      // run before the slot decision below.
       var effectiveSchedule = schedule;
       if (schedule.useAudioReactive == true) {
         final ip = ref.read(selectedDeviceIpProvider);
@@ -266,6 +287,20 @@ class ScheduleSyncService {
       }
 
       if (effectiveSchedule.hasWledPayload) {
+        // Payload-bearing (pattern / audio-reactive): consume a per-schedule
+        // preset slot in the 10–25 range and psave the design there.
+        if (effectiveSchedule.presetId == null &&
+            nextPresetId > _lastSchedulePresetId) {
+          // Out of pattern-preset slots. Leave presetId untouched (null) so the
+          // pattern partition below refuses to arm it and warns — never arm a
+          // macro with no preset. Kept in updatedSchedules so the warning path
+          // still sees it.
+          updatedSchedules.add(effectiveSchedule);
+          continue;
+        }
+        final presetId = effectiveSchedule.presetId ?? nextPresetId;
+        if (effectiveSchedule.presetId == null) nextPresetId++;
+
         final saved = await repo.savePreset(
           presetId: presetId,
           state: effectiveSchedule.wledPayload!,
@@ -277,9 +312,16 @@ class ScheduleSyncService {
         } else {
           savedPresetIds.add(presetId);
         }
-      }
 
-      updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
+        updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
+      } else {
+        // Payload-less legacy action (Turn On / Turn Off / Brightness): do NOT
+        // consume a 10–25 preset slot. Clear any stale stored presetId (a 10+
+        // id left over from the pre-fix era) so buildCfgPayload resolves the
+        // macro via _presetForAction to a real legacy preset 1–5 — all psaved
+        // above — instead of a never-saved 10+ slot.
+        updatedSchedules.add(effectiveSchedule.copyWith(clearPresetId: true));
+      }
     }
 
     // ── Defense-in-depth: never silently arm an empty macro ──────────────
