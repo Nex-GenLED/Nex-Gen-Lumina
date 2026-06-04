@@ -4038,7 +4038,22 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       repeatDays: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
-                      wledPayload: widget.editing?.wledPayload,
+                      // Prefer the freshly-picked pattern's payload so BOTH a
+                      // new schedule AND an edit-that-re-picks persist the live
+                      // design (previously this always reused widget.editing's
+                      // payload, so a re-pick was silently ignored and a new
+                      // schedule saved null). Guarded to the runPattern path:
+                      //  • audio-reactive → payload is built at sync time, keep
+                      //    it null/existing so syncAll's audio branch wins;
+                      //  • brightness / powerOff → map to legacy presets, so a
+                      //    stale _selectedPattern must NOT leak a design payload.
+                      // The 'existing' hydration selection carries no payload,
+                      // so editing without re-picking falls back correctly.
+                      wledPayload:
+                          (_action == _ActionType.runPattern && !_useAudioReactive)
+                              ? (_selectedPattern?.wledPayload ??
+                                  widget.editing?.wledPayload)
+                              : widget.editing?.wledPayload,
                       presetId: widget.editing?.presetId,
                       useAudioReactive: _useAudioReactive ? true : null,
                     );
@@ -4159,7 +4174,23 @@ class PatternSelection {
   final String id;
   final String name;
   final String imageUrl;
-  const PatternSelection({required this.id, required this.name, required this.imageUrl});
+
+  /// Full WLED state to apply when this pattern fires as a schedule — built
+  /// from [GradientPattern.toWledPayload] (already includes on:true + bri +
+  /// seg) at the moment the user picks it. Carrying this through the
+  /// selection boundary is what lets [ScheduleSyncService.syncAll] psave a
+  /// real preset instead of arming a timer macro that points at nothing.
+  /// Null only for the legacy "existing" hydration case (editing a schedule
+  /// without re-picking), where the editor falls back to the schedule's
+  /// already-saved payload.
+  final Map<String, dynamic>? wledPayload;
+
+  const PatternSelection({
+    required this.id,
+    required this.name,
+    required this.imageUrl,
+    this.wledPayload,
+  });
 }
 
 class _PatternPickerRow extends StatelessWidget {
@@ -4412,6 +4443,13 @@ class _AggregatedPatternGrid extends ConsumerWidget {
         id: p.name.toLowerCase().replaceAll(' ', '_'),
         name: p.name,
         imageUrl: '',
+        // ROOT-CAUSE FIX: carry the full WLED payload (on:true + bri + seg)
+        // instead of dropping it here. Previously this boundary returned only
+        // a name+slug projection, so the schedule saved wledPayload:null →
+        // syncAll skipped savePreset but still armed an ON-timer macro at the
+        // assigned id → WLED fired a macro with no preset behind it → lights
+        // stayed off and never woke from off. toWledPayload() supplies on:true.
+        wledPayload: p.toWledPayload(),
       );
 }
 

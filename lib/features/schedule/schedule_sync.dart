@@ -59,6 +59,17 @@ class ScheduleSyncService {
     final enabled = schedules
         .where((s) => s.enabled && !s.isCurrentlyEvicted)
         .toList(growable: false);
+
+    // SCHEDULE BOUNDARY INVARIANT — do not violate:
+    // Each boundary of a recurring schedule (ON at sunset, OFF at sunrise) is an
+    // INDEPENDENT entry in the controller's timers.ins[], fired by the WLED RTC.
+    // A boundary MUST fire at its trigger time regardless of the currently-applied
+    // design. A manual override changes applied state only; it must never void a
+    // pending boundary. If schedule firing is ever moved off the controller RTC
+    // into an in-app or server-side applier, each boundary must STILL be evaluated
+    // independently at its trigger time — NEVER gate the OFF boundary on an "is the
+    // schedule still the active design" check. Doing so reintroduces the
+    // manual-override-survives-all-day bug that the RTC two-timer model avoids.
     final List<Map<String, dynamic>> timers = [];
 
     for (final s in enabled) {
@@ -180,6 +191,12 @@ class ScheduleSyncService {
     final List<ScheduleItem> updatedSchedules = [];
     final List<String> presetErrors = [];
 
+    // Tracks which preset IDs were actually psaved this sync. Used below to
+    // refuse arming a runPattern timer macro that points at a preset that was
+    // never saved (the silent-arm bug). A macro is only armed if its preset id
+    // is in this set or maps to a legacy on/off/brightness preset.
+    final Set<int> savedPresetIds = <int>{};
+
     // Universal ON/OFF presets — saved on every sync so OFF timers
     // (hardcoded `macro: 2` in buildCfgPayload below) and the legacy
     // _presetForAction fallback ("Turn On" → preset 1) always have
@@ -194,6 +211,8 @@ class ScheduleSyncService {
     );
     if (!savedOn) {
       presetErrors.add('Failed to save preset 1 (NGL On)');
+    } else {
+      savedPresetIds.add(1);
     }
     final savedOff = await repo.savePreset(
       presetId: 2,
@@ -202,6 +221,8 @@ class ScheduleSyncService {
     );
     if (!savedOff) {
       presetErrors.add('Failed to save preset 2 (NGL Off)');
+    } else {
+      savedPresetIds.add(2);
     }
 
     int nextPresetId = _firstSchedulePresetId;
@@ -253,14 +274,42 @@ class ScheduleSyncService {
 
         if (!saved) {
           presetErrors.add('Failed to save preset for "${effectiveSchedule.actionLabel}"');
+        } else {
+          savedPresetIds.add(presetId);
         }
       }
 
       updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
     }
 
-    // Step 2: Build and push timer configuration
-    final payload = buildCfgPayload(updatedSchedules);
+    // ── Defense-in-depth: never silently arm an empty macro ──────────────
+    // A runPattern schedule whose design payload didn't persist as a preset
+    // (e.g. a legacy entry saved with wledPayload:null) would otherwise arm an
+    // ON-timer macro pointing at a preset that was never saved. WLED fires the
+    // macro, the preset is missing, nothing happens — lights stay off and
+    // never wake. That silent-arm is exactly how the bug stayed invisible.
+    // Partition those out, warn loudly (surfaces via lastScheduleSyncResult →
+    // _SyncStatusRow as "Synced with warnings"), and never arm them. Non-
+    // pattern actions (Turn Off/On, Brightness) map to legacy presets and are
+    // left untouched; audio-reactive items already had a payload built above.
+    final List<ScheduleItem> armable = [];
+    for (final s in updatedSchedules) {
+      final isPatternAction = s.actionLabel.toLowerCase().startsWith('pattern');
+      final presetSaved =
+          s.presetId != null && savedPresetIds.contains(s.presetId);
+      if (isPatternAction && !presetSaved) {
+        presetErrors.add(
+            '"${s.actionLabel}" has no saved design — not armed. Re-open the '
+            'schedule and pick a pattern.');
+        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — no '
+            'preset saved at id ${s.presetId}');
+        continue;
+      }
+      armable.add(s);
+    }
+
+    // Step 2: Build and push timer configuration (only for armable schedules)
+    final payload = buildCfgPayload(armable);
 
     try {
       final ok = await repo.applyConfig(payload);
