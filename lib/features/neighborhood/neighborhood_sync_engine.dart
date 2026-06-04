@@ -59,16 +59,34 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
   }
 
-  /// On app paused or detached: if our own isParticipating flag is true,
-  /// flip it back to false via [NeighborhoodService.selfLeaveSync].
-  /// Covers backgrounding + clean kill — a member who closes the app
-  /// tears down only themselves, not the group. Does NOT cover crash:
-  /// the crash-safe heartbeat reaper (NeighborhoodMember.lastSeen
-  /// staleness via Cloud Function) is documented follow-up.
+  // SYNC LIFECYCLE INVARIANT — do not violate:
+  // App lifecycle events (paused/detached/resume) must NEVER write sync or
+  // teardown state. The WLED controller holds the applied fx natively and
+  // free-runs without the phone; a sync ends ONLY via explicit user action
+  // (_stopSync / End-Group / Leave). Backgrounding, sleeping, or hard-closing
+  // the app must not revert lights or remove a member. (History: a pause-time
+  // self-leave caused non-deterministic background reverts; a resume guard
+  // added to patch it then suppressed legitimate End-Group teardowns. Both
+  // removed. Do not reintroduce a lifecycle-driven write — or a guard to
+  // defend against one.)
+
+  /// On app paused or detached: DO NOTHING that ends the sync. The WLED
+  /// controller holds the last-applied fx natively, so a backgrounded /
+  /// suspended / hard-closed app must leave the lights running. The member
+  /// stays `isParticipating == true`; a sync ends ONLY on an explicit user
+  /// Leave/End (sync_control_panel `_stopSync`).
   ///
-  /// Fire-and-forget — the OS may suspend the process before the
-  /// Firestore write reaches the wire. Firestore's local cache queues
-  /// it for the next resume.
+  /// Previously this fired [NeighborhoodService.selfLeaveSync] on
+  /// paused/detached, which wrote a self-teardown and reverted the member's
+  /// lights — making "background = revert". Because that revert is a
+  /// fire-and-forget Firestore round-trip + applyJson, it was
+  /// non-deterministic across platforms (iOS hard-close survived by losing
+  /// the transmit race; Android screen-timeout won the race and reverted).
+  /// Removed so BOTH platforms persist deterministically.
+  ///
+  /// The dispatch to [handleAppLifecyclePauseForTest] is retained as a test
+  /// seam and a home for any future *non-reverting* pause bookkeeping; the
+  /// handler MUST NOT initiate a teardown or reach applyJson.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
@@ -78,23 +96,14 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     }
   }
 
-  /// Lifecycle pause handler. Extracted as [@visibleForTesting] so unit
-  /// tests can exercise the gate logic + clear path without needing a
-  /// real WidgetsBinding lifecycle event to be dispatched.
+  /// Lifecycle pause handler. Intentionally a NO-OP: backgrounding must never
+  /// end a sync (see [didChangeAppLifecycleState]). Kept as a seam so the
+  /// lifecycle-dispatch unit tests can assert which states route here, and so
+  /// any future *non-reverting* pause bookkeeping has a home. It MUST NOT call
+  /// selfLeaveSync / stopListening or anything that reaches applyJson.
   @visibleForTesting
   Future<void> handleAppLifecyclePauseForTest() async {
-    final groupId = _ref.read(activeNeighborhoodIdProvider);
-    final member = _ref.read(currentUserMemberProvider);
-    if (groupId == null || member == null || !member.isParticipating) {
-      return;
-    }
-    try {
-      await _ref
-          .read(neighborhoodNotifierProvider.notifier)
-          .selfLeaveSync(groupId);
-    } catch (e) {
-      debugPrint('App-pause self-leave failed: $e');
-    }
+    // No-op by design — do NOT revert lights on background.
   }
 
   /// Checks if the current member should participate in the given sync command.
