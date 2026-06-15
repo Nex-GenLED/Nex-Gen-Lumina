@@ -662,6 +662,47 @@ class WledService implements WledRepository {
     return const {};
   }
 
+  /// Fetches full preset definitions via GET /presets.json (ID → stored WLED
+  /// state map). Concrete to [WledService] — not on the [WledRepository]
+  /// interface — because only the on-LAN HTTP path can read the controller's
+  /// filesystem. Schedule sync uses it to skip re-`psave`ing slots that already
+  /// match (a `psave` applies its inline state live on this firmware, so the
+  /// skip is what stops the strip flashing when a schedule is edited).
+  Future<Map<int, Map<String, dynamic>>> fetchPresets() async {
+    // No filesystem presets in sim mode — return empty so idempotence callers
+    // fall back to writing (matching pre-idempotence behavior under tests).
+    if (_simulate) return const {};
+
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final req = await client.getUrl(_uri('/presets.json'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final decoded = jsonDecode(body);
+        if (decoded is Map) {
+          final result = <int, Map<String, dynamic>>{};
+          for (final entry in decoded.entries) {
+            final id = int.tryParse(entry.key.toString());
+            // Slot "0" is WLED's empty/scratch slot — skip it.
+            if (id != null && id > 0 && entry.value is Map) {
+              result[id] = Map<String, dynamic>.from(entry.value as Map);
+            }
+          }
+          debugPrint('📋 Fetched ${result.length} WLED preset definitions');
+          return result;
+        }
+      }
+      debugPrint('WLED fetchPresets status ${res.statusCode}');
+    } catch (e) {
+      debugPrint('WLED fetchPresets error: $e');
+    }
+    return const {};
+  }
+
   @override
   void invalidatePresetCache() {
     _presetNamesCache = null;

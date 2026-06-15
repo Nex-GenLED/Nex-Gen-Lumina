@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
 ///
@@ -185,6 +186,11 @@ class ScheduleSyncService {
       ));
     }
 
+    // Non-null binding for use inside the closures below — Dart's null
+    // promotion of [repo] (a reassignable local) does not cross into the
+    // psaveIfChanged closure, so capture it once here after the guard.
+    final activeRepo = repo;
+
     final enabled = schedules.where((s) => s.enabled).toList();
 
     // Step 1: Assign preset IDs and save presets to device
@@ -197,60 +203,106 @@ class ScheduleSyncService {
     // is in this set or maps to a legacy on/off/brightness preset.
     final Set<int> savedPresetIds = <int>{};
 
-    // Universal ON/OFF presets — saved on every sync so OFF timers
-    // (hardcoded `macro: 2` in buildCfgPayload below) and the legacy
-    // _presetForAction fallback ("Turn On" → preset 1) always have
-    // valid targets. WLED retains presets across reboots, but psave
-    // is idempotent — overwriting in place is safe and cheap.
-    // Failures here are logged via presetErrors but do not abort the
-    // sync; per-schedule presets and the timer push still proceed.
-    final savedOn = await repo.savePreset(
-      presetId: 1,
-      state: {'on': true, 'bri': 200},
-      presetName: 'NGL On',
-    );
-    if (!savedOn) {
-      presetErrors.add('Failed to save preset 1 (NGL On)');
-    } else {
-      savedPresetIds.add(1);
-    }
-    final savedOff = await repo.savePreset(
-      presetId: 2,
-      state: {'on': false},
-      presetName: 'NGL Off',
-    );
-    if (!savedOff) {
-      presetErrors.add('Failed to save preset 2 (NGL Off)');
-    } else {
-      savedPresetIds.add(2);
-    }
+    // ── Idempotent-write + capture/restore scaffolding ──────────────────
+    // ROOT CAUSE this guards against: every `savePreset` POSTs its inline
+    // state to /json/state with `psave`, and on this firmware WLED APPLIES
+    // that state to the live strip before snapshotting it (bench-confirmed on
+    // 0.15.1: an OFF strip flips ON after `{on:true,bri:153,psave:5}`). The
+    // old code re-`psave`d the whole 1–5 block on EVERY mutation, so the last
+    // write (preset 5 = on/bri153, no color) left the strip solid-on whenever
+    // a schedule was saved and the user navigated away.
+    //
+    // Two-part fix:
+    //   1. Read the controller's current presets once and only `psave` a slot
+    //      whose stored definition no longer matches what we want. A re-sync
+    //      that changes nothing writes nothing → no live-output change.
+    //   2. Capture live /json/state before the (now rare) writes; if any write
+    //      happened, re-apply it afterward so the strip ends exactly where it
+    //      started. The only non-applying save shape WLED offers here — a bare
+    //      `{psave:N}` — can't define a *differing* preset, so capture/restore
+    //      is the mechanism for the writes that must happen.
+    // Preset defs come from the on-LAN HTTP service only (GET /presets.json);
+    // for any other repo (cloud relay / mock) we treat presets as unknown and
+    // fall back to writing — the capture/restore below still guards output.
+    final Map<int, Map<String, dynamic>> existingPresets =
+        activeRepo is WledService ? await activeRepo.fetchPresets() : const {};
+    final Map<String, dynamic>? capturedLiveState = await activeRepo.getState();
+    bool didWriteAnyPreset = false;
 
-    // Legacy brightness-level presets referenced by [_presetForAction] for
-    // Brightness schedules: 3=Dim(20%), 4=Low(40%), 5=Medium(60%). Previously
-    // these were NEVER written, so a Brightness schedule armed a macro pointing
-    // at a nonexistent preset and silently no-op'd (same dead-macro class as the
-    // pattern bug). Saved here (idempotent, like 1/2) so the macros resolve.
-    // on:true so a brightness schedule also wakes the controller from off.
-    // bri = round(pct * 255 / 100): 20%→51, 40%→102, 60%→153, matching the
-    // 20/40/60% buckets in _presetForAction.
-    const legacyBrightnessPresets = <int, (int, String)>{
-      3: (51, 'NGL Dim'),
-      4: (102, 'NGL Low'),
-      5: (153, 'NGL Medium'),
-    };
-    for (final entry in legacyBrightnessPresets.entries) {
-      final (bri, name) = entry.value;
-      final saved = await repo.savePreset(
-        presetId: entry.key,
-        state: {'on': true, 'bri': bri},
+    // psave [state]→[id] ONLY when [isSatisfied] reports the slot's current
+    // definition is wrong/absent. On skip the slot is already correct, so it
+    // still counts as armable (added to savedPresetIds) — the empty-macro
+    // guard below must not refuse a schedule whose preset we deliberately left
+    // in place. On a real write, trip didWriteAnyPreset so the caller restores.
+    Future<void> psaveIfChanged({
+      required int id,
+      required Map<String, dynamic> state,
+      required String name,
+      required bool Function(Map<String, dynamic> existingDef) isSatisfied,
+    }) async {
+      final existing = existingPresets[id];
+      if (existing != null && isSatisfied(existing)) {
+        savedPresetIds.add(id);
+        return;
+      }
+      final ok = await activeRepo.savePreset(
+        presetId: id,
+        state: state,
         presetName: name,
       );
-      if (!saved) {
-        presetErrors.add('Failed to save preset ${entry.key} ($name)');
+      if (ok) {
+        didWriteAnyPreset = true;
+        savedPresetIds.add(id);
       } else {
-        savedPresetIds.add(entry.key);
+        presetErrors.add('Failed to save preset $id ($name)');
       }
     }
+
+    // System presets — fixed definitions, so once present with the right name
+    // they are never rewritten (this is what stops the every-sync storm).
+    //   1 = On, 3/4/5 = Dim/Low/Medium brightness (referenced by
+    //   _presetForAction; bri = round(pct*255/100): 20%→51, 40%→102, 60%→153).
+    await psaveIfChanged(
+      id: 1,
+      state: {'on': true, 'bri': 200},
+      name: 'NGL On',
+      isSatisfied: (d) => _presetNamed(d, 'NGL On'),
+    );
+    // Preset 2 = Off. OFF timers fire `macro: 2`; a slot left holding an ON
+    // design (seen in the field — wrong-named/legacy writes) silently turns the
+    // lights ON at the OFF boundary instead of off. Repair it whenever the
+    // stored slot isn't actually off. We write seg.on:false explicitly so the
+    // _presetIsOff check is stable on the next sync (this firmware stores
+    // on-state per-segment, with no top-level `on` key).
+    await psaveIfChanged(
+      id: 2,
+      state: {
+        'on': false,
+        'seg': [
+          {'on': false}
+        ],
+      },
+      name: 'NGL Off',
+      isSatisfied: (d) => _presetNamed(d, 'NGL Off') && _presetIsOff(d),
+    );
+    await psaveIfChanged(
+      id: 3,
+      state: {'on': true, 'bri': 51},
+      name: 'NGL Dim',
+      isSatisfied: (d) => _presetNamed(d, 'NGL Dim'),
+    );
+    await psaveIfChanged(
+      id: 4,
+      state: {'on': true, 'bri': 102},
+      name: 'NGL Low',
+      isSatisfied: (d) => _presetNamed(d, 'NGL Low'),
+    );
+    await psaveIfChanged(
+      id: 5,
+      state: {'on': true, 'bri': 153},
+      name: 'NGL Medium',
+      isSatisfied: (d) => _presetNamed(d, 'NGL Medium'),
+    );
 
     int nextPresetId = _firstSchedulePresetId;
 
@@ -301,17 +353,17 @@ class ScheduleSyncService {
         final presetId = effectiveSchedule.presetId ?? nextPresetId;
         if (effectiveSchedule.presetId == null) nextPresetId++;
 
-        final saved = await repo.savePreset(
-          presetId: presetId,
-          state: effectiveSchedule.wledPayload!,
-          presetName: effectiveSchedule.actionLabel,
+        // Idempotent: skip the psave when slot already holds this design, so a
+        // re-sync of an unchanged pattern schedule writes nothing (no flash).
+        // A genuinely new/changed design is the only case that writes — and
+        // that single write is undone visually by the capture/restore below.
+        final payload = effectiveSchedule.wledPayload!;
+        await psaveIfChanged(
+          id: presetId,
+          state: payload,
+          name: effectiveSchedule.actionLabel,
+          isSatisfied: (d) => _scheduleDesignMatches(d, payload),
         );
-
-        if (!saved) {
-          presetErrors.add('Failed to save preset for "${effectiveSchedule.actionLabel}"');
-        } else {
-          savedPresetIds.add(presetId);
-        }
 
         updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
       } else {
@@ -322,6 +374,34 @@ class ScheduleSyncService {
         // above — instead of a never-saved 10+ slot.
         updatedSchedules.add(effectiveSchedule.copyWith(clearPresetId: true));
       }
+    }
+
+    // ── Restore live output ──────────────────────────────────────────────
+    // Each psave above applied its inline state to the live strip (no
+    // non-applying save exists on this firmware for a differing preset). If we
+    // wrote at least one preset, re-apply the state captured before the batch
+    // so the lights end exactly where they started — saving/editing a schedule
+    // and navigating away must NOT turn the system on or change the look. A
+    // sync that wrote nothing (all presets already current) skips this, so the
+    // common path touches the strip zero times. This is purely a live-output
+    // restore; it never touches timers, so the two-timer ON/OFF boundary
+    // invariant is untouched — only the RTC fires boundaries.
+    if (didWriteAnyPreset && capturedLiveState != null) {
+      final restore = <String, dynamic>{
+        if (capturedLiveState['on'] != null) 'on': capturedLiveState['on'],
+        if (capturedLiveState['bri'] != null) 'bri': capturedLiveState['bri'],
+        if (capturedLiveState['seg'] != null) 'seg': capturedLiveState['seg'],
+      };
+      if (restore.isNotEmpty) {
+        final restored = await repo.applyJson(restore);
+        if (!restored) {
+          debugPrint(
+              'ScheduleSync: live-state restore after preset writes failed');
+        }
+      }
+    } else if (didWriteAnyPreset) {
+      debugPrint('ScheduleSync: wrote presets but had no captured live state '
+          'to restore — strip may reflect the last preset written');
     }
 
     // ── Defense-in-depth: never silently arm an empty macro ──────────────
@@ -472,6 +552,70 @@ class ScheduleSyncService {
       return int.tryParse(percentMatch.group(1)!);
     }
     return null;
+  }
+
+  // ── Preset-idempotence helpers (used by syncAll) ──────────────────────
+  // These read a stored preset definition (as returned by
+  // [WledRepository.fetchPresets]) and decide whether it already matches what
+  // we would write, so the sync can skip the psave (and its live-apply flash).
+
+  /// True when the stored preset's name equals [name] (trimmed).
+  static bool _presetNamed(Map<String, dynamic> def, String name) =>
+      def['n'] is String && (def['n'] as String).trim() == name;
+
+  /// True when the preset represents an OFF state. This firmware stores
+  /// on-state per-segment (no top-level `on` key on saved presets), so a
+  /// preset is "off" only when no segment is left on. Falls back to a
+  /// top-level `on:false` for builds that do store it.
+  static bool _presetIsOff(Map<String, dynamic> def) {
+    final seg = def['seg'];
+    if (seg is List) {
+      for (final s in seg) {
+        if (s is Map && s['on'] == true) return false;
+      }
+      return true;
+    }
+    return def['on'] == false;
+  }
+
+  /// Best-effort match between a stored schedule preset and the [payload] we
+  /// would write — compares the first segment's effect id and primary color.
+  /// A false negative (treats a match as a mismatch) only costs one redundant
+  /// write, which the capture/restore in syncAll renders invisible; it never
+  /// produces a false positive that would leave a stale design armed.
+  static bool _scheduleDesignMatches(
+      Map<String, dynamic> def, Map<String, dynamic> payload) {
+    try {
+      final dSeg = def['seg'];
+      final pSeg = payload['seg'];
+      if (dSeg is! List || pSeg is! List || dSeg.isEmpty || pSeg.isEmpty) {
+        return false;
+      }
+      final d0 = dSeg.first;
+      final p0 = pSeg.first;
+      if (d0 is! Map || p0 is! Map) return false;
+      if (d0['fx'] != p0['fx']) return false;
+      final dCol = d0['col'];
+      final pCol = p0['col'];
+      if (dCol is! List || pCol is! List || dCol.isEmpty || pCol.isEmpty) {
+        return false;
+      }
+      return _sameColor(dCol.first, pCol.first);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Compares two WLED color arrays on their R/G/B channels (ignoring a
+  /// possibly-absent W channel and any normalization padding).
+  static bool _sameColor(dynamic a, dynamic b) {
+    if (a is! List || b is! List) return false;
+    for (var i = 0; i < 3; i++) {
+      final av = i < a.length && a[i] is num ? (a[i] as num).toInt() : 0;
+      final bv = i < b.length && b[i] is num ? (b[i] as num).toInt() : 0;
+      if (av != bv) return false;
+    }
+    return true;
   }
 }
 
