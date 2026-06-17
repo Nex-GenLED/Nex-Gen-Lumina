@@ -193,6 +193,7 @@ Verification owed merged into #77's gate; this item closed. The 2026-05-29 audit
 ### #TD-1 — Migrate schedules off the user-doc array field
 **Severity:** HIGH (before 100 active users)
 Move from an array field on the user document to `/users/{uid}/schedules/{scheduleId}` subcollection. Touches `schedule_providers.dart`, `user_model.dart`, Firestore rules, and all schedule read/write paths.
+#TD-1 schedules→subcollection: full execution plan at docs/audits/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06.md; also fixes the live whole-array clobber race (removeSchedule/updateSchedule non-transactional, saveSchedules blind overwrite).
 
 ### #TD-2 — Remove dead `_controllerIps` plumbing
 **Severity:** MEDIUM
