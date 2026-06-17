@@ -788,15 +788,21 @@ class AppRouter {
                         parentNavigatorKey: _rootNavigatorKey,
                         pageBuilder: (context, state) {
                           final nodeId = state.pathParameters['nodeId']!;
-                          // Game Day pushes nodeIds in the form 'team_<teamSlug>'.
-                          // Extract the team slug so LibraryBrowserScreen can route
-                          // design taps through GameDayAutopilotNotifier.saveDesign.
-                          // If the nodeId doesn't carry the team_ prefix (defensive
-                          // — shouldn't happen for this route), fall back to null so
-                          // the picker behaves like the Explore mount.
-                          final String? teamSlug = nodeId.startsWith('team_')
-                              ? nodeId.substring('team_'.length)
-                              : null;
+                          // The path param is now the REAL catalog leaf node id
+                          // (resolved by SportsLibraryBuilder.resolveTeamNodeId),
+                          // which no longer encodes the team slug. teamSlug is
+                          // therefore passed EXPLICITLY via extra so it still
+                          // reaches GameDayAutopilotNotifier.saveDesign through
+                          // LibraryBrowserScreen → ColorwayEffectSelectorPage.
+                          // Legacy fallback: older deep links of the form
+                          // 'team_<slug>' still recover the slug by prefix strip.
+                          final extra = state.extra;
+                          String? teamSlug;
+                          if (extra is Map && extra['teamSlug'] is String) {
+                            teamSlug = extra['teamSlug'] as String;
+                          } else if (nodeId.startsWith('team_')) {
+                            teamSlug = nodeId.substring('team_'.length);
+                          }
                           return NoTransitionPage(
                             child: LibraryBrowserScreen(
                               nodeId: nodeId,

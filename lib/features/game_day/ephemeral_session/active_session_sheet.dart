@@ -14,6 +14,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../theme.dart';
 import '../../sports_alerts/data/team_colors.dart';
+import '../../wled/sports_library_builder.dart';
 import 'ephemeral_game_session.dart';
 import 'ephemeral_game_session_providers.dart';
 
@@ -179,14 +180,37 @@ class ActiveSessionSheet extends ConsumerWidget {
 
   void _onEditDesign(BuildContext context) {
     final teamSlug = session.teamSlug;
+    final messenger = ScaffoldMessenger.of(context);
     // Dismiss the sheet first; the sheet's Navigator pops, leaving the
     // dashboard route intact. Then push the picker route from Item #64
     // which uses parentNavigatorKey: _rootNavigatorKey so back-arrow
     // returns directly to the dashboard.
     Navigator.of(context).pop();
-    if (context.mounted) {
-      context.push('/dashboard/game-day/picker/team_$teamSlug');
+    if (!context.mounted) return;
+
+    // Resolve the real catalog leaf node id from the team identity (derived
+    // from kTeamColors) rather than minting `team_<slug>`. See
+    // SportsLibraryBuilder.resolveTeamNodeId.
+    final team = kTeamColors[teamSlug];
+    final nodeId = team == null
+        ? null
+        : SportsLibraryBuilder.resolveTeamNodeId(
+            teamName: team.teamName,
+            sport: team.sport,
+            espnTeamId: team.espnTeamId,
+          );
+    if (nodeId == null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+              "Couldn't find ${team?.teamName ?? 'that team'}'s designs in the library."),
+        ),
+      );
+      return;
     }
+    // teamSlug passed explicitly so it still reaches saveDesign.
+    context.push('/dashboard/game-day/picker/$nodeId',
+        extra: {'teamSlug': teamSlug});
   }
 
   Future<void> _onCancel(BuildContext context, WidgetRef ref) async {

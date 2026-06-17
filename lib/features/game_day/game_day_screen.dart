@@ -14,6 +14,7 @@ import '../autopilot/game_day_autopilot_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
+import '../wled/sports_library_builder.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
@@ -425,8 +426,30 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // the root navigator so the picker's back-arrow returns to Game Day,
     // not the Explore tab root. Other callers of /explore/library/:nodeId
     // (in-explore browsing) keep their branch-local navigation.
-    final nodeId = 'team_${config.teamSlug}';
-    context.push('/dashboard/game-day/picker/$nodeId');
+    //
+    // Resolve the real catalog leaf node id from the team identity instead of
+    // minting `team_<slug>` — the kTeamColors-key namespace only coincidentally
+    // matched the catalog id for single-name domestic teams and never for
+    // soccer / MLS city-strip / NCAA, landing those on an empty folder.
+    final nodeId = SportsLibraryBuilder.resolveTeamNodeId(
+      teamName: config.teamName,
+      sport: config.sport,
+      espnTeamId: config.espnTeamId,
+    );
+    if (nodeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              "Couldn't find ${config.teamName}'s designs in the library."),
+        ),
+      );
+      return;
+    }
+    // teamSlug is passed EXPLICITLY (extra) now that the path param is the
+    // real catalog node id — it still flows to ColorwayEffectSelectorPage's
+    // saveDesign side-channel via LibraryBrowserScreen.
+    context.push('/dashboard/game-day/picker/$nodeId',
+        extra: {'teamSlug': config.teamSlug});
   }
 
   /// Falls back to cyan if the team's primary color is too dark to read
