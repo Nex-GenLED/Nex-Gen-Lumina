@@ -72,16 +72,21 @@ Future<void> handleSchedulingIntents({
 
   final controller = ref.read(luminaSheetProvider.notifier);
 
-  // Post the AI's response to the chat thread first so the user sees the
-  // confirmation message Claude crafted. Both surfaces read the same
-  // provider, so the message lands in the active chat regardless of the
-  // entry point.
-  controller.addAssistantMessage(
-    result.responseText,
-    preview: preview,
-    wledPayload: result.wledPayload,
-  );
-  onMessagePosted?.call();
+  // Capture write-critical handles NOW, while the calling widget's `ref` is
+  // still alive. `schedulesProvider` is a global (non-autoDispose) provider, so
+  // its notifier outlives this screen/sheet — the [Add] SnackBar action below
+  // writes through this captured notifier instead of `ref`, which throws
+  // "Cannot use ref after the widget was disposed" once the sheet is closed
+  // (root cause C). This is a function-local capture of a container-scoped
+  // notifier, NOT a notifier cached in widget State.
+  final schedulesNotifier = ref.read(schedulesProvider.notifier);
+
+  // IMPORTANT (root cause A): do NOT post the AI's prose here. The cloud reply
+  // routinely claims completion ("I've scheduled…", "done", "tonight") and the
+  // write hasn't happened yet — the user confirms via the SnackBar below, and
+  // that write can fail. The prose + any success wording is posted ONLY after
+  // addAll confirms the row committed (see the [Add] action). Until then the
+  // SnackBar itself is the (non-completion) proposal.
 
   // ── Honesty guard: drop ambiguous intents (distinct name, no own wled) ─
   // Without this, a sibling labeled "Friday Red" with no per-element wled
@@ -153,7 +158,13 @@ Future<void> handleSchedulingIntents({
     successText = '${items.length} schedules added';
   }
 
-  ScaffoldMessenger.of(context).showSnackBar(
+  // Capture the messenger up front too — ScaffoldMessenger is app-level (above
+  // this sheet), so the handle stays valid after the sheet is dismissed. The
+  // [Add] action below uses only captured handles (messenger / schedulesNotifier
+  // / controller), never `ref` or `context`, so the write and its result
+  // survive the originating widget's disposal (root cause C).
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.showSnackBar(
     SnackBar(
       content: Text(
         promptText,
@@ -165,52 +176,63 @@ Future<void> handleSchedulingIntents({
         label: 'Add',
         textColor: NexGenPalette.cyan,
         onPressed: () async {
-          final messenger = ScaffoldMessenger.of(context);
+          // Write through the captured notifier (survives sheet disposal).
+          // addAll now RETURNS the real outcome instead of swallowing failures,
+          // so we claim success only when the row actually committed.
+          bool ok;
           try {
-            await ref
-                .read(schedulesProvider.notifier)
-                .addAll(items, resolution: resolution);
-            if (!context.mounted) return;
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(successText),
-                backgroundColor: Colors.green.shade700,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-            // Honesty follow-up: if the guard dropped any siblings,
-            // post a chat message naming them so the user sees the
-            // saved/skipped split in the conversation history (the
-            // SnackBar disappears).
-            if (droppedNames.isNotEmpty) {
-              final savedQuoted = items
-                  .map((i) => '"${displayNameFor(
-                      i.actionLabel.startsWith('Pattern: ')
-                          ? i.actionLabel.substring(9)
-                          : i.actionLabel)}"')
-                  .join(', ');
-              final droppedQuoted = droppedNames
-                  .map((n) => '"${displayNameFor(n)}"')
-                  .join(', ');
-              final droppedPhrase = droppedNames.length == 1
-                  ? 'a separate design for $droppedQuoted'
-                  : 'separate designs for $droppedQuoted';
-              controller.addAssistantMessage(
-                'Saved $savedQuoted. I couldn\'t set $droppedPhrase '
-                'in one go — ask me to add it and I\'ll schedule it.',
-              );
-              onMessagePosted?.call();
-            }
+            ok = await schedulesNotifier.addAll(items, resolution: resolution);
           } catch (e) {
-            debugPrint('handleSchedulingIntents: addAll failed: $e');
-            if (!context.mounted) return;
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text('Could not add schedules: $e'),
-                backgroundColor: Colors.red.shade700,
-                duration: const Duration(seconds: 3),
-              ),
+            // addAll no longer throws on a write failure; this only fires on an
+            // unexpected error. Treat as not-committed.
+            debugPrint('handleSchedulingIntents: addAll threw: $e');
+            ok = false;
+          }
+
+          if (!ok) {
+            // Write did NOT commit. addAll already surfaced a real error with a
+            // RETRY action (or no user was signed in). Post NOTHING that claims
+            // success — the conversation must not show a "scheduled" the row
+            // never got (root causes A + B).
+            return;
+          }
+
+          // ── Confirmed committed — only now is success safe to show ──────────
+          // Post the AI's prose (with preview) here, deferred from before the
+          // write so its completion wording can never outrun the row.
+          controller.addAssistantMessage(
+            result.responseText,
+            preview: preview,
+            wledPayload: result.wledPayload,
+          );
+          onMessagePosted?.call();
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(successText),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          // Honesty follow-up: if the guard dropped any siblings, post a chat
+          // message naming them so the user sees the saved/skipped split.
+          if (droppedNames.isNotEmpty) {
+            final savedQuoted = items
+                .map((i) => '"${displayNameFor(
+                    i.actionLabel.startsWith('Pattern: ')
+                        ? i.actionLabel.substring(9)
+                        : i.actionLabel)}"')
+                .join(', ');
+            final droppedQuoted = droppedNames
+                .map((n) => '"${displayNameFor(n)}"')
+                .join(', ');
+            final droppedPhrase = droppedNames.length == 1
+                ? 'a separate design for $droppedQuoted'
+                : 'separate designs for $droppedQuoted';
+            controller.addAssistantMessage(
+              'Saved $savedQuoted. I couldn\'t set $droppedPhrase '
+              'in one go — ask me to add it and I\'ll schedule it.',
             );
+            onMessagePosted?.call();
           }
         },
       ),

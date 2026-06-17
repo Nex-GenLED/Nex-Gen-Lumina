@@ -205,6 +205,43 @@ void main() {
       expect(h.userService.addSchedulesCalls, isEmpty);
       expect(h.container.read(schedulesProvider), isEmpty);
     });
+
+    test('addAll reports the real outcome — true on commit, false on failure',
+        () async {
+      // The confirm flow branches on this: a swallowed failure (old behavior,
+      // returning normally) let the UI claim "scheduled" with no row written.
+      final h = _harness();
+      final notifier = await _readNotifier(h.container);
+
+      final okGood =
+          await notifier.addAll([_mk(id: 'g', timeLabel: '5:00 PM')]);
+      expect(okGood, isTrue, reason: 'a committed write reports success');
+
+      h.userService.addSchedulesThrow = FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'unavailable',
+        message: 'simulated outage',
+      );
+      final okBad =
+          await notifier.addAll([_mk(id: 'b', timeLabel: '9:00 PM')]);
+      expect(okBad, isFalse,
+          reason: 'a reverted write must report failure, never silent success');
+
+      // The failed item left no row; only the first committed item survives.
+      expect(h.container.read(schedulesProvider).map((i) => i.id).toList(),
+          ['g']);
+    });
+
+    test('ConflictResolution.cancel returns false (nothing committed)',
+        () async {
+      final h = _harness();
+      final notifier = await _readNotifier(h.container);
+      final ok = await notifier.addAll(
+        [_mk(id: 'a', timeLabel: '5:00 PM')],
+        resolution: ConflictResolution.cancel,
+      );
+      expect(ok, isFalse);
+    });
   });
 
   group('SchedulesNotifier.checkConflictsForAddAll', () {

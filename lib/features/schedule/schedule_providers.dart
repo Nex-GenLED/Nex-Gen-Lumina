@@ -380,18 +380,23 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   ///
   /// Pass [resolution] after showing the conflict dialog to handle overlaps,
   /// same convention as [add].
-  Future<void> addAll(List<ScheduleItem> items,
+  /// Returns `true` only when the batch is confirmed persisted to Firestore;
+  /// `false` when the write failed (state is reverted and a retry error is
+  /// surfaced) or no user is signed in. Callers driving a "scheduled"
+  /// confirmation MUST branch on this — a failed write previously returned
+  /// normally, letting the UI claim success with no row written.
+  Future<bool> addAll(List<ScheduleItem> items,
       {ConflictResolution? resolution}) async {
-    if (items.isEmpty) return;
+    if (items.isEmpty) return true; // nothing to write — vacuously fine
 
     final userId = _userId;
     if (userId == null) {
       debugPrint('SchedulesNotifier: Cannot addAll - no user signed in');
-      return;
+      return false;
     }
 
     // ── Conflict resolution (before optimistic update) ───────────
-    if (resolution == ConflictResolution.cancel) return;
+    if (resolution == ConflictResolution.cancel) return false;
     if (resolution == ConflictResolution.removeExisting) {
       final conflicts = checkConflictsForAddAll(items);
       for (final c in conflicts.conflictingItems) {
@@ -413,19 +418,26 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // listeners see the batch atomically.
     state = [...state, ...items];
 
+    // Outcome propagates to the caller (the confirm flow) — we still revert
+    // optimistic state + surface a retry error on failure, we just no longer
+    // hide whether the write actually committed.
+    bool ok;
     try {
       await _ref.read(userServiceProvider).addSchedules(userId, items);
       debugPrint(
           'SchedulesNotifier: addAll persisted ${items.length} items atomically');
       _triggerWledSync();
+      ok = true;
     } catch (e) {
       debugPrint(
           'SchedulesNotifier: Failed to persist addAll — reverting all ${items.length} items: $e');
       state = oldState;
       _showSaveError('addAll', e, () => addAll(items, resolution: resolution));
+      ok = false;
     }
 
     _isMutating = false;
+    return ok;
   }
 
   /// Remove a schedule by ID
@@ -533,11 +545,16 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// For compound user-intent batches (e.g. one Lumina prompt → N schedules)
   /// a separate atomic batch path is being introduced — it persists every
   /// item verbatim, no dedup, no cap, all-or-nothing atomic revert.
-  Future<void> mergeWithDedup(List<ScheduleItem> items) async {
+  /// Returns `true` when the merged set is confirmed persisted (or when every
+  /// item was already present so there was nothing to write); `false` when the
+  /// Firestore write failed (state reverted, retry error surfaced) or no user
+  /// is signed in. Lets a caller-driven confirmation branch on the real
+  /// outcome instead of assuming success.
+  Future<bool> mergeWithDedup(List<ScheduleItem> items) async {
     final userId = _userId;
     if (userId == null) {
       debugPrint('SchedulesNotifier: Cannot mergeWithDedup - no user signed in');
-      return;
+      return false;
     }
 
     _isMutating = true;
@@ -557,7 +574,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       debugPrint(
           'SchedulesNotifier: mergeWithDedup skipped — all ${items.length} items already present');
       _isMutating = false;
-      return;
+      return true; // already present = nothing to persist, not a failure
     }
 
     var merged = [...state, ...newItems];
@@ -576,19 +593,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     state = merged;
 
-    // Persist to Firestore — throws on failure after retries.
+    // Persist to Firestore — propagate the outcome so the caller never claims
+    // success on a reverted write.
+    bool ok;
     try {
       await _ref.read(userServiceProvider).saveSchedules(userId, merged);
       debugPrint(
           'Merged ${newItems.length} new schedules (filtered ${items.length - newItems.length} duplicates), total: ${merged.length}');
       _triggerWledSync();
+      ok = true;
     } catch (e) {
       debugPrint('SchedulesNotifier: Failed to persist mergeWithDedup — reverting: $e');
       state = oldState;
       _showSaveError('mergeWithDedup', e, () => mergeWithDedup(items));
+      ok = false;
     }
 
     _isMutating = false;
+    return ok;
   }
 
   // ─── Persistence health check ──────────────────────────────────
