@@ -126,5 +126,43 @@ void main() {
       expect(result, isEmpty);
       expectNoPayloadLeak(result);
     });
+
+    // ── Layer 3a: UNBALANCED / TRUNCATED trailing payload ──────────────────
+    // The exact leak this submission gate closes. A reply cut off mid-object
+    // has an opening brace with NO matching close — _matchingBrace returns -1
+    // and the OLD code wrote the partial payload verbatim into the bubble.
+    // strip-to-end-of-string must now drop it entirely.
+    test('prose + UNBALANCED trailing JSON (truncated) → prose only, no '
+        'raw JSON leaks', () {
+      const raw = 'Here is your holiday plan! '
+          '{"patternName":"Holiday","schedulingIntents":[{"timeLabel":"Sunset",'
+          '"repeatDays":["Mon","Tue"],"wled":{"on":true,"seg":[{"col":[[255,0';
+
+      final result = CloudAIProcessor.stripJsonForDisplay(raw);
+
+      expect(result, 'Here is your holiday plan!');
+      expectNoPayloadLeak(result);
+    });
+
+    test('UNBALANCED payload with NO prose collapses to empty (no leak)', () {
+      const raw =
+          '{"patternName":"X","wled":{"on":true,"seg":[{"fx":2,"col":[[10,20';
+
+      final result = CloudAIProcessor.stripJsonForDisplay(raw);
+
+      expect(result, isEmpty);
+      expectNoPayloadLeak(result);
+    });
+
+    test('unbalanced PROSE brace (no quoted key) is preserved — not a payload',
+        () {
+      // "{ to group" has no "key": pattern, so it is conversational, not a
+      // cut-off payload; it must survive the strip-to-end guard.
+      const raw = 'In WLED you use a { to group segments together.';
+
+      final result = CloudAIProcessor.stripJsonForDisplay(raw);
+
+      expect(result, raw);
+    });
   });
 }

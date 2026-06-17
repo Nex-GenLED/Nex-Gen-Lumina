@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
+import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart'
+    show LuminaResponseTruncatedException;
 import 'package:nexgen_command/theme.dart';
 
 /// Tier 2 — Cloud AI processor for complex / creative lighting commands.
@@ -49,6 +51,21 @@ class CloudAIProcessor {
       }
 
       return _parseAIResponse(aiResponse, text);
+    } on LuminaResponseTruncatedException {
+      // Truncation safety net (Layer 1): the reply overran the token cap and
+      // its body is a partial, unbalanced payload. Never parse or post it —
+      // surface a friendly, actionable message and return a result with NO
+      // wledPayload and NO scheduling intents, so the UI shows clean prose and
+      // creates no phantom schedule. Mirrors 2B: never present output that
+      // outran a clean parse.
+      debugPrint(
+          'CloudAIProcessor: response truncated at token cap — friendly message, no payload');
+      return const LuminaCommandResult(
+        responseText:
+            'That request was a bit much for me to set up in one go — '
+            'try fewer days or designs and I\'ll get it.',
+        tier: ProcessingTier.cloud,
+      );
     } on FirebaseFunctionsException catch (e) {
       debugPrint('LuminaBrain.chat Firebase error: ${e.code} - ${e.message}');
       final message = switch (e.code) {
@@ -81,6 +98,18 @@ class CloudAIProcessor {
     }
   }
 
+  /// Test seam over [_parseAIResponse] — the pure raw-string → result parser.
+  /// Lets the truncation safety net be proven with a forced-truncation input
+  /// (an unbalanced/cut-off body) without standing up Firebase/Riverpod: a
+  /// truncated string must yield NO wledPayload (no schedule), NO raw JSON in
+  /// [LuminaCommandResult.responseText], and must not masquerade as a clean
+  /// success. Genuine max_tokens truncation is caught upstream (Layer 1); this
+  /// seam exercises Layer 3's defense-in-depth for unflagged malformed bodies.
+  @visibleForTesting
+  static LuminaCommandResult parseAiResponseForTest(
+          String response, String rawText) =>
+      _parseAIResponse(response, rawText);
+
   /// Parses the raw AI response text into a structured [LuminaCommandResult].
   ///
   /// The AI embeds JSON within its verbal response. We extract that JSON,
@@ -90,19 +119,37 @@ class CloudAIProcessor {
     final parsed = _extractJson(response);
 
     if (parsed == null) {
-      // No *parseable* JSON in the response — surface the prose so the user
-      // sees what Claude actually said (e.g. an unknown-entity color guess, a
-      // brainstorm of ideas, a clarifying question). wledPayload stays null
-      // and previewColors defaults to const [], so _AssistantBubble renders
-      // a plain conversational bubble with no apply card.
+      // `_extractJson` returned null for one of TWO very different reasons —
+      // and the truncation safety net (Layer 3) requires telling them apart:
       //
-      // CRITICAL: `_extractJson` also returns null when the model embedded a
-      // WLED payload that failed to jsonDecode (trailing comma, prose braces
-      // widening the first-{…last-} span, truncation, etc.). In that case the
-      // raw response still contains the proprietary payload, so we must scrub
-      // any JSON-object block before display — otherwise the raw payload leaks
-      // into the chat bubble alongside the recommendation.
+      //   (a) CLEAN conversational reply — no JSON at all (an unknown-entity
+      //       color guess, a brainstorm, a clarifying question). This is an
+      //       ordinary success: show the prose, no apply card.
+      //   (b) PARSE FAILURE — the model embedded a WLED payload that failed to
+      //       jsonDecode (trailing comma, unbalanced/truncated braces, prose
+      //       braces widening the first-{…last-} span). This must NOT
+      //       masquerade as a clean success: the raw payload must never reach
+      //       the bubble, and an empty scrub must not show the success-toned
+      //       "Done." over a reply where nothing actually happened.
+      //
+      // Genuine max_tokens truncation is already caught upstream (Layer 1) as
+      // LuminaResponseTruncatedException and never reaches here; this branch
+      // is the defense-in-depth for malformed-but-not-flagged payloads.
+      //
+      // stripJsonForDisplay scrubs balanced JSON blocks AND (Layer 3a) strips
+      // an unbalanced trailing block to end-of-string, so raw JSON can never
+      // leak regardless of which case this is. In both cases wledPayload stays
+      // null → no schedule, no apply card.
       final scrubbed = stripJsonForDisplay(response);
+      final parseFailed = _containedJsonAttempt(response);
+      if (parseFailed) {
+        return LuminaCommandResult(
+          responseText: scrubbed.isNotEmpty
+              ? scrubbed
+              : "That didn't come through cleanly — mind trying that again?",
+          tier: ProcessingTier.cloud,
+        );
+      }
       return LuminaCommandResult(
         responseText: scrubbed.isEmpty ? 'Done.' : scrubbed,
         tier: ProcessingTier.cloud,
@@ -406,12 +453,36 @@ class CloudAIProcessor {
             i = end + 1; // skip the entire JSON object
             continue;
           }
+        } else {
+          // Unbalanced opening brace — no matching close. This is the
+          // truncated/cut-off payload that previously LEAKED raw JSON into the
+          // bubble (the _matchingBrace == -1 hole). If the remainder looks
+          // like a JSON-object attempt (carries a quoted "key":), strip from
+          // this brace to end-of-string so a partial payload can NEVER reach
+          // the bubble (truncation safety net, Layer 3a). A genuine unbalanced
+          // prose brace ("we use { to group") has no "key": pattern and is
+          // left untouched.
+          if (_looksLikeJsonObject(text.substring(i))) {
+            break;
+          }
         }
       }
       out.write(text[i]);
       i++;
     }
     return out.toString();
+  }
+
+  /// True when [response] contains a JSON-object ATTEMPT: an opening brace
+  /// whose remainder carries a quoted `"key":` pair. Used by the parsed==null
+  /// branch to tell a PARSE FAILURE (payload present but undecodable —
+  /// malformed/unbalanced) apart from a CLEAN conversational reply (no payload
+  /// at all). Only the former is a failure. Mirrors [_looksLikeJsonObject]'s
+  /// discriminator so the two stay in agreement.
+  static bool _containedJsonAttempt(String response) {
+    final braceStart = response.indexOf('{');
+    if (braceStart < 0) return false;
+    return _looksLikeJsonObject(response.substring(braceStart));
   }
 
   /// Returns the index of the `}` that closes the `{` at [start], or -1 if

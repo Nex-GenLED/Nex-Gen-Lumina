@@ -23,6 +23,24 @@ import 'package:flutter/foundation.dart';
 /// All calls proxy through Firebase Cloud Function 'claudeProxy' so
 /// the Anthropic API key never lives in the app.
 
+// ─── Truncation signal ────────────────────────────────────────────────────────
+
+/// Thrown by [LuminaAI._callClaude] when the model's reply was cut off at the
+/// output token cap (cloud signals `truncated:true` / `stop_reason ==
+/// "max_tokens"`). The partial text is NOT returned — a truncated body is an
+/// unbalanced, half-built JSON payload, and parsing it leaked raw JSON into the
+/// chat bubble while silently dropping the intended schedule. Callers MUST
+/// treat this as a non-result: surface a friendly message, post no raw JSON,
+/// create no schedule. This is the PRIMARY layer of the truncation safety net;
+/// it makes truncation safe at ANY token cap rather than relying on the cap
+/// never being hit.
+class LuminaResponseTruncatedException implements Exception {
+  const LuminaResponseTruncatedException();
+  @override
+  String toString() =>
+      'LuminaResponseTruncatedException: response hit max_tokens (partial body discarded)';
+}
+
 // ─── Model identifiers ────────────────────────────────────────────────────────
 
 const _kHaiku  = 'claude-haiku-4-5-20251001';
@@ -803,6 +821,19 @@ class LuminaAI {
 
         if (data == null) throw Exception('Claude returned no data');
 
+        // Truncation safety net (Layer 1): a reply cut off at the token cap is
+        // a PARTIAL body — its JSON is unbalanced, so parsing it leaks raw
+        // JSON to the bubble and drops the schedule silently. Detect via the
+        // cloud's explicit `truncated` flag OR the native stop_reason, and
+        // discard the partial rather than returning it as if complete. Checked
+        // BEFORE reading the content block so a non-empty partial text can
+        // never escape as a successful result.
+        if (data['truncated'] == true || data['stop_reason'] == 'max_tokens') {
+          debugPrint(
+              '$label: response truncated (stop_reason=max_tokens) — discarding partial body');
+          throw const LuminaResponseTruncatedException();
+        }
+
         final contentArray = data['content'] as List?;
         if (contentArray != null && contentArray.isNotEmpty) {
           for (final block in contentArray) {
@@ -819,6 +850,11 @@ class LuminaAI {
         }
 
         throw Exception('Claude returned empty content. Keys: ${data.keys.toList()}');
+      } on LuminaResponseTruncatedException {
+        // Deterministic outcome — retrying just truncates again at the same
+        // cap. Propagate immediately so the caller surfaces the friendly
+        // message without burning two more round-trips.
+        rethrow;
       } on FirebaseFunctionsException catch (e) {
         debugPrint('claudeProxy error: ${e.code} - ${e.message}');
         // Retry transient errors, surface permanent ones immediately

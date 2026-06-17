@@ -159,6 +159,23 @@ exports.claudeProxy = onCall(
     const outputTokens = response.usage?.output_tokens || 0;
     const estimatedCost = _estimateCost(model, inputTokens, outputTokens);
 
+    // ── Truncation detection (truncation safety net, Layer 1) ────────────────
+    // When the model hits the output token cap, Anthropic sets
+    // stop_reason="max_tokens" and the body is a PARTIAL reply — its JSON is
+    // cut mid-object. Returning it as an ordinary success let the client parse
+    // a half-payload, which leaked raw JSON into the chat bubble AND silently
+    // dropped schedules. Surface an explicit `truncated` flag so the client
+    // can discard the partial and show a friendly message instead. We still
+    // return the (partial) response object so usage/diagnostics are intact —
+    // the flag is the contract the client keys off, not the body.
+    const truncated = response.stop_reason === 'max_tokens';
+    if (truncated) {
+      console.warn(
+        `claudeProxy TRUNCATED: model=${model} uid=${userId} ` +
+        `out=${outputTokens} (stop_reason=max_tokens) — flagging truncated:true`
+      );
+    }
+
     // ── Log usage ────────────────────────────────────────────────────────────
     await usageRef.add({
       timestamp: now,
@@ -168,6 +185,7 @@ exports.claudeProxy = onCall(
       outputTokens,
       estimatedCost,
       latency,
+      truncated,
       hourlyCount:  hourlyCount  + 1,
       monthlyCount: monthlyCount + 1,
     });
@@ -179,7 +197,10 @@ exports.claudeProxy = onCall(
       `hourly=${hourlyCount + 1}/${HOURLY_ABUSE_LIMIT} monthly=${monthlyCount + 1}`
     );
 
-    return response;
+    // Explicit truncated flag alongside the native stop_reason. The client
+    // checks either, so the contract holds even if Anthropic's field shape
+    // changes. Non-mutating spread keeps every original field intact.
+    return { ...response, truncated };
   }
 );
 
