@@ -229,7 +229,7 @@ class CanonicalPalettes {
         ThemeColor.hex('White', 0xFFFFFFFF),
         ThemeColor.hex('True Blue', 0xFF0000FF),
       ],
-      suggestedEffects: [52, 12, 43, 2], // Fireworks, Theater Chase, Twinkle, Breathe
+      suggestedEffects: [42, 13, 17, 2], // Fireworks, Theater, Twinkle, Breathe (fw 0.15.1)
       defaultSpeed: 60, // Slower default for better visual effect
       defaultIntensity: 180,
       aliases: ['july 4th', 'independence day', 'patriotic', 'usa', 'america', 'american', 'memorial day', 'veterans day'],
@@ -263,7 +263,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Christmas Green', 0xFF00FF00),
         ThemeColor.hex('Gold', 0xFFFFD700),
       ],
-      suggestedEffects: [12, 41, 43, 2], // Theater Chase, Running, Twinkle, Breathe
+      suggestedEffects: [13, 15, 17, 2], // Theater, Running, Twinkle, Breathe (fw 0.15.1)
       defaultSpeed: 80,
       defaultIntensity: 180,
       aliases: ['xmas', 'holiday', 'festive', 'candy cane'],
@@ -302,7 +302,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Witch Purple', 0xFF800080),
         ThemeColor.hex('Slime Green', 0xFF00FF00),
       ],
-      suggestedEffects: [43, 52, 37, 70], // Twinkle, Fireworks, Candle, Twinkle
+      suggestedEffects: [17, 42, 88], // Twinkle, Fireworks, Candle (fw 0.15.1; legacy had Twinkle twice)
       defaultSpeed: 70,
       defaultIntensity: 150,
       aliases: ['spooky', 'haunted', 'scary', 'trick or treat', 'october'],
@@ -330,7 +330,7 @@ class CanonicalPalettes {
         ThemeColor.hex('True Red', 0xFFFF0000),
         ThemeColor.hex('Blush Pink', 0xFFFFB6C1),
       ],
-      suggestedEffects: [2, 0, 13, 70], // Breathe, Solid, Fade, Twinkle
+      suggestedEffects: [2, 0, 12, 17], // Breathe, Solid, Fade, Twinkle (fw 0.15.1)
       defaultSpeed: 50,
       defaultIntensity: 128,
       aliases: ['valentine', 'romance', 'romantic', 'love', 'heart'],
@@ -357,7 +357,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Kelly Green', 0xFF4CBB17),
         ThemeColor.hex('Gold', 0xFFFFD700),
       ],
-      suggestedEffects: [2, 41, 70, 0], // Breathe, Running, Twinkle, Solid
+      suggestedEffects: [2, 15, 17, 0], // Breathe, Running, Twinkle, Solid (fw 0.15.1)
       defaultSpeed: 80,
       defaultIntensity: 150,
       aliases: ['st patrick', 'irish', 'shamrock', 'leprechaun', 'march'],
@@ -385,7 +385,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Easter Yellow', 0xFFFFFACD),
         ThemeColor.hex('Easter Lavender', 0xFFE6E6FA),
       ],
-      suggestedEffects: [2, 13, 70, 0], // Breathe, Fade, Twinkle, Solid
+      suggestedEffects: [2, 12, 17, 0], // Breathe, Fade, Twinkle, Solid (fw 0.15.1)
       defaultSpeed: 60,
       defaultIntensity: 128,
       aliases: ['spring holiday', 'pastel', 'bunny'],
@@ -403,7 +403,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Cranberry', 0xFF9F000F),
         ThemeColor.hex('Brown', 0xFF8B4513),
       ],
-      suggestedEffects: [37, 2, 0, 13], // Candle, Breathe, Solid, Fade
+      suggestedEffects: [88, 2, 0, 12], // Candle, Breathe, Solid, Fade (fw 0.15.1)
       defaultSpeed: 60,
       defaultIntensity: 150,
       aliases: ['harvest', 'autumn holiday', 'fall holiday', 'turkey day'],
@@ -425,7 +425,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Rose', 0xFFFF6B6B),
         ThemeColor.hex('Warm White', 0xFFFFF8DC),
       ],
-      suggestedEffects: [2, 0, 37, 13], // Breathe, Solid, Candle, Fade
+      suggestedEffects: [2, 0, 88, 12], // Breathe, Solid, Candle, Fade (fw 0.15.1)
       defaultSpeed: 50,
       defaultIntensity: 128,
       defaultBrightness: 150,
@@ -442,7 +442,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Warm Amber', 0xFFFFB347),
         ThemeColor.hex('Soft White', 0xFFFFF8DC),
       ],
-      suggestedEffects: [0, 2, 13], // Solid, Breathe, Fade
+      suggestedEffects: [0, 2, 12], // Solid, Breathe, Fade (fw 0.15.1)
       defaultSpeed: 40,
       defaultIntensity: 100,
       defaultBrightness: 150,
@@ -461,7 +461,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Lime', 0xFF32CD32),
         ThemeColor.hex('Purple', 0xFF9400D3),
       ],
-      suggestedEffects: [52, 43, 72, 41], // Fireworks, Twinkle, Sparkle, Running
+      suggestedEffects: [42, 17, 20, 15], // Fireworks, Twinkle, Sparkle, Running (fw 0.15.1)
       defaultSpeed: 100, // Moderate base speed - effect multipliers will adjust
       defaultIntensity: 200,
       aliases: ['celebration', 'fun', 'disco', 'dance', 'rave'],
@@ -483,7 +483,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Purple', 0xFF8B00FF),
       ],
       // Rainbow effects that cycle through the full color spectrum
-      suggestedEffects: [9, 10, 66, 96], // Rainbow, Rainbow Cycle, Chase Rainbow, Ripple Rainbow
+      suggestedEffects: [9, 33, 30, 99], // Rainbow, Rainbow Runner, Chase Rainbow, Ripple Rainbow (fw 0.15.1; "Rainbow Cycle" no longer exists → Rainbow Runner)
       defaultSpeed: 128,
       defaultIntensity: 200,
       aliases: ['multicolor', 'multi-color', 'spectrum', 'colorful', 'all colors', 'pride colors'],
@@ -500,7 +500,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Turquoise', 0xFF40E0D0),
         ThemeColor.hex('Seafoam', 0xFF98FF98),
       ],
-      suggestedEffects: [110, 2, 95, 13], // Flow, Breathe, Ripple, Fade
+      suggestedEffects: [110, 2, 79, 12], // Flow, Breathe, Ripple, Fade (fw 0.15.1)
       defaultSpeed: 70,
       defaultIntensity: 140,
       aliases: ['sea', 'beach', 'coastal', 'underwater', 'aqua', 'marine'],
@@ -518,7 +518,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Golden', 0xFFFFD700),
         ThemeColor.hex('Purple Dusk', 0xFF8B5CF6),
       ],
-      suggestedEffects: [2, 110, 13, 0], // Breathe, Flow, Fade, Solid
+      suggestedEffects: [2, 110, 12, 0], // Breathe, Flow, Fade, Solid (fw 0.15.1)
       defaultSpeed: 60,
       defaultIntensity: 150,
       aliases: ['dusk', 'twilight', 'golden hour', 'evening'],
@@ -535,7 +535,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Electric Blue', 0xFF00FFFF),
         ThemeColor.hex('Neon Green', 0xFF39FF14),
       ],
-      suggestedEffects: [65, 41, 72, 1], // Chase, Running, Sparkle, Blink
+      suggestedEffects: [28, 15, 20, 1], // Chase, Running, Sparkle, Blink (fw 0.15.1)
       defaultSpeed: 120, // Energetic but controlled - effect multipliers will adjust
       defaultIntensity: 220,
       aliases: ['electric', 'cyberpunk', 'synthwave', 'retro'],
@@ -552,7 +552,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Champagne Gold', 0xFFF7E7CE),
         ThemeColor.hex('Pearl', 0xFFF0EAD6),
       ],
-      suggestedEffects: [0, 2, 13, 37], // Solid, Breathe, Fade, Candle
+      suggestedEffects: [0, 2, 12, 88], // Solid, Breathe, Fade, Candle (fw 0.15.1)
       defaultSpeed: 40,
       defaultIntensity: 100,
       defaultBrightness: 180,
@@ -573,7 +573,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Sky Blue', 0xFF87CEEB),
         ThemeColor.hex('Lavender', 0xFFE6E6FA),
       ],
-      suggestedEffects: [2, 70, 13, 0], // Breathe, Twinkle, Fade, Solid
+      suggestedEffects: [2, 17, 12, 0], // Breathe, Twinkle, Fade, Solid (fw 0.15.1)
       defaultSpeed: 70,
       defaultIntensity: 140,
       aliases: ['springtime', 'bloom', 'april', 'may'],
@@ -591,7 +591,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Palm Green', 0xFF32CD32),
         ThemeColor.hex('Ocean Blue', 0xFF00CED1),
       ],
-      suggestedEffects: [110, 41, 72, 0], // Flow, Running, Sparkle, Solid
+      suggestedEffects: [110, 15, 20, 0], // Flow, Running, Sparkle, Solid (fw 0.15.1)
       defaultSpeed: 100,
       defaultIntensity: 180,
       aliases: ['summertime', 'tropical', 'beach', 'june', 'july', 'august'],
@@ -609,7 +609,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Golden Yellow', 0xFFDAA520),
         ThemeColor.hex('Brown', 0xFF8B4513),
       ],
-      suggestedEffects: [37, 2, 13, 70], // Candle, Breathe, Fade, Twinkle
+      suggestedEffects: [88, 2, 12, 17], // Candle, Breathe, Fade, Twinkle (fw 0.15.1)
       defaultSpeed: 60,
       defaultIntensity: 150,
       aliases: ['fall', 'harvest', 'october', 'november', 'leaves'],
@@ -627,7 +627,7 @@ class CanonicalPalettes {
         ThemeColor.hex('Frost', 0xFFE0FFFF),
         ThemeColor.hex('Silver', 0xFFC0C0C0),
       ],
-      suggestedEffects: [70, 72, 2, 0], // Twinkle, Sparkle, Breathe, Solid
+      suggestedEffects: [17, 20, 2, 0], // Twinkle, Sparkle, Breathe, Solid (fw 0.15.1)
       defaultSpeed: 60,
       defaultIntensity: 140,
       aliases: ['wintertime', 'snow', 'frost', 'ice', 'december', 'january', 'february'],

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
 /// Represents a complete custom design that can be saved and applied to WLED devices.
@@ -452,23 +453,51 @@ class LedColorGroup {
   }
 }
 
-/// Common WLED effects with user-friendly names
-const Map<int, String> kDesignEffects = {
-  0: 'Solid',
-  1: 'Blink',
-  2: 'Breathe',
-  9: 'Rainbow',
-  12: 'Theater Chase',
-  28: 'Chase',
-  37: 'Candle',
-  38: 'Fire',
-  42: 'Fireworks',
-  44: 'Twinkle',
-  63: 'Colortwinkles',
-  74: 'Palette',
-  80: 'Ripple',
-  97: 'Pacifica',
+/// Curated Design-Studio effects, defined by their CATALOG NAME and resolved
+/// to the device's 0.15.1 fx ID via [WledEffectsCatalog]. Routing by name (not
+/// hardcoded numbers) keeps these in lockstep with the firmware and prevents the
+/// effect-ID drift that previously shipped wrong fx (e.g. Candle→Chase 2).
+///
+/// `[catalogName, userFacingLabel]`. The label may differ from the catalog name
+/// where the product wording differs (e.g. "Theater" → "Theater Chase",
+/// "Fire 2012" → "Fire").
+const List<List<String>> _kDesignEffectSpecs = [
+  ['Solid', 'Solid'],
+  ['Blink', 'Blink'],
+  ['Breathe', 'Breathe'],
+  ['Rainbow', 'Rainbow'],
+  ['Theater', 'Theater Chase'],
+  ['Chase', 'Chase'],
+  ['Candle', 'Candle'],
+  ['Fire 2012', 'Fire'],
+  ['Fireworks', 'Fireworks'],
+  ['Twinkle', 'Twinkle'],
+  ['Colortwinkles', 'Colortwinkles'],
+  ['Palette', 'Palette'],
+  ['Ripple', 'Ripple'],
+  ['Pacifica', 'Pacifica'],
+];
+
+/// Common WLED effects with user-friendly names, keyed by the real 0.15.1 fx ID.
+final Map<int, String> kDesignEffects = {
+  for (final spec in _kDesignEffectSpecs)
+    if (WledEffectsCatalog.idForName(spec[0]) != null)
+      WledEffectsCatalog.idForName(spec[0])!: spec[1],
 };
 
-/// Curated list of effect IDs for the design studio
-const List<int> kCuratedEffectIds = [0, 2, 9, 12, 28, 37, 44, 63, 74, 80, 97];
+/// Curated list of effect IDs for the design studio (resolved by name, in order).
+/// Intentionally a subset of [kDesignEffects] — omits Blink, Fire, Fireworks,
+/// matching the pre-drift curated selection.
+final List<int> kCuratedEffectIds = WledEffectsCatalog.idsForNames(const [
+  'Solid',
+  'Breathe',
+  'Rainbow',
+  'Theater',
+  'Chase',
+  'Candle',
+  'Twinkle',
+  'Colortwinkles',
+  'Palette',
+  'Ripple',
+  'Pacifica',
+]);

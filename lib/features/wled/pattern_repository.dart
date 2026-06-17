@@ -146,18 +146,22 @@ class PatternRepository {
     91,  // Bouncing Balls
     96,  // Drip
     // Exotic Effects - Forward-thinking, visually impressive
-    46,  // Twinklefox - magical fairy-dust sparkle
-    52,  // Ripple - expanding ripple waves
-    65,  // Colorwaves - flowing color waves
-    69,  // Aurora - northern lights simulation
-    70,  // Lake - shimmering water reflection
-    73,  // Pacifica - ocean-inspired flowing
-    82,  // Plasma - plasma ball effect
-    89,  // Fireworks Starburst - explosive celebration
-    100, // Heartbeat - pulsing life rhythm
-    107, // Flow - smooth flowing motion
-    111, // Chunchun - unique flowing pattern
-    112, // Dancing Shadows - dramatic shadow play
+    // Re-numbered to fw 0.15.1 catalog IDs (these were pre-0.14 IDs that
+    // drifted — e.g. old 46 rendered Gradient, not Twinklefox). Verified
+    // against WledEffectsCatalog. _creativePatternName's switch below is
+    // updated to the same IDs so creative naming still matches.
+    80,  // Twinklefox - magical fairy-dust sparkle (was 46 = Gradient)
+    79,  // Ripple - expanding ripple waves (was 52 = Running Dual)
+    67,  // Colorwaves - flowing color waves (was 65 = Palette)
+    38,  // Aurora - northern lights simulation (was 69 = Fill Noise)
+    75,  // Lake - shimmering water reflection (was 70 = Noise 1)
+    101, // Pacifica - ocean-inspired flowing (was 73 = Noise 4)
+    97,  // Plasma - plasma ball effect (was 82 = Halloween Eyes)
+    89,  // Fireworks Starburst - explosive celebration (already correct)
+    100, // Heartbeat - pulsing life rhythm (already correct)
+    110, // Flow - smooth flowing motion (was 107 = Noise Pal)
+    111, // Chunchun - unique flowing pattern (already correct)
+    112, // Dancing Shadows - dramatic shadow play (already correct)
   ];
 
   /// Creative name templates for effects.
@@ -221,26 +225,26 @@ class PatternRepository {
         return 'Bouncing ${plural(baseName)}';
       case 96:  // Drip
         return '$baseName Drips';
-      // Exotic Effects
-      case 46:  // Twinklefox
+      // Exotic Effects (fw 0.15.1 catalog IDs — kept in sync with kColorwayEffectIds)
+      case 80:  // Twinklefox
         return '$baseName Stardust';
-      case 52:  // Ripple
+      case 79:  // Ripple
         return '$baseName Ripples';
-      case 65:  // Colorwaves
+      case 67:  // Colorwaves
         return 'Flowing ${plural(baseName)}';
-      case 69:  // Aurora
+      case 38:  // Aurora
         return '$baseName Aurora';
-      case 70:  // Lake
+      case 75:  // Lake
         return '$baseName Reflections';
-      case 73:  // Pacifica
+      case 101: // Pacifica
         return '$baseName Tides';
-      case 82:  // Plasma
+      case 97:  // Plasma
         return '$baseName Plasma';
       case 89:  // Fireworks Starburst
         return '$baseName Burst';
       case 100: // Heartbeat
         return '$baseName Pulse';
-      case 107: // Flow
+      case 110: // Flow
         return '$baseName Flow';
       case 111: // Chunchun
         return 'Dancing ${plural(baseName)}';
@@ -571,7 +575,7 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 12, // Chase
+            'fx': 28, // Chase (was 12 = Fade on fw 0.15.1)
             'pal': 3, // Red/White
             'sx': 180,
             'ix': 200
@@ -590,8 +594,16 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 9, // Color Waves
-            'pal': 12, // Pastel-like
+            'fx': 67, // Colorwaves (was 9 = Rainbow, which generates its own
+            // colors and ignored the pastel intent entirely)
+            'pal': 4, // Color Gradient of col[] below — honors the shipped
+            // pal:4 normalize convention so it sweeps the pastel colors
+            // instead of a built-in WLED palette.
+            'col': [
+              [255, 182, 193, 0], // Easter pink
+              [173, 216, 230, 0], // Easter blue
+              [255, 250, 205, 0], // Easter yellow
+            ],
             'sx': 140,
             'ix': 160
           }
@@ -609,7 +621,8 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 120, // Sparkle
+            'fx': 20, // Sparkle (was 120 = Ghost Rider, a 2D matrix effect —
+            // rendered a single moving dot on the 1D rooflines, not a sparkle)
             'pal': 6, // Red/White/Blue
             'sx': 170,
             'ix': 180
@@ -628,7 +641,7 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 76, // Lightning
+            'fx': 57, // Lightning (was 76 = Meteor on fw 0.15.1)
             'pal': 5, // Purple/Orange
             'sx': 210,
             'ix': 200

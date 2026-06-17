@@ -481,8 +481,27 @@ class WledEffectsCatalog {
     for (final e in allEffects) e.id: e,
   };
 
+  /// Map of lower-cased effect name to its 0.15.1 ID.
+  /// Source of truth for routing legacy maps by NAME → correct ID so they
+  /// can never drift from the device firmware again.
+  static final Map<String, int> _idByName = {
+    for (final e in allEffects) e.name.toLowerCase(): e.id,
+  };
+
   /// Get effect by ID. Returns null if not found.
   static WledEffect? getById(int id) => _effectsById[id];
+
+  /// Resolve a catalog effect NAME to its 0.15.1 ID. Case-insensitive.
+  /// Returns null if the name is not a real 0.15.1 effect (e.g. a legacy
+  /// effect that no longer exists — callers must omit those, not substitute).
+  static int? idForName(String name) => _idByName[name.toLowerCase()];
+
+  /// Resolve a list of catalog names to IDs, silently dropping any name that
+  /// is not a real 0.15.1 effect. Use to build menus/curated lists by name.
+  static List<int> idsForNames(Iterable<String> names) => [
+        for (final n in names)
+          if (_idByName[n.toLowerCase()] != null) _idByName[n.toLowerCase()]!,
+      ];
 
   /// Get effect name by ID. Returns 'Effect #id' if not found.
   static String getName(int id) => _effectsById[id]?.name ?? 'Effect #$id';
