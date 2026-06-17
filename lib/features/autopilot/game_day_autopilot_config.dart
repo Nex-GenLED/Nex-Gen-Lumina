@@ -146,6 +146,15 @@ class GameDayAutopilotConfig {
   /// ignores "game end + 60min" default. Same semantics as onTimeOverride.
   final String? offTimeOverride;
 
+  /// Optional end bound for materialization. When non-null, the rolling
+  /// 7-day calendar populate ([populateCalendarForTeam]) skips any game
+  /// whose date falls after this day (inclusive of the day itself), so the
+  /// autopilot stops writing future entries once the bound passes. Null
+  /// means open-ended — the sport's natural season end governs. Set from a
+  /// Lumina recurring-sports rule ("...through Oct 2026"); additive, so
+  /// existing configs deserialize to null with no migration.
+  final DateTime? untilDate;
+
   /// When this config was created.
   final DateTime createdAt;
 
@@ -182,6 +191,7 @@ class GameDayAutopilotConfig {
     this.leadTimeMinutesOverride,
     this.onTimeOverride,
     this.offTimeOverride,
+    this.untilDate,
     required this.createdAt,
     required this.updatedAt,
     this.participatingChannelIndices,
@@ -300,6 +310,7 @@ class GameDayAutopilotConfig {
           'lead_time_minutes_override': leadTimeMinutesOverride,
         if (onTimeOverride != null) 'on_time_override': onTimeOverride,
         if (offTimeOverride != null) 'off_time_override': offTimeOverride,
+        if (untilDate != null) 'until_date': Timestamp.fromDate(untilDate!),
         'created_at': Timestamp.fromDate(createdAt),
         'updated_at': Timestamp.fromDate(updatedAt),
         if (participatingChannelIndices != null)
@@ -334,6 +345,7 @@ class GameDayAutopilotConfig {
           (data['lead_time_minutes_override'] as num?)?.toInt(),
       onTimeOverride: data['on_time_override'] as String?,
       offTimeOverride: data['off_time_override'] as String?,
+      untilDate: (data['until_date'] as Timestamp?)?.toDate(),
       createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participatingChannelIndices: rawParticipating is List
@@ -358,6 +370,8 @@ class GameDayAutopilotConfig {
     int? leadTimeMinutesOverride,
     String? onTimeOverride,
     String? offTimeOverride,
+    DateTime? untilDate,
+    bool clearUntilDate = false,
     DateTime? updatedAt,
     List<int>? participatingChannelIndices,
     bool clearParticipatingChannelIndices = false,
@@ -386,6 +400,7 @@ class GameDayAutopilotConfig {
           leadTimeMinutesOverride ?? this.leadTimeMinutesOverride,
       onTimeOverride: onTimeOverride ?? this.onTimeOverride,
       offTimeOverride: offTimeOverride ?? this.offTimeOverride,
+      untilDate: clearUntilDate ? null : (untilDate ?? this.untilDate),
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       participatingChannelIndices: clearParticipatingChannelIndices

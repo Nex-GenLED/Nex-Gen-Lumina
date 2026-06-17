@@ -309,6 +309,13 @@ class GameDayAutopilotService {
     final location = onGetUserLocation?.call();
     final entries = <CalendarEntry>[];
     final windowEnd = now.add(Duration(days: lookaheadDays));
+    // Optional end bound from a Lumina recurring-sports rule ("...through Oct
+    // 2026"). Normalized to end-of-day so a game ON the bound date still
+    // counts — the bound is inclusive of its own day. Null = open-ended.
+    final DateTime? untilEnd = config.untilDate == null
+        ? null
+        : DateTime(config.untilDate!.year, config.untilDate!.month,
+            config.untilDate!.day, 23, 59, 59);
     int gameIndex = 0;
 
     for (final game in games) {
@@ -321,6 +328,11 @@ class GameDayAutopilotService {
       );
       if (activationTime.isBefore(now)) continue;
       if (game.scheduledDate.isAfter(windowEnd)) continue;
+      // Honor the rule's end bound: once a game falls past untilDate, stop
+      // materializing it. Combined with the rolling window, this means the
+      // autopilot naturally writes zero entries for this team after the
+      // bound passes — no separate teardown needed.
+      if (untilEnd != null && game.scheduledDate.isAfter(untilEnd)) continue;
 
       // Apply daylight filter if enabled
       if (config.skipDayGames &&

@@ -259,6 +259,18 @@ class CloudAIProcessor {
       debugPrint('[Lumina AI] Ephemeral session intent received: $ephemeralSession');
     }
 
+    // Extract recurring sports-autopilot rule. Emitted for "every game / all
+    // season" team requests — a COMPACT rule (team slug + optional untilDate)
+    // that the app routes to the existing Game Day Autopilot enable path,
+    // instead of enumerating ~80 game dates (which truncates the response).
+    Map<String, dynamic>? recurringSportsAutopilot;
+    final recurringRaw = obj['recurringSportsAutopilot'];
+    if (recurringRaw is Map) {
+      recurringSportsAutopilot = Map<String, dynamic>.from(recurringRaw);
+      debugPrint(
+          '[Lumina AI] Recurring sports autopilot intent received: $recurringSportsAutopilot');
+    }
+
     final command = LuminaCommand(
       type: type,
       parameters: {
@@ -281,6 +293,7 @@ class CloudAIProcessor {
       clarificationOptions: clarificationOptions,
       tier: ProcessingTier.cloud,
       ephemeralSession: ephemeralSession,
+      recurringSportsAutopilot: recurringSportsAutopilot,
     );
   }
 

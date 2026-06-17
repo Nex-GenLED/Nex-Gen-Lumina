@@ -524,11 +524,25 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
   /// Toggle autopilot for a team. Creates or updates the Firestore document.
   ///
+  /// IDEMPOTENT per team: the doc is keyed by [teamSlug] under
+  /// `game_day_autopilot/{teamSlug}`, so calling this for a team that already
+  /// has a config UPDATES that single doc in place — it never creates a second
+  /// parallel config. This is the single source of truth per team; two configs
+  /// would write duplicate CalendarEntry rows competing for the same lease
+  /// slots. Both the direct Game Day UI and the Lumina recurring-sports rule
+  /// route through here, so they converge on one config.
+  ///
+  /// [untilDate] (optional) sets an end bound on materialization — supplied by
+  /// the Lumina recurring-sports rule ("...through Oct 2026"). When non-null
+  /// it is persisted (`until_date`) and honored by [populateCalendarForTeam];
+  /// when null any existing bound is preserved (never clobbered).
+  ///
   /// Throws [StateError] if the user is not authenticated, or [ArgumentError]
   /// if the team slug is unknown. Firestore errors propagate to the caller.
   Future<void> toggleAutopilot({
     required String teamSlug,
     required bool enabled,
+    DateTime? untilDate,
   }) async {
     final user = ref.read(authStateProvider).maybeWhen(
           data: (u) => u,
@@ -558,6 +572,10 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       await docRef.update({
         'enabled': enabled,
         'updated_at': Timestamp.fromDate(now),
+        // Persist the optional end bound when supplied (Lumina recurring-
+        // sports rule). Omitted when null so re-enabling without a bound
+        // never clobbers a previously-set one.
+        if (untilDate != null) 'until_date': Timestamp.fromDate(untilDate),
       });
       // Reconstruct the fresh config from the stream's stale snapshot +
       // the field we just changed. If the stream doesn't yet know about
@@ -571,7 +589,13 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
           .where((c) => c.teamSlug == teamSlug)
           .firstOrNull;
       if (stale != null) {
-        freshConfig = stale.copyWith(enabled: enabled, updatedAt: now);
+        freshConfig = stale.copyWith(
+          enabled: enabled,
+          updatedAt: now,
+          // null untilDate keeps the existing bound (copyWith treats null as
+          // "no change"); a supplied value overrides it.
+          untilDate: untilDate,
+        );
       }
     } else {
       // Create a new config from kTeamColors. Delegates the subcollection
@@ -595,10 +619,11 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       // addTeam validated the slug; this lookup is guaranteed to hit.
       final team = kTeamColors[teamSlug]!;
 
-      if (enabled) {
+      if (enabled || untilDate != null) {
         await docRef.update({
-          'enabled': true,
+          if (enabled) 'enabled': true,
           'updated_at': Timestamp.fromDate(now),
+          if (untilDate != null) 'until_date': Timestamp.fromDate(untilDate),
         });
       }
 
@@ -615,6 +640,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         primaryColorValue: team.primary.toARGB32(),
         secondaryColorValue: team.secondary.toARGB32(),
         enabled: enabled,
+        untilDate: untilDate,
         createdAt: now,
         updatedAt: now,
       );

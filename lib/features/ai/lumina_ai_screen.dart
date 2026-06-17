@@ -24,6 +24,7 @@ import 'package:nexgen_command/app_providers.dart'
     show selectedTabIndexProvider, authStateProvider;
 import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
+import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.dart';
 import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,22 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       final ephemeralIntent = result.ephemeralSessionIntent;
       if (ephemeralIntent != null && ephemeralIntent.isValid) {
         await _handleEphemeralSession(ephemeralIntent, result, prompt);
+        return;
+      }
+
+      // ── Recurring sports autopilot (every game / all season) ──────────────
+      // A COMPACT rule (team slug + optional untilDate) — NOT enumerated game
+      // dates. Routes to the existing Game Day Autopilot enable path, which
+      // idempotently enables/updates ONE config per team and materializes only
+      // the rolling 7-day window into ≤8 WLED timers via the lease manager.
+      final recurringSports = result.recurringSportsAutopilotIntent;
+      if (recurringSports != null && recurringSports.isValid) {
+        await handleRecurringSportsAutopilot(
+          ref: ref,
+          intent: recurringSports,
+          result: result,
+          onMessagePosted: _scrollToEnd,
+        );
         return;
       }
 

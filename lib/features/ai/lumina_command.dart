@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ephemeral_session_intent.dart';
+import 'recurring_sports_autopilot_intent.dart';
 
 /// Types of commands the Lumina voice assistant can process.
 enum LuminaCommandType {
@@ -104,6 +105,21 @@ class LuminaCommandResult {
   EphemeralSessionIntent? get ephemeralSessionIntent =>
       EphemeralSessionIntent.fromJson(ephemeralSession);
 
+  /// Optional recurring sports-autopilot rule emitted by the AI when the user
+  /// asks for a team's lighting on EVERY game / all season ("Royals every
+  /// home-game night through Oct"). A COMPACT rule (team slug + optional end
+  /// bound) — NOT an enumeration of game dates — so the response stays small
+  /// and never truncates. Populated by [CloudAIProcessor] from the
+  /// `recurringSportsAutopilot` field. Handlers consume the typed accessor
+  /// [recurringSportsAutopilotIntent].
+  final Map<String, dynamic>? recurringSportsAutopilot;
+
+  /// Typed accessor for [recurringSportsAutopilot]. Returns null when the
+  /// field is null or fails validation in
+  /// [RecurringSportsAutopilotIntent.fromJson].
+  RecurringSportsAutopilotIntent? get recurringSportsAutopilotIntent =>
+      RecurringSportsAutopilotIntent.fromJson(recurringSportsAutopilot);
+
   const LuminaCommandResult({
     this.command,
     required this.responseText,
@@ -112,5 +128,6 @@ class LuminaCommandResult {
     this.clarificationOptions = const [],
     this.tier = ProcessingTier.local,
     this.ephemeralSession,
+    this.recurringSportsAutopilot,
   });
 }
