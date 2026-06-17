@@ -283,7 +283,6 @@ class TeamColorDatabase {
       ..._nflTeams,
       ..._nbaTeams,
       ..._nhlTeams,
-      ..._echlTeams,
       ..._mlbTeams,
       ..._mlsTeams,
       ..._nwslTeams,
@@ -418,13 +417,6 @@ class TeamColorDatabase {
     _team(id: 'canucks', name: 'Vancouver Canucks', city: 'Vancouver', league: 'NHL', colors: [TeamColor.hex('Canucks Blue', 0xFF00205B), TeamColor.hex('Canucks Green', 0xFF00843D), TeamColor.hex('Canucks White', 0xFFFFFFFF)], aliases: ['vancouver canucks', 'van', 'vancouver hockey']),
     _team(id: 'golden_knights', name: 'Vegas Golden Knights', city: 'Vegas', league: 'NHL', colors: [TeamColor.hex('Knights Gold', 0xFFB4975A), TeamColor.hex('Knights Steel', 0xFF333F42), TeamColor.hex('Knights Red', 0xFFC8102E)], aliases: ['vegas golden knights', 'vgk', 'vegas hockey', 'golden knights', 'knights']),
     _team(id: 'utah_hockey', name: 'Utah Hockey Club', city: 'Utah', league: 'NHL', colors: [TeamColor.hex('Utah Blue', 0xFF6CACE4), TeamColor.hex('Utah Black', 0xFF010101), TeamColor.hex('Utah White', 0xFFFFFFFF)], aliases: ['utah hockey club', 'utah hockey', 'utah nhl', 'salt lake hockey']),
-  ];
-
-  // =======================================================================
-  //  ECHL (color-only — Game Day intentionally not wired)
-  // =======================================================================
-  static final List<UnifiedTeamEntry> _echlTeams = [
-    _team(id: 'kc_mavericks', name: 'Kansas City Mavericks', city: 'Kansas City', league: 'ECHL', colors: [TeamColor.hex('Mavs Orange', 0xFFF15F22), TeamColor.hex('Mavs Black', 0xFF000000), TeamColor.hex('Mavs Gray', 0xFFA9A9A9), TeamColor.hex('Iron Mountain', 0xFF585456)], aliases: ['kansas city mavericks', 'kc mavericks', 'mavericks hockey', 'kc mavs hockey']),
   ];
 
   // =======================================================================
