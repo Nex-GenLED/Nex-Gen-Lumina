@@ -190,7 +190,13 @@ class _ColorwayEffectSelectorPageState
             'fx': fxId,
             'sx': speed,
             'ix': ref.read(selectorIntensityProvider),
-            'pal': 5, // "Colors Only" palette
+            // Palette by effect color-behavior, NOT a blanket pal:5 — palette-
+            // driven effects (Rainbow, Colorwaves, Aurora, Plasma…) sweep a
+            // gradient of the USER's colors (pal:4); col-based effects keep
+            // discrete user colors ("Colors Only", pal:5). Single source of
+            // truth in WledEffectsCatalog; also enforced at the apply chokepoint
+            // (normalizeWledPayload) for stored/legacy payloads.
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
             'grp': colorGroup,
             'spc': spacing,
             'col': cols,
@@ -261,7 +267,9 @@ class _ColorwayEffectSelectorPageState
             'fx': fxId,
             'sx': speed,
             'ix': intensity,
-            'pal': 5,
+            // Palette by effect color-behavior (see _sendToWled). Keeps the
+            // payload persisted to Game Day saveDesign correct at rest.
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
             'grp': colorGroup,
             'spc': spacing,
             'col': cols,

@@ -379,6 +379,30 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       s.putIfAbsent('of', () => 0);
     }
 
+    // Palette guard (single chokepoint for the pal:5 strobing/blending bug).
+    //
+    // A palette-driven / motion-sweep effect — generatesOwnColors / usesPalette
+    // (Rainbow, Colorwaves, Aurora, Plasma, Fire, the Noise family) — must NOT
+    // run with pal:5 ("Colors Only"): that strips the sweep and collapses it
+    // into a strobe/blend through the 1–3 col[] slots. Many apply paths (and
+    // older saved/scheduled/Game-Day payloads) baked in pal:5 unconditionally,
+    // so this corrects them centrally on every applyJson AND on replay of a
+    // stored blob — no caller needs to remember the rule.
+    //
+    // Rewrite to pal:4 ("Color Gradient") — the effect then sweeps a smooth
+    // gradient built FROM the user's col[] colors (honoring them), rather than
+    // its own built-in palette (pal:0 would make Rainbow ignore user colors).
+    //
+    // Surgical by design — only the broken case is rewritten:
+    //   - col-based effects (pal:5 is load-bearing) → untouched
+    //   - deliberate non-5 palette choices (holiday cards' pal:3/6/12) → untouched
+    //   - pal absent → untouched (caller/WLED default preserved)
+    // The pal index policy itself lives in WledEffectsCatalog.paletteForEffect.
+    final fx = s['fx'];
+    if (fx is int && s['pal'] == 5 && WledEffectsCatalog.overridesUserColors(fx)) {
+      s['pal'] = 4; // "Color Gradient" — sweep a gradient of the user's colors
+    }
+
     // RGBW validation: ensure all color arrays have 4 channels [R, G, B, W]
     final col = s['col'];
     if (col is List && col.isNotEmpty) {

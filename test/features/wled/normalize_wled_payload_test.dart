@@ -29,6 +29,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 void main() {
   group('normalizeWledPayload — col slot padding (Fix 2)', () {
@@ -290,6 +291,76 @@ void main() {
         [10, 20, 30, 0],
         [40, 50, 60, 0],
       ]));
+    });
+  });
+
+  // Palette guard — the pal:5 strobing/blending fix. A palette-driven effect
+  // (generatesOwnColors / usesPalette) sent with pal:5 ("Colors Only") has its
+  // sweep stripped → strobes/blends through the col[] slots. The chokepoint
+  // flips ONLY that case to pal:4 ("Color Gradient") so the effect sweeps a
+  // gradient of the USER's colors (pal:0 would use the effect's built-in
+  // palette and ignore user colors). Everything else is untouched.
+  group('normalizeWledPayload — palette guard (pal:5 fix)', () {
+    Map seg0(Map<String, dynamic> p) =>
+        (normalizeWledPayload(p)['seg'] as List).first as Map;
+
+    test('Rainbow (fx 9, generatesOwnColors) pal:5 → pal:4', () {
+      expect(seg0({'seg': [{'fx': 9, 'pal': 5, 'col': [[255, 0, 0, 0]]}]})['pal'],
+          equals(4));
+    });
+
+    test('Colorwaves (fx 67, usesPalette) pal:5 → pal:4', () {
+      expect(seg0({'seg': [{'fx': 67, 'pal': 5, 'col': [[255, 0, 0, 0]]}]})['pal'],
+          equals(4));
+    });
+
+    test('Aurora (38) and Plasma (97) pal:5 → pal:4', () {
+      expect(seg0({'seg': [{'fx': 38, 'pal': 5}]})['pal'], equals(4));
+      expect(seg0({'seg': [{'fx': 97, 'pal': 5}]})['pal'], equals(4));
+    });
+
+    test('col-based effects keep pal:5 (Meteor/Chase/Wipe/Twinkle) — no regression', () {
+      for (final fx in [76, 28, 3, 17]) {
+        expect(seg0({'seg': [{'fx': fx, 'pal': 5, 'col': [[1, 2, 3, 0]]}]})['pal'],
+            equals(5), reason: 'fx $fx should keep Colors Only');
+      }
+    });
+
+    test('deliberate non-5 palette on a palette-driven effect is preserved', () {
+      // Holiday card semantics — pal:3 (Colors 1&2) on Rainbow must NOT be
+      // rewritten; only the pal:5 sentinel is corrected. pal:0 (built-in) is
+      // also left as-is — the guard targets the pal:5 bug only.
+      expect(seg0({'seg': [{'fx': 9, 'pal': 3}]})['pal'], equals(3));
+      expect(seg0({'seg': [{'fx': 9, 'pal': 6}]})['pal'], equals(6));
+      expect(seg0({'seg': [{'fx': 9, 'pal': 0}]})['pal'], equals(0));
+    });
+
+    test('absent pal is left absent (no synthesis)', () {
+      final s = seg0({'seg': [{'fx': 9, 'col': [[255, 0, 0, 0]]}]});
+      expect(s.containsKey('pal'), isFalse);
+    });
+
+    test('partial update (no fx) with pal:5 is untouched', () {
+      // A slider tweak emitting {sx, pal} must not be reinterpreted.
+      expect(seg0({'seg': [{'sx': 100, 'pal': 5}]})['pal'], equals(5));
+    });
+  });
+
+  group('WledEffectsCatalog.paletteForEffect', () {
+    test('palette-driven effects → 4 (Color Gradient of user colors)', () {
+      for (final fx in [9, 67, 38, 97, 66, 80, 74]) {
+        expect(WledEffectsCatalog.paletteForEffect(fx), equals(4),
+            reason: 'fx $fx overrides user colors → gradient sweep');
+      }
+    });
+    test('col-based effects → 5', () {
+      for (final fx in [76, 28, 3, 17, 20, 49]) {
+        expect(WledEffectsCatalog.paletteForEffect(fx), equals(5),
+            reason: 'fx $fx uses selected colors');
+      }
+    });
+    test('unknown effect id falls back to 5', () {
+      expect(WledEffectsCatalog.paletteForEffect(9999), equals(5));
     });
   });
 }

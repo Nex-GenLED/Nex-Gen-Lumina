@@ -699,6 +699,32 @@ class WledEffectsCatalog {
   /// Check if an effect overrides/ignores user's color selection.
   static bool overridesUserColors(int id) => _effectsById[id]?.overridesColors ?? false;
 
+  /// Resolves the WLED `pal` (palette) value for [id] from its color behavior.
+  /// This is the SINGLE SOURCE OF TRUTH for how an effect applies the user's
+  /// colors — every apply path should use this instead of hardcoding a palette.
+  ///
+  /// Product rule: the user's chosen `col[]` colors are ALWAYS honored. An
+  /// effect never substitutes its own built-in palette over the user's colors.
+  /// The only difference is HOW the user's colors are applied:
+  ///
+  /// - Palette-driven / motion-sweep effects (generatesOwnColors / usesPalette —
+  ///   Rainbow, Colorwaves, Aurora, Plasma, Fire, the Noise family, Twinklefox,
+  ///   Colortwinkles, …) sweep/animate a smooth GRADIENT built from the user's
+  ///   `col[]` colors → `pal:4` ("Color Gradient"). NOT `pal:0` (that would use
+  ///   the effect's built-in palette, e.g. Rainbow → a hardcoded rainbow hue
+  ///   sweep, ignoring the user's colors) and NOT `pal:5` (that strips the
+  ///   sweep and makes them strobe/blend through discrete slots).
+  ///   Bench-confirmed on 192.168.1.250 (fw 0.15.1): col=blue+white →
+  ///   pal:4 sweeps blue↔white (0% foreign hues); pal:0 → 89% foreign (rainbow).
+  /// - Col-based effects (usesSelectedColors / blendsSelectedColors — Meteor,
+  ///   Chase, Wipe, Twinkle, Sparkle, Fairy, …) keep DISCRETE user colors →
+  ///   `pal:5` ("Colors Only"), so WLED renders exactly the chosen colors and
+  ///   does not bleed the default rainbow palette over them (load-bearing for
+  ///   layout/blend effects such as Spots Fade).
+  /// - Unknown ids fall back to 5 (matches [overridesUserColors]'s false
+  ///   default — preserves prior behavior for anything not in the catalog).
+  static int paletteForEffect(int id) => overridesUserColors(id) ? 4 : 5;
+
   /// Get effects grouped by color behavior (for UI display).
   static Map<ColorBehavior, List<WledEffect>> get effectsByColorBehavior {
     final result = <ColorBehavior, List<WledEffect>>{};

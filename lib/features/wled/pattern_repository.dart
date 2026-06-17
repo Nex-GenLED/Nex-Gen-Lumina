@@ -320,7 +320,11 @@ class PatternRepository {
             'col': col,
             'sx': adjustedSpeed,
             'ix': 128,
-            'pal': 5, // "Colors Only" - use segment colors only, no rainbow blending
+            // Palette by effect color-behavior — palette-driven effects
+            // (Rainbow, Colorwaves, Aurora, Plasma…) sweep a gradient of the
+            // user's colors (pal:4); col-based effects keep discrete user
+            // colors ("Colors Only", pal:5).
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
           }
         ]
       };
@@ -1236,17 +1240,21 @@ class PatternRepository {
       // Apply speed adjustment from catalog
       final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
 
-      // Build segment data
-      // CRITICAL: Set 'pal': 5 ("Colors Only" palette) to ensure effects use
-      // only the segment colors in 'col', not the rainbow default palette.
-      // This fixes issues with effects like Spots Fade, Twinkle Fox, etc.
-      // showing rainbow colors instead of the selected theme colors.
+      // Build segment data.
+      // Palette is resolved per effect color-behavior (see paletteForEffect):
+      // col-based effects get "Colors Only" (pal:5) so they show only the
+      // segment colors and not the default rainbow palette; palette-driven
+      // effects (Rainbow, Colorwaves, Aurora, Plasma…) get "Color Gradient"
+      // (pal:4) so they sweep a gradient built from the user's colors.
       final segData = <String, dynamic>{
         'fx': fxId,
         'col': col,
         'sx': adjustedSpeed,
         'ix': node.defaultIntensity,
-        'pal': 5, // "Colors Only" - prevents rainbow palette blending
+        // Palette by effect color-behavior — palette-driven effects keep their
+        // palette; col-based effects keep "Colors Only" (pal:5). Also enforced
+        // centrally at the apply chokepoint (normalizeWledPayload).
+        'pal': WledEffectsCatalog.paletteForEffect(fxId),
       };
 
       // Add grouping and spacing for architectural patterns
