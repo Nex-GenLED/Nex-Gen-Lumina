@@ -68,6 +68,15 @@ class LuminaAI {
   static final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
+  /// User's IANA timezone (e.g. "America/Chicago"), best-effort. Set from the
+  /// loaded user profile so every [_callClaude] request can hand the cloud an
+  /// authoritative timezone. The cloud uses it to ground "tonight"/"tomorrow"
+  /// against the real local clock instead of guessing a day-part (the
+  /// AM-schedule-says-"tonight" bug). Null is tolerated — the cloud then falls
+  /// back to the [_clientNowString] device-local datetime, which is already in
+  /// the user's actual zone, so day-part resolution stays correct.
+  static String? clientTimeZone;
+
   // ─── Security preamble (prepended to every Lumina system prompt) ────────────
 
   static const String _kSecurityPreamble =
@@ -679,6 +688,34 @@ class LuminaAI {
 
   // ─── Core Claude caller ──────────────────────────────────────────────────────
 
+  /// Formats a device-local [now] as a rich, unambiguous datetime string for
+  /// the cloud's temporal-grounding block, e.g.
+  /// "Wednesday, June 17, 2026 at 10:09 AM (24h 10:09, UTC-05:00)".
+  /// [now] is already in the user's local zone, so the included clock time is
+  /// authoritative for day-part resolution even when no IANA zone is known.
+  static String _clientNowString(DateTime now) {
+    const weekdays = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+      'Sunday',
+    ];
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June', 'July',
+      'August', 'September', 'October', 'November', 'December',
+    ];
+    final dow = weekdays[(now.weekday - 1).clamp(0, 6)];
+    final mon = months[(now.month - 1).clamp(0, 11)];
+    final h24 = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    final hour12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final ampm = now.hour < 12 ? 'AM' : 'PM';
+    final off = now.timeZoneOffset;
+    final sign = off.isNegative ? '-' : '+';
+    final offH = off.inHours.abs().toString().padLeft(2, '0');
+    final offM = (off.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    return '$dow, $mon ${now.day}, ${now.year} at $hour12:$mm $ampm '
+        '(24h $h24:$mm, ${now.timeZoneName} UTC$sign$offH:$offM)';
+  }
+
   static Future<String> _callClaude({
     required String model,
     required String systemPrompt,
@@ -699,6 +736,15 @@ class LuminaAI {
       'temperature': temperature,
       'system': systemPrompt,
       'messages': messages,
+      // Temporal grounding (day-part fix): hand the cloud the user's real
+      // local clock + IANA zone so it resolves "tonight"/"tomorrow" against
+      // the actual time and never writes a day-part word that contradicts the
+      // scheduled time (e.g. "tonight" on a 10:11 AM schedule). clientNow is
+      // device-local (already in the user's zone); clientTimeZone is the IANA
+      // label when known.
+      'clientNow': _clientNowString(DateTime.now()),
+      if (clientTimeZone != null && clientTimeZone!.trim().isNotEmpty)
+        'clientTimeZone': clientTimeZone!.trim(),
     };
 
     int attempt = 0;

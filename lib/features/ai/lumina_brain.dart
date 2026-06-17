@@ -1071,6 +1071,11 @@ class LuminaBrain {
         if (profile.dislikes.isNotEmpty) {
           avoid = profile.dislikes.join(', ');
         }
+        // Hand the AI proxy the user's IANA zone so it grounds "tonight"/
+        // "tomorrow" against the real local clock (day-part bug fix).
+        if (profile.timeZone != null && profile.timeZone!.trim().isNotEmpty) {
+          LuminaAI.clientTimeZone = profile.timeZone!.trim();
+        }
       }
     } catch (e) {
       debugPrint('LuminaBrain context profile read error: $e');
@@ -1182,6 +1187,11 @@ class LuminaBrain {
         }
         if (profile.dislikes.isNotEmpty) {
           avoid = profile.dislikes.join(', ');
+        }
+        // Hand the AI proxy the user's IANA zone so it grounds "tonight"/
+        // "tomorrow" against the real local clock (day-part bug fix).
+        if (profile.timeZone != null && profile.timeZone!.trim().isNotEmpty) {
+          LuminaAI.clientTimeZone = profile.timeZone!.trim();
         }
       }
     } catch (e) {

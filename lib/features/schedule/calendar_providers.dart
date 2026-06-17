@@ -19,6 +19,7 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_conflict_dialog.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -630,6 +631,12 @@ Rules:
         );
     final lat = user?.latitude;
     final lon = user?.longitude;
+
+    // Hand the AI proxy the user's IANA zone so it grounds relative day-part
+    // words against the real local clock (day-part bug fix).
+    if (user?.timeZone != null && user!.timeZone!.trim().isNotEmpty) {
+      LuminaAI.clientTimeZone = user.timeZone!.trim();
+    }
 
     // Compute today's actual sunset/sunrise from device lat/lng
     String sunsetTime = '18:00';

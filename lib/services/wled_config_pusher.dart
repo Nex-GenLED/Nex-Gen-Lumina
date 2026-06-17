@@ -56,6 +56,19 @@ const int kWledTzUtc = 0;
 /// Resolves the WLED tz enum for an IANA name. Unknown names map to UTC.
 int wledTzForIana(String? iana) => kWledTzByIana[iana] ?? kWledTzUtc;
 
+/// The NGL color-gamma standard, written to `cfg.light.gc`.
+///
+/// Matches the WLED firmware default that renders saturated colors correctly
+/// on the Lumina SK6812/WS2814 RGBW strip: brightness gamma OFF (`bri:1`),
+/// color gamma ON (`col:2.8`), exponent 2.8 (`val:2.8`). WLED stores gamma
+/// here — NOT under `hw.led`. A `2.8`/`1`/`2.8` triple is what makes orange
+/// render vivid instead of washed amber (gamma darkens the green midtone).
+const Map<String, dynamic> kNglLightGammaConfig = <String, dynamic>{
+  'bri': 1,
+  'col': 2.8,
+  'val': 2.8,
+};
+
 /// Pushes NGL-standard WLED defaults for a given [ControllerType] to the
 /// device at [controllerIp].
 ///
@@ -122,21 +135,18 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
   //    but WLED expects milliwatts at the configured voltage. For 5 V strips
   //    20 000 mW ≈ 4 A (safe for LRS-350-24 supplies). We specify 20 000 as
   //    the per-controller cap — the same value used on existing installs.
-  // Preserve the device's gamma-correction config (hw.led.gc) if the
-  // firmware exposes it. The typed getConfig() drops gc, so read it from the
-  // raw cfg. Omitting gc on a hw.led write can let WLED reset gamma on the
-  // bus rebuild; re-asserting the device's own value is a no-op when gc is
-  // absent (as on current Lumina firmware) and protective when present
-  // (config half of #3/#4). This is a second cheap GET on install/Re-sync —
-  // both rare, non-hot-path operations.
-  final rawCfg = await _fetchRawConfig(controllerIp);
-  final existingGc = ((rawCfg?['hw'] as Map?)?['led'] as Map?)?['gc'];
+  // NOTE: gamma is NOT a hw.led concern. WLED stores it at cfg.light.gc, and
+  // a hw.led bus rebuild does not touch it. The old code read/wrote
+  // hw.led.gc — a path WLED never uses — so it was always a no-op. Gamma is
+  // now asserted explicitly via pushGammaConfig() below (correct light.gc
+  // path). Do NOT reintroduce gc into the hw.led payload.
 
   const int maxPwrMw = 20000;
   // No-op gate: when the device already matches the SKIKBILY profile exactly
   // (on every field we write), skip the hw.led push so we don't trigger a
   // WLED bus rebuild — which would needlessly drop unmodeled per-bus fields
-  // (ref/rgbwm/freq/ledma) and reset gamma on firmware that has gc.
+  // (ref/rgbwm/freq/ledma). Gamma is unaffected either way (it lives at
+  // light.gc, independent of hw.led) and is asserted separately below.
   final hwUnchanged = currentConfig != null &&
       currentConfig.totalLeds == startAddress &&
       currentConfig.maxPowerMw == maxPwrMw &&
@@ -151,7 +161,6 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
           total: startAddress,
           maxpwr: maxPwrMw,
           ins: buses,
-          gc: existingGc,
         ),
       },
     };
@@ -186,6 +195,21 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
     warnings.add('time/location push failed: ${tlResult.errorMessage}');
   } else if (tlResult.warnings.isNotEmpty) {
     warnings.addAll(tlResult.warnings);
+  }
+
+  // 3.6. Assert the NGL color-gamma standard (cfg.light.gc) and disable the
+  //      realtime gamma bypass (cfg.if.live.no-gc) so saturated colors render
+  //      correctly regardless of the controller's flash-time default, and so
+  //      HTTP- and DDP/realtime-driven output match. A controller flashed,
+  //      reset, or toggled with color gamma off otherwise renders flat, washed
+  //      color (orange → amber) and nothing else restores it. Idempotent —
+  //      pushGammaConfig skips the write when the device is already correct.
+  //      Failure is a warning; install continues.
+  final gammaResult = await pushGammaConfig(controllerIp);
+  if (!gammaResult.success) {
+    warnings.add('gamma push failed: ${gammaResult.errorMessage}');
+  } else if (gammaResult.warnings.isNotEmpty) {
+    warnings.addAll(gammaResult.warnings);
   }
 
   // 4. Apply state-level defaults (brightness cap + sync off).
@@ -273,22 +297,22 @@ List<Map<String, dynamic>> buildSkikbilyBuses(
   return buses;
 }
 
-/// Assembles the `hw.led` config object, carrying the device's existing
-/// gamma config ([gc]) through verbatim when present. When [gc] is null the
-/// key is omitted entirely — identical to the historical payload, so
-/// firmware without a gc field is unaffected (config half of #3/#4).
+/// Assembles the `hw.led` config object.
+///
+/// Gamma is intentionally NOT handled here. WLED stores gamma at
+/// `cfg.light.gc`, never under `hw.led`, so a `gc` key in this payload would
+/// be ignored by the firmware. Gamma is asserted separately by
+/// [pushGammaConfig]. Do not reintroduce a `gc` parameter.
 @visibleForTesting
 Map<String, dynamic> buildLedConfig({
   required int total,
   required int maxpwr,
   required List<Map<String, dynamic>> ins,
-  dynamic gc,
 }) {
   return {
     'total': total,
     'maxpwr': maxpwr,
     'ins': ins,
-    if (gc != null) 'gc': gc,
   };
 }
 
@@ -382,6 +406,75 @@ Future<WledConfigPushResult> pushTimeLocation(
           'time/location write reported success but readback mismatch',
         );
       }
+    }
+  } catch (_) {
+    // Soft-fail — write already returned 2xx.
+  }
+
+  return result;
+}
+
+/// The `/json/cfg` payload that asserts the NGL color-gamma standard
+/// ([kNglLightGammaConfig] at `light.gc`) and disables the realtime gamma
+/// bypass (`if.live.no-gc:false`). WLED deep-merges individual cfg keys, so
+/// this leaves all other `light.*` and `if.live.*` fields untouched.
+///
+/// The `no-gc:false` half ensures DDP/Art-Net/realtime output (neighborhood
+/// sync, multi-controller zones) is gamma-corrected too — otherwise a synced
+/// house and a non-synced house would render the same color differently.
+@visibleForTesting
+Map<String, dynamic> buildGammaPayload() => <String, dynamic>{
+      'light': {'gc': Map<String, dynamic>.from(kNglLightGammaConfig)},
+      'if': {
+        'live': {'no-gc': false},
+      },
+    };
+
+/// True when [rawCfg] already has the NGL color-gamma standard AND the
+/// realtime gamma bypass disabled — i.e. a Re-sync can skip the write.
+/// Reads the CORRECT path (`light.gc`), not the legacy `hw.led.gc` fiction.
+@visibleForTesting
+bool gammaConfigSatisfied(Map<String, dynamic>? rawCfg) {
+  final gc = (rawCfg?['light'] as Map?)?['gc'] as Map?;
+  final noGc = ((rawCfg?['if'] as Map?)?['live'] as Map?)?['no-gc'];
+  double? d(dynamic v) => (v as num?)?.toDouble();
+  return gc != null &&
+      d(gc['col']) == 2.8 &&
+      d(gc['bri']) == 1.0 &&
+      d(gc['val']) == 2.8 &&
+      noGc == false;
+}
+
+/// Pushes the NGL color-gamma standard to `cfg.light.gc` and disables the
+/// realtime gamma bypass (`cfg.if.live.no-gc`). Called during install and
+/// Re-sync so every provisioned controller renders saturated colors correctly
+/// regardless of its flash-time gamma default.
+///
+/// Idempotent: reads the current cfg first and skips the POST when the device
+/// already matches ([gammaConfigSatisfied]), so a Re-sync of a correct device
+/// writes nothing. On write, best-effort readback verifies `light.gc.col`.
+Future<WledConfigPushResult> pushGammaConfig(
+  String controllerIp, {
+  bool verifyAfterWrite = true,
+}) async {
+  final cfg = await _fetchRawConfig(controllerIp);
+  if (gammaConfigSatisfied(cfg)) {
+    return WledConfigPushResult.skipped('color gamma already correct');
+  }
+
+  final result = await _postConfig(controllerIp, buildGammaPayload());
+  if (!result.success) return result;
+  if (!verifyAfterWrite) return result;
+
+  // Best-effort readback on the field that matters for the wash-out (col).
+  try {
+    final after = await _fetchRawConfig(controllerIp);
+    final col =
+        (((after?['light'] as Map?)?['gc'] as Map?)?['col'] as num?)?.toDouble();
+    if (col != 2.8) {
+      return WledConfigPushResult.warning(
+        'gamma write reported success but readback mismatch (light.gc.col=$col)',
+      );
     }
   } catch (_) {
     // Soft-fail — write already returned 2xx.

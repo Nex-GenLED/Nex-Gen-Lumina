@@ -87,7 +87,7 @@ exports.claudeProxy = onCall(
     }
 
     // ── Validate request ─────────────────────────────────────────────────────
-    const { model, max_tokens, temperature, system, messages } = request.data;
+    const { model, max_tokens, temperature, system, messages, clientNow, clientTimeZone } = request.data;
 
     if (!model || !messages || !Array.isArray(messages) || messages.length === 0) {
       throw new HttpsError('invalid-argument', 'Missing required fields: model, messages');
@@ -107,12 +107,21 @@ exports.claudeProxy = onCall(
       throw new HttpsError('internal', 'AI service not configured.');
     }
 
+    // ── Temporal grounding (day-part bug fix) ────────────────────────────────
+    // The model used to write a day-part word that contradicted the actual
+    // scheduled time — e.g. "tonight" on a 10:11 AM schedule — because it had
+    // no anchor to the user's real local clock and guessed. Inject an
+    // authoritative current-time block + explicit resolution rules into the
+    // FRONT of the system prompt on EVERY call so the model resolves
+    // "tonight"/"tomorrow" against the real clock and never infers a day-part.
+    const groundedSystem = _buildTemporalContext(clientNow, clientTimeZone) + (system || '');
+
     // ── Call Anthropic ───────────────────────────────────────────────────────
     const requestBody = JSON.stringify({
       model,
       max_tokens: effectiveMaxTokens,
       temperature: temperature ?? 0.2,
-      system: system || '',
+      system: groundedSystem,
       messages,
     });
 
@@ -175,6 +184,54 @@ exports.claudeProxy = onCall(
 );
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Builds the authoritative current-time + day-part-rule block prepended to the
+// system prompt on every call. Prefers the server clock formatted into the
+// caller's IANA zone (server time is trustworthy; Intl resolves the zone with
+// no extra deps), then the client's device-local datetime string, then UTC.
+// Returns a string that always ends with two newlines so it cleanly precedes
+// the caller's own system prompt.
+function _buildTemporalContext(clientNow, clientTimeZone) {
+  const tz =
+    typeof clientTimeZone === 'string' && clientTimeZone.trim()
+      ? clientTimeZone.trim()
+      : null;
+
+  let nowLabel = null;
+  if (tz) {
+    try {
+      nowLabel = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }).format(new Date());
+    } catch (e) {
+      // Invalid IANA string — fall through to the client-reported value.
+      nowLabel = null;
+    }
+  }
+  if (!nowLabel && typeof clientNow === 'string' && clientNow.trim()) {
+    nowLabel = clientNow.trim();
+  }
+  if (!nowLabel) {
+    nowLabel = new Date().toISOString() + ' (UTC — user local time unknown)';
+  }
+
+  const tzLine = tz ? ` Timezone: ${tz}.` : '';
+  return (
+    `CURRENT DATE & TIME (authoritative — this is the real current clock): ${nowLabel}.${tzLine}\n` +
+    `TIME & DAY-PART RULES (override any other guidance below):\n` +
+    `• Never infer or guess AM/PM or a day-part (morning/afternoon/evening/night/tonight). Use the explicit clock time from the user's request or the scheduled time verbatim.\n` +
+    `• Resolve relative words ("tonight", "tomorrow", "this morning", "later") ONLY against the CURRENT DATE & TIME above. "tonight" means the evening of today's date; never apply it to a morning or afternoon time.\n` +
+    `• If a requested time is ambiguous, choose the NEXT FUTURE occurrence from the current time — never default to night or evening.\n` +
+    `• Your confirmation text MUST NOT contain a day-part word that contradicts the scheduled clock time (e.g. do NOT say "tonight" for a 10:11 AM schedule). When in doubt, state the explicit time, e.g. "at 10:11 AM".\n\n`
+  );
+}
 
 function _estimateCost(model, inputTokens, outputTokens) {
   const p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];

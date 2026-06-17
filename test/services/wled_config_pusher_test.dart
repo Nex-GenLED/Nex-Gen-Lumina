@@ -118,22 +118,70 @@ void main() {
     });
   });
 
-  group('buildLedConfig — gamma (gc) preservation', () {
-    test('carries the device gc through verbatim when present', () {
-      final led = buildLedConfig(
-        total: 400,
-        maxpwr: 20000,
-        ins: const [],
-        gc: {'col': 2.8, 'bri': 1.0},
-      );
-      expect(led['gc'], {'col': 2.8, 'bri': 1.0});
+  group('buildLedConfig — gamma is NOT a hw.led concern', () {
+    test('never emits a gc key (gamma lives at light.gc, not hw.led)', () {
+      final led = buildLedConfig(total: 400, maxpwr: 20000, ins: const []);
+      expect(led.containsKey('gc'), false);
+      expect(led.keys.toSet(), {'total', 'maxpwr', 'ins'});
+    });
+  });
+
+  group('gamma config — correct light.gc path (Issue A fix)', () {
+    test('buildGammaPayload writes light.gc {bri:1,col:2.8,val:2.8} + '
+        'if.live.no-gc:false', () {
+      final p = buildGammaPayload();
+      final gc = (p['light'] as Map)['gc'] as Map;
+      expect(gc['bri'], 1);
+      expect(gc['col'], 2.8);
+      expect(gc['val'], 2.8);
+      // Gamma must land under light.*, never hw.led.*.
+      expect(p.containsKey('hw'), false);
+      // Realtime/DDP bypass disabled so synced controllers match HTTP control.
+      expect(((p['if'] as Map)['live'] as Map)['no-gc'], false);
     });
 
-    test('omits gc when the device has none (firmware unaffected)', () {
-      final led = buildLedConfig(total: 400, maxpwr: 20000, ins: const [], gc: null);
-      expect(led.containsKey('gc'), false);
-      // Identical to the historical payload shape otherwise.
-      expect(led.keys.toSet(), {'total', 'maxpwr', 'ins'});
+    test('gammaConfigSatisfied true only when light.gc correct AND no-gc:false',
+        () {
+      final good = {
+        'light': {'gc': {'bri': 1, 'col': 2.8, 'val': 2.8}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(good), true);
+    });
+
+    test('a controller with color gamma OFF (col:1) is NOT satisfied → '
+        'gets a push (regression)', () {
+      final gammaOff = {
+        'light': {'gc': {'bri': 1, 'col': 1.0, 'val': 2.8}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(gammaOff), false,
+          reason: 'col:1 (gamma off) must trigger a corrective push to col:2.8');
+      // And the corrective payload sets it back on.
+      expect(((buildGammaPayload()['light'] as Map)['gc'] as Map)['col'], 2.8);
+    });
+
+    test('realtime bypass still on (no-gc:true) is NOT satisfied', () {
+      final bypassOn = {
+        'light': {'gc': {'bri': 1, 'col': 2.8, 'val': 2.8}},
+        'if': {'live': {'no-gc': true}},
+      };
+      expect(gammaConfigSatisfied(bypassOn), false);
+    });
+
+    test('the legacy hw.led.gc path does NOT satisfy (it is a fiction)', () {
+      // Even if a device echoed gc under hw.led, gamma must be read from
+      // light.gc — so this must report unsatisfied and trigger a real write.
+      final wrongPath = {
+        'hw': {'led': {'gc': {'bri': 1, 'col': 2.8, 'val': 2.8}}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(wrongPath), false);
+    });
+
+    test('missing cfg / sections → not satisfied (defensive)', () {
+      expect(gammaConfigSatisfied(null), false);
+      expect(gammaConfigSatisfied(<String, dynamic>{}), false);
     });
   });
 

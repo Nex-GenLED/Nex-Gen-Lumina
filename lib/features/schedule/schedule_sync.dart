@@ -135,6 +135,15 @@ class ScheduleSyncService {
 
     // Handle specific time
     final parsed = _parseTimeLabel(timeLabel);
+    if (parsed == null) {
+      // Unparseable clock time. NEVER fall back to midnight — that armed a
+      // phantom 00:00 timer. Return null so buildCfgPayload drops this entry;
+      // syncAll's pre-arm guard surfaces a warning so the schedule is flagged
+      // rather than silently firing at the wrong time.
+      debugPrint(
+          'ScheduleSync: unparseable time label "$timeLabel" — timer not built');
+      return null;
+    }
     return {
       'en': true,
       'hour': parsed.hour,
@@ -427,6 +436,31 @@ class ScheduleSyncService {
             'preset saved at id ${s.presetId}');
         continue;
       }
+
+      // ── Never silently arm a timer pointing at the wrong time ──────────
+      // A time label that doesn't resolve to a real clock time (or a solar
+      // keyword) used to fall back to 00:00 and fire the macro at MIDNIGHT.
+      // Refuse to arm such a schedule — surface a warning instead. Both
+      // boundaries are checked together: a half-parseable schedule (good ON,
+      // bad OFF) would otherwise turn lights ON and never OFF, so the whole
+      // entry is left unarmed. Mirrors the dead-macro invariant above.
+      final badLabels = <String>[
+        if (!_isArmableTimeLabel(s.timeLabel)) s.timeLabel,
+        if (s.hasOffTime &&
+            s.offTimeLabel != null &&
+            !_isArmableTimeLabel(s.offTimeLabel!))
+          s.offTimeLabel!,
+      ];
+      if (badLabels.isNotEmpty) {
+        presetErrors.add(
+            '"${s.actionLabel}" has an unrecognized time '
+            '(${badLabels.join(", ")}) — not armed. Re-open the schedule and '
+            'set a valid time.');
+        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
+            'unparseable time label(s): ${badLabels.join(", ")}');
+        continue;
+      }
+
       armable.add(s);
     }
 
@@ -469,25 +503,57 @@ class ScheduleSyncService {
 
   // Helpers
 
-  _ParsedTime _parseTimeLabel(String label) {
+  /// Parses a clock-time label into hour/minute for a WLED timer.
+  ///
+  /// Accepts both 12-hour ("7:05 PM", "12:00 AM") and bare 24-hour
+  /// ("10:11", "23:30", "0:05") formats. Sunrise/sunset are resolved by
+  /// [_buildTimerEntry] before this is reached; the keyword branch here is
+  /// purely defensive and never arms a clock time.
+  ///
+  /// Returns `null` for a genuinely unrecognized label. Callers MUST treat
+  /// null as "do not arm". The pre-fix behavior silently fell back to 00:00,
+  /// so a bare malformed label (or an un-suffixed 24-hour time that didn't
+  /// match the am/pm regex) armed a phantom MIDNIGHT timer with no warning.
+  /// Never default an unparseable time to midnight.
+  _ParsedTime? _parseTimeLabel(String label) {
     final l = label.trim().toLowerCase();
-    // Sunrise/sunset are handled separately; return midnight as fallback
+    // Sunrise/sunset are handled separately by _buildTimerEntry; defensive.
     if (l == 'sunrise' || l == 'sunset') {
       return const _ParsedTime(hour: 0, minute: 0);
     }
-    // Expect formats like "7:05 PM" or "12:00 AM"
-    final reg = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
-    final m = reg.firstMatch(label.trim());
+    // 12-hour: "7:05 PM" / "12:00 AM"
+    final ampm = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
+    final m = ampm.firstMatch(l);
     if (m != null) {
-      var hh = int.tryParse(m.group(1)!) ?? 0;
-      final mm = int.tryParse(m.group(2)!) ?? 0;
+      var hh = int.tryParse(m.group(1)!) ?? -1;
+      final mm = int.tryParse(m.group(2)!) ?? -1;
       final ap = m.group(3)!.toLowerCase();
+      if (hh < 1 || hh > 12 || mm < 0 || mm > 59) return null;
       if (ap == 'pm' && hh != 12) hh += 12;
       if (ap == 'am' && hh == 12) hh = 0;
-      return _ParsedTime(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
+      return _ParsedTime(hour: hh, minute: mm);
     }
-    // Fallback to midnight
-    return const _ParsedTime(hour: 0, minute: 0);
+    // 24-hour: "10:11" / "23:30" / "0:05"
+    final h24 = RegExp(r'^(\d{1,2}):(\d{2})$');
+    final m24 = h24.firstMatch(l);
+    if (m24 != null) {
+      final hh = int.tryParse(m24.group(1)!);
+      final mm = int.tryParse(m24.group(2)!);
+      if (hh == null || mm == null || hh > 23 || mm > 59) return null;
+      return _ParsedTime(hour: hh, minute: mm);
+    }
+    // Genuinely unparseable — do NOT default to midnight. Return null so the
+    // caller leaves the schedule unarmed and flags it.
+    return null;
+  }
+
+  /// True when [label] is a time WLED can actually arm: a solar keyword or a
+  /// clock time [_parseTimeLabel] recognizes. Used by [syncAll] to refuse
+  /// arming a timer that would otherwise silently fire at midnight.
+  bool _isArmableTimeLabel(String label) {
+    final l = label.trim().toLowerCase();
+    if (l == 'sunrise' || l == 'sunset') return true;
+    return _parseTimeLabel(label) != null;
   }
 
   /// Compute the WLED dow bitmask for a list of weekday names.
