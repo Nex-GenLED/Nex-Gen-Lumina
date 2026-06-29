@@ -1072,11 +1072,21 @@ class WledNotifier extends Notifier<WledStateModel> {
   Future<void> setColor(Color color, {bool isManualChange = true}) async {
     _stateApplySeq++;
     state = state.copyWith(color: color);
-    // For RGBW strips, explicitly set white to 0 for pure RGB color accuracy
-    // This prevents WLED's auto-white from mixing in white LED and distorting colors
+    // Force W=0 unconditionally so the dedicated white LED never mixes into a
+    // picked color. This closes the cold-start pink residual: supportsRgbw
+    // defaults false and flips true only after the async /json/info probe, so
+    // gating zero-white on it let a desaturated red take the auto-white-
+    // extraction branch (W = min(r,g,b)) before the probe resolved → pink.
+    // The device LED type (RGBW vs RGB) is itself only known via async probes,
+    // so there is no early synchronous signal to gate on — and forcing W=0 is
+    // safe for both strip types: on RGBW it's the desired pure-color path
+    // (gamma handles accuracy), and on an RGB bus WLED ignores the W channel.
+    // Pure dark red (G=B=0) is byte-identical either way (min=0), so it stays
+    // unaffected. Intentional white (setWarmWhite) is a separate path and still
+    // honors supportsRgbw.
     await _postUpdate(
       color: color,
-      forceRgbwZeroWhite: state.supportsRgbw,
+      forceRgbwZeroWhite: true,
       isManualChange: isManualChange,
       transientType: _kTransientColor,
     );
