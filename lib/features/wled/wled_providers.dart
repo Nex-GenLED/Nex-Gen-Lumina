@@ -574,6 +574,11 @@ class WledNotifier extends Notifier<WledStateModel> {
       // suppresses the stale device-echoed visual fields.
       final tokenAtDispatch = _stateApplySeq;
       final data = await service.getState();
+      // The container can tear down during the up-to-45s remote getState above.
+      // Bail before any ref.read / state mutation so a post-dispose write can't
+      // throw "Bad state: ... after dispose". The finally only touches the
+      // _polling bool (safe post-dispose).
+      if (_disposed) return;
       final isRemote = ref.read(isRemoteModeProvider);
       if (data == null) {
         if (isRemote) {
