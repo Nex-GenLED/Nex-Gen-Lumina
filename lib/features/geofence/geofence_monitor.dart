@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart'
+    show FavoritePattern;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -317,8 +319,18 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
           final favs = await FirebaseFirestore.instance.collection('users').doc(uid).collection('favorites').where('name', isEqualTo: actionName).limit(1).get();
           if (favs.docs.isNotEmpty) {
             final data = favs.docs.first.data();
-            final p = data['payload'];
-            if (p is Map<String, dynamic>) payload = p;
+            // Recover the stored WLED payload. Writers persist it as
+            // `wledPayload` (Shape A = jsonEncoded String, Shape B = raw Map);
+            // FavoritePattern.decodeWledPayload tolerates both. Defensively
+            // accept `pattern_data` (Map or jsonEncoded String) through the
+            // same decoder IF wledPayload is absent, so an unexpected shape
+            // can't crash the trigger. No pattern_name lookup and no query
+            // change — Shape C (no `name` field) stays excluded by design.
+            final raw = data['wledPayload'] ?? data['pattern_data'];
+            final decoded = FavoritePattern.decodeWledPayload(raw);
+            // Empty map = null/empty/unparseable → no usable payload; fall
+            // through to _applyFallback exactly as the old behaviour did.
+            if (decoded.isNotEmpty) payload = decoded;
           }
         } catch (e) {
           debugPrint('Favorites lookup failed: $e');
@@ -326,13 +338,23 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       }
 
       if (payload != null) {
-        // Route the geofence-triggered apply through the chokepoint so
-        // the dashboard + roofline preview + Now Playing chip all
-        // reflect the action that just fired (e.g. "Welcome Home").
-        // Bare repo.applyJson would leave Now Playing stale.
-        await ref
+        // Route the recovered favorite through the multi-bus chokepoint so
+        // EVERY effective channel lights (not just bus 0) and the dashboard +
+        // roofline preview + Now Playing chip reflect the action that just
+        // fired (e.g. "Welcome Home"). applyToDevice is raw-vs-prefiltered
+        // safe, so saved-scene (id-bearing) payloads pass straight through.
+        final applied = await ref
             .read(wledStateProvider.notifier)
-            .applyPayloadWithLabel(payload, labelHint: actionName);
+            .applyToDevice(payload, labelHint: actionName);
+        if (!applied) {
+          // Cold-start net (mirrors _applyColorFallback's !ok branch).
+          // applyToDevice's U1 gate returns false when no effective channels
+          // are resolved yet — likely on a cold background geofence wake
+          // before the hardware/channel map loads. Bare applyJson hits the
+          // device directly without the channel gate so we still light
+          // SOMETHING rather than silently no-op'ing.
+          await repo.applyJson(payload);
+        }
       } else {
         await _applyFallback(actionName, repo);
       }

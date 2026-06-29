@@ -73,7 +73,10 @@ class FavoritePattern {
   /// - **Map (legacy):** docs that somehow persisted as raw Map before the
   ///   jsonEncode fix landed; pass through so reads of old data don't throw.
   /// Returns `{}` for null / empty / unparseable input.
-  @visibleForTesting
+  ///
+  /// Also used in production by [GeofenceMonitor] to recover a stored
+  /// favorite's payload (Shape A String / Shape B Map) when applying a
+  /// geofence trigger, so this is a shared decode utility — not test-only.
   static Map<String, dynamic> decodeWledPayload(dynamic raw) {
     if (raw is String) {
       if (raw.isEmpty) return <String, dynamic>{};
