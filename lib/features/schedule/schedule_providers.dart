@@ -374,9 +374,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   ///
   /// Differs from [mergeWithDedup] (autopilot path) in three ways:
   ///   • Persists every item verbatim — no dedup against existing items.
-  ///   • No 50-item cap; the caller is expected to bound batch size.
   ///   • Single arrayUnion write rather than full-field overwrite, so it
-  ///     doesn't clobber concurrent autopilot/manual writes.
+  ///     doesn't clobber concurrent autopilot/manual writes — EXCEPT when the
+  ///     50-item cap (shared with [mergeWithDedup]) requires trimming, in which
+  ///     case it falls back to a full overwrite to drop the oldest entries.
   ///
   /// Pass [resolution] after showing the conflict dialog to handle overlaps,
   /// same convention as [add].
@@ -414,18 +415,42 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // revert restores every item together.
     final oldState = List<ScheduleItem>.from(state);
 
-    // Single optimistic push — N items appended in one state mutation so
-    // listeners see the batch atomically.
-    state = [...state, ...items];
+    // Hard cap at 50 schedules — same bound (and keep-newest trim) as
+    // [mergeWithDedup], applied here so compound AI batches can't grow the
+    // user-doc array unbounded. Existing first, new items appended last, so
+    // skip(removed) drops the OLDEST and keeps the most recently created 50
+    // (identical semantics to mergeWithDedup's trim). Interim protection on
+    // the array shape; the subcollection migration (#TD-1) is unaffected.
+    const maxSchedules = 50;
+    var combined = [...oldState, ...items];
+    final needsTrim = combined.length > maxSchedules;
+    if (needsTrim) {
+      final removed = combined.length - maxSchedules;
+      combined = combined.skip(removed).toList();
+      debugPrint(
+          'SchedulesNotifier: addAll cap enforced — trimmed $removed entries to stay at $maxSchedules');
+    }
+
+    // Single optimistic push — listeners see the (possibly trimmed) batch
+    // atomically.
+    state = combined;
 
     // Outcome propagates to the caller (the confirm flow) — we still revert
     // optimistic state + surface a retry error on failure, we just no longer
     // hide whether the write actually committed.
     bool ok;
     try {
-      await _ref.read(userServiceProvider).addSchedules(userId, items);
+      // arrayUnion (append-only) can't drop the oldest entries, so when the cap
+      // requires trimming, persist the full trimmed set instead. The common
+      // (uncapped) path keeps the non-clobbering arrayUnion write.
+      if (needsTrim) {
+        await _ref.read(userServiceProvider).saveSchedules(userId, combined);
+      } else {
+        await _ref.read(userServiceProvider).addSchedules(userId, items);
+      }
       debugPrint(
-          'SchedulesNotifier: addAll persisted ${items.length} items atomically');
+          'SchedulesNotifier: addAll persisted ${items.length} items atomically'
+          '${needsTrim ? ' (trimmed to $maxSchedules total)' : ''}');
       _triggerWledSync();
       ok = true;
     } catch (e) {
