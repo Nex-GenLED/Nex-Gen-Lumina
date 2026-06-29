@@ -420,6 +420,16 @@ class WledNotifier extends Notifier<WledStateModel> {
   // freshly-written user label.
   int _resolveSeq = 0;
 
+  // Monotonically incremented by every optimistic device-state setter
+  // (togglePower / setBrightness / setSpeed / setColor / setWarmWhite). Each
+  // poll captures this value just before its getState dispatch and passes it
+  // into [_applyStateData]; if the counter has since advanced (a newer
+  // optimistic write landed while the poll was in flight), the poll's
+  // device-echoed visual fields are suppressed at the commit site — closing
+  // the #87b optimistic-UI vs stale-poll race. Distinct from [_resolveSeq]
+  // (preset-name resolver) — different lifecycle, different write set.
+  int _stateApplySeq = 0;
+
   /// Consecutive remote poll failures. After 3, bridge is marked unreachable
   /// even if it was previously confirmed — prevents stale "Connected" status.
   int _consecutiveRemoteFailures = 0;
@@ -558,6 +568,11 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
     _polling = true;
     try {
+      // Capture the state-apply token BEFORE dispatch. If an optimistic setter
+      // advances the counter while this getState is in flight (the #87b race —
+      // worst case a remote getState pending up to 45s), the commit below
+      // suppresses the stale device-echoed visual fields.
+      final tokenAtDispatch = _stateApplySeq;
       final data = await service.getState();
       final isRemote = ref.read(isRemoteModeProvider);
       if (data == null) {
@@ -596,7 +611,7 @@ class WledNotifier extends Notifier<WledStateModel> {
         ref.read(bridgeReachableProvider.notifier).state = true;
       }
       try {
-        _applyStateData(data);
+        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
       } catch (e) {
         debugPrint('WLED parse state error: $e');
       }
@@ -626,10 +641,15 @@ class WledNotifier extends Notifier<WledStateModel> {
     if (service == null) return;
     _polling = true;
     try {
+      // Token captured before dispatch (see _runPollTick). The settle re-poll
+      // from _postUpdate runs AFTER the optimistic write, so it captures the
+      // current token and reconciles normally; only polls dispatched before a
+      // newer optimistic write are suppressed.
+      final tokenAtDispatch = _stateApplySeq;
       final data = await service.getState();
       if (data == null) return;
       try {
-        _applyStateData(data);
+        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
       } catch (e) {
         debugPrint('WLED parse state error (pollOnce): $e');
       }
@@ -642,7 +662,7 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   /// Parse a full /json/state response and update all state fields.
   /// Used by both polling and refreshConnection to avoid duplication.
-  void _applyStateData(Map<String, dynamic> data) {
+  void _applyStateData(Map<String, dynamic> data, {int? tokenAtDispatch}) {
     final prevPresetId = state.presetId;
     final prevEffectId = state.effectId;
     // Within the post-apply window, polled writes to fields the local apply
@@ -650,7 +670,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     // as-sent payload instead of snapping to the device's (lossy) echo.
     // Non-visual fields (paletteId, presetId, reverse, connected) update
     // either way — external state changes still surface.
-    final suppressVisual = _isPollOverwriteSuppressed();
+    //
+    // Two independent suppression conditions, OR'd:
+    //   1. Time window (_isPollOverwriteSuppressed) — covers the apply-path
+    //      lossy-echo race (pattern/effect/grp/spc reduced by /json/state).
+    //   2. Sequence token (#87b) — covers the optimistic-setter race: a poll
+    //      whose getState was dispatched BEFORE the latest optimistic write
+    //      (togglePower/setBrightness/setSpeed/setColor/setWarmWhite) carries a
+    //      stale tokenAtDispatch and must not snap the UI back to pre-tap state.
+    //      A null token (e.g. the test seam) skips this check.
+    final suppressVisual = _isPollOverwriteSuppressed() ||
+        (tokenAtDispatch != null && tokenAtDispatch != _stateApplySeq);
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
     int speed = state.speed;
@@ -978,11 +1008,13 @@ class WledNotifier extends Notifier<WledStateModel> {
     service.reset();
 
     try {
+      // Token captured before dispatch (see _runPollTick).
+      final tokenAtDispatch = _stateApplySeq;
       final data = await service.getState();
       if (data != null) {
         debugPrint('🔄 WledNotifier: Connection restored');
         // Full state parse — colors, effect, speed, reverse, etc.
-        _applyStateData(data);
+        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
         // Query RGBW support if not yet done
         if (!_infoQueried) {
           _infoQueried = true;
@@ -1009,12 +1041,14 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   Future<void> togglePower(bool value, {bool isManualChange = true}) async {
     debugPrint('🔌 togglePower called: $value (manual: $isManualChange)');
+    _stateApplySeq++;
     state = state.copyWith(isOn: value);
     // Only send power state - don't include brightness when turning off
     await _postUpdate(on: value, isManualChange: isManualChange);
   }
 
   Future<void> setBrightness(int bri, {bool isManualChange = true}) async {
+    _stateApplySeq++;
     state = state.copyWith(brightness: bri);
     // Always send power state with brightness to ensure WLED interprets correctly
     await _postUpdate(
@@ -1026,6 +1060,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   }
 
   Future<void> setSpeed(int sx, {bool isManualChange = true}) async {
+    _stateApplySeq++;
     state = state.copyWith(speed: sx);
     await _postUpdate(
       speed: sx,
@@ -1035,6 +1070,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   }
 
   Future<void> setColor(Color color, {bool isManualChange = true}) async {
+    _stateApplySeq++;
     state = state.copyWith(color: color);
     // For RGBW strips, explicitly set white to 0 for pure RGB color accuracy
     // This prevents WLED's auto-white from mixing in white LED and distorting colors
@@ -1047,6 +1083,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   }
 
   Future<void> setWarmWhite(int white, {bool isManualChange = true}) async {
+    _stateApplySeq++;
     final clamped = white.clamp(0, 255);
     state = state.copyWith(warmWhite: clamped);
     // Send an update including current color and the updated white channel
