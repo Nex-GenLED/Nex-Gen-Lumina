@@ -32,6 +32,7 @@ import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -1339,9 +1340,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       }).toList();
       final first = recurring.isNotEmpty ? recurring.first : null;
 
-      final patternName = calEntry?.patternName ??
+      // Route through the slug resolver so snake_case pattern slugs
+      // (e.g. KC_Royals_Game_Day) render as display names, matching every
+      // other surface. calEntry.displayName already calls displayNameFor;
+      // the actionLabel-extracted fallback is wrapped explicitly.
+      final patternName = calEntry?.displayName ??
           (first != null
-              ? (first.actionLabel.contains(':') ? first.actionLabel.split(':').last.trim() : first.actionLabel)
+              ? displayNameFor(first.actionLabel.contains(':')
+                  ? first.actionLabel.split(':').last.trim()
+                  : first.actionLabel)
               : null);
       // CalendarEntry stores onTime/offTime as 24-hour 'HH:mm' wall-clock
       // strings; ScheduleItem.timeLabel is already 12-hour 'h:mm AM/PM' or a

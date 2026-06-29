@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -237,7 +238,10 @@ class NightTrackBar extends StatelessWidget {
         startPosition: startPos,
         endPosition: endPos,
         style: style,
-        label: patternName,
+        // Route the extracted slug through the resolver so snake_case pattern
+        // slugs render as display names. The raw value still feeds style
+        // matching in _styleFromItem above (unaffected).
+        label: displayNameFor(patternName),
       ));
     }
 
