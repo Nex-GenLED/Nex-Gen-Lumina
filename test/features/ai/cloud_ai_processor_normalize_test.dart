@@ -11,6 +11,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/ai/cloud_ai_processor.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 
 void main() {
   group('CloudAIProcessor.normalizeSchedulingIntents', () {
@@ -33,9 +34,10 @@ void main() {
       final result = CloudAIProcessor.normalizeSchedulingIntents(obj);
 
       expect(result, isNotNull);
+      expect(result, isA<List<SchedulingIntent>>());
       expect(result!.length, 2);
-      expect(result[0]['patternName'], 'Warm White Wash');
-      expect(result[1]['patternName'], 'Friday Red');
+      expect(result[0].patternName, 'Warm White Wash');
+      expect(result[1].patternName, 'Friday Red');
     });
 
     test('singular schedulingIntent map → wrapped as one-element list', () {
@@ -47,7 +49,7 @@ void main() {
 
       expect(result, isNotNull);
       expect(result!.length, 1);
-      expect(result.first['patternName'], 'Warm White Wash');
+      expect(result.first.patternName, 'Warm White Wash');
     });
 
     test('neither field present → null (key omitted from bag downstream)',
@@ -89,7 +91,7 @@ void main() {
       expect(result!.length, 1,
           reason: 'non-List schedulingIntents is ignored; '
               'singular schedulingIntent is used');
-      expect(result.first['patternName'], 'Warm White Wash');
+      expect(result.first.patternName, 'Warm White Wash');
     });
 
     test('schedulingIntents with malformed entries → non-Map entries dropped',
@@ -109,7 +111,7 @@ void main() {
       expect(result, isNotNull);
       expect(result!.length, 2,
           reason: 'only the two valid Map entries survive');
-      expect(result.map((m) => m['patternName']).toList(),
+      expect(result.map((m) => m.patternName).toList(),
           ['Good 1', 'Good 2']);
     });
 
@@ -153,7 +155,63 @@ void main() {
 
       expect(result, isNotNull);
       expect(result!.length, 1);
-      expect(result.first['patternName'], 'From Array');
+      expect(result.first.patternName, 'From Array');
+    });
+
+    test('typed coercion: singular Map → one-element typed list, fields '
+        'parsed', () {
+      // Confirms the singular→one-element coercion AND the typed defaulting
+      // survive the #58 typing change in one assertion.
+      final obj = {
+        'schedulingIntent': {
+          'action': 'add',
+          'timeLabel': '19:00',
+          'offTimeLabel': null,
+          'repeatDays': const ['Fri'],
+          'patternName': 'Friday Red',
+        },
+      };
+
+      final result = CloudAIProcessor.normalizeSchedulingIntents(obj);
+
+      expect(result, isA<List<SchedulingIntent>>());
+      expect(result!.length, 1);
+      final intent = result.first;
+      expect(intent.patternName, 'Friday Red');
+      expect(intent.timeLabel, '19:00');
+      expect(intent.offTimeLabel, isNull);
+      expect(intent.repeatDays, ['Fri']);
+      expect(intent.action, 'add');
+    });
+
+    test('typed coercion: garbage field values in a well-formed Map entry → '
+        'defaults, no throw', () {
+      // Entry IS a Map (passes the entry-level filter) but its fields are
+      // garbage scalars. fromJson must coerce to defaults rather than throw,
+      // preserving the normalizer\'s never-throws contract.
+      final obj = {
+        'schedulingIntents': [
+          {
+            'timeLabel': 42, // non-String → default 'Sunset'
+            'offTimeLabel': 7, // non-String → null
+            'repeatDays': 'not-a-list', // non-List → all 7 days
+            'patternName': true, // non-String → 'Custom'
+            'wled': 'nope', // non-Map → null
+          },
+        ],
+      };
+
+      final result = CloudAIProcessor.normalizeSchedulingIntents(obj);
+
+      expect(result, isNotNull);
+      expect(result!.length, 1);
+      final intent = result.first;
+      expect(intent.timeLabel, 'Sunset');
+      expect(intent.offTimeLabel, isNull);
+      expect(intent.repeatDays,
+          ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+      expect(intent.patternName, 'Custom');
+      expect(intent.wled, isNull);
     });
   });
 }

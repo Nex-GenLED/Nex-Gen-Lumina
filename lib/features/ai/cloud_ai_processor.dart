@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart'
     show LuminaResponseTruncatedException;
@@ -348,35 +349,40 @@ class CloudAIProcessor {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /// Normalize the AI's scheduling-intent shape into a canonical List<Map>.
+  /// Normalize the AI's scheduling-intent shape into a canonical
+  /// List<SchedulingIntent>.
   ///
   /// Resolution order:
-  ///   1. `schedulingIntents` is a List → filter to Map elements, drop
-  ///      anything that doesn't look like a schedule object. Return the
-  ///      filtered list (possibly empty → return null if every entry was
+  ///   1. `schedulingIntents` is a List → keep Map elements, parse each
+  ///      through [SchedulingIntent.fromJson], drop non-Map junk. Return the
+  ///      parsed list (possibly empty → return null if every entry was
   ///      malformed, so the bag-assembly omits the key entirely).
-  ///   2. `schedulingIntent` is a Map → wrap as `[that map]`.
+  ///   2. `schedulingIntent` is a Map → wrap as `[SchedulingIntent.fromJson]`.
   ///   3. Neither field present (or both null) → return null.
   ///
   /// Defensive: never throws. The model occasionally returns a stray
   /// `false` or `"none"` for these fields; we silently coerce to "no
   /// intents present" rather than crashing the entire response pipeline.
+  /// `SchedulingIntent.fromJson` is itself tolerant at the field level, so a
+  /// well-formed Map with garbage field values parses to defaults rather than
+  /// throwing.
   @visibleForTesting
-  static List<Map<String, dynamic>>? normalizeSchedulingIntents(
+  static List<SchedulingIntent>? normalizeSchedulingIntents(
       Map<String, dynamic> obj) {
     final arr = obj['schedulingIntents'];
     if (arr is List) {
-      final filtered = <Map<String, dynamic>>[];
+      final filtered = <SchedulingIntent>[];
       for (final entry in arr) {
         if (entry is Map) {
-          filtered.add(Map<String, dynamic>.from(entry));
+          filtered.add(
+              SchedulingIntent.fromJson(Map<String, dynamic>.from(entry)));
         }
       }
       return filtered.isEmpty ? null : filtered;
     }
     final single = obj['schedulingIntent'];
     if (single is Map) {
-      return [Map<String, dynamic>.from(single)];
+      return [SchedulingIntent.fromJson(Map<String, dynamic>.from(single))];
     }
     return null;
   }

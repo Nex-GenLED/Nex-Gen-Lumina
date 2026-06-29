@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:nexgen_command/features/ai/lumina_command.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -63,7 +64,7 @@ const _kFrost = Color(0xFFDCF0FF);
 Future<void> handleSchedulingIntents({
   required WidgetRef ref,
   required BuildContext context,
-  required List<Map<String, dynamic>> intents,
+  required List<SchedulingIntent> intents,
   required LuminaCommandResult result,
   required LuminaPatternPreview? preview,
   VoidCallback? onMessagePosted,
@@ -140,14 +141,13 @@ Future<void> handleSchedulingIntents({
   final String promptText;
   final String successText;
   if (items.length == 1) {
-    final firstName = displayNameFor(
-        keptIntents.first['patternName'] as String? ?? 'Custom');
-    final firstTime = keptIntents.first['timeLabel'] as String? ?? 'Sunset';
+    final firstName = displayNameFor(keptIntents.first.patternName);
+    final firstTime = keptIntents.first.timeLabel;
     promptText = 'Add "$firstName" to your schedule at $firstTime?';
     successText = 'Schedule added';
   } else {
     final names = keptIntents
-        .map((i) => displayNameFor(i['patternName'] as String? ?? 'Custom'))
+        .map((i) => displayNameFor(i.patternName))
         .toList();
     // For 2-3 items list the names inline; for 4+ just say the count to
     // keep the SnackBar from overflowing.
@@ -246,7 +246,7 @@ class IntentClassification {
   /// Intents safe to schedule. Either carry their own `wled` (distinct
   /// design provided) or reuse the top-level design under the matching
   /// `patternName`. May be a subset of the input.
-  final List<Map<String, dynamic>> kept;
+  final List<SchedulingIntent> kept;
 
   /// Display names of intents the guard dropped because they would have
   /// attached the wrong design under a truthful label. The caller surfaces
@@ -281,7 +281,7 @@ class IntentClassification {
 /// belt-and-suspenders.
 @visibleForTesting
 IntentClassification classifyIntents({
-  required List<Map<String, dynamic>> intents,
+  required List<SchedulingIntent> intents,
   required String? topLevelPatternName,
 }) {
   if (intents.isEmpty) {
@@ -290,11 +290,11 @@ IntentClassification classifyIntents({
 
   final topNormalized = topLevelPatternName?.trim().toLowerCase();
 
-  final kept = <Map<String, dynamic>>[];
+  final kept = <SchedulingIntent>[];
   final droppedNames = <String>[];
   for (final intent in intents) {
-    final hasOwnWled = intent['wled'] is Map;
-    final name = (intent['patternName'] as String?)?.trim() ?? '';
+    final hasOwnWled = intent.wled != null;
+    final name = intent.patternName.trim();
     final nameMatchesTop = topNormalized != null &&
         topNormalized.isNotEmpty &&
         name.toLowerCase() == topNormalized;
@@ -338,7 +338,7 @@ IntentClassification classifyIntents({
 /// [sharedWledPayload] — the top-level design.
 @visibleForTesting
 List<ScheduleItem> buildScheduleItemsFromIntents({
-  required List<Map<String, dynamic>> intents,
+  required List<SchedulingIntent> intents,
   required String sourcePromptId,
   required int batchTs,
   required Map<String, dynamic>? sharedWledPayload,
@@ -346,30 +346,23 @@ List<ScheduleItem> buildScheduleItemsFromIntents({
   final items = <ScheduleItem>[];
   for (int i = 0; i < intents.length; i++) {
     final intent = intents[i];
-    final timeLabel = intent['timeLabel'] as String? ?? 'Sunset';
-    final offTimeLabel = intent['offTimeLabel'] as String?;
-    final repeatDays = (intent['repeatDays'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        const ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    final patternName = intent['patternName'] as String? ?? 'Custom';
 
     // Per-element wled wins when present; else fall back to the
     // shared top-level payload. The honesty guard upstream
     // ([classifyIntents]) ensures this fallback only fires when the
     // patternName matches the top-level design, so the user never sees
     // a sibling labeled "Friday Red" running a warm-white payload.
-    final perIntentWled = intent['wled'];
-    final itemPayload = perIntentWled is Map
+    final perIntentWled = intent.wled;
+    final itemPayload = perIntentWled != null
         ? Map<String, dynamic>.from(perIntentWled)
         : sharedWledPayload;
 
     items.add(ScheduleItem(
       id: 'ai-$batchTs-$i',
-      timeLabel: timeLabel,
-      offTimeLabel: offTimeLabel,
-      repeatDays: repeatDays,
-      actionLabel: 'Pattern: $patternName',
+      timeLabel: intent.timeLabel,
+      offTimeLabel: intent.offTimeLabel,
+      repeatDays: intent.repeatDays,
+      actionLabel: 'Pattern: ${intent.patternName}',
       enabled: true,
       wledPayload: itemPayload,
       sourcePromptId: sourcePromptId,

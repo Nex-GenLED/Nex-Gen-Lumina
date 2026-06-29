@@ -11,6 +11,7 @@
 // or Firebase Auth.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 
 void main() {
@@ -30,19 +31,25 @@ void main() {
     ],
   };
 
-  Map<String, dynamic> _intent({
+  // Build a typed intent from the same raw map shape the cloud parser feeds
+  // through SchedulingIntent.fromJson. The #58 typing change moved the field
+  // defaulting/coercion into fromJson, so tests exercise the real parse path
+  // rather than hand-constructing the typed object.
+  SchedulingIntent _intent({
     String patternName = 'Warm White Wash',
     String timeLabel = 'Sunset',
     String? offTimeLabel = 'Sunrise',
     List<String> repeatDays = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+    Map<String, dynamic>? wled,
   }) =>
-      {
+      SchedulingIntent.fromJson({
         'action': 'add',
         'timeLabel': timeLabel,
         'offTimeLabel': offTimeLabel,
         'repeatDays': repeatDays,
         'patternName': patternName,
-      };
+        if (wled != null) 'wled': wled,
+      });
 
   group('buildScheduleItemsFromIntents — single intent', () {
     test('1-element intents → 1 ScheduleItem with full field mapping', () {
@@ -183,7 +190,7 @@ void main() {
     test('intent missing timeLabel → defaults to "Sunset"', () {
       final items = buildScheduleItemsFromIntents(
         intents: [
-          {'patternName': 'Defaulty'},
+          SchedulingIntent.fromJson({'patternName': 'Defaulty'}),
         ],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
@@ -196,7 +203,8 @@ void main() {
     test('intent missing repeatDays → defaults to all 7 days', () {
       final items = buildScheduleItemsFromIntents(
         intents: [
-          {'patternName': 'Daily', 'timeLabel': '18:00'},
+          SchedulingIntent.fromJson(
+              {'patternName': 'Daily', 'timeLabel': '18:00'}),
         ],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
@@ -210,7 +218,7 @@ void main() {
     test('intent missing patternName → defaults to "Custom"', () {
       final items = buildScheduleItemsFromIntents(
         intents: [
-          {'timeLabel': '20:00'},
+          SchedulingIntent.fromJson({'timeLabel': '20:00'}),
         ],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
@@ -255,14 +263,14 @@ void main() {
       final items = buildScheduleItemsFromIntents(
         intents: [
           _intent(patternName: 'Warm White Wash'),
-          {
+          SchedulingIntent.fromJson({
             'action': 'add',
             'timeLabel': '19:00',
             'offTimeLabel': null,
             'repeatDays': ['Fri'],
             'patternName': 'Friday Red',
             'wled': redWled,
-          },
+          }),
         ],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
@@ -290,21 +298,20 @@ void main() {
           {'fx': 0},
         ],
       };
+      final intent = SchedulingIntent.fromJson({
+        'patternName': 'Red',
+        'timeLabel': '19:00',
+        'wled': mutableRed,
+      });
       final items = buildScheduleItemsFromIntents(
-        intents: [
-          {
-            'patternName': 'Red',
-            'timeLabel': '19:00',
-            'wled': mutableRed,
-          },
-        ],
+        intents: [intent],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
         sharedWledPayload: sharedWled,
       );
 
-      // Defensive copy: mutating the source map after building must not
-      // mutate the item's stored payload.
+      // Defensive copy: mutating the source map after parsing must not
+      // mutate the item's stored payload (fromJson copies wled at parse time).
       mutableRed['on'] = false;
       expect(items.first.wledPayload!['on'], isTrue);
     });
@@ -313,11 +320,11 @@ void main() {
         'shared payload (defensive)', () {
       final items = buildScheduleItemsFromIntents(
         intents: [
-          {
+          SchedulingIntent.fromJson({
             'patternName': 'Warm White Wash',
             'timeLabel': 'Sunset',
             'wled': 'not-a-map', // model junk
-          },
+          }),
         ],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
@@ -355,11 +362,11 @@ void main() {
         'distinct design)', () {
       final result = classifyIntents(
         intents: [
-          {
+          SchedulingIntent.fromJson({
             'patternName': 'Friday Red',
             'timeLabel': '19:00',
             'wled': friRed,
-          },
+          }),
         ],
         topLevelPatternName: 'Warm White Wash',
       );
@@ -373,15 +380,15 @@ void main() {
         intents: [
           _intent(patternName: 'Warm White Wash'),
           // Distinct name, no own wled → would lie about the design.
-          {
+          SchedulingIntent.fromJson({
             'patternName': 'Friday Red',
             'timeLabel': '19:00',
-          },
+          }),
         ],
         topLevelPatternName: 'Warm White Wash',
       );
       expect(result.kept.length, 1);
-      expect(result.kept.first['patternName'], 'Warm White Wash');
+      expect(result.kept.first.patternName, 'Warm White Wash');
       expect(result.droppedNames, ['Friday Red']);
     });
 
@@ -393,14 +400,15 @@ void main() {
       // the rest as dropped.
       final result = classifyIntents(
         intents: [
-          {'patternName': 'Alpha', 'timeLabel': '06:00'},
-          {'patternName': 'Bravo', 'timeLabel': '12:00'},
-          {'patternName': 'Charlie', 'timeLabel': '18:00'},
+          SchedulingIntent.fromJson({'patternName': 'Alpha', 'timeLabel': '06:00'}),
+          SchedulingIntent.fromJson({'patternName': 'Bravo', 'timeLabel': '12:00'}),
+          SchedulingIntent.fromJson(
+              {'patternName': 'Charlie', 'timeLabel': '18:00'}),
         ],
         topLevelPatternName: 'Original Design',
       );
       expect(result.kept.length, 1);
-      expect(result.kept.first['patternName'], 'Alpha');
+      expect(result.kept.first.patternName, 'Alpha');
       expect(result.droppedNames, ['Bravo', 'Charlie'],
           reason: 'first becomes kept; rest stay dropped — never zero kept');
     });
@@ -424,7 +432,7 @@ void main() {
       // fallback if it's the only intent.
       final resultWithOwnWled = classifyIntents(
         intents: [
-          {'patternName': 'X', 'wled': friRed},
+          SchedulingIntent.fromJson({'patternName': 'X', 'wled': friRed}),
         ],
         topLevelPatternName: null,
       );
@@ -433,14 +441,14 @@ void main() {
 
       final resultWithoutOwnWled = classifyIntents(
         intents: [
-          {'patternName': 'X'},
-          {'patternName': 'Y'},
+          SchedulingIntent.fromJson({'patternName': 'X'}),
+          SchedulingIntent.fromJson({'patternName': 'Y'}),
         ],
         topLevelPatternName: null,
       );
       // Both ambiguous → fallback keeps intents[0], drops the rest.
       expect(resultWithoutOwnWled.kept.length, 1);
-      expect(resultWithoutOwnWled.kept.first['patternName'], 'X');
+      expect(resultWithoutOwnWled.kept.first.patternName, 'X');
       expect(resultWithoutOwnWled.droppedNames, ['Y']);
     });
 

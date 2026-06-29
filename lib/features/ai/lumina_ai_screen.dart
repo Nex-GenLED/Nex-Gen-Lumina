@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
@@ -241,10 +242,8 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       // atomically via addAll. Same path on full-screen and bottom-sheet.
       final schedulingIntentsRaw = result.wledPayload?['schedulingIntents'];
       if (schedulingIntentsRaw is List && schedulingIntentsRaw.isNotEmpty) {
-        final intents = schedulingIntentsRaw
-            .whereType<Map>()
-            .map((m) => Map<String, dynamic>.from(m))
-            .toList();
+        final intents =
+            schedulingIntentsRaw.whereType<SchedulingIntent>().toList();
         if (intents.isNotEmpty) {
           LuminaPatternPreview? schedulePreview;
           if (result.wledPayload != null) {
