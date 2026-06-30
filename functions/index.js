@@ -1,5 +1,6 @@
 const { onCall, HttpsError, onRequest } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineString } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { claudeProxy } = require('./src/claudeProxy');
@@ -983,16 +984,14 @@ function addSecurityHeaders(res) {
  * - Expired OAuth codes
  * - Suggestions older than 30 days
  */
-exports.cleanupOldData = onCall(
-  { region: "us-central1" },
-  async (request) => {
-    // Only allow admin calls (or scheduled triggers in production)
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Admin access required");
-    }
-
+// Shared cleanup routine. Extracted from the onCall handler so a scheduled
+// trigger can run it too (Slice 0 — previously onCall-only, so it NEVER fired
+// automatically and command docs accumulated forever). Returns the stats map;
+// throws on error for the caller to handle.
+async function runDataCleanup() {
     const USAGE_RETENTION_DAYS = 90;
     const SUGGESTIONS_RETENTION_DAYS = 30;
+    const COMMANDS_RETENTION_DAYS = 7;
     const usageCutoff = new Date();
     usageCutoff.setDate(usageCutoff.getDate() - USAGE_RETENTION_DAYS);
     const usageCutoffTimestamp = admin.firestore.Timestamp.fromDate(usageCutoff);
@@ -1000,6 +999,10 @@ exports.cleanupOldData = onCall(
     const suggestionsCutoff = new Date();
     suggestionsCutoff.setDate(suggestionsCutoff.getDate() - SUGGESTIONS_RETENTION_DAYS);
     const suggestionsCutoffTimestamp = admin.firestore.Timestamp.fromDate(suggestionsCutoff);
+
+    const commandsCutoff = new Date();
+    commandsCutoff.setDate(commandsCutoff.getDate() - COMMANDS_RETENTION_DAYS);
+    const commandsCutoffTimestamp = admin.firestore.Timestamp.fromDate(commandsCutoff);
 
     console.log(`Starting data cleanup:
       - Usage logs older than ${usageCutoff.toISOString()}
@@ -1012,6 +1015,7 @@ exports.cleanupOldData = onCall(
         patternUsage: 0,
         habits: 0,
         suggestions: 0,
+        commands: 0,
         oauthCodes: 0,
       };
 
@@ -1080,6 +1084,27 @@ exports.cleanupOldData = onCall(
           await batch4.commit();
           stats.suggestions += oldSuggestions.size;
         }
+
+        // Clean up old WLED relay command docs (Slice 0 — the TTL). Any command
+        // past the retention window is terminal-or-abandoned: the bridge/app
+        // acted on it long ago. Bounded per run (limit 450) to stay under the
+        // 500-op batch cap; the daily schedule drains any backlog over
+        // successive runs. Queries createdAt only (single-field auto-index), so
+        // no composite index is needed.
+        const oldCommands = await db
+          .collection("users")
+          .doc(userId)
+          .collection("commands")
+          .where("createdAt", "<", commandsCutoffTimestamp)
+          .limit(450)
+          .get();
+
+        if (oldCommands.size > 0) {
+          const batchC = db.batch();
+          oldCommands.docs.forEach((doc) => batchC.delete(doc.ref));
+          await batchC.commit();
+          stats.commands += oldCommands.size;
+        }
       }
 
       // Clean up expired OAuth codes (> 1 hour old)
@@ -1097,10 +1122,41 @@ exports.cleanupOldData = onCall(
       }
 
       console.log(`Cleanup complete:`, stats);
-      return { success: true, stats };
+      return stats;
     } catch (error) {
       console.error("Cleanup error:", error);
+      throw error;
+    }
+}
+
+// Manual admin invocation (unchanged surface): callable, auth-gated. Returns
+// the same { success, stats } envelope as before.
+exports.cleanupOldData = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    // Only allow admin calls
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Admin access required");
+    }
+    try {
+      const stats = await runDataCleanup();
+      return { success: true, stats };
+    } catch (error) {
       throw new HttpsError("internal", error.message);
+    }
+  }
+);
+
+// Scheduled trigger so cleanup ACTUALLY runs without a manual call — this is
+// what finally gives users/{uid}/commands a real TTL (Slice 0). Daily 04:00 UTC.
+exports.scheduledDataCleanup = onSchedule(
+  { schedule: "0 4 * * *", region: "us-central1" },
+  async () => {
+    try {
+      const stats = await runDataCleanup();
+      console.log("scheduledDataCleanup complete:", stats);
+    } catch (error) {
+      console.error("scheduledDataCleanup error:", error);
     }
   }
 );

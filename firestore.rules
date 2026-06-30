@@ -1216,6 +1216,20 @@ service cloud.firestore {
                resource.data.creatorUid == request.auth.uid;
       }
 
+      // Membership check usable in SUBCOLLECTION scope. The resource-based
+      // [isGroupMember] above reads `resource.data.memberUids`; inside a
+      // subcollection rule `resource` is the SUBCOLLECTION doc (which has no
+      // memberUids), so reusing isGroupMember() there would deny EVERY real
+      // member and lock the whole crew out. This variant looks the parent
+      // group up via get() so membership is read from the group doc no matter
+      // which doc the rule is evaluating. memberUids is the authoritative
+      // member list (same source the group create/update rules enforce).
+      function isGroupMemberLookup() {
+        return request.auth != null &&
+               request.auth.uid in
+                 get(/databases/$(database)/documents/neighborhoods/$(groupId)).data.memberUids;
+      }
+
       // Any authenticated user can read groups so they can:
       //   - list groups they belong to (memberUids contains-uid query)
       //   - look up a group by inviteCode when joining
@@ -1260,34 +1274,34 @@ service cloud.firestore {
         );
       }
 
-      // Sync commands broadcast to the group (host → all members).
+      // Sync commands broadcast to the group — CREW MEMBERS ONLY. Any member
+      // (not just the creator) can initiate in the distributed self-apply
+      // model, so the gate is membership, not creatorship. Server-side fanout
+      // uses the admin SDK, which bypasses these rules entirely. Previously
+      // `request.auth != null` let ANY authenticated user broadcast to a crew
+      // they don't belong to (pre-existing hole, Slice 0).
       match /commands/{commandId} {
-        allow read: if request.auth != null;
-        allow create, update, delete: if request.auth != null;
+        allow read, create, update, delete: if isGroupMemberLookup();
       }
 
       // Schedules for recurring sync events.
       match /schedules/{scheduleId} {
-        allow read: if request.auth != null;
-        allow create, update, delete: if request.auth != null;
+        allow read, create, update, delete: if isGroupMemberLookup();
       }
 
       // One-off sync events (Block Party / Game Day setups).
       match /syncEvents/{eventId} {
-        allow read: if request.auth != null;
-        allow create, update, delete: if request.auth != null;
+        allow read, create, update, delete: if isGroupMemberLookup();
       }
 
       // Active sync sessions (per-event runtime state).
       match /syncSessions/{sessionId} {
-        allow read: if request.auth != null;
-        allow create, update, delete: if request.auth != null;
+        allow read, create, update, delete: if isGroupMemberLookup();
       }
 
       // Group autopilot config (game day automation).
       match /game_day_autopilot/{configId} {
-        allow read: if request.auth != null;
-        allow create, update, delete: if request.auth != null;
+        allow read, create, update, delete: if isGroupMemberLookup();
       }
     }
 
