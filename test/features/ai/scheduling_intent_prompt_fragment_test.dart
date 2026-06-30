@@ -35,6 +35,42 @@ void main() {
       expect(fragment, contains('"patternName":"Friday Red"'));
     });
 
+    test('teaches the RECURRING sequential-chain handoff shape (#51 step 1)',
+        () {
+      expect(fragment,
+          contains('─── SEQUENTIAL CHAINS (each segment hands off to the next) ───'));
+      // The load-bearing handoff rule: intermediate offTimeLabel must be null.
+      expect(fragment,
+          contains('Set `offTimeLabel` to null on EVERY segment EXCEPT the last'));
+      expect(fragment,
+          contains('arms a competing OFF that races the next'));
+      expect(fragment,
+          contains('The LAST segment\'s `offTimeLabel` is the "then off"'));
+      expect(fragment, contains('SEQUENTIAL CHAINS ARE RECURRING-ONLY'));
+      expect(fragment, contains('N segments + the final off = N+1 device timers'));
+      // The verbatim 2-segment worked example (intermediate null, terminal off).
+      expect(fragment,
+          contains('"patternName":"Red",  "wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[255,0,0,0]]}]}}'));
+      expect(fragment,
+          contains('"patternName":"Blue", "wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[0,0,255,0]]}]}}'));
+    });
+
+    test('teaches ONE-SHOT honesty — fail loud, never silently drop (#51 step 2)',
+        () {
+      expect(fragment,
+          contains('─── ONE-SHOT TIMED SEQUENCES (not yet schedulable) ───'));
+      expect(fragment,
+          contains('CANNOT be scheduled yet'));
+      expect(fragment,
+          contains('Do NOT silently apply only the first color'));
+      // Must explicitly forbid the two wrong fallbacks the audit flagged.
+      expect(fragment, contains('`repeatDays:[]` (it would never fire)'));
+      expect(fragment,
+          contains('do '
+              'NOT emit a weekly recurring schedule for a one-time request'));
+      expect(fragment, contains('offer the recurring alternative'));
+    });
+
     test('does NOT mention the removed `action` field (dead contract)', () {
       expect(fragment.contains('"action"'), isFalse,
           reason: 'action field removed from the schema in #58 Commit 2');
