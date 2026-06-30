@@ -342,6 +342,11 @@ class CloudAIProcessor {
       tier: ProcessingTier.cloud,
       ephemeralSession: ephemeralSession,
       recurringSportsAutopilot: recurringSportsAutopilot,
+      // Carry the normalized intents on the typed field INDEPENDENT of the
+      // wled branch above (#58b). The in-wled mirror at the attach junction
+      // (:193) is only populated when wled is a Map; this field is the
+      // canonical carrier so intents survive a null/absent top-level wled.
+      schedulingIntents: normalizedIntents,
     );
   }
 

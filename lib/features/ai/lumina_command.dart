@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'ephemeral_session_intent.dart';
 import 'recurring_sports_autopilot_intent.dart';
+import 'scheduling_intent.dart';
 
 /// Types of commands the Lumina voice assistant can process.
 enum LuminaCommandType {
@@ -120,6 +121,20 @@ class LuminaCommandResult {
   RecurringSportsAutopilotIntent? get recurringSportsAutopilotIntent =>
       RecurringSportsAutopilotIntent.fromJson(recurringSportsAutopilot);
 
+  /// Normalized recurring weekly/daily scheduling intents (1 or N), already
+  /// typed by [CloudAIProcessor.normalizeSchedulingIntents]. This is the
+  /// CANONICAL carrier dispatch reads — set independently of [wledPayload] so
+  /// the intents survive even when the model emits a null/absent top-level
+  /// `wled` (the prompt's EPHEMERAL Example C shape, #58b). The same list is
+  /// also redundantly mirrored inside `wledPayload['schedulingIntents']` when a
+  /// `wled` is present (harmless legacy copy; do not read it for dispatch).
+  /// Null when the response carried no scheduling intent.
+  final List<SchedulingIntent>? schedulingIntents;
+
+  /// True when at least one scheduling intent is present.
+  bool get hasSchedulingIntents =>
+      schedulingIntents != null && schedulingIntents!.isNotEmpty;
+
   const LuminaCommandResult({
     this.command,
     required this.responseText,
@@ -129,5 +144,6 @@ class LuminaCommandResult {
     this.tier = ProcessingTier.local,
     this.ephemeralSession,
     this.recurringSportsAutopilot,
+    this.schedulingIntents,
   });
 }

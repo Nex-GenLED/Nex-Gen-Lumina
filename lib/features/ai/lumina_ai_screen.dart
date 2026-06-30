@@ -236,32 +236,30 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
 
       // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────────
       // The cloud parser canonicalizes both schema shapes (singular
-      // schedulingIntent, array schedulingIntents) into one List<Map> under
-      // the `schedulingIntents` key. The shared handler iterates the list,
-      // builds N ScheduleItems with a shared sourcePromptId, and persists
-      // atomically via addAll. Same path on full-screen and bottom-sheet.
-      final schedulingIntentsRaw = result.wledPayload?['schedulingIntents'];
-      if (schedulingIntentsRaw is List && schedulingIntentsRaw.isNotEmpty) {
-        final intents =
-            schedulingIntentsRaw.whereType<SchedulingIntent>().toList();
-        if (intents.isNotEmpty) {
-          LuminaPatternPreview? schedulePreview;
-          if (result.wledPayload != null) {
-            schedulePreview = _extractPreview(result.wledPayload!);
-          } else if (result.previewColors.isNotEmpty) {
-            schedulePreview =
-                LuminaPatternPreview(colors: result.previewColors);
-          }
-          await handleSchedulingIntents(
-            ref: ref,
-            context: context,
-            intents: intents,
-            result: result,
-            preview: schedulePreview,
-            onMessagePosted: _scrollToEnd,
-          );
-          return;
+      // schedulingIntent, array schedulingIntents) into one typed
+      // List<SchedulingIntent> carried on result.schedulingIntents — read here
+      // INDEPENDENT of wledPayload so the intents survive a null/absent
+      // top-level wled (#58b). The shared handler iterates the list, builds N
+      // ScheduleItems with a shared sourcePromptId, and persists atomically via
+      // addAll. Same path on full-screen and bottom-sheet.
+      final intents = result.schedulingIntents ?? const <SchedulingIntent>[];
+      if (intents.isNotEmpty) {
+        LuminaPatternPreview? schedulePreview;
+        if (result.wledPayload != null) {
+          schedulePreview = _extractPreview(result.wledPayload!);
+        } else if (result.previewColors.isNotEmpty) {
+          schedulePreview =
+              LuminaPatternPreview(colors: result.previewColors);
         }
+        await handleSchedulingIntents(
+          ref: ref,
+          context: context,
+          intents: intents,
+          result: result,
+          preview: schedulePreview,
+          onMessagePosted: _scrollToEnd,
+        );
+        return;
       }
 
       // ── Normal single-pattern apply ───────────────────────────────────────
