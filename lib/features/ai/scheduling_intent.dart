@@ -10,16 +10,22 @@
 // shapes dispatched independently; this type models the per-element scheduling
 // intent only.
 //
-// #58 Commit 1 of 2 — typing refactor with ZERO behavior change. fromJson
-// reproduces the EXACT defaulting/coercion the handler previously applied via
-// raw Map access (scheduling_intent_handler.dart buildScheduleItemsFromIntents):
+// #58 — typed scheduling-intent contract. fromJson reproduces the EXACT
+// defaulting/coercion the handler previously applied via raw Map access
+// (scheduling_intent_handler.dart buildScheduleItemsFromIntents):
 //   • timeLabel    absent/non-String → 'Sunset'
 //   • offTimeLabel absent/non-String → null
 //   • repeatDays   absent/non-List   → all 7 days; elements .toString()-coerced
 //   • patternName  absent/non-String → 'Custom'
 //   • wled         absent/non-Map    → null (defensively copied when present)
-// `action` ("add"|"replace") is carried as a passthrough field but read by no
-// consumer (dead contract — its removal is Commit 2, a prompt change).
+//
+// Commit 2 removed the dead `action` field ("add"|"replace") from both this
+// type and the prompt schema: no consumer ever read it (conflict resolution is
+// user-driven via the schedule conflict dialog).
+//
+// [schemaPromptFragment] is the single source of truth for the scheduling
+// schema description the model is held to — the producer (lumina_ai_service.dart
+// Smart prompt) now assembles it from this fragment instead of inline prose.
 //
 // Field-level parsing is tolerant (never throws) to honor the normalizer's
 // "never throws / tolerate garbage scalars" contract now that fromJson runs
@@ -50,18 +56,12 @@ class SchedulingIntent {
   /// schedule). Null when absent or non-Map. Defensively copied at parse time.
   final Map<String, dynamic>? wled;
 
-  /// Passthrough of the documented `action` field ("add"|"replace"). Carried
-  /// for round-trip fidelity but read by no consumer (dead contract — conflict
-  /// resolution is user-driven via the schedule conflict dialog).
-  final String? action;
-
   const SchedulingIntent({
     required this.timeLabel,
     this.offTimeLabel,
     required this.repeatDays,
     required this.patternName,
     this.wled,
-    this.action,
   });
 
   static const List<String> _allDays = [
@@ -74,6 +74,92 @@ class SchedulingIntent {
     'Sat',
   ];
 
+  /// The scheduling-schema description the model is held to — the single
+  /// source of truth shared by the producer (lumina_ai_service.dart Smart
+  /// prompt assembles this verbatim) and this parser. Byte-for-byte the prior
+  /// inline "SCHEDULING INTENT" prompt section, MINUS the dead `action` field
+  /// (removed in #58 Commit 2). Pure static text — no dynamic interpolation;
+  /// temporal grounding (clientNow/timezone) stays in the builder, outside
+  /// this fragment.
+  static const String schemaPromptFragment =
+      '═══ SCHEDULING INTENT ═══\n'
+      'When the user\'s request implies a recurring or future schedule (e.g. '
+      '"turn on Chiefs colors every Thursday night this season", "warm white '
+      'every night at sunset", "every Friday at 7pm", "Christmas pattern from '
+      'Dec 1 to Dec 31"), generate BOTH the lighting design AND a '
+      '`schedulingIntent` field in the JSON.\n'
+      '`schedulingIntent` schema:\n'
+      '  {\n'
+      '    "timeLabel": "HH:MM" | "Sunset" | "Sunrise",\n'
+      '    "offTimeLabel": "HH:MM" | "Sunset" | "Sunrise" | null,\n'
+      '    "repeatDays": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],\n'
+      '    "patternName": string\n'
+      '  }\n'
+      'Rules:\n'
+      '• Omit `schedulingIntent` (or set null) for one-shot/now requests.\n'
+      '• `repeatDays` uses three-letter day codes. Use all 7 for "every night", '
+      '"nightly", "daily". Use the matching subset for "every Thursday", '
+      '"weekends" → ["Sat","Sun"], "weekdays" → ["Mon","Tue","Wed","Thu","Fri"].\n'
+      '• If the user says "sunset"/"sunrise", set the corresponding label '
+      'literally as "Sunset"/"Sunrise" — the app resolves these from device '
+      'location.\n'
+      '• `patternName` mirrors the design\'s patternName so the schedule entry '
+      'reads naturally (e.g. "Chiefs Game Day", "Warm White Wash").\n'
+      '• Multi-day full-season requests (Christmas season, Halloween month, '
+      'Independence week, etc.) still use the existing `isSchedule:true` / '
+      '`scheduleType:"season_fill"` mechanism described in HOLIDAY SEASONS — '
+      '`schedulingIntent` is for recurring weekly/daily patterns, not season-fill.\n'
+      '• The `message` field must mention the schedule plainly: "Saved as Chiefs '
+      'Game Day every Thursday from sunset to sunrise."\n'
+      '─── COMPOUND SCHEDULES ───\n'
+      'When the user asks for MULTIPLE distinct recurring schedules in one '
+      'request (e.g. "warm white every night at sunset AND red every Friday '
+      'at 7pm"), emit `schedulingIntents` as an ARRAY with one object per '
+      'schedule. Each element uses the exact same shape as the single '
+      '`schedulingIntent` form.\n'
+      'Rules:\n'
+      '• For a SINGLE schedule, continue using `schedulingIntent` (singular). '
+      'A one-element `schedulingIntents` array is also accepted.\n'
+      '• Do NOT emit both `schedulingIntent` and `schedulingIntents` in the '
+      'same response. Prefer `schedulingIntents` when there are 2+; '
+      '`schedulingIntent` for exactly 1.\n'
+      '• COMPOUND IS RECURRING-ONLY. Date-bounded spans ("until Dec 25", '
+      '"through New Year\'s", "for the month of October") STILL route to the '
+      'existing `isSchedule:true` / `scheduleType:"season_fill"` mechanism — '
+      'NOT `schedulingIntents`. Each element of `schedulingIntents` is a '
+      'weekly-recurring pattern with time-of-day only, exactly like the '
+      'singular form. Do not invent startDate/endDate fields.\n'
+      '• Each element\'s `patternName` should be distinct enough that the '
+      'user can tell the entries apart in their schedule list.\n'
+      '• DISTINCT DESIGN PER SCHEDULE — when the user asks for different '
+      'lighting on each schedule (e.g. "warm white nightly AND red on '
+      'Friday"), include a per-element `"wled"` field on EACH element '
+      'whose design differs from the top-level `"wled"`. The per-element '
+      '`"wled"` uses the SAME format as the top-level `"wled"` (full WLED '
+      'state — on/bri/seg/etc.). The top-level `"wled"` holds the '
+      'primary/first design.\n'
+      '• SAME DESIGN ACROSS SCHEDULES — when every schedule should run the '
+      'same design (e.g. "warm white nightly AND on Saturday mornings"), '
+      'OMIT per-element `"wled"` on the siblings; they\'ll reuse the '
+      'top-level. Don\'t emit identical payloads N times.\n'
+      '• NEVER emit a distinct `patternName` without the matching '
+      'per-element `"wled"`. A schedule named "Friday Red" attached to a '
+      'warm-white payload is a lying entry — the app drops it rather than '
+      'create user confusion. If you can\'t produce a per-element payload '
+      'for a sibling, use the same `patternName` as the top-level so the '
+      'reuse is honest, or omit that sibling entirely.\n'
+      'Example — user: "warm white every night at sunset, and red every '
+      'Friday at 7pm":\n'
+      '  "wled": {<warm white payload — primary design>},\n'
+      '  "schedulingIntents": [\n'
+      '    {"timeLabel":"Sunset","offTimeLabel":"Sunrise",'
+      '"repeatDays":["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],'
+      '"patternName":"Warm White Wash"},\n'
+      '    {"timeLabel":"19:00","offTimeLabel":null,'
+      '"repeatDays":["Fri"],"patternName":"Friday Red",'
+      '"wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[255,0,0,0]]}]}}\n'
+      '  ]\n\n';
+
   /// Parse a raw intent Map into a typed [SchedulingIntent]. Never throws.
   /// Reproduces the handler's exact field defaulting; see the file header.
   factory SchedulingIntent.fromJson(Map<String, dynamic> json) {
@@ -82,7 +168,6 @@ class SchedulingIntent {
     final rawDays = json['repeatDays'];
     final rawName = json['patternName'];
     final rawWled = json['wled'];
-    final rawAction = json['action'];
 
     return SchedulingIntent(
       timeLabel: rawTime is String ? rawTime : 'Sunset',
@@ -92,7 +177,6 @@ class SchedulingIntent {
           : const [...SchedulingIntent._allDays],
       patternName: rawName is String ? rawName : 'Custom',
       wled: rawWled is Map ? Map<String, dynamic>.from(rawWled) : null,
-      action: rawAction is String ? rawAction : null,
     );
   }
 
@@ -100,7 +184,6 @@ class SchedulingIntent {
   /// a carried intent is persisted inside a ScheduleItem.wledPayload (which
   /// serializes via `jsonEncode`, whose default encoder calls `.toJson()`).
   Map<String, dynamic> toJson() => {
-        if (action != null) 'action': action,
         'timeLabel': timeLabel,
         'offTimeLabel': offTimeLabel,
         'repeatDays': repeatDays,

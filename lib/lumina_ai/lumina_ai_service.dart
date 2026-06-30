@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
+
 /// LuminaAI — Two-layer Claude routing for Nex-Gen LED's Lumina feature.
 ///
 /// LAYER ARCHITECTURE:
@@ -231,9 +233,9 @@ class LuminaAI {
       '"colors":[{"name":string,"rgb":[R,G,B,W]}],'
       '"effect":{"name":string,"id":number,"direction":string,"isStatic":boolean},'
       '"speed":number,"intensity":number,"wled":object,'
-      '"schedulingIntent":{"action":string,"timeLabel":string,"offTimeLabel":string|null,'
+      '"schedulingIntent":{"timeLabel":string,"offTimeLabel":string|null,'
       '"repeatDays":[string],"patternName":string}|null,'
-      '"schedulingIntents":[{"action":string,"timeLabel":string,"offTimeLabel":string|null,'
+      '"schedulingIntents":[{"timeLabel":string,"offTimeLabel":string|null,'
       '"repeatDays":[string],"patternName":string,"wled":object|omitted}]|null,'
       '"ephemeralSession":{"type":"post_game_revert","teamSlug":string,'
       '"gameAnchor":{"type":"today"|"tonight"|"tomorrow"|"next"|"specific_date",'
@@ -369,84 +371,10 @@ class LuminaAI {
       '- "only [colors]" → use EXCLUSIVELY those colors\n'
       '- "with [color]" → include that color alongside canonical\n'
       '- "no [color]" / "without [color]" → exclude completely, pick thematic replacement\n\n'
-      '═══ SCHEDULING INTENT ═══\n'
-      'When the user\'s request implies a recurring or future schedule (e.g. '
-      '"turn on Chiefs colors every Thursday night this season", "warm white '
-      'every night at sunset", "every Friday at 7pm", "Christmas pattern from '
-      'Dec 1 to Dec 31"), generate BOTH the lighting design AND a '
-      '`schedulingIntent` field in the JSON.\n'
-      '`schedulingIntent` schema:\n'
-      '  {\n'
-      '    "action": "add" | "replace",\n'
-      '    "timeLabel": "HH:MM" | "Sunset" | "Sunrise",\n'
-      '    "offTimeLabel": "HH:MM" | "Sunset" | "Sunrise" | null,\n'
-      '    "repeatDays": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],\n'
-      '    "patternName": string\n'
-      '  }\n'
-      'Rules:\n'
-      '• Omit `schedulingIntent` (or set null) for one-shot/now requests.\n'
-      '• `repeatDays` uses three-letter day codes. Use all 7 for "every night", '
-      '"nightly", "daily". Use the matching subset for "every Thursday", '
-      '"weekends" → ["Sat","Sun"], "weekdays" → ["Mon","Tue","Wed","Thu","Fri"].\n'
-      '• If the user says "sunset"/"sunrise", set the corresponding label '
-      'literally as "Sunset"/"Sunrise" — the app resolves these from device '
-      'location.\n'
-      '• `patternName` mirrors the design\'s patternName so the schedule entry '
-      'reads naturally (e.g. "Chiefs Game Day", "Warm White Wash").\n'
-      '• Multi-day full-season requests (Christmas season, Halloween month, '
-      'Independence week, etc.) still use the existing `isSchedule:true` / '
-      '`scheduleType:"season_fill"` mechanism described in HOLIDAY SEASONS — '
-      '`schedulingIntent` is for recurring weekly/daily patterns, not season-fill.\n'
-      '• The `message` field must mention the schedule plainly: "Saved as Chiefs '
-      'Game Day every Thursday from sunset to sunrise."\n'
-      '─── COMPOUND SCHEDULES ───\n'
-      'When the user asks for MULTIPLE distinct recurring schedules in one '
-      'request (e.g. "warm white every night at sunset AND red every Friday '
-      'at 7pm"), emit `schedulingIntents` as an ARRAY with one object per '
-      'schedule. Each element uses the exact same shape as the single '
-      '`schedulingIntent` form.\n'
-      'Rules:\n'
-      '• For a SINGLE schedule, continue using `schedulingIntent` (singular). '
-      'A one-element `schedulingIntents` array is also accepted.\n'
-      '• Do NOT emit both `schedulingIntent` and `schedulingIntents` in the '
-      'same response. Prefer `schedulingIntents` when there are 2+; '
-      '`schedulingIntent` for exactly 1.\n'
-      '• COMPOUND IS RECURRING-ONLY. Date-bounded spans ("until Dec 25", '
-      '"through New Year\'s", "for the month of October") STILL route to the '
-      'existing `isSchedule:true` / `scheduleType:"season_fill"` mechanism — '
-      'NOT `schedulingIntents`. Each element of `schedulingIntents` is a '
-      'weekly-recurring pattern with time-of-day only, exactly like the '
-      'singular form. Do not invent startDate/endDate fields.\n'
-      '• Each element\'s `patternName` should be distinct enough that the '
-      'user can tell the entries apart in their schedule list.\n'
-      '• DISTINCT DESIGN PER SCHEDULE — when the user asks for different '
-      'lighting on each schedule (e.g. "warm white nightly AND red on '
-      'Friday"), include a per-element `"wled"` field on EACH element '
-      'whose design differs from the top-level `"wled"`. The per-element '
-      '`"wled"` uses the SAME format as the top-level `"wled"` (full WLED '
-      'state — on/bri/seg/etc.). The top-level `"wled"` holds the '
-      'primary/first design.\n'
-      '• SAME DESIGN ACROSS SCHEDULES — when every schedule should run the '
-      'same design (e.g. "warm white nightly AND on Saturday mornings"), '
-      'OMIT per-element `"wled"` on the siblings; they\'ll reuse the '
-      'top-level. Don\'t emit identical payloads N times.\n'
-      '• NEVER emit a distinct `patternName` without the matching '
-      'per-element `"wled"`. A schedule named "Friday Red" attached to a '
-      'warm-white payload is a lying entry — the app drops it rather than '
-      'create user confusion. If you can\'t produce a per-element payload '
-      'for a sibling, use the same `patternName` as the top-level so the '
-      'reuse is honest, or omit that sibling entirely.\n'
-      'Example — user: "warm white every night at sunset, and red every '
-      'Friday at 7pm":\n'
-      '  "wled": {<warm white payload — primary design>},\n'
-      '  "schedulingIntents": [\n'
-      '    {"action":"add","timeLabel":"Sunset","offTimeLabel":"Sunrise",'
-      '"repeatDays":["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],'
-      '"patternName":"Warm White Wash"},\n'
-      '    {"action":"add","timeLabel":"19:00","offTimeLabel":null,'
-      '"repeatDays":["Fri"],"patternName":"Friday Red",'
-      '"wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[255,0,0,0]]}]}}\n'
-      '  ]\n\n'
+      // Scheduling schema sourced from the single-source-of-truth fragment so
+      // producer + parser never drift (#58). The fragment is byte-for-byte the
+      // former inline SCHEDULING INTENT section minus the dead `action` field.
+      + SchedulingIntent.schemaPromptFragment +
       '═══ EPHEMERAL SESSION INTENT (sports + revert) ═══\n'
       'When the user requests a sports/team event AND specifies an "after" or '
       '"revert" state, generate BOTH the immediate `wled` payload (team '
@@ -525,7 +453,7 @@ class LuminaAI {
       'C) User: "Switch to warm white at 11pm" (clock-time only, no sports '
       'anchor)\n'
       '   → wled: null, '
-      'schedulingIntent: {"action":"add","timeLabel":"23:00",'
+      'schedulingIntent: {"timeLabel":"23:00",'
       '"offTimeLabel":null,"repeatDays":[],"patternName":"Warm White"}, '
       'ephemeralSession: null\n\n'
       '═══ RECURRING SPORTS AUTOPILOT (every game / all season) ═══\n'
@@ -622,6 +550,16 @@ class LuminaAI {
       'ALWAYS: Clean, age-appropriate language suitable for users as young as 8. '
       'Engagement should feel like a skilled professional who takes pride in '
       'their work — not a chatbot trying to be liked.';
+
+  // ─── Test seams ─────────────────────────────────────────────────────────────
+
+  /// The fully-assembled Smart-tier system prompt. Exposed for the #58
+  /// fragment-equivalence test, which asserts the scheduling schema is now
+  /// sourced from [SchedulingIntent.schemaPromptFragment] and that the
+  /// assembled prompt differs from the pre-commit text ONLY by the removed
+  /// `action` field. Not used at runtime.
+  @visibleForTesting
+  static String get debugSmartSystemPrompt => _kSmartSystemPrompt;
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 

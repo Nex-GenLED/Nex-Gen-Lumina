@@ -294,6 +294,10 @@ IntentClassification classifyIntents({
   final droppedNames = <String>[];
   for (final intent in intents) {
     final hasOwnWled = intent.wled != null;
+    // Absent patternName resolves to the single 'Custom' default carried by
+    // SchedulingIntent.fromJson (#58 Commit 2 — standardized; the pre-typing
+    // map-access path defaulted to '' here, which is no longer possible). The
+    // isEmpty fallback below only fires for an explicitly-emitted empty string.
     final name = intent.patternName.trim();
     final nameMatchesTop = topNormalized != null &&
         topNormalized.isNotEmpty &&

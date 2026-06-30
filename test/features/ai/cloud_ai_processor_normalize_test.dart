@@ -181,7 +181,8 @@ void main() {
       expect(intent.timeLabel, '19:00');
       expect(intent.offTimeLabel, isNull);
       expect(intent.repeatDays, ['Fri']);
-      expect(intent.action, 'add');
+      // `action` was removed from the contract in #58 Commit 2; a model that
+      // still emits it is tolerated (extra key ignored), not parsed.
     });
 
     test('typed coercion: garbage field values in a well-formed Map entry → '
