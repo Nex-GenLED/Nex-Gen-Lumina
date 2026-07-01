@@ -63,13 +63,12 @@
          detection, and to configure the Welcome Home geofence. -->
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Lumina uses your location to detect the WiFi network you are connected to (so it knows when you are on your home network) and to configure the Welcome Home geofence.</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Always Allow enables reliable geofence triggers even when the app is closed.</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Your location is used to detect when you arrive home so we can welcome you with lights.</string>
+    <!-- NSLocationAlways* keys removed: Lumina uses foreground (When In Use)
+         location only — WLED/home-network detection and geofence setup while
+         the app is open. There is no always/background-location capability, so
+         the 'location' background mode is also removed below. -->
     <key>UIBackgroundModes</key>
     <array>
-        <string>location</string>
         <string>fetch</string>
         <string>processing</string>
         <string>remote-notification</string>

@@ -15,7 +15,11 @@
        Geofencing uses foreground (whileInUse) location only. A true app-closed
        geofence is a later workstream. -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <!-- FOREGROUND_SERVICE_LOCATION intentionally NOT declared: geolocator's
+       location foreground service is never started (foreground/whileInUse
+       location only, no foregroundNotificationConfig), so the typed
+       location-FGS permission would be unused. The GeolocatorLocationService
+       is stripped from the merged manifest below via tools:node="remove". -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <!-- RECEIVE_BOOT_COMPLETED is inert: flutter_background_service is configured
        autoStart:false / autoStartOnBoot:false, so its BootReceiver never
@@ -90,11 +94,18 @@
                 android:name="android.app.actions"
                 android:resource="@xml/actions"/>
         </activity>
-        <!-- Foreground service type for background location updates (Android 10+) -->
+        <!-- Strip geolocator's location foreground service (our redundant copy
+             AND the plugin-injected one) from the merged manifest. Lumina uses
+             geolocator for FOREGROUND (whileInUse) location only — WLED/mDNS
+             discovery + geofence setup while the app is open — and never starts
+             the location FGS (no foregroundNotificationConfig). Removing the
+             service keeps the shipped manifest honest (no location
+             foregroundServiceType) and pairs with dropping
+             FOREGROUND_SERVICE_LOCATION above. Foreground getPositionStream
+             uses platform location APIs directly, not this service. -->
         <service
             android:name="com.baseflow.geolocator.GeolocatorLocationService"
-            android:foregroundServiceType="location"
-            android:exported="false" />
+            tools:node="remove" />
         <!-- Sports Alerts background polling service -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
