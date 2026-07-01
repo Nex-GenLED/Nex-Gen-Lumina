@@ -240,6 +240,12 @@ class NeighborhoodGroup {
   }
 
   bool get isCreator => creatorUid.isNotEmpty;
+
+  /// True when [uid] is this crew's creator. Same check the sync screen uses
+  /// inline (`group.creatorUid == uid`), named so the creator-only invite-code
+  /// rotation gate is unit-testable. Null uid → false.
+  bool isCreatedBy(String? uid) => uid != null && creatorUid == uid;
+
   int get memberCount => memberUids.length;
   bool get hasLocation => latitude != null && longitude != null;
 }

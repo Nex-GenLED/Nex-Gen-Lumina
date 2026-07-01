@@ -1254,6 +1254,69 @@ class _GroupControlsSheet extends ConsumerStatefulWidget {
 }
 
 class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
+  /// True while an invite-code regeneration is in flight (creator action).
+  bool _regeneratingCode = false;
+
+  /// Creator-only: confirm, then rotate the invite code. Overwriting the group
+  /// doc's inviteCode instantly invalidates the old code (join validates by a
+  /// live query on the field; the code is not cached post-join), and the
+  /// watched group stream refreshes the displayed code. No function/rules
+  /// change — [regenerateInviteCode] already exists and is creator-gated
+  /// server-side.
+  Future<void> _confirmAndRegenerate() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A24),
+        title: const Text('Regenerate invite code?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Regenerating the code invalidates the current one. Anyone with the '
+          'old code can no longer join; share the new code with people you '
+          'want to add.',
+          style: TextStyle(color: Colors.grey.shade300),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey.shade400)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Regenerate', style: TextStyle(color: Colors.cyan)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _regeneratingCode = true);
+    final newCode = await ref
+        .read(neighborhoodNotifierProvider.notifier)
+        .regenerateInviteCode();
+    if (!mounted) return;
+    setState(() => _regeneratingCode = false);
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (newCode == null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text("Couldn't regenerate the code. Try again."),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } else {
+      // The watched group stream refreshes the code shown in the UI; confirm
+      // the new value here so the creator can share it immediately.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('New invite code: $newCode'),
+          backgroundColor: Colors.green.shade700,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeGroup = ref.watch(activeNeighborhoodProvider);
@@ -1589,6 +1652,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
   }
 
   Widget _buildGroupActions(NeighborhoodGroup group) {
+    // Creator-only gate — same check the sheet uses elsewhere
+    // (group.creatorUid == current uid), via the tested model helper. Only the
+    // creator sees the rotate-code action.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final isCreator = group.isCreatedBy(uid);
+
     return Column(
       children: [
         // Share invite section
@@ -1643,6 +1712,34 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                   ),
                 ),
               ),
+              // Creator-only: rotate the invite code. A leaked code must be
+              // invalidatable (the open-join model's safeguard). Overwriting
+              // the group doc's inviteCode instantly invalidates the old code;
+              // the watched group stream refreshes the code shown above.
+              if (isCreator) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: _regeneratingCode ? null : _confirmAndRegenerate,
+                    icon: _regeneratingCode
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.grey,
+                            ),
+                          )
+                        : Icon(Icons.autorenew,
+                            size: 18, color: Colors.grey.shade400),
+                    label: Text(
+                      _regeneratingCode ? 'Regenerating…' : 'Regenerate code',
+                      style: TextStyle(color: Colors.grey.shade400),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
