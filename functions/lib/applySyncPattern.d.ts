@@ -66,3 +66,32 @@ export declare function buildFanoutCommandDoc(args: {
     initiatorUid: string;
     sessionId: string;
 }): Record<string, unknown>;
+/** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
+export declare const GROUP_CEILING_PER_MIN = 5;
+/** Per-initiator cooldown: minimum ms between one initiator's fanouts. */
+export declare const INITIATOR_COOLDOWN_MS = 18000;
+/** Rolling window for the per-group ceiling. */
+export declare const RATE_WINDOW_MS = 60000;
+interface RateState {
+    windowStarts?: number[];
+    lastByInitiator?: Record<string, number>;
+}
+/**
+ * PURE decision + next-state for the rate limiter. Given the current state and
+ * `nowMs`, decides whether this initiator's fanout is allowed and returns the
+ * state to persist on accept. Exported for unit verification. NOTE: the
+ * `windowStarts`/`lastByInitiator` in the returned value are the trimmed/updated
+ * values the caller writes ONLY when `allowed` — on reject nothing is written.
+ *
+ * Checks (reject on either):
+ *   • per-initiator cooldown — now - lastByInitiator[uid] < INITIATOR_COOLDOWN_MS
+ *   • per-group ceiling      — live windowStarts (last 60s) length >= ceiling
+ * retryAfterMs = ms until the failing constraint next permits a fanout.
+ */
+export declare function evaluateRateLimit(state: RateState, initiatorUid: string, nowMs: number): {
+    allowed: boolean;
+    retryAfterMs: number;
+    windowStarts: number[];
+    lastByInitiator: Record<string, number>;
+};
+export {};

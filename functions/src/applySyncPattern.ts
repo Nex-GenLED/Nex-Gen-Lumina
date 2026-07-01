@@ -159,6 +159,24 @@ export const applySyncPattern = onRequest(
     if (fanout === true && groupId && groupId.length > 0) {
       const fanoutEnabled = await readSyncFanoutEnabled(db);
       if (fanoutEnabled) {
+        // Anti-strobe rate limit (Commit 2). Reserve a slot TRANSACTIONALLY so
+        // the function's concurrent instances serialize on the state doc — a
+        // per-instance in-memory counter would not. On reject nothing is
+        // written (no member docs); the app suppresses its broadcast too.
+        const reservation = await reserveFanoutSlot(
+          db,
+          groupId,
+          initiatorUid,
+          Date.now()
+        );
+        if (!reservation.allowed) {
+          res.status(200).json({
+            ok: false,
+            reason: "rate_limited",
+            retryAfterMs: reservation.retryAfterMs,
+          });
+          return;
+        }
         const fan = await fanoutToCrew(db, {
           groupId,
           initiatorUid,
@@ -441,4 +459,120 @@ async function fanoutToCrew(
       `commands=${commandCount} skipped=${skipped}`
   );
   return { memberCount, commandCount, skipped };
+}
+
+// ─── Slice 1 Commit 2: anti-strobe rate limit ────────────────────────────
+
+/** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
+export const GROUP_CEILING_PER_MIN = 5;
+/** Per-initiator cooldown: minimum ms between one initiator's fanouts. */
+export const INITIATOR_COOLDOWN_MS = 18000;
+/** Rolling window for the per-group ceiling. */
+export const RATE_WINDOW_MS = 60000;
+
+interface RateState {
+  windowStarts?: number[];
+  lastByInitiator?: Record<string, number>;
+}
+
+/**
+ * PURE decision + next-state for the rate limiter. Given the current state and
+ * `nowMs`, decides whether this initiator's fanout is allowed and returns the
+ * state to persist on accept. Exported for unit verification. NOTE: the
+ * `windowStarts`/`lastByInitiator` in the returned value are the trimmed/updated
+ * values the caller writes ONLY when `allowed` — on reject nothing is written.
+ *
+ * Checks (reject on either):
+ *   • per-initiator cooldown — now - lastByInitiator[uid] < INITIATOR_COOLDOWN_MS
+ *   • per-group ceiling      — live windowStarts (last 60s) length >= ceiling
+ * retryAfterMs = ms until the failing constraint next permits a fanout.
+ */
+export function evaluateRateLimit(
+  state: RateState,
+  initiatorUid: string,
+  nowMs: number
+): {
+  allowed: boolean;
+  retryAfterMs: number;
+  windowStarts: number[];
+  lastByInitiator: Record<string, number>;
+} {
+  const cutoff = nowMs - RATE_WINDOW_MS;
+  const trimmed = (state.windowStarts ?? []).filter((t) => t > cutoff);
+  const last = state.lastByInitiator ?? {};
+
+  // Per-initiator cooldown.
+  const lastAt = last[initiatorUid] ?? 0;
+  const sinceLast = nowMs - lastAt;
+  if (sinceLast < INITIATOR_COOLDOWN_MS) {
+    return {
+      allowed: false,
+      retryAfterMs: INITIATOR_COOLDOWN_MS - sinceLast,
+      windowStarts: trimmed,
+      lastByInitiator: last,
+    };
+  }
+
+  // Per-group ceiling.
+  if (trimmed.length >= GROUP_CEILING_PER_MIN) {
+    const earliest = Math.min(...trimmed);
+    const retryAfterMs = Math.max(0, earliest + RATE_WINDOW_MS - nowMs);
+    return { allowed: false, retryAfterMs, windowStarts: trimmed, lastByInitiator: last };
+  }
+
+  // Accept — reserve a slot. Prune lastByInitiator to initiators active within
+  // the cooldown window so the map can't grow unbounded (stale entries can't
+  // cause a rejection anyway).
+  const prunedLast: Record<string, number> = {};
+  for (const [uid, t] of Object.entries(last)) {
+    if (t > nowMs - INITIATOR_COOLDOWN_MS) prunedLast[uid] = t;
+  }
+  prunedLast[initiatorUid] = nowMs;
+
+  return {
+    allowed: true,
+    retryAfterMs: 0,
+    windowStarts: [...trimmed, nowMs],
+    lastByInitiator: prunedLast,
+  };
+}
+
+/**
+ * TRANSACTIONAL check-and-reserve against
+ * neighborhoods/{groupId}/rate_limits/state. Runs inside db.runTransaction so
+ * the function's concurrent instances serialize on this single doc — two calls
+ * that would both pass a naive check can't both commit; Firestore aborts and
+ * retries one against the other's committed state. Single-doc read+write → no
+ * composite index. Admin-SDK only (new subcollection has no client rule →
+ * default-deny for clients).
+ */
+async function reserveFanoutSlot(
+  db: admin.firestore.Firestore,
+  groupId: string,
+  initiatorUid: string,
+  nowMs: number
+): Promise<{ allowed: boolean; retryAfterMs: number }> {
+  const ref = db
+    .collection("neighborhoods")
+    .doc(groupId)
+    .collection("rate_limits")
+    .doc("state");
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const state: RateState = snap.exists ? (snap.data() as RateState) : {};
+    const decision = evaluateRateLimit(state, initiatorUid, nowMs);
+    if (!decision.allowed) {
+      return { allowed: false, retryAfterMs: decision.retryAfterMs };
+    }
+    tx.set(
+      ref,
+      {
+        windowStarts: decision.windowStarts,
+        lastByInitiator: decision.lastByInitiator,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return { allowed: true, retryAfterMs: 0 };
+  });
 }

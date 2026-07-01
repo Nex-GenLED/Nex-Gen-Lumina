@@ -305,27 +305,36 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
   }
 
   /// Broadcasts a sync command to all members.
-  Future<void> broadcastSync(SyncCommand command) async {
+  ///
+  /// Returns the [FanoutResult] when the flag is on (null otherwise) so the UI
+  /// caller can surface a rate-limit "try again" message. Ordering (flag ON):
+  /// fanout FIRST (it enforces the server-side rate limit); on a rate-limited
+  /// reject, fire NOTHING — not even the app-open broadcast — so the two
+  /// delivery paths stay consistent (Commit 2). A plain fanout failure
+  /// (network/500) still falls through to the broadcast so app-open members
+  /// aren't left dark. Flag OFF ⇒ only the broadcast, exactly as today.
+  Future<FanoutResult?> broadcastSync(SyncCommand command) async {
     state = const AsyncValue.loading();
     try {
-      await _service.broadcastSyncCommand(command);
-
-      // Slice 1 (flag-gated, default OFF): ALSO fan out server-side so members
-      // whose app is closed get the command via their bridge. KEEP the
-      // broadcast above (instant for app-open Firestore listeners). An app-open
-      // member with a bridge gets both applies of the IDENTICAL payload —
-      // idempotent, visually a no-op. Flag OFF ⇒ only the broadcast, exactly
-      // as today.
+      FanoutResult? result;
       if (ref.read(syncFanoutEnabledSyncProvider)) {
-        await _service.fanoutAdHocSync(
+        result = await _service.fanoutAdHocSync(
           groupId: command.groupId,
           payload: _buildFanoutPayload(command),
         );
+        if (result.rateLimited) {
+          // Reject = nothing fires: skip the broadcast entirely.
+          state = const AsyncValue.data(null);
+          return result;
+        }
       }
 
+      await _service.broadcastSyncCommand(command);
       state = const AsyncValue.data(null);
+      return result;
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      return null;
     }
   }
 

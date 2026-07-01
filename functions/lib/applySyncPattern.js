@@ -76,9 +76,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applySyncPattern = void 0;
+exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.applySyncPattern = void 0;
 exports.isMemberSkipped = isMemberSkipped;
 exports.buildFanoutCommandDoc = buildFanoutCommandDoc;
+exports.evaluateRateLimit = evaluateRateLimit;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
 exports.applySyncPattern = (0, https_1.onRequest)({ maxInstances: 10, cors: false }, async (req, res) => {
@@ -161,6 +162,19 @@ exports.applySyncPattern = (0, https_1.onRequest)({ maxInstances: 10, cors: fals
     if (fanout === true && groupId && groupId.length > 0) {
         const fanoutEnabled = await readSyncFanoutEnabled(db);
         if (fanoutEnabled) {
+            // Anti-strobe rate limit (Commit 2). Reserve a slot TRANSACTIONALLY so
+            // the function's concurrent instances serialize on the state doc — a
+            // per-instance in-memory counter would not. On reject nothing is
+            // written (no member docs); the app suppresses its broadcast too.
+            const reservation = await reserveFanoutSlot(db, groupId, initiatorUid, Date.now());
+            if (!reservation.allowed) {
+                res.status(200).json({
+                    ok: false,
+                    reason: "rate_limited",
+                    retryAfterMs: reservation.retryAfterMs,
+                });
+                return;
+            }
             const fan = await fanoutToCrew(db, {
                 groupId,
                 initiatorUid,
@@ -383,5 +397,91 @@ async function fanoutToCrew(db, args) {
     console.log(`applySyncPattern FANOUT: group=${args.groupId} members=${memberCount} ` +
         `commands=${commandCount} skipped=${skipped}`);
     return { memberCount, commandCount, skipped };
+}
+// ─── Slice 1 Commit 2: anti-strobe rate limit ────────────────────────────
+/** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
+exports.GROUP_CEILING_PER_MIN = 5;
+/** Per-initiator cooldown: minimum ms between one initiator's fanouts. */
+exports.INITIATOR_COOLDOWN_MS = 18000;
+/** Rolling window for the per-group ceiling. */
+exports.RATE_WINDOW_MS = 60000;
+/**
+ * PURE decision + next-state for the rate limiter. Given the current state and
+ * `nowMs`, decides whether this initiator's fanout is allowed and returns the
+ * state to persist on accept. Exported for unit verification. NOTE: the
+ * `windowStarts`/`lastByInitiator` in the returned value are the trimmed/updated
+ * values the caller writes ONLY when `allowed` — on reject nothing is written.
+ *
+ * Checks (reject on either):
+ *   • per-initiator cooldown — now - lastByInitiator[uid] < INITIATOR_COOLDOWN_MS
+ *   • per-group ceiling      — live windowStarts (last 60s) length >= ceiling
+ * retryAfterMs = ms until the failing constraint next permits a fanout.
+ */
+function evaluateRateLimit(state, initiatorUid, nowMs) {
+    const cutoff = nowMs - exports.RATE_WINDOW_MS;
+    const trimmed = (state.windowStarts ?? []).filter((t) => t > cutoff);
+    const last = state.lastByInitiator ?? {};
+    // Per-initiator cooldown.
+    const lastAt = last[initiatorUid] ?? 0;
+    const sinceLast = nowMs - lastAt;
+    if (sinceLast < exports.INITIATOR_COOLDOWN_MS) {
+        return {
+            allowed: false,
+            retryAfterMs: exports.INITIATOR_COOLDOWN_MS - sinceLast,
+            windowStarts: trimmed,
+            lastByInitiator: last,
+        };
+    }
+    // Per-group ceiling.
+    if (trimmed.length >= exports.GROUP_CEILING_PER_MIN) {
+        const earliest = Math.min(...trimmed);
+        const retryAfterMs = Math.max(0, earliest + exports.RATE_WINDOW_MS - nowMs);
+        return { allowed: false, retryAfterMs, windowStarts: trimmed, lastByInitiator: last };
+    }
+    // Accept — reserve a slot. Prune lastByInitiator to initiators active within
+    // the cooldown window so the map can't grow unbounded (stale entries can't
+    // cause a rejection anyway).
+    const prunedLast = {};
+    for (const [uid, t] of Object.entries(last)) {
+        if (t > nowMs - exports.INITIATOR_COOLDOWN_MS)
+            prunedLast[uid] = t;
+    }
+    prunedLast[initiatorUid] = nowMs;
+    return {
+        allowed: true,
+        retryAfterMs: 0,
+        windowStarts: [...trimmed, nowMs],
+        lastByInitiator: prunedLast,
+    };
+}
+/**
+ * TRANSACTIONAL check-and-reserve against
+ * neighborhoods/{groupId}/rate_limits/state. Runs inside db.runTransaction so
+ * the function's concurrent instances serialize on this single doc — two calls
+ * that would both pass a naive check can't both commit; Firestore aborts and
+ * retries one against the other's committed state. Single-doc read+write → no
+ * composite index. Admin-SDK only (new subcollection has no client rule →
+ * default-deny for clients).
+ */
+async function reserveFanoutSlot(db, groupId, initiatorUid, nowMs) {
+    const ref = db
+        .collection("neighborhoods")
+        .doc(groupId)
+        .collection("rate_limits")
+        .doc("state");
+    return db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const state = snap.exists ? snap.data() : {};
+        const decision = evaluateRateLimit(state, initiatorUid, nowMs);
+        if (!decision.allowed) {
+            return { allowed: false, retryAfterMs: decision.retryAfterMs };
+        }
+        tx.set(ref, {
+            windowStarts: decision.windowStarts,
+            lastByInitiator: decision.lastByInitiator,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return { allowed: true, retryAfterMs: 0 };
+    });
 }
 //# sourceMappingURL=applySyncPattern.js.map

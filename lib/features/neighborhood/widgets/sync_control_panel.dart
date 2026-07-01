@@ -1306,8 +1306,27 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
       }
     }
 
-    ref.read(neighborhoodNotifierProvider.notifier).broadcastSync(command);
+    _dispatchBroadcast(command);
     ref.read(syncEngineActiveProvider.notifier).state = true;
+  }
+
+  /// Await the broadcast so a server-side rate-limit reject (Slice 1 Commit 2)
+  /// can surface a "try again" SnackBar. When the fanout flag is off this
+  /// returns null and nothing extra is shown — behavior is unchanged.
+  Future<void> _dispatchBroadcast(SyncCommand command) async {
+    final result = await ref
+        .read(neighborhoodNotifierProvider.notifier)
+        .broadcastSync(command);
+    if (!mounted) return;
+    if (result != null && result.rateLimited) {
+      final secs = (result.retryAfterMs / 1000).ceil();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hang on — try again in ${secs < 1 ? 1 : secs}s.'),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    }
   }
 
   /// Two-tier stop. Branches on owner identity:

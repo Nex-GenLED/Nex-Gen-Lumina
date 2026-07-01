@@ -11,6 +11,54 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'neighborhood_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
+/// Outcome of a server-side ad-hoc fanout POST (Slice 1 Commit 2).
+///
+/// [rateLimited] is the ONLY state that suppresses the app-open broadcast
+/// (reject = nothing fires). A plain failure ([ok] false, not rate-limited —
+/// network/500/no-auth) lets the broadcast proceed so app-open members aren't
+/// left dark.
+class FanoutResult {
+  final bool ok;
+  final bool rateLimited;
+  final int retryAfterMs;
+
+  const FanoutResult({
+    this.ok = false,
+    this.rateLimited = false,
+    this.retryAfterMs = 0,
+  });
+
+  const FanoutResult.failed()
+      : ok = false,
+        rateLimited = false,
+        retryAfterMs = 0;
+
+  /// PURE parser over the HTTP status + body from applySyncPattern. Exposed
+  /// for testing. 200 + {ok:true} → ok; 200 + {reason:'rate_limited',
+  /// retryAfterMs} → rateLimited; anything else → a plain (non-rate-limited)
+  /// failure so the caller still broadcasts.
+  factory FanoutResult.parse(int statusCode, String body) {
+    if (statusCode != 200) return const FanoutResult(ok: false);
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        if (decoded['ok'] == true) return const FanoutResult(ok: true);
+        if (decoded['reason'] == 'rate_limited') {
+          final ra = decoded['retryAfterMs'];
+          return FanoutResult(
+            ok: false,
+            rateLimited: true,
+            retryAfterMs: ra is num ? ra.toInt() : 0,
+          );
+        }
+      }
+    } catch (_) {
+      // Malformed body → treat as a plain failure (broadcast proceeds).
+    }
+    return const FanoutResult(ok: false);
+  }
+}
+
 /// Service for managing neighborhood sync groups in Firestore.
 class NeighborhoodService {
   final FirebaseFirestore _firestore;
@@ -401,23 +449,23 @@ class NeighborhoodService {
   /// Slice 1 (flag-gated, default OFF): server-side ad-hoc fanout. POSTs the
   /// shared WLED [payload] to the applySyncPattern Cloud Function, which fans
   /// it out to every consenting crew member's own command queue so members
-  /// whose app is closed get it via their bridge. Best-effort: logs and
-  /// swallows failures — the in-app [broadcastSyncCommand] broadcast is the
-  /// primary path and already ran. Result-body parsing (rate-limit "try again")
-  /// arrives in Commit 2.
-  Future<void> fanoutAdHocSync({
+  /// whose app is closed get it via their bridge. Returns a [FanoutResult]:
+  /// the caller suppresses its own broadcast ONLY on [FanoutResult.rateLimited]
+  /// (reject = nothing fires); a plain failure (network/500/no-auth) returns a
+  /// non-rate-limited result so the broadcast still proceeds.
+  Future<FanoutResult> fanoutAdHocSync({
     required String groupId,
     required Map<String, dynamic> payload,
   }) async {
     final uid = _currentUid;
-    if (uid == null) return;
+    if (uid == null) return const FanoutResult.failed();
     String? token;
     try {
       token = await _auth.currentUser?.getIdToken();
     } catch (e) {
       debugPrint('NeighborhoodService.fanoutAdHocSync: idToken failed: $e');
     }
-    if (token == null) return;
+    if (token == null) return const FanoutResult.failed();
     try {
       final resp = await http
           .post(
@@ -439,14 +487,15 @@ class NeighborhoodService {
             }),
           )
           .timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) {
+      final result = FanoutResult.parse(resp.statusCode, resp.body);
+      if (!result.ok) {
         debugPrint('NeighborhoodService.fanoutAdHocSync: '
             'HTTP ${resp.statusCode} ${resp.body}');
-      } else {
-        debugPrint('NeighborhoodService.fanoutAdHocSync: ok ${resp.body}');
       }
+      return result;
     } catch (e) {
       debugPrint('NeighborhoodService.fanoutAdHocSync error: $e');
+      return const FanoutResult.failed();
     }
   }
 
