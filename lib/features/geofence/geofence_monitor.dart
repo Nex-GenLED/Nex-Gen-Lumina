@@ -113,39 +113,13 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
     // Permanently denied — never prompt, user must go to Settings manually
     if (perm == LocationPermission.deniedForever) return;
 
-    // "While in use" — ask once to upgrade to Always for geofencing
+    // "While in use" (foreground) is SUFFICIENT. The geofence runs in the main
+    // app isolate and only functions while the app is active, so we no longer
+    // escalate to background "Always" — ACCESS_BACKGROUND_LOCATION was removed
+    // because the app-closed capability isn't implemented (no location
+    // foreground service is started). Accept foreground and stop; do NOT show a
+    // background-location disclosure or request .always.
     if (perm == LocationPermission.whileInUse) {
-      final alreadyAsked = prefs.getBool(_kGeofencePromptShownKey) ?? false;
-      if (alreadyAsked) return; // Already asked once, accept "while in use"
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Enable Background Location'),
-          content: const Text(
-            'To trigger "Welcome Home" reliably, we need background '
-            'location access so your arrival is detected even when '
-            'the app is closed.\n\n'
-            'You can change this later in Settings.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Not now'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Continue'),
-            ),
-          ],
-        ),
-      );
-
-      await prefs.setBool(_kGeofencePromptShownKey, true);
-      if (confirmed != true) return;
-
-      // On iOS, requesting again after whileInUse escalates to Always
-      perm = await Geolocator.requestPermission();
       return;
     }
 

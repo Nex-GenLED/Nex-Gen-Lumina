@@ -7,12 +7,24 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-  <!-- Background location for geofence monitoring -->
-  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+  <!-- ACCESS_BACKGROUND_LOCATION intentionally NOT declared. The geofence
+       ("Welcome Home") runs in the main app isolate and starts no location
+       foreground service (no AndroidSettings.foregroundNotificationConfig), so
+       it only functions while the app is active — there is no genuine
+       app-closed background-location capability to justify the permission.
+       Geofencing uses foreground (whileInUse) location only. A true app-closed
+       geofence is a later workstream. -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- RECEIVE_BOOT_COMPLETED is inert: flutter_background_service is configured
+       autoStart:false / autoStartOnBoot:false, so its BootReceiver never
+       restarts the service. Strip BOTH our declaration AND the plugin-injected
+       one (flutter_background_service_android) from the merged manifest via
+       tools:node="remove" (same mechanism as AD_ID below) so the Play
+       permission declaration matches actual behavior. -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"
+      tools:node="remove" />
     <!-- Android 13+ nearby Wi‑Fi devices (for discovery without location) -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <!-- Bluetooth permissions for BLE provisioning (Improv) -->
