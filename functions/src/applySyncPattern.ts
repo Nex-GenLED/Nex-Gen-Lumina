@@ -52,6 +52,14 @@ interface ApplyPatternRequest {
   sessionId?: string;
   source?: string;
   controllerIds?: string[];
+  // Slice 1: ONLY the foreground ad-hoc "start" caller sets this true. The
+  // background self-apply callers (sync_event_background_worker,
+  // game_day_autopilot) pass a groupId but NOT fanout, so they keep the
+  // self-only path even when the flag is on — preserving the distributed
+  // self-apply model and the scheduled path's own syncConsent check
+  // (initiateSyncSession). Without this, flipping the flag would make every
+  // background self-apply fan out to the whole crew.
+  fanout?: boolean;
 }
 
 export const applySyncPattern = onRequest(
@@ -93,6 +101,7 @@ export const applySyncPattern = onRequest(
       sessionId,
       source,
       controllerIds,
+      fanout,
     } = envelope;
 
     if (!initiatorUid) {
@@ -133,6 +142,31 @@ export const applySyncPattern = onRequest(
         res.status(403).json({
           error: "Initiator is not a member of the named sync group.",
         });
+        return;
+      }
+    }
+
+    // ── Slice 1: flag-gated ad-hoc fanout (default OFF) ───────────────
+    // ONLY the foreground ad-hoc caller sets fanout:true. When that AND the
+    // flag are on AND a groupId is present, fan the command out to EVERY
+    // consenting crew member's own command queue (admin SDK) so only the
+    // initiator needs the app open. Anything else (no fanout flag = background
+    // self-apply callers, no groupId = Game Day personal mode, flag off) →
+    // falls through to the unchanged self-only path below, byte-identical to
+    // pre-Slice-1. The flag is read ONLY on the fanout-requested path so the
+    // high-frequency background callers incur zero extra read. Membership was
+    // already verified above.
+    if (fanout === true && groupId && groupId.length > 0) {
+      const fanoutEnabled = await readSyncFanoutEnabled(db);
+      if (fanoutEnabled) {
+        const fan = await fanoutToCrew(db, {
+          groupId,
+          initiatorUid,
+          payloadString: JSON.stringify(payload),
+          sessionId: sessionId || "",
+          source: source || "sync_fanout",
+        });
+        res.status(200).json({ ok: true, ...fan });
         return;
       }
     }
@@ -213,3 +247,198 @@ export const applySyncPattern = onRequest(
     res.status(200).json({ ok: true, commandCount: targets.length });
   }
 );
+
+// ─── Slice 1 fanout helpers ──────────────────────────────────────────────
+
+/**
+ * PURE. A crew member in these states is NOT commanded by an ad-hoc fanout
+ * (explicit pause / opt-out). NOTE: `isParticipating` is deliberately NOT
+ * checked here — it is a runtime apply-state that is false on every resting
+ * member, so gating START on it would skip the entire crew and the fanout
+ * would no-op. (isParticipating is a STOP-path gate, a later slice.)
+ * Exported for unit verification.
+ */
+export function isMemberSkipped(participationStatus: unknown): boolean {
+  return participationStatus === "paused" || participationStatus === "optedOut";
+}
+
+/**
+ * PURE. The exact command-doc body the autonomous bridge already executes —
+ * byte-compatible with the self-only path above and the app's
+ * CloudRelayRepository writer. The server `createdAt` timestamp is added by the
+ * caller (it can't be a pure value). Exported for unit verification.
+ */
+export function buildFanoutCommandDoc(args: {
+  payloadString: string;
+  controllerId: string;
+  controllerIp: string;
+  webhookUrl: string | null;
+  source: string;
+  initiatorUid: string;
+  sessionId: string;
+}): Record<string, unknown> {
+  return {
+    type: "applyJson",
+    payload: args.payloadString,
+    controllerId: args.controllerId,
+    controllerIp: args.controllerIp,
+    webhookUrl: args.webhookUrl,
+    status: "pending",
+    source: args.source,
+    initiatorUid: args.initiatorUid,
+    sessionId: args.sessionId,
+  };
+}
+
+/** Read the fanout feature flag (config/sync_fanout.enabled). Default false. */
+async function readSyncFanoutEnabled(
+  db: admin.firestore.Firestore
+): Promise<boolean> {
+  try {
+    const doc = await db.collection("config").doc("sync_fanout").get();
+    return doc.exists && doc.data()?.enabled === true;
+  } catch (err) {
+    console.warn(
+      "applySyncPattern: fanout flag read failed; defaulting OFF",
+      err
+    );
+    return false;
+  }
+}
+
+/**
+ * Resolve a member's controller targets.
+ *   1. Denormalized member.controllerId[] (Slice 1) → write one target per id
+ *      with controllerIp:"" so the bridge self-resolves its paired WLED IP. No
+ *      cross-collection read — this is the denormalization win for the common
+ *      bridge-mode install.
+ *   2. Else LAZY-read users/{uid}/controllers live → {id, ip} (covers existing
+ *      members with no controllerId[] yet, and Webhook-Mode members that need a
+ *      real IP).
+ *   3. Else the legacy single controllerIp on the member doc.
+ *   4. Else a single {id:"", ip:""} — the bridge self-resolves from "".
+ */
+async function resolveMemberTargets(
+  db: admin.firestore.Firestore,
+  memberUid: string,
+  memberData: admin.firestore.DocumentData
+): Promise<{ id: string; ip: string }[]> {
+  const denormIds = Array.isArray(memberData.controllerId)
+    ? (memberData.controllerId as unknown[]).filter(
+        (x) => typeof x === "string" && (x as string).length > 0
+      )
+    : [];
+  if (denormIds.length > 0) {
+    return (denormIds as string[]).map((id) => ({ id, ip: "" }));
+  }
+
+  try {
+    const snap = await db
+      .collection("users")
+      .doc(memberUid)
+      .collection("controllers")
+      .get();
+    const out: { id: string; ip: string }[] = [];
+    snap.forEach((d) =>
+      out.push({ id: d.id, ip: (d.data().ip as string) || "" })
+    );
+    if (out.length > 0) return out;
+  } catch (err) {
+    console.warn(
+      `applySyncPattern: controller read failed for ${memberUid}`,
+      err
+    );
+  }
+
+  const legacyIp = (memberData.controllerIp as string) || "";
+  if (legacyIp.length > 0) return [{ id: "", ip: legacyIp }];
+  return [{ id: "", ip: "" }];
+}
+
+/**
+ * Fan an ad-hoc sync out to every consenting crew member's own command queue.
+ * Membership is read LIVE here (never a cached/passed-in list) so a member who
+ * just left is already gone. Per-member work is isolated with allSettled — one
+ * member's read/write failure must not abort the crew.
+ */
+async function fanoutToCrew(
+  db: admin.firestore.Firestore,
+  args: {
+    groupId: string;
+    initiatorUid: string;
+    payloadString: string;
+    sessionId: string;
+    source: string;
+  }
+): Promise<{ memberCount: number; commandCount: number; skipped: number }> {
+  const membersSnap = await db
+    .collection("neighborhoods")
+    .doc(args.groupId)
+    .collection("members")
+    .get();
+
+  let memberCount = 0;
+  let skipped = 0;
+  const tasks: Promise<number>[] = [];
+
+  membersSnap.forEach((memberDoc) => {
+    const data = memberDoc.data();
+    if (isMemberSkipped(data.participationStatus)) {
+      skipped++;
+      return;
+    }
+    memberCount++;
+    const memberUid = memberDoc.id;
+    tasks.push(
+      (async () => {
+        const targets = await resolveMemberTargets(db, memberUid, data);
+        // Webhook-Mode members need their forward URL; bridge-mode members get
+        // null. One get per member — acceptable at crew scale.
+        let webhookUrl: string | null = null;
+        try {
+          const u = await db.collection("users").doc(memberUid).get();
+          webhookUrl = (u.data()?.webhookUrl as string | undefined) || null;
+        } catch (_) {
+          /* ignore — null webhook = bridge mode */
+        }
+        const commandsRef = db
+          .collection("users")
+          .doc(memberUid)
+          .collection("commands");
+        let written = 0;
+        for (const t of targets) {
+          await commandsRef.add({
+            ...buildFanoutCommandDoc({
+              payloadString: args.payloadString,
+              controllerId: t.id,
+              controllerIp: t.ip,
+              webhookUrl,
+              source: args.source,
+              initiatorUid: args.initiatorUid,
+              sessionId: args.sessionId,
+            }),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          written++;
+        }
+        return written;
+      })()
+    );
+  });
+
+  const results = await Promise.allSettled(tasks);
+  let commandCount = 0;
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      commandCount += r.value;
+    } else {
+      console.warn("applySyncPattern: member fanout failed", r.reason);
+    }
+  }
+
+  console.log(
+    `applySyncPattern FANOUT: group=${args.groupId} members=${memberCount} ` +
+      `commands=${commandCount} skipped=${skipped}`
+  );
+  return { memberCount, commandCount, skipped };
+}

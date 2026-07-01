@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:math' show Random, cos, sin, sqrt, atan2, pi;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,6 +26,31 @@ class NeighborhoodService {
       _firestore.collection('neighborhoods');
 
   String? get _currentUid => _auth.currentUser?.uid;
+
+  /// Cloud Functions base URL (matches sync_event_background_worker.dart).
+  static const String _functionsBaseUrl =
+      'https://us-central1-icrt6menwsv2d8all8oijs021b06s5.cloudfunctions.net';
+
+  /// Read the current user's own controller doc ids from
+  /// users/{uid}/controllers, for denormalizing onto the member doc
+  /// (NeighborhoodMember.controllerId, Slice 1). Best-effort: returns an
+  /// empty list on any failure — the server fanout then falls back to a live
+  /// controllers read, so an empty list never breaks delivery.
+  Future<List<String>> _ownControllerIds() async {
+    final uid = _currentUid;
+    if (uid == null) return const [];
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('controllers')
+          .get();
+      return snap.docs.map((d) => d.id).toList();
+    } catch (e) {
+      debugPrint('NeighborhoodService: _ownControllerIds failed: $e');
+      return const [];
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Group Management
@@ -85,13 +112,16 @@ class NeighborhoodService {
       rethrow;
     }
 
-    // Add creator as first member
+    // Add creator as first member. Denormalize the creator's own controller
+    // ids onto the member doc (Slice 1) so the server fanout can resolve
+    // targets without a per-member cross-collection read.
     final member = NeighborhoodMember(
       oderId: uid,
       displayName: displayName ?? 'My Home',
       positionIndex: 0,
       lastSeen: now,
       isOnline: true,
+      controllerId: await _ownControllerIds(),
     );
     try {
       await docRef.collection('members').doc(uid).set(UserService.sanitizeForFirestore(member.toFirestore()));
@@ -145,13 +175,15 @@ class NeighborhoodService {
     final membersSnapshot = await doc.reference.collection('members').get();
     final positionIndex = membersSnapshot.docs.length;
 
-    // Add member document
+    // Add member document. Denormalize the joiner's own controller ids onto
+    // the member doc (Slice 1) for server-fanout target resolution.
     final member = NeighborhoodMember(
       oderId: uid,
       displayName: displayName ?? 'Home #${positionIndex + 1}',
       positionIndex: positionIndex,
       lastSeen: DateTime.now(),
       isOnline: true,
+      controllerId: await _ownControllerIds(),
     );
     await doc.reference.collection('members').doc(uid).set(member.toFirestore());
 
@@ -349,13 +381,73 @@ class NeighborhoodService {
   // Member Management
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /// Updates a member's configuration.
+  /// Updates a member's configuration. When updating the CURRENT user's own
+  /// member doc, refresh the denormalized controllerId[] from their controllers
+  /// (Slice 1). For another member's doc (creator moderation), leave
+  /// controllerId as-passed — a client can't read another user's controllers,
+  /// and the server fanout falls back to a live read anyway.
   Future<void> updateMember(String groupId, NeighborhoodMember member) async {
+    var toWrite = member;
+    if (member.oderId == _currentUid) {
+      toWrite = member.copyWith(controllerId: await _ownControllerIds());
+    }
     await _neighborhoodsRef
         .doc(groupId)
         .collection('members')
-        .doc(member.oderId)
-        .update(member.toFirestore());
+        .doc(toWrite.oderId)
+        .update(toWrite.toFirestore());
+  }
+
+  /// Slice 1 (flag-gated, default OFF): server-side ad-hoc fanout. POSTs the
+  /// shared WLED [payload] to the applySyncPattern Cloud Function, which fans
+  /// it out to every consenting crew member's own command queue so members
+  /// whose app is closed get it via their bridge. Best-effort: logs and
+  /// swallows failures — the in-app [broadcastSyncCommand] broadcast is the
+  /// primary path and already ran. Result-body parsing (rate-limit "try again")
+  /// arrives in Commit 2.
+  Future<void> fanoutAdHocSync({
+    required String groupId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+    String? token;
+    try {
+      token = await _auth.currentUser?.getIdToken();
+    } catch (e) {
+      debugPrint('NeighborhoodService.fanoutAdHocSync: idToken failed: $e');
+    }
+    if (token == null) return;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$_functionsBaseUrl/applySyncPattern'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'data': {
+                'groupId': groupId,
+                'payload': payload,
+                'initiatorUid': uid,
+                'source': 'sync_fanout',
+                // ONLY the ad-hoc caller sets this — gates server fanout so the
+                // background self-apply callers (which omit it) stay self-only.
+                'fanout': true,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) {
+        debugPrint('NeighborhoodService.fanoutAdHocSync: '
+            'HTTP ${resp.statusCode} ${resp.body}');
+      } else {
+        debugPrint('NeighborhoodService.fanoutAdHocSync: ok ${resp.body}');
+      }
+    } catch (e) {
+      debugPrint('NeighborhoodService.fanoutAdHocSync error: $e');
+    }
   }
 
   /// Updates the position index for a member.

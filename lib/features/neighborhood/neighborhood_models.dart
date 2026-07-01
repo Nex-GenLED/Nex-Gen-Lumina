@@ -299,6 +299,15 @@ class NeighborhoodMember {
   final double rooflineMeters;
   final RooflineDirection rooflineDirection;
   final String? controllerIp;
+
+  /// Denormalized list of this member's controller doc ids (from
+  /// users/{uid}/controllers). Written at member-doc save time so the
+  /// server-side fanout (applySyncPattern, Slice 1) can resolve targets
+  /// without a per-member cross-collection read. Empty when not yet
+  /// denormalized — the function falls back to a live read. Additive:
+  /// existing members deserialize to `const []`.
+  final List<String> controllerId;
+
   final bool isOnline;
   final DateTime lastSeen;
   final MemberParticipationStatus participationStatus;
@@ -327,6 +336,7 @@ class NeighborhoodMember {
     this.rooflineMeters = 15.0,
     this.rooflineDirection = RooflineDirection.leftToRight,
     this.controllerIp,
+    this.controllerId = const [],
     this.isOnline = false,
     required this.lastSeen,
     this.participationStatus = MemberParticipationStatus.active,
@@ -346,6 +356,10 @@ class NeighborhoodMember {
       rooflineMeters: (data['rooflineMeters'] ?? 15.0).toDouble(),
       rooflineDirection: RooflineDirectionExtension.fromJson(data['rooflineDirection']),
       controllerIp: data['controllerIp'],
+      controllerId: data['controllerId'] is List
+          ? List<String>.from(
+              (data['controllerId'] as List).map((e) => e.toString()))
+          : const [],
       isOnline: data['isOnline'] ?? false,
       lastSeen: (data['lastSeen'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participationStatus: MemberParticipationStatusExtension.fromJson(data['participationStatus']),
@@ -365,6 +379,7 @@ class NeighborhoodMember {
       'rooflineMeters': rooflineMeters,
       'rooflineDirection': rooflineDirection.toJson(),
       'controllerIp': controllerIp,
+      'controllerId': controllerId,
       'isOnline': isOnline,
       'lastSeen': Timestamp.fromDate(lastSeen),
       'participationStatus': participationStatus.toJson(),
@@ -383,6 +398,7 @@ class NeighborhoodMember {
     double? rooflineMeters,
     RooflineDirection? rooflineDirection,
     String? controllerIp,
+    List<String>? controllerId,
     bool? isOnline,
     DateTime? lastSeen,
     MemberParticipationStatus? participationStatus,
@@ -399,6 +415,7 @@ class NeighborhoodMember {
       rooflineMeters: rooflineMeters ?? this.rooflineMeters,
       rooflineDirection: rooflineDirection ?? this.rooflineDirection,
       controllerIp: controllerIp ?? this.controllerIp,
+      controllerId: controllerId ?? this.controllerId,
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       participationStatus: participationStatus ?? this.participationStatus,

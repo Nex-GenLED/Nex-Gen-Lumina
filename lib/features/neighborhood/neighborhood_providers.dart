@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
+import 'sync_fanout_feature_flag.dart';
 import 'services/sync_notification_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,10 +309,58 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     try {
       await _service.broadcastSyncCommand(command);
+
+      // Slice 1 (flag-gated, default OFF): ALSO fan out server-side so members
+      // whose app is closed get the command via their bridge. KEEP the
+      // broadcast above (instant for app-open Firestore listeners). An app-open
+      // member with a bridge gets both applies of the IDENTICAL payload —
+      // idempotent, visually a no-op. Flag OFF ⇒ only the broadcast, exactly
+      // as today.
+      if (ref.read(syncFanoutEnabledSyncProvider)) {
+        await _service.fanoutAdHocSync(
+          groupId: command.groupId,
+          payload: _buildFanoutPayload(command),
+        );
+      }
+
       state = const AsyncValue.data(null);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
+  }
+
+  /// Build the shared WLED payload for the server fanout from [command]'s base
+  /// (global) pattern. Mirrors the seg shape the receiving sync engine applies
+  /// (NeighborhoodSyncEngine._executePattern) so an app-open listener and an
+  /// app-closed bridge apply the identical state. Slice 1 sends the full
+  /// payload (no per-member channel scoping — that field is dead schema).
+  Map<String, dynamic> _buildFanoutPayload(SyncCommand command) {
+    final p = command.getPatternForMember('');
+    final colorArrays = p.colors.map((c) {
+      final r = (c >> 16) & 0xFF;
+      final g = (c >> 8) & 0xFF;
+      final b = c & 0xFF;
+      return <int>[r, g, b, 0];
+    }).toList();
+    if (colorArrays.isEmpty) colorArrays.add([255, 255, 255, 0]);
+    while (colorArrays.length < 3) {
+      colorArrays.add([0, 0, 0, 0]);
+    }
+    return {
+      'on': true,
+      'bri': p.brightness,
+      'seg': [
+        {
+          'fx': p.effectId,
+          'sx': p.speed,
+          'ix': p.intensity,
+          'pal': p.pal,
+          'grp': p.grp,
+          'spc': p.spc,
+          'col': colorArrays.take(3).toList(),
+        },
+      ],
+    };
   }
 
   /// Stops the current sync.

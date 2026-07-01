@@ -42,3 +42,27 @@
  *   firebase deploy --only functions:applySyncPattern
  */
 export declare const applySyncPattern: import("firebase-functions/v2/https").HttpsFunction;
+/**
+ * PURE. A crew member in these states is NOT commanded by an ad-hoc fanout
+ * (explicit pause / opt-out). NOTE: `isParticipating` is deliberately NOT
+ * checked here — it is a runtime apply-state that is false on every resting
+ * member, so gating START on it would skip the entire crew and the fanout
+ * would no-op. (isParticipating is a STOP-path gate, a later slice.)
+ * Exported for unit verification.
+ */
+export declare function isMemberSkipped(participationStatus: unknown): boolean;
+/**
+ * PURE. The exact command-doc body the autonomous bridge already executes —
+ * byte-compatible with the self-only path above and the app's
+ * CloudRelayRepository writer. The server `createdAt` timestamp is added by the
+ * caller (it can't be a pure value). Exported for unit verification.
+ */
+export declare function buildFanoutCommandDoc(args: {
+    payloadString: string;
+    controllerId: string;
+    controllerIp: string;
+    webhookUrl: string | null;
+    source: string;
+    initiatorUid: string;
+    sessionId: string;
+}): Record<string, unknown>;
