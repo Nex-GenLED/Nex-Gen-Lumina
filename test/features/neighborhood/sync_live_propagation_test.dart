@@ -29,8 +29,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('resolveAutoActiveGroupId — app-wide active-group resolution', () {
-    test('no groups → keep current (do not clobber a stale id mid-leave)', () {
-      expect(resolveAutoActiveGroupId('g1', const []), 'g1');
+    test('no groups → null (do NOT keep a stale id after a leave — outage '
+        'fix: a stale pointer drove denied command reads that blanked the '
+        'dashboard)', () {
+      expect(resolveAutoActiveGroupId('g1', const []), isNull);
       expect(resolveAutoActiveGroupId(null, const []), isNull);
     });
 
@@ -72,6 +74,16 @@ void main() {
         _group('g2', isActive: false),
       ];
       expect(resolveAutoActiveGroupId(null, groups), isNull);
+    });
+
+    test('stale selection (not in list) + multi-group none active → null, NOT '
+        'the stale id (never auto-activate a non-member group — outage fix)',
+        () {
+      final groups = [
+        _group('g1', isActive: false),
+        _group('g2', isActive: false),
+      ];
+      expect(resolveAutoActiveGroupId('gone', groups), isNull);
     });
   });
 

@@ -70,7 +70,18 @@ final latestSyncCommandProvider = StreamProvider<SyncCommand?>((ref) {
   if (groupId == null) return Stream.value(null);
 
   final service = ref.watch(neighborhoodServiceProvider);
-  return service.watchLatestCommand(groupId);
+  // Defense-in-depth: a denied read (e.g. transiently pointing at a group the
+  // rules gate) or ANY stream error must be INERT to the home screen — never
+  // surface as an AsyncError. Swallow it so the keepalive stays silent ("no
+  // active sync command") instead of throwing / driving a re-subscribe loop
+  // and blanking the dashboard. The real fixes (resolveAutoActiveGroupId never
+  // activating a non-member group + the exists()-based rule) prevent the
+  // permission-denied at the source; this is the net.
+  return service
+      .watchLatestCommand(groupId)
+      .handleError((Object e, StackTrace st) {
+    debugPrint('latestSyncCommandProvider: stream error swallowed (inert): $e');
+  });
 });
 
 /// Current sync timing configuration (user-adjustable).
@@ -87,8 +98,13 @@ final neighborhoodSchedulesProvider = StreamProvider<List<SyncSchedule>>((ref) {
   final groupId = ref.watch(activeNeighborhoodIdProvider);
   if (groupId == null) return Stream.value([]);
 
+  // Sibling gated stream (neighborhoods/{groupId}/schedules) — same
+  // defense-in-depth as latestSyncCommandProvider: a denied/errored read must
+  // be inert (fall back to "no schedules"), never an AsyncError.
   final service = ref.watch(neighborhoodServiceProvider);
-  return service.watchSchedules(groupId);
+  return service.watchSchedules(groupId).handleError((Object e, StackTrace st) {
+    debugPrint('neighborhoodSchedulesProvider: stream error swallowed (inert): $e');
+  });
 });
 
 /// Provider for nearby public groups based on user location.

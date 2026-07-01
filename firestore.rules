@@ -1216,18 +1216,21 @@ service cloud.firestore {
                resource.data.creatorUid == request.auth.uid;
       }
 
-      // Membership check usable in SUBCOLLECTION scope. The resource-based
-      // [isGroupMember] above reads `resource.data.memberUids`; inside a
-      // subcollection rule `resource` is the SUBCOLLECTION doc (which has no
-      // memberUids), so reusing isGroupMember() there would deny EVERY real
-      // member and lock the whole crew out. This variant looks the parent
-      // group up via get() so membership is read from the group doc no matter
-      // which doc the rule is evaluating. memberUids is the authoritative
-      // member list (same source the group create/update rules enforce).
+      // Membership check usable in SUBCOLLECTION scope. Uses the canonical
+      // membership signal — the presence of the caller's members/{uid} doc —
+      // which is created on join (createGroup / joinGroup) and DELETED on leave
+      // (leaveGroup). This is null-safe: unlike the prior
+      // `in get(group).data.memberUids` form, it accesses NO field, so a group
+      // doc with a missing/malformed memberUids can no longer fail the rule
+      // CLOSED and blank an in-crew member's dashboard (the outage this
+      // replaces). exists() bypasses the members read rule and is a single
+      // access call (well under the 10-call limit). Non-members / left members
+      // have no members/{uid} doc → still denied, so the Slice 0 hole stays
+      // closed. `resource` cannot be used here (in a subcollection rule it is
+      // the subcollection doc), hence the explicit path lookup.
       function isGroupMemberLookup() {
         return request.auth != null &&
-               request.auth.uid in
-                 get(/databases/$(database)/documents/neighborhoods/$(groupId)).data.memberUids;
+               exists(/databases/$(database)/documents/neighborhoods/$(groupId)/members/$(request.auth.uid));
       }
 
       // Any authenticated user can read groups so they can:

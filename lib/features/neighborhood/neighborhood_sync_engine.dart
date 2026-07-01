@@ -1012,7 +1012,24 @@ String? resolveAutoActiveGroupId(
   String? currentId,
   List<NeighborhoodGroup> groups,
 ) {
-  if (groups.isEmpty) return currentId;
+  // NEVER auto-activate a group the user isn't a member of. `groups` is the
+  // memberUids-scoped list (userNeighborhoodsProvider); a currentId absent from
+  // it is a stale pointer (a group left/deleted, or a residual selection). The
+  // keepalive keys the command stream off the resolved id, and the rules
+  // correctly DENY reads of a non-member group's commands — a denied read
+  // previously propagated as an AsyncError that blanked the dashboard. So when
+  // the current selection is not a real membership, resolve to null (the
+  // caller then clears the stale pointer) rather than returning it.
+  //
+  //   • no groups            → null (user is in no crews → no active group).
+  //     Previously returned currentId, which kept a stale id alive after a
+  //     leave and drove the denied-read outage.
+  //   • current is a member  → keep it (explicit valid selection respected).
+  //   • any group is active  → target it (auto-tune a receiver to a live sync).
+  //   • exactly one group    → target it.
+  //   • otherwise (ambiguous)→ null (defer to explicit on-screen selection);
+  //     never fall back to a non-member currentId.
+  if (groups.isEmpty) return null;
   if (currentId != null && groups.any((g) => g.id == currentId)) {
     return currentId;
   }
@@ -1020,5 +1037,5 @@ String? resolveAutoActiveGroupId(
     if (g.isActive) return g.id;
   }
   if (groups.length == 1) return groups.first.id;
-  return currentId;
+  return null;
 }
