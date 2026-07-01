@@ -18,6 +18,17 @@ import 'game_schedule_service.dart';
 import 'score_monitor_service.dart';
 
 // ---------------------------------------------------------------------------
+// Kill-switch: the Android foreground service (dataSync FGS) is DISABLED for
+// the current Play release so the app declares no typed foreground-service
+// permission (no Play FGS declaration / demo-video requirement). The
+// background sports/sync watch was already inert in practice (updateControllerIps
+// never wired up), so this removes no working user behavior. Foreground
+// controls (test-fire, in-app sports UI) are unaffected. Flip back to true —
+// and restore FOREGROUND_SERVICE_DATA_SYNC + the BackgroundService <service> in
+// AndroidManifest.xml, then complete the Play FGS declaration — to re-enable.
+const bool kSportsBackgroundServiceEnabled = false;
+
+// ---------------------------------------------------------------------------
 // SharedPreferences key for persisted alert configs
 // ---------------------------------------------------------------------------
 const _kConfigsKey = 'sports_alert_configs';
@@ -34,6 +45,7 @@ const _kForegroundNotificationId = 887733;
 /// The service will auto-start only when explicitly told via
 /// [startSportsService].
 Future<void> initialiseSportsBackgroundService() async {
+  if (!kSportsBackgroundServiceEnabled) return;
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
@@ -57,6 +69,7 @@ Future<void> initialiseSportsBackgroundService() async {
 
 /// Start the background polling service.
 Future<void> startSportsService() async {
+  if (!kSportsBackgroundServiceEnabled) return;
   final service = FlutterBackgroundService();
   final running = await service.isRunning();
   if (!running) {

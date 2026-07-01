@@ -14,13 +14,20 @@
        app-closed background-location capability to justify the permission.
        Geofencing uses foreground (whileInUse) location only. A true app-closed
        geofence is a later workstream. -->
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  <!-- FOREGROUND_SERVICE_LOCATION intentionally NOT declared: geolocator's
-       location foreground service is never started (foreground/whileInUse
-       location only, no foregroundNotificationConfig), so the typed
-       location-FGS permission would be unused. The GeolocatorLocationService
-       is stripped from the merged manifest below via tools:node="remove". -->
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <!-- Foreground services are DISABLED for this release. The only FGS was the
+       sports/sync background watch (flutter_background_service, dataSync type),
+       now gated off in Dart (kSportsBackgroundServiceEnabled=false). Strip BOTH
+       our declarations AND the plugin-injected copies from the merged manifest
+       via tools:node="remove" so the app declares no foreground-service
+       permission and Play requires no FGS declaration / demo video.
+       FOREGROUND_SERVICE_LOCATION was likewise never declared (geolocator uses
+       whileInUse location only). Re-add FOREGROUND_SERVICE +
+       FOREGROUND_SERVICE_DATA_SYNC (and the BackgroundService <service> below)
+       when the background watch is re-enabled. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+      tools:node="remove" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+      tools:node="remove" />
   <!-- RECEIVE_BOOT_COMPLETED is inert: flutter_background_service is configured
        autoStart:false / autoStartOnBoot:false, so its BootReceiver never
        restarts the service. Strip BOTH our declaration AND the plugin-injected
@@ -106,12 +113,13 @@
         <service
             android:name="com.baseflow.geolocator.GeolocatorLocationService"
             tools:node="remove" />
-        <!-- Sports Alerts background polling service -->
+        <!-- Sports/sync background polling service DISABLED for this release —
+             strip our copy AND the plugin-injected one from the merged manifest
+             so no foreground service ships (pairs with the removed
+             FOREGROUND_SERVICE* permissions above). -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false"
-            tools:replace="android:exported" />
+            tools:node="remove" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
