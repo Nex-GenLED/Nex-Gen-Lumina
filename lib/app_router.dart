@@ -33,6 +33,7 @@ import 'package:nexgen_command/features/site/manage_controllers_page.dart';
 import 'package:nexgen_command/features/site/system_management_screen.dart';
 import 'package:nexgen_command/features/site/remote_access_screen.dart';
 import 'package:nexgen_command/features/site/bridge_setup_screen.dart';
+import 'package:nexgen_command/features/design/refine/refine_roofline_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
@@ -340,6 +341,14 @@ class AppRouter {
         name: 'roofline-editor',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineEditorScreen()),
+      ),
+      // Design Studio Slice 5 — customer boundary refine.
+      GoRoute(
+        path: AppRoutes.rooflineRefine,
+        name: 'roofline-refine',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+            fullscreenDialog: true, child: RefineRooflineScreen()),
       ),
       GoRoute(
         path: AppRoutes.segmentSetup,
@@ -1154,6 +1163,7 @@ class AppRoutes {
   static const String sportsAlerts = '/settings/sports-alerts';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
+  static const String rooflineRefine = '/settings/roofline-refine';
   static const String segmentSetup = '/segment-setup';
   static const String rooflineSetupWizard = '/roofline-setup-wizard';
   static const String currentColors = '/settings/current-colors';

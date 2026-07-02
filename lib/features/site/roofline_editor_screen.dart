@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -76,6 +77,13 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         ),
         title: const Text('Trace Roofline'),
         actions: [
+          // Design Studio Slice 5 — jump to customer boundary refine.
+          if (_currentSegments.isNotEmpty)
+            TextButton.icon(
+              onPressed: () => context.push(AppRoutes.rooflineRefine),
+              icon: const Icon(Icons.tune, size: 18),
+              label: const Text('Refine'),
+            ),
           if (_currentSegments.isNotEmpty)
             TextButton.icon(
               onPressed: () => _editorKey.currentState?.clear(),

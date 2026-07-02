@@ -138,8 +138,8 @@ class SmartPresetsSection extends ConsumerWidget {
               'perfect placement.'),
           backgroundColor: Colors.orange,
           action: SnackBarAction(
-            label: 'Remap',
-            onPressed: () => context.push(AppRoutes.rooflineEditor),
+            label: 'Refine',
+            onPressed: () => context.push(AppRoutes.rooflineRefine),
           ),
         ));
         break;
