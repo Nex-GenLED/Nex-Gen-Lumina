@@ -27,6 +27,7 @@ import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/smart_presets/smart_presets_section.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
@@ -495,6 +496,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildSmartSuggestions(context, ref),
             const SizedBox(height: 16),
             _buildFavoritesSection(context, ref),
+            const SizedBox(height: 16),
+            const SmartPresetsSection(),
             const SizedBox(height: 16),
             _buildTonightCard(context, ref),
           ]),
