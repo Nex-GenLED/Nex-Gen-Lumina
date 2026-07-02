@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/controller_type.dart';
@@ -133,7 +134,7 @@ List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhit
   return [finalR, finalG, finalB, finalW];
 }
 
-class WledService implements WledRepository {
+class WledService implements WledRepository, PerPixelWriter {
   final String baseUrl; // e.g., http://192.168.1.23
   late final bool _simulate;
   bool? _supportsRgbwCache;
@@ -163,6 +164,13 @@ class WledService implements WledRepository {
   /// at the exact shape that would reach the controller. Audit 2026-05-29.
   @visibleForTesting
   Map<String, dynamic>? lastSimulatedSetStatePayload;
+
+  /// Per-pixel (`i`) chunk payloads captured in simulation mode, in the order
+  /// [applyPerPixel] posted them. Tests assert chunk count, ordering, segment
+  /// targeting (no channel fan-out), and canonical nested-`i` shape without an
+  /// HTTP layer. Design Studio Slice 0.
+  @visibleForTesting
+  final List<Map<String, dynamic>> lastSimulatedPerPixelChunks = [];
 
   /// Force simulated savePreset() to return false. Default true.
   /// Used by integration tests covering the "savePreset failure:
@@ -399,6 +407,71 @@ class WledService implements WledRepository {
     final normalized = normalizeWledPayload(payload);
     final expanded = expandForParticipation(normalized, participating);
     return _postJson(expanded);
+  }
+
+  /// Typed per-pixel (`i`) write — Design Studio Slice 0.
+  ///
+  /// DELIBERATELY does NOT route through [applyJson]: per-pixel paints carry
+  /// absolute per-segment targeting and MUST bypass channel filtering /
+  /// participation expansion (which would fan a paint out to every channel).
+  /// Spans are range-compressed and posted as sequential, size-bounded chunks
+  /// via [_postPerPixelChunk] — an UNCHUNKED `HttpClient` POST, since WLED
+  /// 0.15.x drops chunked transfer-encoding on `/json/state`.
+  @override
+  Future<bool> applyPerPixel({
+    int segmentId = 0,
+    required List<PixelSpan> spans,
+    int chunkSize = kDefaultPixelChunkSize,
+  }) {
+    return postPixelSpansChunked(
+      spans: spans,
+      segmentId: segmentId,
+      chunkSize: chunkSize,
+      postChunk: _postPerPixelChunk,
+    );
+  }
+
+  /// Posts a single per-pixel chunk via an unchunked (explicit Content-Length)
+  /// `HttpClient` POST — mirrors [_postConfig]/[savePreset]. Maps WLED's
+  /// oversize rejections (HTTP 413 OR HTTP 400 `{"error":9}` JSON-buffer limit,
+  /// bench-confirmed on 0.15.4) onto [PerPixelChunkResult.payloadTooLarge] so
+  /// the orchestrator can retry at a smaller chunk size.
+  Future<PerPixelChunkResult> _postPerPixelChunk(
+      Map<String, dynamic> payload) async {
+    if (_simulate) {
+      lastSimulatedPerPixelChunks.add(Map<String, dynamic>.from(payload));
+      return PerPixelChunkResult.ok;
+    }
+    try {
+      final body = jsonEncode(payload);
+      final bodyBytes = utf8.encode(body);
+      debugPrint('📤 WLED POST /json/state (per-pixel chunk, ${bodyBytes.length}B)');
+
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(_uri('/json/state'));
+      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      // Explicit Content-Length → unchunked. See _postConfig/savePreset:
+      // WLED 0.15.x drops chunked POSTs. Do NOT swap for http.post.
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final resBody = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return PerPixelChunkResult.ok;
+      }
+      // 413 (Payload Too Large) or 400 (WLED JSON-buffer error:9) → shrink+retry.
+      if (res.statusCode == 413 || res.statusCode == 400) {
+        debugPrint('⚠️ per-pixel chunk too large (${res.statusCode}): $resBody');
+        return PerPixelChunkResult.payloadTooLarge;
+      }
+      debugPrint('❌ per-pixel chunk error ${res.statusCode}: $resBody');
+      return PerPixelChunkResult.failed;
+    } catch (e) {
+      debugPrint('❌ per-pixel chunk exception: $e');
+      return PerPixelChunkResult.failed;
+    }
   }
 
   Future<bool> _postConfig(Map<String, dynamic> data) async {

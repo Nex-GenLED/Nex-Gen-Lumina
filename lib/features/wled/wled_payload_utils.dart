@@ -436,14 +436,12 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       s['col'] = padded;
     }
 
-    // Also validate per-pixel 'i' arrays
+    // Normalize + validate per-pixel 'i' arrays. Canonicalizes the legacy
+    // flat form ([idx,r,g,b,…]) to nested ([idx,[r,g,b,w],…]) so nothing
+    // unvalidated reaches the wire (Design Studio Slice 0).
     final iArray = s['i'];
     if (iArray is List) {
-      for (int j = 0; j < iArray.length; j++) {
-        if (iArray[j] is List) {
-          iArray[j] = validateRgbw(iArray[j] as List, source: 'normalizeWledPayload i[$j]');
-        }
-      }
+      s['i'] = normalizeIArray(iArray, source: 'normalizeWledPayload');
     }
 
     normalizedSegs.add(s);

@@ -56,6 +56,75 @@ List<List<int>> validateRgbwList(List<dynamic> colors, {String? source}) {
   }).toList();
 }
 
+/// Normalizes a WLED per-pixel `i` array to the CANONICAL nested form and
+/// validates every color to 4-channel RGBW.
+///
+/// Canonical form (the only shape any writer should emit — see
+/// `lib/features/wled/per_pixel.dart`):
+///   - single pixel: `index, [r, g, b, w]`
+///   - range:        `start, stop, [r, g, b, w]`  (stop exclusive, per WLED)
+/// i.e. integers are indices/bounds; every color is a nested `List`.
+///
+/// Two inputs are handled so nothing unvalidated can reach the wire:
+///
+///   1. **Nested form** (contains ≥1 `List`): validate each color `List`
+///      in place via [validateRgbw]; leave index/bound integers untouched.
+///      This is the canonical shape and the common case.
+///
+///   2. **Legacy FLAT form** (`[idx, r, g, b, idx, r, g, b, …]`, all bare
+///      ints, length % 4 == 0, no lists): the shape the old
+///      `PatternComposer._generateStaticPayload` emitted. WLED actually
+///      misreads this (treats the r,g,b bytes as further indices), so it
+///      never rendered correctly. **Convert** it to canonical nested
+///      single-pixel entries with W=0.
+///
+/// Anything else with no color `List` (all-ints but not %4, or otherwise
+/// unparseable) is **dropped to `[]`** — fail-safe, matching [validateRgbw]'s
+/// clamp-don't-throw philosophy. A blank segment is preferable to shipping
+/// an unvalidated `i` array that WLED would garble.
+///
+/// Returns a new list; does not mutate [raw].
+List<dynamic> normalizeIArray(List<dynamic> raw, {String? source}) {
+  if (raw.isEmpty) return const <dynamic>[];
+
+  final hasList = raw.any((e) => e is List);
+  if (hasList) {
+    // Canonical / nested form: validate every color list, keep bounds.
+    final out = List<dynamic>.from(raw);
+    for (int j = 0; j < out.length; j++) {
+      if (out[j] is List) {
+        out[j] = validateRgbw(out[j] as List, source: source ?? 'i[$j]');
+      }
+    }
+    return out;
+  }
+
+  // No color lists at all → legacy flat form or unparseable.
+  final allNums = raw.every((e) => e is num);
+  if (allNums && raw.length % 4 == 0) {
+    final out = <dynamic>[];
+    for (int k = 0; k < raw.length; k += 4) {
+      out.add((raw[k] as num).toInt());
+      out.add(validateRgbw(
+        [raw[k + 1], raw[k + 2], raw[k + 3]],
+        source: source ?? 'i(flat)',
+      ));
+    }
+    if (kDebugMode) {
+      debugPrint('⚠️ i-array: converted legacy FLAT form '
+          '(${raw.length ~/ 4} px) → canonical nested'
+          '${source != null ? ' from $source' : ''}');
+    }
+    return out;
+  }
+
+  if (kDebugMode) {
+    debugPrint('⚠️ i-array: unparseable form (len=${raw.length}, no color '
+        'lists) — dropping to []${source != null ? ' from $source' : ''}');
+  }
+  return const <dynamic>[];
+}
+
 /// Ensures every segment in a WLED payload has valid RGBW colors in its `col` field.
 /// Mutates the payload in place and returns it for chaining.
 Map<String, dynamic> ensurePayloadRgbw(Map<String, dynamic> payload, {String? source}) {
@@ -71,14 +140,10 @@ Map<String, dynamic> ensurePayloadRgbw(Map<String, dynamic> payload, {String? so
       s['col'] = validateRgbwList(col, source: source ?? 'payload seg[$i]');
     }
 
-    // Also validate per-pixel 'i' arrays: [index, [r,g,b,w], index, [r,g,b,w], ...]
+    // Normalize + validate per-pixel 'i' arrays (canonicalizes flat→nested).
     final iArray = s['i'];
     if (iArray is List) {
-      for (int j = 0; j < iArray.length; j++) {
-        if (iArray[j] is List) {
-          iArray[j] = validateRgbw(iArray[j] as List, source: source ?? 'payload seg[$i].i[$j]');
-        }
-      }
+      s['i'] = normalizeIArray(iArray, source: source ?? 'payload seg[$i].i');
     }
   }
 

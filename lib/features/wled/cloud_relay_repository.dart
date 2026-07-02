@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -29,7 +30,7 @@ import 'package:nexgen_command/models/remote_command.dart';
 /// 2b. (Webhook Mode) Cloud Function POSTs to user's webhook URL
 /// 3. Command status updated in Firestore
 /// 4. App polls/listens for status update
-class CloudRelayRepository implements WledRepository {
+class CloudRelayRepository implements WledRepository, PerPixelWriter {
   final String userId;
   final String controllerId;
   final String controllerIp;
@@ -370,6 +371,34 @@ class CloudRelayRepository implements WledRepository {
     final normalized = normalizeWledPayload(payload);
     final expanded = expandForParticipation(normalized, participating);
     return _executeBool('applyJson', expanded);
+  }
+
+  /// Typed per-pixel (`i`) write — Design Studio Slice 0, remote path.
+  ///
+  /// Each range-compressed chunk becomes ONE command doc, posted via
+  /// [_executeBool] which awaits the doc to a terminal status BEFORE the next
+  /// chunk is written. That serialization guarantees the bridge executes chunks
+  /// in order (no reordering window). Bypasses channel filtering /
+  /// participation expansion (goes straight to `_executeBool('applyJson', …)`,
+  /// not the public [applyJson]) — a paint carries absolute segment targeting.
+  /// Per-chunk payloads are KB (bounded by [chunkSize]), far under the 1 MiB
+  /// Firestore doc limit. The bridge can't surface a 413/400 back to us, so
+  /// the relay transport never returns [PerPixelChunkResult.payloadTooLarge].
+  @override
+  Future<bool> applyPerPixel({
+    int segmentId = 0,
+    required List<PixelSpan> spans,
+    int chunkSize = kDefaultPixelChunkSize,
+  }) {
+    return postPixelSpansChunked(
+      spans: spans,
+      segmentId: segmentId,
+      chunkSize: chunkSize,
+      postChunk: (payload) async {
+        final ok = await _executeBool('applyJson', payload);
+        return ok ? PerPixelChunkResult.ok : PerPixelChunkResult.failed;
+      },
+    );
   }
 
   @override
