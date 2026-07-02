@@ -212,6 +212,28 @@ service cloud.firestore {
         // Users can delete their controllers. Any authenticated user is
         // allowed so the installer can clean up duplicates during setup.
         allow delete: if isOwner(userId) || request.auth != null;
+
+        // Design Studio semantic pixel map (Slice 1) — one doc per channel at
+        // /users/{userId}/controllers/{controllerId}/pixelMap/{channelId}.
+        //
+        // SECURITY (LOCKED — do not soften): read is OWNER-ONLY; writes accept
+        // the owner OR a staff (installer/salesperson) session whose dealerCode
+        // claim matches the customer's dealer_code. mintStaffToken puts
+        // role+dealerCode on request.auth.token via signInWithCustomToken
+        // (installer_providers.dart:192), so hasStaffClaim is genuinely
+        // exercised for installer wizard / impersonation writes; the customer's
+        // dealer_code is read from the parent /users/{userId} doc (stamped at
+        // install time). NO `request.auth != null` fallback — that broad
+        // pattern caused the neighborhoods outage class and is banned for new
+        // rules. (Slice-1 writes are all owner writes, covered by isOwner; the
+        // hasStaffClaim branch is for the Slice-2 installer capture path.)
+        match /pixelMap/{channelId} {
+          allow read: if isOwner(userId);
+          allow create, update, delete: if isOwner(userId)
+            || hasStaffClaim(
+                 get(/databases/$(database)/documents/users/$(userId))
+                   .data.get('dealer_code', ''));
+        }
       }
 
       // NOTE: Schedules are stored as an array field on the /users/{userId}
