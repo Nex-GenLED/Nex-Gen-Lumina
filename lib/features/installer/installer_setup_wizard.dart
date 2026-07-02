@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/installer/screens/customer_info_screen.d
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
 import 'package:nexgen_command/features/installer/screens/connection_method_screen.dart';
 import 'package:nexgen_command/features/installer/screens/hardware_config_step.dart';
+import 'package:nexgen_command/features/installer/screens/map_roofline_step.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
 import 'package:nexgen_command/features/installer/screens/commercial_brand_setup_step.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
@@ -45,6 +46,8 @@ InstallerWizardStep nextWizardStep(InstallerWizardStep step) {
     case InstallerWizardStep.zoneConfiguration:
       return InstallerWizardStep.hardwareConfig;
     case InstallerWizardStep.hardwareConfig:
+      return InstallerWizardStep.mapRoofline;
+    case InstallerWizardStep.mapRoofline:
       return InstallerWizardStep.brandSetup;
     case InstallerWizardStep.brandSetup:
       return InstallerWizardStep.handoff;
@@ -69,10 +72,101 @@ InstallerWizardStep prevWizardStep(InstallerWizardStep step) {
       return InstallerWizardStep.connectionMethod;
     case InstallerWizardStep.hardwareConfig:
       return InstallerWizardStep.zoneConfiguration;
-    case InstallerWizardStep.brandSetup:
+    case InstallerWizardStep.mapRoofline:
       return InstallerWizardStep.hardwareConfig;
+    case InstallerWizardStep.brandSetup:
+      return InstallerWizardStep.mapRoofline;
     case InstallerWizardStep.handoff:
       return InstallerWizardStep.brandSetup;
+  }
+}
+
+/// Copies controller documents added during the installer wizard from the
+/// installer/staff UID to the customer UID, then deletes the originals — with
+/// **each controller's `pixelMap/*` subcollection carried along** (Design
+/// Studio Slice 2: a wizard-captured roofline map MUST arrive under the
+/// customer uid; the parent controller doc copy does NOT carry subcollections).
+/// One batch for atomicity.
+///
+/// Only controllers whose ids are in [controllerIds] migrate; empty →
+/// ALL (legacy safety fallback). No-op when [fromUid] is null/empty or equals
+/// [toUid]. Non-throwing — a failure is logged and swallowed so handoff still
+/// completes.
+///
+/// Extracted as a top-level function (injectable [firestore]) so the migration
+/// — the slice's integrity guarantee — is unit-testable against a fake.
+@visibleForTesting
+Future<void> migrateInstallerControllersToCustomer({
+  required FirebaseFirestore firestore,
+  required String? fromUid,
+  required String toUid,
+  required Set<String> controllerIds,
+}) async {
+  if (fromUid == null || fromUid.isEmpty) {
+    debugPrint('Installer: skipping controller migration — no source UID');
+    return;
+  }
+  if (fromUid == toUid) {
+    debugPrint('Installer: skipping controller migration — same UID');
+    return;
+  }
+  try {
+    final sourceCol =
+        firestore.collection('users').doc(fromUid).collection('controllers');
+    final destCol =
+        firestore.collection('users').doc(toUid).collection('controllers');
+
+    final snapshot = await sourceCol.get();
+    if (snapshot.docs.isEmpty) {
+      debugPrint('Installer: no controllers to migrate from $fromUid');
+      return;
+    }
+
+    // Only migrate controllers from this installation session, so an admin's
+    // pre-existing controllers aren't moved to the customer.
+    final docsToMigrate = controllerIds.isEmpty
+        ? snapshot.docs
+        : snapshot.docs.where((d) => controllerIds.contains(d.id)).toList();
+
+    if (docsToMigrate.isEmpty) {
+      debugPrint('Installer: no matching controllers to migrate '
+          '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
+      return;
+    }
+
+    // Read each controller's pixelMap subcollection BEFORE the batch (reads
+    // can't live inside a WriteBatch).
+    final pixelMapByController = <String, QuerySnapshot<Map<String, dynamic>>>{};
+    for (final doc in docsToMigrate) {
+      pixelMapByController[doc.id] =
+          await sourceCol.doc(doc.id).collection('pixelMap').get();
+    }
+
+    final batch = firestore.batch();
+    int pixelMapDocs = 0;
+    for (final doc in docsToMigrate) {
+      batch.set(destCol.doc(doc.id), doc.data());
+      batch.delete(sourceCol.doc(doc.id));
+
+      final pm = pixelMapByController[doc.id];
+      if (pm != null) {
+        for (final ch in pm.docs) {
+          batch.set(
+            destCol.doc(doc.id).collection('pixelMap').doc(ch.id),
+            ch.data(),
+          );
+          batch.delete(
+            sourceCol.doc(doc.id).collection('pixelMap').doc(ch.id),
+          );
+          pixelMapDocs++;
+        }
+      }
+    }
+    await batch.commit();
+    debugPrint('Installer: migrated ${docsToMigrate.length} controller(s) '
+        '($pixelMapDocs pixelMap doc(s)) from $fromUid to $toUid');
+  } catch (e) {
+    debugPrint('Installer: controller migration failed (non-blocking): $e');
   }
 }
 
@@ -512,6 +606,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           onBack: () => _goToStep(prevWizardStep(step)),
           onNext: () => _goToStep(nextWizardStep(step)),
         );
+      case InstallerWizardStep.mapRoofline:
+        return MapRooflineStep(
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
       case InstallerWizardStep.brandSetup:
         // Auto-advance for residential — the brand-setup step is a
         // commercial-only insertion that must be transparent for the
@@ -560,71 +659,20 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
-  /// Copies controller documents that were added during the installer wizard
-  /// from the installer's UID to the customer's UID, then deletes the
-  /// originals. Uses a batch write for atomicity.
-  ///
-  /// Only controllers whose document IDs are in [controllerIds] are migrated.
-  /// If [controllerIds] is empty, ALL controllers are migrated (legacy
-  /// fallback for safety).
-  ///
-  /// A failure here is non-blocking — the handoff still completes, but the
-  /// customer won't see their controllers until they're re-added manually.
+  /// Thin instance wrapper around [migrateInstallerControllersToCustomer] using
+  /// the live Firestore instance. A failure here is non-blocking — the handoff
+  /// still completes.
   Future<void> _migrateControllersToCustomer(
     String? fromUid,
     String toUid,
     Set<String> controllerIds,
-  ) async {
-    if (fromUid == null || fromUid.isEmpty) {
-      debugPrint('Installer: skipping controller migration — no source UID');
-      return;
-    }
-    if (fromUid == toUid) {
-      debugPrint('Installer: skipping controller migration — same UID');
-      return;
-    }
-    try {
-      final sourceCol = FirebaseFirestore.instance
-          .collection('users')
-          .doc(fromUid)
-          .collection('controllers');
-      final destCol = FirebaseFirestore.instance
-          .collection('users')
-          .doc(toUid)
-          .collection('controllers');
-
-      final snapshot = await sourceCol.get();
-      if (snapshot.docs.isEmpty) {
-        debugPrint('Installer: no controllers to migrate from $fromUid');
-        return;
-      }
-
-      // Only migrate controllers that belong to this installation session.
-      // This prevents the admin's own pre-existing controllers from being
-      // moved to the customer's account.
-      final docsToMigrate = controllerIds.isEmpty
-          ? snapshot.docs
-          : snapshot.docs.where((d) => controllerIds.contains(d.id)).toList();
-
-      if (docsToMigrate.isEmpty) {
-        debugPrint('Installer: no matching controllers to migrate '
-            '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
-        return;
-      }
-
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in docsToMigrate) {
-        // Copy to customer UID with the same doc ID
-        batch.set(destCol.doc(doc.id), doc.data());
-        // Delete from installer/anonymous UID
-        batch.delete(sourceCol.doc(doc.id));
-      }
-      await batch.commit();
-      debugPrint('Installer: migrated ${docsToMigrate.length} controller(s) '
-          'from $fromUid to $toUid');
-    } catch (e) {
-      debugPrint('Installer: controller migration failed (non-blocking): $e');
-    }
+  ) {
+    return migrateInstallerControllersToCustomer(
+      firestore: FirebaseFirestore.instance,
+      fromUid: fromUid,
+      toUid: toUid,
+      controllerIds: controllerIds,
+    );
   }
 
   Future<void> _completeSetup() async {
@@ -1394,6 +1442,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return _StepInfo('Zone Configuration', 'Zones');
       case InstallerWizardStep.hardwareConfig:
         return _StepInfo('Hardware Config', 'Hardware');
+      case InstallerWizardStep.mapRoofline:
+        return _StepInfo('Map Roofline', 'Map');
       case InstallerWizardStep.brandSetup:
         return _StepInfo('Brand Setup', 'Brand');
       case InstallerWizardStep.handoff:

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
 import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 
 /// Session timeout duration (30 minutes of inactivity)
@@ -442,6 +443,12 @@ enum InstallerWizardStep {
   connectionMethod,
   zoneConfiguration,
   hardwareConfig,
+  // Design Studio Slice 2: pixel-walk roofline mapping. Positioned right after
+  // hardwareConfig, where per-channel bus.len counts are authoritative. Always
+  // SKIPPABLE ("Map later") — an install is never blocked by mapping. Old
+  // drafts with currentStepIndex 5/6 (brandSetup/handoff) now resolve to
+  // mapRoofline/brandSetup; harmless because mapRoofline is skippable.
+  mapRoofline,
   brandSetup,
   handoff,
 }
@@ -746,4 +753,5 @@ void resetInstallerWizardState(WidgetRef ref) {
   ref.read(installerConnectionMethodsProvider.notifier).state = const {};
   ref.read(installerConnectionMethodSkippedProvider.notifier).state =
       const {};
+  ref.read(rooflineCaptureProvider.notifier).reset();
 }

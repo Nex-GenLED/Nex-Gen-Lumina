@@ -128,8 +128,10 @@ class DraftMetadata {
       case 4:
         return 'Hardware Config';
       case 5:
-        return 'Brand Setup';
+        return 'Map Roofline';
       case 6:
+        return 'Brand Setup';
+      case 7:
         return 'Handoff';
       default:
         return 'Step ${stepIndex + 1}';

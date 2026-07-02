@@ -42,4 +42,17 @@ void main() {
       );
     },
   );
+
+  // Design Studio Slice 2: mapRoofline sits between hardwareConfig and
+  // brandSetup (counts are authoritative right after hardwareConfig).
+  test('mapRoofline sits between hardwareConfig and brandSetup', () {
+    expect(nextWizardStep(InstallerWizardStep.hardwareConfig),
+        InstallerWizardStep.mapRoofline);
+    expect(nextWizardStep(InstallerWizardStep.mapRoofline),
+        InstallerWizardStep.brandSetup);
+    expect(prevWizardStep(InstallerWizardStep.mapRoofline),
+        InstallerWizardStep.hardwareConfig);
+    expect(prevWizardStep(InstallerWizardStep.brandSetup),
+        InstallerWizardStep.mapRoofline);
+  });
 }
