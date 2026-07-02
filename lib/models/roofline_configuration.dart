@@ -34,6 +34,12 @@ class RooflineConfiguration {
   /// but can be overridden when the user adds channels before tracing.
   final int totalChannelCount;
 
+  /// Firestore doc id of the controller this map belongs to (Design Studio
+  /// Slice 1). Empty for legacy per-user configs and demo configs. Set by
+  /// [aggregatePixelMapChannelsToConfig] when loading the per-controller map.
+  /// In-memory identity only — not serialized into the legacy `toJson`.
+  final String controllerId;
+
   const RooflineConfiguration({
     required this.id,
     required this.name,
@@ -42,6 +48,7 @@ class RooflineConfiguration {
     required this.updatedAt,
     this.photoPath,
     this.totalChannelCount = 1,
+    this.controllerId = '',
   });
 
   /// Total number of pixels across all segments
@@ -237,6 +244,26 @@ class RooflineConfiguration {
     return totalPixelCount == devicePixelCount;
   }
 
+  /// Per-channel validation against live device bus lengths (Design Studio
+  /// Slice 1). [liveCountsByChannel] maps channelIndex → current
+  /// `WledLedBus.len`. Returns channelIndex → `true` when this channel's
+  /// mapped segment sum matches the live count (or the live count is unknown),
+  /// `false` when they diverge (the map is STALE for that channel — the
+  /// roofline changed and needs a remap).
+  Map<int, bool> validateChannelsAgainstDevice(
+    Map<int, int> liveCountsByChannel,
+  ) {
+    final result = <int, bool>{};
+    for (final ch in allChannelIndices) {
+      final mapped =
+          segmentsForChannel(ch).fold(0, (acc, seg) => acc + seg.pixelCount);
+      final live = liveCountsByChannel[ch];
+      // Unknown live count (device unreachable) → not provably stale → valid.
+      result[ch] = live == null ? true : mapped == live;
+    }
+    return result;
+  }
+
   /// Recalculate start pixels for all segments based on their order.
   /// Returns a new configuration with updated start pixels.
   RooflineConfiguration recalculateStartPixels() {
@@ -300,6 +327,7 @@ class RooflineConfiguration {
     String? photoPath,
     bool clearPhotoPath = false,
     int? totalChannelCount,
+    String? controllerId,
   }) {
     return RooflineConfiguration(
       id: id ?? this.id,
@@ -309,6 +337,7 @@ class RooflineConfiguration {
       updatedAt: updatedAt ?? DateTime.now(),
       photoPath: clearPhotoPath ? null : (photoPath ?? this.photoPath),
       totalChannelCount: totalChannelCount ?? this.totalChannelCount,
+      controllerId: controllerId ?? this.controllerId,
     );
   }
 
