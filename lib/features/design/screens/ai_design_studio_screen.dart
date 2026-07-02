@@ -3,14 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
+import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
 import 'package:nexgen_command/features/design/widgets/ai_understanding_panel.dart';
 import 'package:nexgen_command/features/design/widgets/clarification_dialog.dart';
-import 'package:nexgen_command/features/design/widgets/live_preview_canvas.dart';
 import 'package:nexgen_command/features/design/widgets/voice_input_button.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
+
+/// Which authoring surface the Design Studio is showing (Slice 4).
+enum _StudioMode { ai, manual }
 
 /// AI-first Design Studio screen.
 ///
@@ -29,6 +35,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   bool _showManualControls = false;
   bool _isSaving = false;
   bool _isApplying = false;
+  _StudioMode _mode = _StudioMode.ai;
 
   @override
   void dispose() {
@@ -44,7 +51,6 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     final isClarifying = ref.watch(isClarifyingProvider);
     final patternReady = ref.watch(patternReadyProvider);
     final intent = ref.watch(currentDesignIntentProvider);
-    final livePreviewEnabled = ref.watch(livePreviewEnabledProvider);
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -61,14 +67,16 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
         bottom: false,
         child: Padding(
           padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-          child: Column(
+          child: _mode == _StudioMode.manual
+              ? const ManualDesignEditor()
+              : Column(
             children: [
-              // Live preview canvas
+              // Unified preview (Slice 4 1b) — the SAME house-photo overlay
+              // both modes render on, fed the AI ComposedPattern as a per-LED
+              // frame. Falls back to a strip only when there's no trace/photo.
               Expanded(
                 flex: 3,
-                child: LivePreviewCanvas(
-                  enabled: livePreviewEnabled,
-                ),
+                child: DesignPreview(frame: _aiFrame(), height: double.infinity),
               ),
 
               // Understanding panel (shows what we understood)
@@ -108,6 +116,23 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     );
   }
 
+  /// Builds the AI ComposedPattern's global color groups into the mode-agnostic
+  /// per-LED frame the unified [DesignPreview] renders (Slice 4 1b).
+  DesignFrame _aiFrame() {
+    final composed = ref.watch(composedPatternProvider);
+    if (composed == null) return const {};
+    final channels = ref.watch(deviceChannelsProvider);
+    int fallback = 0;
+    for (final g in composed.colorGroups) {
+      if (g.endLed + 1 > fallback) fallback = g.endLed + 1;
+    }
+    return frameFromGlobalGroups(
+      groups: composed.colorGroups,
+      channels: channels,
+      fallbackLength: fallback,
+    );
+  }
+
   PreferredSizeWidget _buildAppBar(BuildContext context) {
     final livePreviewEnabled = ref.watch(livePreviewEnabledProvider);
 
@@ -118,11 +143,18 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
         icon: const Icon(Icons.arrow_back, color: Colors.white),
         onPressed: () => Navigator.of(context).pop(),
       ),
-      title: const Text(
-        'Design Studio',
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
+      title: SegmentedButton<_StudioMode>(
+        segments: const [
+          ButtonSegment(value: _StudioMode.ai, label: Text('AI'), icon: Icon(Icons.auto_awesome, size: 16)),
+          ButtonSegment(value: _StudioMode.manual, label: Text('Manual'), icon: Icon(Icons.brush, size: 16)),
+        ],
+        selected: {_mode},
+        showSelectedIcon: false,
+        onSelectionChanged: (s) => setState(() => _mode = s.first),
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          textStyle: WidgetStatePropertyAll(
+              const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
         ),
       ),
       actions: [
