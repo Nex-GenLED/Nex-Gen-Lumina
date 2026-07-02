@@ -19,11 +19,26 @@ class SegmentPathData {
   /// Optional per-segment color override (null = use channel color).
   final Color? overrideColor;
 
+  /// Real LED count on this segment (Design Studio Slice 4 real-index mode).
+  /// When set with [ledColors], the painter places EXACTLY this many dots
+  /// keyed to real LED indices (not path-length-distributed virtual LEDs).
+  final int? pixelCount;
+
+  /// Explicit per-LED colors, length == [pixelCount] (real-index mode).
+  final List<Color>? ledColors;
+
+  /// Subtle feature-underlay tint (corner/peak) drawn beneath the dots so the
+  /// house photo shows both the pixels and their architectural meaning.
+  final Color? featureTint;
+
   const SegmentPathData({
     required this.points,
     required this.channelIndex,
     this.isConnectedToPrevious = false,
     this.overrideColor,
+    this.pixelCount,
+    this.ledColors,
+    this.featureTint,
   });
 }
 
@@ -83,6 +98,13 @@ class RooflineLightPainter extends CustomPainter {
   /// rendering when null.
   final List<SegmentPathData>? segmentPaths;
 
+  /// Design Studio Slice 4 real-LED-index mode. When true, segments that carry
+  /// [SegmentPathData.pixelCount] + [SegmentPathData.ledColors] render exactly
+  /// pixelCount dots keyed to real LED indices with explicit per-LED colors
+  /// (bypassing the effect painters). Segments without those fields fall back
+  /// to normal rendering.
+  final bool realIndexMode;
+
   RooflineLightPainter({
     required this.colors,
     this.animationPhase = 0.0,
@@ -101,6 +123,7 @@ class RooflineLightPainter extends CustomPainter {
     this.spacing = 0,
     this.reverse = false,
     this.segmentPaths,
+    this.realIndexMode = false,
   });
 
   @override
@@ -128,6 +151,16 @@ class RooflineLightPainter extends CustomPainter {
         final canvasPoints = normalizedPoints
             .map((p) => Offset(p.dx * size.width, p.dy * size.height))
             .toList();
+
+        // Real-index mode: place exactly pixelCount dots with explicit colors.
+        if (realIndexMode &&
+            seg.pixelCount != null &&
+            seg.pixelCount! > 0 &&
+            seg.ledColors != null) {
+          _paintExplicitColors(canvas, canvasPoints, seg.pixelCount!,
+              seg.ledColors!, brightnessFactor, seg.featureTint);
+          continue;
+        }
 
         // Use override color if present, otherwise use channel colors
         final segColors = seg.overrideColor != null
@@ -241,6 +274,50 @@ class RooflineLightPainter extends CustomPainter {
       case EffectCategory.morphing:
         _paintMorphingPath(canvas, ledPositions, colors, brightness);
         break;
+    }
+  }
+
+  /// Real-index render (Slice 4): places EXACTLY [pixelCount] dots along the
+  /// segment's polyline, each drawn with its explicit color from [ledColors].
+  /// Optionally lays a faint [featureTint] stroke underneath (corner/peak
+  /// underlay) so the meaning of the pixels reads on the photo. Reuses the
+  /// existing position walker + [_drawLedDot] — no effect dispatch.
+  void _paintExplicitColors(
+    Canvas canvas,
+    List<Offset> points,
+    int pixelCount,
+    List<Color> ledColors,
+    double brightness,
+    Color? featureTint,
+  ) {
+    if (points.length < 2 || pixelCount <= 0) return;
+
+    double totalLength = 0;
+    for (int i = 1; i < points.length; i++) {
+      totalLength += (points[i] - points[i - 1]).distance;
+    }
+
+    // Feature underlay: a soft tinted stroke beneath the dots.
+    if (featureTint != null) {
+      final path = Path()..moveTo(points.first.dx, points.first.dy);
+      for (int i = 1; i < points.length; i++) {
+        path.lineTo(points[i].dx, points[i].dy);
+      }
+      final tintPaint = Paint()
+        ..color = featureTint.withValues(alpha: 0.18)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 10.0
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      canvas.drawPath(path, tintPaint);
+    }
+
+    var positions = _getLedPositionsAlongPath(points, totalLength, pixelCount);
+    if (reverse) positions = positions.reversed.toList();
+
+    for (int i = 0; i < pixelCount && i < positions.length; i++) {
+      final color = i < ledColors.length ? ledColors[i] : backgroundColor;
+      _drawLedDot(canvas, positions[i], color, brightness, radius: 2.6);
     }
   }
 
@@ -748,6 +825,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.colorGroupSize != colorGroupSize ||
         oldDelegate.spacing != spacing ||
         oldDelegate.reverse != reverse ||
-        oldDelegate.segmentPaths != segmentPaths;
+        oldDelegate.segmentPaths != segmentPaths ||
+        oldDelegate.realIndexMode != realIndexMode;
   }
 }

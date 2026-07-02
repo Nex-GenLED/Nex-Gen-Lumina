@@ -631,6 +631,24 @@ final saveComposedDesignProvider = Provider<Future<String?> Function({String? na
   };
 });
 
+/// The AI studio's current [ComposedPattern] built into an in-memory
+/// [CustomDesign] (same derivation as [saveComposedDesignProvider], WITHOUT
+/// writing to Firestore) so "Apply to Lights" can apply it directly through the
+/// shared per-pixel spine (Design Studio Slice 4 / #86). Null when there's no
+/// composed pattern.
+final composedDesignForApplyProvider = Provider<CustomDesign?>((ref) {
+  final pattern = ref.watch(composedPatternProvider);
+  if (pattern == null) return null;
+  final user = ref.read(authStateProvider).valueOrNull;
+  final segments =
+      ref.read(zoneSegmentsProvider).valueOrNull ?? const <WledSegment>[];
+  return customDesignFromComposedPattern(
+    pattern: pattern,
+    segments: segments,
+    ownerId: user?.uid ?? '',
+  );
+});
+
 /// Duplicate an existing design
 final duplicateDesignProvider = Provider<Future<String?> Function(CustomDesign design, String newName)>((ref) {
   return (design, newName) async {

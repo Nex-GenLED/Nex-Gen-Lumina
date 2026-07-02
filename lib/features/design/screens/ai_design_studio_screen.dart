@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
@@ -27,6 +28,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   final _focusNode = FocusNode();
   bool _showManualControls = false;
   bool _isSaving = false;
+  bool _isApplying = false;
 
   @override
   void dispose() {
@@ -302,13 +304,26 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
           ),
           const SizedBox(width: 12),
 
-          // Apply to lights button — disabled pending #86 firmware-gated apply
+          // Apply to Lights — #86 ENABLED (Design Studio Slice 4). Routes the
+          // composed design through the shared per-pixel spine
+          // (applyCustomDesignToLights): per-channel `i` spans with rgbToRgbw,
+          // multi-bus-correct targeting, chunked transport — the three
+          // firmware-fidelity concerns from the old disable comment resolved.
           Expanded(
             flex: 2,
             child: ElevatedButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.lightbulb),
-              label: const Text('Apply to Lights (coming soon)'),
+              onPressed: _isApplying ? null : _handleApplyToLights,
+              icon: _isApplying
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.black54),
+                      ),
+                    )
+                  : const Icon(Icons.lightbulb),
+              label: Text(_isApplying ? 'Applying…' : 'Apply to Lights'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NexGenPalette.cyan,
                 foregroundColor: Colors.black,
@@ -518,11 +533,55 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     }
   }
 
-  // _handleApplyToLights intentionally NOT implemented. Apply is firmware-
-  // gated — see the comment in _buildActionButtons. The "Apply to Lights"
-  // button stays disabled (onPressed: null) until the composer payload's
-  // three hardware-fidelity issues are verified on a real controller. That is
-  // the remaining #86 sub-task and ships in a separate prompt.
+  /// #86 apply — builds the current ComposedPattern into an in-memory
+  /// CustomDesign and applies it through the SHARED per-pixel spine (the same
+  /// [applyCustomDesignToLights] the manual editor's "Apply to Lights" uses).
+  Future<void> _handleApplyToLights() async {
+    if (_isApplying) return;
+    final design = ref.read(composedDesignForApplyProvider);
+    if (design == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Describe a design first, then apply it.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
+    }
+    setState(() => _isApplying = true);
+    try {
+      final result = await applyCustomDesignToLights(ref, design);
+      if (!mounted) return;
+      final (msg, color) = switch (result) {
+        DesignApplyResult.applied ||
+        DesignApplyResult.staleApplied =>
+          ('Applied to your lights', NexGenPalette.cyan),
+        DesignApplyResult.noMap => (
+            'This design has no lit pixels to apply.',
+            Colors.orange.shade800
+          ),
+        DesignApplyResult.error => (
+            "Couldn't reach your lights. Check the connection.",
+            Colors.red.shade800
+          ),
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: color),
+      );
+    } catch (e) {
+      debugPrint('DesignStudio apply error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Couldn't apply that design — please try again."),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isApplying = false);
+    }
+  }
 }
 
 /// Quick idea chip widget.

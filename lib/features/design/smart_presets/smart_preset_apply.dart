@@ -1,11 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_logic.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_models.dart';
-import 'package:nexgen_command/features/wled/per_pixel.dart';
-import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
-import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 /// Outcome of applying a smart preset.
@@ -37,40 +34,12 @@ Future<SmartPresetApplyResult> applySmartPreset(
   required List<int> accentRgbw,
   int cornerSpread = 2,
 }) async {
-  final repo = ref.read(wledRepositoryProvider);
-  if (repo == null) return SmartPresetApplyResult.error;
-
   final config = ref.read(currentRooflineConfigProvider).valueOrNull;
   if (config == null || config.segments.isEmpty) {
     return SmartPresetApplyResult.noMap;
   }
 
   final deviceChannels = ref.read(deviceChannelsProvider);
-  final effective = ref.read(effectiveChannelIdsProvider);
-  // Empty effective set = the U1 gate (user deselected all) — no-op, exactly
-  // like every other dashboard apply.
-  if (effective.isEmpty) return SmartPresetApplyResult.error;
-  final effectiveSet = effective.toSet();
-
-  // 1. BASE — solid color across the effective channels, via the chokepoint.
-  var basePayload = <String, dynamic>{
-    'on': true,
-    'seg': [
-      {
-        'fx': 0,
-        'sx': 128,
-        'ix': 128,
-        'pal': 0,
-        'col': [baseRgbw],
-      }
-    ],
-  };
-  basePayload = applyChannelFilter(basePayload, effective, deviceChannels);
-  await repo.applyJson(basePayload);
-
-  // 2. ACCENTS — per-channel `i` overlay on mapped channels within the
-  // effective set. Unmapped channels (and channels with no matching feature)
-  // simply keep the base color.
   final busLen = <int, int>{
     for (final c in deviceChannels) c.id: c.stop - c.start,
   };
@@ -81,21 +50,18 @@ Future<SmartPresetApplyResult> applySmartPreset(
     busLenByChannel: busLen,
     cornerSpread: cornerSpread,
   );
-  if (repo is PerPixelWriter) {
-    final writer = repo as PerPixelWriter;
-    for (final entry in accentsByChannel.entries) {
-      if (entry.value.isEmpty) continue;
-      if (!effectiveSet.contains(entry.key)) continue;
-      await writer.applyPerPixel(segmentId: entry.key, spans: entry.value);
-    }
-  }
 
-  // 3. Label the active look so the dashboard names it.
-  ref
-      .read(activePresetLabelProvider.notifier)
-      .setLabelWithFingerprint(preset.name, ref.read(wledStateProvider));
+  // Shared spine: base solid + per-channel accent `i` spans. Empty effective
+  // set / unreachable device → false (U1 gate), exactly like other applies.
+  final ok = await applyBaseAndSpans(
+    ref,
+    baseRgbw: baseRgbw,
+    spansByChannel: accentsByChannel,
+    label: preset.name,
+  );
+  if (!ok) return SmartPresetApplyResult.error;
 
-  // 4. Stale-map signal (still applied above — best effort, ranges clamped).
+  // Stale-map signal (still applied above — best effort, ranges clamped).
   final staleness = ref.read(pixelMapStalenessProvider);
   final anyStale = staleness.values.any((v) => v);
   return anyStale
