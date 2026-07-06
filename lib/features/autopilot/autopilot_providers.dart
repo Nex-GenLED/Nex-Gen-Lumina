@@ -557,8 +557,13 @@ class AutopilotSettingsService {
     // Format repeat days
     List<String> repeatDays = item.repeatDays;
     if (repeatDays.isEmpty) {
-      // One-time event - use the date as the "repeat" indicator
-      repeatDays = [_formatDate(localTime)];
+      // One-time event: derive the WLED-recognizable weekday abbreviation from
+      // the event's date. The previous "Jul 6"-style date string is NOT a
+      // weekday, so wledDowMaskForDayList() returned 0 → a dead dow:0 timer
+      // that took a slot but never fired (and never matched in-app either).
+      // Autopilot regenerates this rolling window weekly, so weekly recurrence
+      // on the correct weekday is the intended cadence — and it actually arms.
+      repeatDays = [_weekdayAbbr(localTime)];
     }
 
     // Build action label
@@ -597,10 +602,13 @@ class AutopilotSettingsService {
     return '$hour12:$minute $period';
   }
 
-  /// Format date as "Jan 21" style
-  String _formatDate(DateTime dt) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${months[dt.month - 1]} ${dt.day}';
+  /// Three-letter weekday abbreviation ("Mon".."Sun") for [dt]. Used to turn a
+  /// one-time autopilot event (empty repeatDays) into a WLED-armable recurring
+  /// entry — the value must be recognized by [wledDowMaskForDayList], so it
+  /// maps to a nonzero dow bit instead of the old dead date string.
+  String _weekdayAbbr(DateTime dt) {
+    const abbrs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return abbrs[dt.weekday - 1]; // DateTime.weekday: 1=Mon..7=Sun
   }
 
   /// Set the change tolerance level (0-5).

@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/theme.dart';
 
 const _kFrost = Color(0xFFDCF0FF);
@@ -103,6 +104,34 @@ Future<void> handleSchedulingIntents({
   final keptIntents = classification.kept;
   final droppedNames = classification.droppedNames;
 
+  // ── Days guard (refuse-and-warn, never silently normalize) ────────────
+  // An intent with empty/unrecognized repeatDays yields a WLED dow mask of 0 —
+  // the timer would take a slot but NEVER fire (the silent dead-timer bug).
+  // Partition those out and surface them honestly (#51 steps 1-2: tell the user
+  // it can't be scheduled as stated, offer the recurring form). Note
+  // SchedulingIntent.fromJson defaults ABSENT repeatDays to all 7 days, so only
+  // an explicitly-emitted empty/garbage list lands here — exactly the one-shot
+  // sequence shape the prompt tells the model not to emit as repeatDays:[].
+  final daysPartition = partitionSchedulableByDays(keptIntents);
+  final schedulableIntents = daysPartition.schedulable;
+  final unschedulableDayNames = daysPartition.unschedulableNames;
+
+  if (schedulableIntents.isEmpty) {
+    // Nothing armable — persist NOTHING and tell the user plainly.
+    final names = unschedulableDayNames.isEmpty
+        ? 'that'
+        : unschedulableDayNames
+            .map((n) => '"${displayNameFor(n)}"')
+            .join(', ');
+    controller.addAssistantMessage(
+      "I couldn't schedule $names as stated — no repeat days were set, so it "
+      "would never run. Tell me which days (or say \"every night\") and I'll "
+      "set it up.",
+    );
+    onMessagePosted?.call();
+    return;
+  }
+
   // ── Build N ScheduleItems sharing one sourcePromptId ──────────────────
   // sourcePromptId: a single opaque uuid stamped on every sibling so the
   // UI can later group, bulk-undo, or atomically roll back the set.
@@ -111,7 +140,7 @@ Future<void> handleSchedulingIntents({
   final sourcePromptId = const Uuid().v4();
   final batchTs = DateTime.now().millisecondsSinceEpoch;
   final items = buildScheduleItemsFromIntents(
-    intents: keptIntents,
+    intents: schedulableIntents,
     sourcePromptId: sourcePromptId,
     batchTs: batchTs,
     sharedWledPayload: result.wledPayload,
@@ -141,12 +170,12 @@ Future<void> handleSchedulingIntents({
   final String promptText;
   final String successText;
   if (items.length == 1) {
-    final firstName = displayNameFor(keptIntents.first.patternName);
-    final firstTime = keptIntents.first.timeLabel;
+    final firstName = displayNameFor(schedulableIntents.first.patternName);
+    final firstTime = schedulableIntents.first.timeLabel;
     promptText = 'Add "$firstName" to your schedule at $firstTime?';
     successText = 'Schedule added';
   } else {
-    final names = keptIntents
+    final names = schedulableIntents
         .map((i) => displayNameFor(i.patternName))
         .toList();
     // For 2-3 items list the names inline; for 4+ just say the count to
@@ -231,6 +260,19 @@ Future<void> handleSchedulingIntents({
             controller.addAssistantMessage(
               'Saved $savedQuoted. I couldn\'t set $droppedPhrase '
               'in one go — ask me to add it and I\'ll schedule it.',
+            );
+            onMessagePosted?.call();
+          }
+          // Days-guard follow-up: any sibling dropped for empty repeatDays is
+          // surfaced honestly with the recurring-form offer.
+          if (unschedulableDayNames.isNotEmpty) {
+            final q = unschedulableDayNames
+                .map((n) => '"${displayNameFor(n)}"')
+                .join(', ');
+            final it = unschedulableDayNames.length == 1 ? 'it' : 'them';
+            controller.addAssistantMessage(
+              "I couldn't schedule $q — no repeat days were set. Tell me which "
+              "days (or say \"every night\") and I'll add $it.",
             );
             onMessagePosted?.call();
           }
@@ -323,6 +365,49 @@ IntentClassification classifyIntents({
   return IntentClassification(kept: kept, droppedNames: droppedNames);
 }
 
+/// Result of [partitionSchedulableByDays] — the intents whose repeatDays arm a
+/// real (nonzero-dow) timer plus the display names of those that don't.
+class DaysSchedulability {
+  /// Intents with at least one recognized repeat day (nonzero WLED dow mask).
+  final List<SchedulingIntent> schedulable;
+
+  /// Display names of intents whose repeatDays produced a zero dow mask
+  /// (empty/unrecognized) — surfaced to the user; never persisted.
+  final List<String> unschedulableNames;
+
+  const DaysSchedulability({
+    required this.schedulable,
+    required this.unschedulableNames,
+  });
+}
+
+/// Partition [intents] by whether their repeatDays arm a real WLED timer.
+///
+/// An intent whose repeatDays map to a zero dow bitmask (empty list or only
+/// unrecognized day names) would arm a timer that occupies a slot but NEVER
+/// fires — the silent dead-timer bug. Policy is refuse-and-warn: those are
+/// dropped into [DaysSchedulability.unschedulableNames] for the caller to
+/// surface, never silently normalized to daily. Delegates the mask decision to
+/// the canonical [wledDowMaskForDayList] so this stays in lock-step with the
+/// arm-boundary guard in ScheduleSyncService.
+@visibleForTesting
+DaysSchedulability partitionSchedulableByDays(List<SchedulingIntent> intents) {
+  final schedulable = <SchedulingIntent>[];
+  final unschedulableNames = <String>[];
+  for (final intent in intents) {
+    if (wledDowMaskForDayList(intent.repeatDays) == 0) {
+      final n = intent.patternName.trim();
+      unschedulableNames.add(n.isEmpty ? 'Custom' : n);
+    } else {
+      schedulable.add(intent);
+    }
+  }
+  return DaysSchedulability(
+    schedulable: schedulable,
+    unschedulableNames: unschedulableNames,
+  );
+}
+
 /// Map N AI intents to N [ScheduleItem]s sharing one [sourcePromptId].
 ///
 /// Pure function — extracted from [handleSchedulingIntents] so the
@@ -350,6 +435,12 @@ List<ScheduleItem> buildScheduleItemsFromIntents({
   final items = <ScheduleItem>[];
   for (int i = 0; i < intents.length; i++) {
     final intent = intents[i];
+
+    // Defense in depth: never build a dead dow:0 item even if a caller skipped
+    // partitionSchedulableByDays. Empty/unrecognized repeatDays would arm a
+    // timer that never fires. (Gaps in the `ai-$batchTs-$i` id sequence from a
+    // skip are harmless — ids only need to be unique.)
+    if (wledDowMaskForDayList(intent.repeatDays) == 0) continue;
 
     // Per-element wled wins when present; else fall back to the
     // shared top-level payload. The honesty guard upstream

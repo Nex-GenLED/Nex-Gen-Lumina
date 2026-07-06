@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 
@@ -188,6 +189,24 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     return 'unexpected error: $error';
   }
 
+  /// True when [item]'s repeatDays arm a real WLED timer (nonzero dow mask).
+  /// An empty or all-unrecognized set produces dow:0 — a timer that occupies a
+  /// slot but never fires — so those are refused before persist. Policy:
+  /// refuse-and-warn, never silently normalize to daily. Delegates to the
+  /// canonical [wledDowMaskForDayList] so this stays in lock-step with the
+  /// arm-boundary guard in ScheduleSyncService.
+  static bool _hasArmableDays(ScheduleItem item) =>
+      wledDowMaskForDayList(item.repeatDays) != 0;
+
+  /// Surface a validation error to the user via the app-level messenger.
+  void _showValidationError(String message) {
+    final messenger = AppRouter.scaffoldMessengerKey.currentState;
+    messenger?.showSnackBar(SnackBar(
+      content: Text(message),
+      duration: const Duration(seconds: 6),
+    ));
+  }
+
   // ─── Conflict detection ─────────────────────────────────────────
 
   /// Check for conflicts before adding a schedule.
@@ -330,6 +349,17 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return;
     }
 
+    // Refuse-and-warn: a schedule with no valid repeat days would arm a WLED
+    // timer that never fires (dow:0). Don't persist it. (Manual picker and AI
+    // handler already block this upstream; persistence-layer backstop.)
+    if (!_hasArmableDays(item)) {
+      debugPrint('SchedulesNotifier: refusing add — "${item.actionLabel}" '
+          'has no valid repeat days (${item.repeatDays})');
+      _showValidationError(
+          "Pick at least one repeat day — the schedule won't run without one.");
+      return;
+    }
+
     // ── Conflict resolution (before optimistic update) ───────────
     if (resolution == ConflictResolution.cancel) return;
     if (resolution == ConflictResolution.removeExisting) {
@@ -393,6 +423,19 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     final userId = _userId;
     if (userId == null) {
       debugPrint('SchedulesNotifier: Cannot addAll - no user signed in');
+      return false;
+    }
+
+    // Refuse-and-warn: reject the batch if any item has no valid repeat days
+    // (dow:0 would never fire). Upstream flows (AI handler, manual picker)
+    // already filter these; this is the persistence-layer backstop.
+    final badDays = items.where((i) => !_hasArmableDays(i)).toList();
+    if (badDays.isNotEmpty) {
+      debugPrint('SchedulesNotifier: refusing addAll — ${badDays.length} '
+          'item(s) have no valid repeat days');
+      _showValidationError(
+          "Some schedules had no repeat days set and weren't added — pick at "
+          "least one day.");
       return false;
     }
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 
 // ---------------------------------------------------------------------------
@@ -281,7 +282,8 @@ class SchedulePlanNotifier extends Notifier<SchedulePlanState> {
 
   /// Convert the plan into a list of [ScheduleItem]s for the backend.
   List<ScheduleItem> _planToScheduleItems(SchedulePlan plan) {
-    return plan.days.map((day) {
+    final items = <ScheduleItem>[];
+    for (final day in plan.days) {
       final s = day.suggestion;
 
       // Build a WLED payload from the suggestion if one isn't already set.
@@ -291,7 +293,16 @@ class SchedulePlanNotifier extends Notifier<SchedulePlanState> {
       // ScheduleItem (e.g. "Thu").
       final repeatDay = _expandDay(day.dayOfWeek);
 
-      return ScheduleItem(
+      // Refuse-and-skip: _expandDay falls back to the raw string for an
+      // unrecognized dayOfWeek, which would yield a zero WLED dow mask — a
+      // timer that never fires. Never build a dead dow:0 entry.
+      if (wledDowMaskForDayList([repeatDay]) == 0) {
+        debugPrint('SchedulePlan: skipped day with unrecognized dayOfWeek '
+            '"${day.dayOfWeek}" — would produce dow:0');
+        continue;
+      }
+
+      items.add(ScheduleItem(
         id: 'plan_${plan.name.hashCode}_${day.key}',
         timeLabel: plan.triggerTime,
         offTimeLabel: plan.offTime,
@@ -299,8 +310,9 @@ class SchedulePlanNotifier extends Notifier<SchedulePlanState> {
         actionLabel: day.designName,
         enabled: true,
         wledPayload: payload,
-      );
-    }).toList();
+      ));
+    }
+    return items;
   }
 
   /// Build a WLED JSON payload from a [LuminaLightingSuggestion].

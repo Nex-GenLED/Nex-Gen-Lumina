@@ -29,6 +29,67 @@ class ScheduleSyncService {
   /// Last available preset ID for user schedules
   static const int _lastSchedulePresetId = 25;
 
+  /// Total timer slots WLED honors in `timers.ins`.
+  static const int kMaxWledTimers = 8;
+
+  /// Disabled timer stub used to overwrite a vacated WLED slot. WLED merges
+  /// `timers.ins` by index and never clears slots beyond the pushed array's
+  /// length, so a shrinking schedule set would otherwise leave stale timers
+  /// armed in the high slots (the dow:0 orphan-accumulation bug). Padding every
+  /// pushed payload to exactly [kMaxWledTimers] entries with these stubs makes
+  /// each sync authoritative over all 8 slots. `en:0` so a stub never fires.
+  static const Map<String, dynamic> _disabledTimerStub = {
+    'en': 0,
+    'hour': 0,
+    'min': 0,
+    'macro': 0,
+    'dow': 0,
+  };
+
+  /// Pad/truncate [ins] to exactly [kMaxWledTimers] entries. Real timers keep
+  /// their order and values (so sunset hour:25 / sunrise hour:24 entries are
+  /// untouched); unused slots become disabled stubs so a sync that dropped a
+  /// schedule zeros the slot it vacated on the controller. Apply ONLY at the
+  /// final push stage (syncAll / _buildMergedCfgPayload) — never inside
+  /// buildCfgPayload, whose callers merge its real-timer list before padding.
+  static List<Map<String, dynamic>> padTimersToMax(
+      List<Map<String, dynamic>> ins) {
+    final out = ins.length > kMaxWledTimers
+        ? ins.sublist(0, kMaxWledTimers)
+        : List<Map<String, dynamic>>.from(ins);
+    while (out.length < kMaxWledTimers) {
+      out.add(Map<String, dynamic>.from(_disabledTimerStub));
+    }
+    return out;
+  }
+
+  /// Split [armable] into the subset that fits WLED's [kMaxWledTimers]-slot
+  /// timer table and a flag for whether any schedule overflowed. Mirrors
+  /// [buildCfgPayload]'s ON-then-OFF slot consumption exactly so the caller can
+  /// (a) surface a loud "slots full" warning and (b) count only schedules that
+  /// actually armed — never overcounting a schedule that silently fell off the
+  /// controller.
+  static ({List<ScheduleItem> armed, bool overflowed}) splitByTimerCapacity(
+      List<ScheduleItem> armable) {
+    final armed = <ScheduleItem>[];
+    var slotsUsed = 0;
+    var overflowed = false;
+    for (final s in armable) {
+      if (slotsUsed >= kMaxWledTimers) {
+        overflowed = true;
+        break;
+      }
+      slotsUsed += 1; // ON timer
+      if (s.hasOffTime &&
+          s.offTimeLabel != null &&
+          slotsUsed < kMaxWledTimers) {
+        slotsUsed += 1; // OFF timer
+      }
+      armed.add(s);
+    }
+    return (armed: armed, overflowed: overflowed);
+  }
+
   /// Builds a WLED /json/cfg payload that sets the timer configuration.
   ///
   /// WLED Timer Format (from JSON API docs):
@@ -74,9 +135,21 @@ class ScheduleSyncService {
     final List<Map<String, dynamic>> timers = [];
 
     for (final s in enabled) {
-      if (timers.length >= 8) break;
+      if (timers.length >= kMaxWledTimers) break;
 
       final dow = _computeDowMask(s.repeatDays);
+
+      // Defense in depth (never emit a dead timer): an empty or
+      // all-unrecognized repeatDays yields an all-zero WLED dow mask, which the
+      // firmware reads as "no days" — the timer takes a slot but NEVER fires.
+      // syncAll's arm-boundary guard already refuses these with a loud warning;
+      // skip here too so NO path can write a dow:0 orphan. Policy: refuse, never
+      // silently normalize to daily.
+      if (dow == 0) {
+        debugPrint('ScheduleSync: skipped dow:0 timer for "${s.actionLabel}" '
+            '(repeatDays=${s.repeatDays})');
+        continue;
+      }
 
       // Determine preset ID: use assigned presetId if available, else fall back to legacy behavior
       final presetId = s.presetId ?? _presetForAction(s.actionLabel);
@@ -92,7 +165,7 @@ class ScheduleSyncService {
       }
 
       // OFF timer (if schedule has an off time)
-      if (s.hasOffTime && s.offTimeLabel != null && timers.length < 8) {
+      if (s.hasOffTime && s.offTimeLabel != null && timers.length < kMaxWledTimers) {
         final offTimer = _buildTimerEntry(
           timeLabel: s.offTimeLabel!,
           dow: dow,
@@ -104,7 +177,12 @@ class ScheduleSyncService {
       }
     }
 
-    // Return the cfg payload - only send configured timers, no padding needed
+    // Return the REAL timers only — deliberately UNPADDED. Callers that push
+    // this to the controller (syncAll, CalendarEntryLeaseManager) merge in any
+    // lease timers and THEN pad the combined array to kMaxWledTimers via
+    // [padTimersToMax], so vacated slots get zeroed on the controller. Padding
+    // here would corrupt that merge (stubs would land between real timers), and
+    // the eviction/time-parse tests assert the exact real-timer count.
     return {
       'timers': {
         'ins': timers,
@@ -461,11 +539,52 @@ class ScheduleSyncService {
         continue;
       }
 
+      // ── Never arm a dead dow:0 timer ───────────────────────────────────
+      // An empty or all-unrecognized repeatDays yields a zero WLED dow mask
+      // ("no days"), so the timer would take a slot but never fire — the
+      // silent dead-timer that accumulates until the 8-slot table is full.
+      // Refuse-and-warn (policy: never silently normalize to daily); the
+      // schedule stays saved in Firestore, it just isn't armed. Mirrors the
+      // dead-macro / bad-time invariants above.
+      if (_computeDowMask(s.repeatDays) == 0) {
+        presetErrors.add(
+            '"${s.actionLabel}" has no repeat days — not armed. Re-open the '
+            'schedule and pick at least one day.');
+        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
+            'repeatDays produced dow:0 (${s.repeatDays})');
+        continue;
+      }
+
       armable.add(s);
     }
 
-    // Step 2: Build and push timer configuration (only for armable schedules)
-    final payload = buildCfgPayload(armable);
+    // ── Slot capacity: which armable schedules actually fit the 8-slot table ─
+    // buildCfgPayload truncates at kMaxWledTimers; mirror its slot accounting
+    // here so we (a) surface a loud warning when schedules overflow and (b)
+    // count only the schedules that armed — never claim success for one that
+    // silently fell off the controller.
+    final capacity = splitByTimerCapacity(armable);
+    final armedSchedules = capacity.armed;
+    if (capacity.overflowed) {
+      presetErrors.add(
+          "Schedule saved but couldn't arm — controller timer slots are full "
+          "(8/8). Delete an old schedule.");
+      debugPrint('ScheduleSync: ${armable.length - armedSchedules.length} '
+          'schedule(s) could not arm — WLED timer table full (8/8)');
+    }
+
+    // Step 2: Build and push timer configuration. Only armed schedules become
+    // real timers; the payload is padded to all 8 slots so any slot a
+    // now-removed schedule vacated is overwritten with a disabled stub (slot
+    // reclaim — this is what clears the accumulated dow:0 orphans).
+    final built = buildCfgPayload(armedSchedules);
+    final builtIns = ((built['timers'] as Map)['ins'] as List)
+        .cast<Map<String, dynamic>>();
+    final payload = <String, dynamic>{
+      'timers': {
+        'ins': padTimersToMax(builtIns),
+      },
+    };
 
     try {
       final ok = await repo.applyConfig(payload);
@@ -481,7 +600,9 @@ class ScheduleSyncService {
       return finish(ScheduleSyncResult(
         success: true,
         presetErrors: presetErrors,
-        schedulesWithPresets: updatedSchedules,
+        // Count only schedules that actually armed — never overcount a
+        // schedule dropped for a full table / dow:0 / bad time.
+        schedulesWithPresets: armedSchedules,
       ));
     } catch (e) {
       debugPrint('ScheduleSync: Exception during sync: $e');

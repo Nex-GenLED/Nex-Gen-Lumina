@@ -1075,6 +1075,13 @@ class CalendarEntryLeaseManager {
   Map<String, dynamic> _buildLeaseTimersPayload() {
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
+      // Defense in depth: a dowMask of 0 (unparseable dateKey) would arm a
+      // timer that never fires. Skip it — never write a dead dow:0 lease timer.
+      if (lease.dowMask == 0) {
+        debugPrint('$_kLogPrefix skipped dow:0 lease ${lease.dateKey} '
+            '(would never fire)');
+        continue;
+      }
       ins.add({
         'en': true,
         'hour': lease.wledHour,
@@ -1112,7 +1119,14 @@ class CalendarEntryLeaseManager {
     } catch (e) {
       debugPrint('$_kLogPrefix _buildMergedCfgPayload: schedules read '
           'failed — $e (falling back to lease-only payload)');
-      return _buildLeaseTimersPayload();
+      final leaseOnly =
+          (_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List;
+      return {
+        'timers': {
+          'ins': ScheduleSyncService.padTimersToMax(
+              leaseOnly.cast<Map<String, dynamic>>()),
+        },
+      };
     }
     const scheduleSync = ScheduleSyncService();
     final schedulePayload = scheduleSync.buildCfgPayload(schedules);
@@ -1121,9 +1135,14 @@ class CalendarEntryLeaseManager {
     final leasePayload = _buildLeaseTimersPayload();
     final leaseTimers =
         (leasePayload['timers'] as Map?)?['ins'] as List? ?? const [];
+    // Pad the FINAL merged array to all 8 slots so a shrinking schedule/lease
+    // set zeros the slots it vacated on the controller (slot reclaim — clears
+    // accumulated dow:0 orphans). This is the only pad point for the lease
+    // path; buildCfgPayload stays unpadded so the merge above is correct.
     return {
       'timers': {
-        'ins': [...schedTimers, ...leaseTimers],
+        'ins': ScheduleSyncService.padTimersToMax(
+            [...schedTimers, ...leaseTimers].cast<Map<String, dynamic>>()),
       },
     };
   }
