@@ -7,12 +7,27 @@ import '../models/score_alert_event.dart';
 import '../models/sport_type.dart';
 import 'espn_api_service.dart';
 
+/// The consumed surface of the score diff engine — the parts the foreground
+/// celebration coordinator depends on. Extracted so the coordinator can be
+/// unit-tested with a fake monitor (no ESPN, no network).
+abstract interface class ScoreMonitor {
+  /// Emits a [ScoreAlertEvent] each time a tracked team scores (post-baseline).
+  Stream<ScoreAlertEvent> get alertStream;
+
+  /// Run one polling cycle for [activeConfigs]. The first observation of a game
+  /// baselines silently (no emit); only subsequent deltas emit.
+  Future<void> checkScores(List<ScoreAlertConfig> activeConfigs);
+
+  /// Clear all cached baselines/dedup state (logout / teardown).
+  void reset();
+}
+
 /// Core diff engine that detects scoring events by comparing consecutive
 /// ESPN polling snapshots.
 ///
 /// Maintains an internal cache of last-known [GameState] per game and emits
 /// [ScoreAlertEvent]s on [alertStream] when a user's team scores.
-class ScoreMonitorService {
+class ScoreMonitorService implements ScoreMonitor {
   ScoreMonitorService({EspnApiService? espnApi})
       : _espnApi = espnApi ?? EspnApiService();
 

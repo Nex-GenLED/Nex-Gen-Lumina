@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
@@ -100,7 +101,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    final foreground = state == AppLifecycleState.resumed;
+    // Score celebrations are app-open-only BY DESIGN — pause the ESPN poll +
+    // celebration playback whenever the app leaves the foreground.
+    ref
+        .read(foregroundCelebrationCoordinatorProvider)
+        .setForeground(foreground);
+    if (foreground) {
       // Force-refresh the persisted Firebase ID token so the background
       // workers have a valid token after the user re-foregrounds the app.
       // The token TTL is ~1 hour; on resume after a long idle window the
@@ -114,6 +121,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     ref.watch(autoConnectControllerProvider);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
+    // Foreground score celebrations: keep the driver alive so it pushes the
+    // live-game team set into the coordinator (app-open-only; no background).
+    ref.watch(foregroundCelebrationControllerProvider);
     ref.watch(syncIdTokenPersistenceKeepAliveProvider);
     // Item #61 Workstream B — eager-read the lease manager at shell
     // mount so manager.initialize() (and bootstrapCalendarLeaseFlagDoc)
