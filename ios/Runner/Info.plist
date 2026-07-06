@@ -63,10 +63,15 @@
          detection, and to configure the Welcome Home geofence. -->
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Lumina uses your location to detect the WiFi network you are connected to (so it knows when you are on your home network) and to configure the Welcome Home geofence.</string>
-    <!-- NSLocationAlways* keys removed: Lumina uses foreground (When In Use)
-         location only — WLED/home-network detection and geofence setup while
-         the app is open. There is no always/background-location capability, so
-         the 'location' background mode is also removed below. -->
+    <!-- ITMS-90683: this key exists SOLELY because the geolocator plugin binary
+         references the Always location API, and Apple's static scanner rejects
+         the build (ITMS-90683) if a referenced API has no usage string. Lumina
+         makes ONLY a When-In-Use (whileInUse) request in Dart and never asks for
+         Always/background authorization — the copy is foreground-honest to match.
+         Do NOT re-add the 'location' UIBackgroundMode: there is no background
+         location capability. -->
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Lumina uses your location only while you are using the app — to detect your home WiFi network and set up the Welcome Home geofence. It does not track your location in the background.</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>fetch</string>
