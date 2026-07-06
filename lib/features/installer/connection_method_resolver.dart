@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
 /// Pure detection: derive a [ConnectionMethod] from a parsed /json/info
@@ -52,6 +53,11 @@ abstract class ConnectionMethodResolver {
   /// read as inactive). Used by the handoff verification sweep so the
   /// UI can render an "offline" failure separately from "unverified."
   Future<ConnectionMethod?> probeOrNull(ControllerInfo controller);
+
+  /// Read-only clock-health probe for [controller] (BUG-CLOCK-1). Returns null
+  /// when unreachable or the fields can't be read. Advisory only — the handoff
+  /// surfaces this as a warn line, never a fail, so it can't block the install.
+  Future<ClockHealth?> probeClockOrNull(ControllerInfo controller);
 
   /// Clears WiFi credentials and reboots [controller]. Returns true on the
   /// /json/cfg 2xx response; the actual ethernet-only confirmation is the
@@ -111,6 +117,21 @@ class FirebaseConnectionMethodResolver implements ConnectionMethodResolver {
         );
     if (info == null) return null;
     return detectConnectionMethod(info);
+  }
+
+  @override
+  Future<ClockHealth?> probeClockOrNull(ControllerInfo controller) async {
+    final clockInfo = await _service(controller).fetchClockInfo().timeout(
+          const Duration(seconds: 10),
+          onTimeout: () => null,
+        );
+    if (clockInfo == null) return null;
+    final now = DateTime.now();
+    return evaluateClockHealth(
+      device: clockInfo,
+      phoneNow: now,
+      phoneUtcOffset: now.timeZoneOffset,
+    );
   }
 
   @override

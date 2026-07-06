@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -30,7 +31,7 @@ import 'package:nexgen_command/models/remote_command.dart';
 /// 2b. (Webhook Mode) Cloud Function POSTs to user's webhook URL
 /// 3. Command status updated in Firestore
 /// 4. App polls/listens for status update
-class CloudRelayRepository implements WledRepository, PerPixelWriter {
+class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoSource {
   final String userId;
   final String controllerId;
   final String controllerIp;
@@ -436,6 +437,18 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter {
 
   @override
   Future<WledHardwareConfig?> getConfig() async => null;
+
+  /// Relay-mode clock fetch: the bridge exposes getInfo (→ device time) but
+  /// cannot read /json/cfg, so timezone/location are left unknown and their
+  /// checks are skipped (rather than false-warned). Only CLOCK_UNSET is
+  /// evaluable off-LAN. A future 'getCfg' bridge command would unlock the
+  /// tz/location checks in relay mode.
+  @override
+  Future<ControllerClockInfo?> fetchClockInfo() async {
+    final result = await _executeCommand('getInfo', {});
+    if (result == null) return null;
+    return ControllerClockInfo.fromMaps(result, null);
+  }
 
   @override
   Future<bool> supportsRgbw() async {

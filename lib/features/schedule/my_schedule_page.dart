@@ -25,6 +25,9 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/features/wled/clock_health_providers.dart';
+import 'package:nexgen_command/features/wled/clock_health_ui.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
@@ -97,12 +100,20 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
   // lastScheduleSyncResultProvider, which _SyncStatusRow surfaces below.
   DateTime? _lastSyncTime;
 
+  // BUG-CLOCK-1: dismissal is mount-scoped so the controller clock-health
+  // banner reappears the next time this screen opens (dismissible-but-recurring).
+  bool _clockBannerDismissed = false;
+
   @override
   void initState() {
     super.initState();
     final today = DateTime.now();
     _weekStart = _startOfWeek(today);
     _calStart = DateTime(today.year, today.month, 1);
+    // Refresh controller clock health on screen open (cached, no polling loop).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.invalidate(clockHealthProvider);
+    });
   }
 
   // ── View mode toggle ──
@@ -289,6 +300,18 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
 
           // ── Schedule overload warning ──────────────────────────────────
           const ScheduleOverloadBanner(),
+
+          // ── Controller clock health (BUG-CLOCK-1) ──────────────────────
+          // LOCATION_UNSET only surfaces when the user actually has solar
+          // (sunrise/sunset) schedules — a location-less controller is
+          // harmless until a solar timer depends on it.
+          ClockHealthBanner(
+            solarRelevant: schedules.any((s) =>
+                isSolarTimeLabel(s.timeLabel) ||
+                isSolarTimeLabel(s.offTimeLabel)),
+            dismissed: _clockBannerDismissed,
+            onDismiss: () => setState(() => _clockBannerDismissed = true),
+          ),
 
           // ── Main scroll area ────────────────────────────────────────────
           // Bottom padding is intentionally small here — the manual
@@ -4016,6 +4039,20 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                             : _offSolar)
                         : null;
                     final days = _selectedDays.map((i) => _dayAbbr[i]).toList(growable: false);
+
+                    // BUG-CLOCK-1: non-blocking clock-health warning before
+                    // save. Uses the cached health (no fetch); a solar schedule
+                    // (sunrise/sunset) additionally surfaces LOCATION_UNSET.
+                    final creatingSolar = isSolarTimeLabel(timeLabel) ||
+                        isSolarTimeLabel(offTimeLabel);
+                    final clockOk = await maybeWarnClockBeforeSave(
+                      context,
+                      ref.read(clockHealthProvider).valueOrNull,
+                      creatingSolar: creatingSolar,
+                    );
+                    if (!clockOk) return;
+                    if (!context.mounted) return;
+
                     String actionLabel;
                     switch (_action) {
                       case _ActionType.powerOff:

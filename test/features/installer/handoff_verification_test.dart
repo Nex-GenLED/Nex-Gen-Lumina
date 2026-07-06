@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── Fakes ──────────────────────────────────────────────────────────────
@@ -16,11 +17,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// controller id. Null = "unreachable". The handoff screen uses
 /// `probeOrNull` exclusively for verification.
 class _FakeResolver implements ConnectionMethodResolver {
-  _FakeResolver(this.observed);
+  _FakeResolver(this.observed, {this.clock = const {}});
 
   /// `null` value in the map means the controller is unreachable.
   /// A missing key also resolves to null (treated as unreachable).
   final Map<String, ConnectionMethod?> observed;
+
+  /// Canned clock-health per controller id (BUG-CLOCK-1). Missing key → null
+  /// (unreachable/unknown → no clock line surfaced).
+  final Map<String, ClockHealth?> clock;
 
   @override
   Future<ConnectionMethod> probe(ControllerInfo c) async =>
@@ -29,6 +34,9 @@ class _FakeResolver implements ConnectionMethodResolver {
   @override
   Future<ConnectionMethod?> probeOrNull(ControllerInfo c) async =>
       observed[c.id];
+
+  @override
+  Future<ClockHealth?> probeClockOrNull(ControllerInfo c) async => clock[c.id];
 
   @override
   Future<bool> disableWifi(ControllerInfo c) async => true;
@@ -434,6 +442,60 @@ void main() {
         matching: find.byType(ElevatedButton),
       ));
       expect(btn.onPressed, isNull);
+    });
+
+    // ── BUG-CLOCK-1 advisory clock line (warn-only, never blocks) ──────────
+    testWidgets(
+        'unhealthy clock → warn line shown but Complete Setup stays ENABLED',
+        (tester) async {
+      final controllers = [_ctrl('a', '192.168.1.10', name: 'Roof')];
+      // Connection passes; clock is dead (never-synced). The clock line must
+      // surface as an advisory warning WITHOUT blocking handoff.
+      final resolver = _FakeResolver(
+        {'a': ConnectionMethod.ethernet},
+        clock: {'a': const ClockHealth({ClockHealthIssue.clockUnset})},
+      );
+      await _mountHandoff(
+        tester,
+        controllers: controllers,
+        selectedIds: const {'a'},
+        persisted: const {'a': ConnectionMethod.ethernet},
+        skipped: const {},
+        resolver: resolver,
+        onNext: (_) {},
+      );
+
+      // Advisory clock line renders with the specific failure message.
+      expect(_inVerificationSection(find.text('Controller clock')),
+          findsOneWidget);
+      expect(_inVerificationSection(find.textContaining("clock isn't set")),
+          findsOneWidget);
+      // Complete Setup is still enabled — a bad clock never blocks handoff.
+      final btn = tester.widget<ElevatedButton>(find.ancestor(
+        of: find.text('Complete Setup'),
+        matching: find.byType(ElevatedButton),
+      ));
+      expect(btn.onPressed, isNotNull,
+          reason: 'clock health is advisory — must not block Complete Setup');
+    });
+
+    testWidgets('healthy clock → clock line shows the OK state', (tester) async {
+      final controllers = [_ctrl('a', '192.168.1.10')];
+      final resolver = _FakeResolver(
+        {'a': ConnectionMethod.ethernet},
+        clock: {'a': const ClockHealth.healthy()},
+      );
+      await _mountHandoff(
+        tester,
+        controllers: controllers,
+        selectedIds: const {'a'},
+        persisted: const {'a': ConnectionMethod.ethernet},
+        skipped: const {},
+        resolver: resolver,
+        onNext: (_) {},
+      );
+
+      expect(_inVerificationSection(find.textContaining('OK')), findsOneWidget);
     });
   });
 }

@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/installer/screens/connection_method_scre
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
 // ─── Fakes ──────────────────────────────────────────────────────────────
@@ -42,6 +43,9 @@ class _FakeResolver implements ConnectionMethodResolver {
   Future<ConnectionMethod?> probeOrNull(ControllerInfo controller) async {
     return detected[controller.id];
   }
+
+  @override
+  Future<ClockHealth?> probeClockOrNull(ControllerInfo controller) async => null;
 
   @override
   Future<bool> disableWifi(ControllerInfo controller) async {

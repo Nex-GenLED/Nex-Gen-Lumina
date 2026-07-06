@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/widgets/team_autocomplete.dart';
 
 /// Test-visible key for the pre-flight verification section. Tests use
@@ -54,6 +55,12 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   // in the fail bucket.
   final Map<String, VerificationResult> _verifications = {};
   bool _sweepStarted = false;
+
+  // BUG-CLOCK-1: advisory controller clock health, keyed by controller id.
+  // Kept SEPARATE from [_verifications] so it can NEVER gate _canCompleteSetup —
+  // an unhealthy clock is a warn line, not a handoff blocker. A missing key
+  // means "not probed / unreachable" and surfaces nothing.
+  final Map<String, ClockHealth> _clockHealth = {};
 
   @override
   void initState() {
@@ -126,7 +133,21 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
         persisted: persistedMethods[controller.id],
         isSkipped: skipped.contains(controller.id),
       ));
+      // Advisory clock-health probe (non-blocking; separate from _verifications).
+      unawaited(_probeClock(controller: controller, resolver: resolver));
     }
+  }
+
+  /// Read-only BUG-CLOCK-1 probe. Stores the result in [_clockHealth] for the
+  /// advisory checklist line. Never touches [_verifications], so it can't block
+  /// handoff. A null result (unreachable / unreadable) simply surfaces nothing.
+  Future<void> _probeClock({
+    required ControllerInfo controller,
+    required ConnectionMethodResolver resolver,
+  }) async {
+    final health = await resolver.probeClockOrNull(controller);
+    if (!mounted || health == null) return;
+    setState(() => _clockHealth[controller.id] = health);
   }
 
   Future<void> _verifyOne({
@@ -786,15 +807,58 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
               style:
                   TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
             )
-          else
+          else ...[
             for (final c in controllers)
               _VerificationRow(
                 controller: c,
                 result: _verifications[c.id] ??
                     const VerificationResult.pending(),
               ),
+            // Advisory (non-blocking) controller clock-health line.
+            _buildClockCheckRow(controllers),
+          ],
         ],
       ),
+    );
+  }
+
+  /// One aggregate, advisory clock-health line across the selected controllers.
+  /// Pending until at least one probe returns; PASS when every probed
+  /// controller is healthy; WARN (never fail) naming the worst issue + the
+  /// controller it affects. This is a warn-only checklist line — it does NOT
+  /// feed [_canCompleteSetup], so it can never block the install.
+  Widget _buildClockCheckRow(List<ControllerInfo> controllers) {
+    final probed =
+        controllers.where((c) => _clockHealth.containsKey(c.id)).toList();
+    if (probed.isEmpty) {
+      return const _ClockCheckRow(
+        status: VerificationStatus.pending,
+        reason: 'Checking controller clock…',
+      );
+    }
+    // Installer context: treat solar as relevant so a 0,0 location surfaces
+    // now, before the customer relies on sunset/sunrise schedules.
+    ClockHealthIssue? worst;
+    ControllerInfo? worstController;
+    for (final c in probed) {
+      final issue =
+          primaryIssueToSurface(_clockHealth[c.id]!, solarRelevant: true);
+      if (issue == null) continue;
+      if (worst == null || issue.index < worst.index) {
+        worst = issue;
+        worstController = c;
+      }
+    }
+    if (worst == null) {
+      return const _ClockCheckRow(
+        status: VerificationStatus.pass,
+        reason: 'Clock, timezone & location OK',
+      );
+    }
+    final who = worstController!.name ?? worstController.ip;
+    return _ClockCheckRow(
+      status: VerificationStatus.warn,
+      reason: '$who — ${clockHealthMessage(worst)}',
     );
   }
 
@@ -896,6 +960,53 @@ class _VerificationRow extends StatelessWidget {
       case VerificationStatus.pending:
         return NexGenPalette.textMedium;
     }
+  }
+}
+
+/// Advisory clock-health checklist line (BUG-CLOCK-1). Reuses [_StatusIcon]
+/// but is never a `fail` — an unhealthy clock is a warn, so it can't block
+/// handoff. Fixed "Controller clock" title with the specific issue as reason.
+class _ClockCheckRow extends StatelessWidget {
+  const _ClockCheckRow({required this.status, required this.reason});
+
+  final VerificationStatus status;
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final reasonColor = status == VerificationStatus.warn
+        ? NexGenPalette.amber
+        : NexGenPalette.textMedium;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusIcon(status: status),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Controller clock',
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  reason,
+                  style: TextStyle(color: reasonColor, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

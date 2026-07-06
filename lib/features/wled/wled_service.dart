@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -134,7 +135,7 @@ List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhit
   return [finalR, finalG, finalB, finalW];
 }
 
-class WledService implements WledRepository, PerPixelWriter {
+class WledService implements WledRepository, PerPixelWriter, ClockInfoSource {
   final String baseUrl; // e.g., http://192.168.1.23
   late final bool _simulate;
   bool? _supportsRgbwCache;
@@ -279,6 +280,45 @@ class WledService implements WledRepository, PerPixelWriter {
       debugPrint('WLED getInfo error: $e');
     }
     return null;
+  }
+
+  /// Read-only clock/timezone/location fetch for the BUG-CLOCK-1 health check.
+  /// GETs /json/info (device time) + /json/cfg (if.ntp tz/offset/lat/lon) and
+  /// normalizes them into a [ControllerClockInfo]. Never writes to the device.
+  /// Returns null in sim mode (no data → no false banner) or if info is
+  /// unreachable; a cfg read failure degrades to time-only rather than failing.
+  @override
+  Future<ControllerClockInfo?> fetchClockInfo() async {
+    if (_simulate) return null;
+    final info = await getInfo();
+    if (info == null) return null;
+    Map<String, dynamic>? cfg;
+    try {
+      cfg = await _fetchCfgRaw();
+    } catch (e) {
+      debugPrint('WLED fetchClockInfo: cfg read failed (time-only): $e');
+    }
+    return ControllerClockInfo.fromMaps(info.raw, cfg);
+  }
+
+  /// Raw GET /json/cfg as a map (read-only). Used by [fetchClockInfo] for the
+  /// if.ntp block that [getConfig] discards. Returns null on any failure.
+  Future<Map<String, dynamic>?> _fetchCfgRaw() async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final req = await client.getUrl(_uri('/json/cfg'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final body = await res.transform(utf8.decoder).join();
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final decoded = jsonDecode(body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+      return null;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   Future<bool> setState({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite}) async {
