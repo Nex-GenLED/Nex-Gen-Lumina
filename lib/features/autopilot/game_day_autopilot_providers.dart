@@ -10,12 +10,14 @@
 //   - AutopilotProfile.preferredEffectStyles (design auto-selection)
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_providers.dart';
+import '../../services/user_service.dart';
 import '../../models/roofline_segment.dart';
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
@@ -1029,16 +1031,26 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         .doc(user.uid)
         .collection('game_day_autopilot')
         .doc(teamSlug)
-        .update({
+        .update(UserService.sanitizeForFirestore({
       'design_mode': AutopilotDesignMode.saved.name,
       'saved_design_name': designName,
-      'saved_design_payload': wledPayload,
+      // BUG-GD-PICKER-1 (#84 sibling): the WLED payload carries
+      // seg[].col = [[r,g,b,w],…] — directly-nested arrays that Firestore's
+      // native iOS codec aborts on (SIGABRT) and Android rejects. jsonEncode
+      // to an opaque String on write; GameDayAutopilotConfig.fromFirestore
+      // jsonDecodes on read. Mirrors favorites/scenes/schedules/remote_command
+      // — the eight other WLED-payload write paths already do this.
+      'saved_design_payload': jsonEncode(wledPayload),
       'effect_id': effectId,
       'speed': speed,
       'intensity': intensity,
       'brightness': brightness,
       'updated_at': Timestamp.fromDate(DateTime.now()),
-    });
+      // sanitizeForFirestore is the guard, not the fix: it turns any FUTURE
+      // raw nested-array added to this write into a clean
+      // FirestoreSerializationError (caught by the picker's try/catch →
+      // SnackBar) instead of a native crash. Closes the sanitizer bypass.
+    }));
   }
 
   /// Get the next game info for a team (for UI display).

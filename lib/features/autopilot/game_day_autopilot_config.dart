@@ -3,6 +3,8 @@
 // Persistent configuration for a user's Game Day Autopilot subscription
 // for a single team. Stored in Firestore at /users/{uid}/game_day_autopilot/{teamSlug}.
 
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -331,7 +333,7 @@ class GameDayAutopilotConfig {
       designMode: _parseDesignMode(data['design_mode'] as String?),
       savedDesignName: data['saved_design_name'] as String?,
       savedDesignPayload:
-          data['saved_design_payload'] as Map<String, dynamic>?,
+          _parseSavedDesignPayload(data['saved_design_payload']),
       effectId: (data['effect_id'] as num?)?.toInt() ?? 52,
       speed: (data['speed'] as num?)?.toInt() ?? 160,
       intensity: (data['intensity'] as num?)?.toInt() ?? 128,
@@ -407,6 +409,32 @@ class GameDayAutopilotConfig {
           ? null
           : (participatingChannelIndices ?? this.participatingChannelIndices),
     );
+  }
+
+  /// Tolerant read of `saved_design_payload`.
+  ///
+  /// Post-BUG-GD-PICKER-1 the field is a jsonEncoded String — the raw WLED
+  /// payload carries `seg[].col = [[r,g,b,w],…]` nested arrays that Firestore
+  /// cannot store as a live Map (native iOS SIGABRT / Android reject), so the
+  /// picker's write never actually landed a doc before the fix. Accepts:
+  ///   - String → jsonDecode to Map (current shape).
+  ///   - Map    → verbatim (defensive; no real legacy docs should exist since
+  ///              the raw-Map write always failed, but tolerate anyway).
+  ///   - null / empty / malformed → null, so the apply path falls back to the
+  ///     auto-built team-color payload rather than throwing.
+  static Map<String, dynamic>? _parseSavedDesignPayload(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String) {
+      if (raw.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(raw);
+        return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   static AutopilotDesignMode _parseDesignMode(String? value) {

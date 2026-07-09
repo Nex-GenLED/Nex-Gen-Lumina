@@ -314,7 +314,27 @@ class _ColorwayEffectSelectorPageState
                 brightness: (payload['bri'] as num?)?.toInt() ?? 200,
               );
         } catch (e, st) {
+          // A failed save must LOOK failed — persisting the design IS the
+          // point of the Game Day picker's Apply (BUG-GD-PICKER-1 item 4).
+          // Surface the error instead of swallowing it, and skip the success
+          // snackbar / preview-sync below so the UI never implies the design
+          // stuck. Post-fix this path is essentially unreachable (jsonEncode
+          // makes the write succeed); it now fires only on a genuine Firestore
+          // error or a future nested-array regression the sanitizer rejects.
           debugPrint('[GameDayPicker/Colorway] saveDesign failed: $e\n$st');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  "Applied to your lights, but couldn't save this design "
+                  'for Game Day. Please try again.',
+                ),
+                backgroundColor: Colors.red.shade800,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
         }
       }
     }
