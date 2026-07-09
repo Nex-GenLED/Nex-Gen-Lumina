@@ -23,16 +23,23 @@ class _FakeHealRepo extends WledRepository implements ClockInfoSource {
   _FakeHealRepo(
     this._clockInfo, {
     this.applyConfigResult = true,
+    this.stateResponse,
   });
 
   final ControllerClockInfo? _clockInfo;
   final bool applyConfigResult;
+
+  /// Canned /json/state for the reboot-deferral gate (on/ps). Null = unreadable.
+  final Map<String, dynamic>? stateResponse;
 
   final List<Map<String, dynamic>> configPosts = [];
   final List<Map<String, dynamic>> jsonPosts = [];
 
   @override
   Future<ControllerClockInfo?> fetchClockInfo() async => _clockInfo;
+
+  @override
+  Future<Map<String, dynamic>?> getState() async => stateResponse;
 
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
@@ -47,8 +54,6 @@ class _FakeHealRepo extends WledRepository implements ClockInfoSource {
   }
 
   // Unused abstract members.
-  @override
-  Future<Map<String, dynamic>?> getState() async => null;
   @override
   Future<bool> setState({
     bool? on,
@@ -282,8 +287,8 @@ void main() {
       expect(gamma.calls, ['192.168.1.250']);
     });
 
-    test('CLOCK_UNSET → exactly the ntp-host POST + reboot', () async {
-      final repo = _FakeHealRepo(_clockUnset());
+    test('CLOCK_UNSET (lights off) → ntp-host POST + reboot', () async {
+      final repo = _FakeHealRepo(_clockUnset(), stateResponse: {'on': false});
       final report = await _healer(repo, isLan: true).run();
 
       expect(repo.configPosts, hasLength(1));
@@ -369,10 +374,84 @@ void main() {
     });
   });
 
-  group('relay gating', () {
-    test('relay + CLOCK_UNSET → ntp-host POST + reboot, gamma NOT evaluated',
+  group('reboot-deferral predicate — shouldRebootAfterHostHeal', () {
+    test('lights off → reboot now', () {
+      expect(shouldRebootAfterHostHeal(deviceOn: false), true);
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: false, activePresetId: 3, bootPresetId: 5),
+          true);
+    });
+    test('on + active look IS the boot preset → reboot now', () {
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: true, activePresetId: 5, bootPresetId: 5),
+          true);
+    });
+    test('on + active look differs from boot preset → DEFER', () {
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: true, activePresetId: 3, bootPresetId: 5),
+          false);
+    });
+    test('on + manual look (ps -1) → DEFER', () {
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: true,
+              activePresetId: kWledNoActivePreset,
+              bootPresetId: 5),
+          false);
+    });
+    test('on + no boot preset configured (0 or null) → DEFER', () {
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: true,
+              activePresetId: kWledNoBootPreset,
+              bootPresetId: kWledNoBootPreset),
+          false);
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: true, activePresetId: 2, bootPresetId: null),
+          false);
+    });
+  });
+
+  group('reboot-deferral orchestration', () {
+    test('CLOCK_UNSET + lights on a non-boot look → heal persists, reboot DEFERRED',
         () async {
-      final repo = _FakeHealRepo(_clockUnset());
+      // Fake isn't a WledService → bootPresetId resolves null → on-state defers.
+      final repo = _FakeHealRepo(_clockUnset(),
+          stateResponse: {'on': true, 'ps': 7});
+      final report = await _healer(repo, isLan: true).run();
+
+      // The host/en write still happened (persists in cfg for next boot)…
+      expect(report.ntpHostHealed, true);
+      expect(repo.configPosts.single, {
+        'if': {
+          'ntp': {'host': kHealNtpHost, 'en': true},
+        },
+      });
+      // …but no reboot was sent.
+      expect(report.rebooted, false);
+      expect(report.rebootDeferred, true);
+      expect(repo.jsonPosts, isEmpty);
+      expect(report.log.any((l) => l.contains('deferred')), true);
+    });
+
+    test('CLOCK_UNSET + device state unreadable → defer (never blind-reboot)',
+        () async {
+      final repo = _FakeHealRepo(_clockUnset()); // stateResponse null
+      final report = await _healer(repo, isLan: true).run();
+      expect(report.ntpHostHealed, true);
+      expect(report.rebooted, false);
+      expect(report.rebootDeferred, true);
+    });
+  });
+
+  group('relay gating', () {
+    test('relay + CLOCK_UNSET (off) → ntp-host POST + reboot, gamma NOT evaluated',
+        () async {
+      final repo = _FakeHealRepo(_clockUnset(), stateResponse: {'on': false});
       final gamma = _GammaSpy();
       final report =
           await _healer(repo, isLan: false, gamma: gamma.action).run();

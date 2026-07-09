@@ -321,6 +321,22 @@ class WledService implements WledRepository, PerPixelWriter, ClockInfoSource {
     }
   }
 
+  /// Reads `cfg.def.ps` — the boot/default preset id WLED applies on power-up.
+  /// Used by the on-connect healer's reboot-deferral gate to tell whether a
+  /// reboot would reproduce the currently-displayed look. Returns null on any
+  /// failure or in sim mode (0 = no boot preset configured).
+  Future<int?> getBootPresetId() async {
+    if (_simulate) return null;
+    try {
+      final cfg = await _fetchCfgRaw();
+      final def = cfg?['def'];
+      final ps = (def is Map) ? def['ps'] : null;
+      return ps is num ? ps.toInt() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> setState({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite}) async {
     // Build the wire payload up front so the sim path can capture the same
     // shape the live path sends. Lets the wire-level tests assert col-pad

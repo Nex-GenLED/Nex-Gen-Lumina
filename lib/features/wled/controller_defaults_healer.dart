@@ -42,6 +42,14 @@ const String kHealNtpHost = 'time.google.com';
 /// be set — it's the root cause of the fleet's NTP failures.
 const String kKnownBadNtpHost = '0.wled.pool.ntp.org';
 
+/// WLED `/json/state` `ps` when no preset is active (a manual/live look).
+const int kWledNoActivePreset = -1;
+
+/// WLED `cfg.def.ps` when no boot preset is configured.
+const int kWledNoBootPreset = 0;
+
+int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
+
 // ── Pure planners (no I/O — unit-tested directly) ────────────────────────────
 
 /// True when the controller's NTP host should be healed to [kHealNtpHost].
@@ -141,6 +149,29 @@ CoordHeal? coordHealFor({
   return null;
 }
 
+/// Whether to reboot NOW after an NTP-host heal, vs DEFER to the next natural
+/// boot. A reboot restores WLED's boot look, so we only reboot when that is
+/// non-disruptive: the lights are OFF, or the currently-displayed look already
+/// IS the boot preset (a reboot reproduces it exactly). Otherwise DEFER — the
+/// host/en write persists in cfg and takes effect on the next power cycle or
+/// user reboot, whenever that is (keeps the healer stateless — no delayed-reboot
+/// scheduling). [bootPresetId] is null in relay mode (cfg.def unreadable) → any
+/// on-state defers.
+bool shouldRebootAfterHostHeal({
+  required bool deviceOn,
+  int? activePresetId,
+  int? bootPresetId,
+}) {
+  if (!deviceOn) return true; // off → no visible disruption
+  // On: reboot only if the live look is exactly the configured boot preset.
+  if (bootPresetId != null &&
+      bootPresetId != kWledNoBootPreset &&
+      activePresetId == bootPresetId) {
+    return true;
+  }
+  return false; // on + non-boot / manual / unknown → defer to next natural boot
+}
+
 // ── Surgical cfg payloads (one field family each) ────────────────────────────
 
 Map<String, dynamic> ntpHostHealPayload() => {
@@ -206,6 +237,10 @@ class ControllerHealReport {
   bool coordsHealed = false;
   bool gammaHealed = false;
   bool rebooted = false;
+
+  /// The ntp-host heal was written but the reboot was DEFERRED to the next
+  /// natural boot (lights were on a non-boot look). The cfg write persists.
+  bool rebootDeferred = false;
   final List<String> log = [];
 
   bool get anyHealed =>
@@ -219,6 +254,7 @@ class ControllerHealReport {
       if (coordsHealed) 'coords',
       if (gammaHealed) 'gamma',
       if (rebooted) 'reboot',
+      if (rebootDeferred) 'reboot-deferred',
     ];
     return parts.isEmpty ? 'no-op' : parts.join('+');
   }
@@ -339,12 +375,22 @@ class ControllerDefaultsHealer {
     }
 
     // (e) reboot ONLY when an NTP-retry field (host/en) changed — never for
-    // tz/coords/gamma. WLED re-attempts NTP only on boot.
+    // tz/coords/gamma. WLED re-attempts NTP only on boot. Gate on device state
+    // so we don't reboot an actively-running non-boot look: defer instead (the
+    // cfg write persists and applies on the next natural boot).
     if (ntpRetryFieldChanged) {
-      try {
-        report.rebooted = await repo.applyJson({'rb': true});
-      } catch (e) {
-        report.log.add('reboot failed: $e');
+      final decision = await _decideReboot();
+      if (decision.reboot) {
+        try {
+          report.rebooted = await repo.applyJson({'rb': true});
+        } catch (e) {
+          report.log.add('reboot failed: $e');
+        }
+      } else {
+        report.rebootDeferred = true;
+        report.log.add(
+            'reboot deferred (${decision.reason}) — host/en persists in cfg, '
+            'applies on next natural boot');
       }
     }
 
@@ -355,6 +401,37 @@ class ControllerDefaultsHealer {
     }
 
     return report;
+  }
+
+  /// Reads the live device state (on + active preset) and, on LAN, the boot
+  /// preset, to decide whether the post-NTP-heal reboot is safe now or should
+  /// defer. Unreadable state → defer (never blind-reboot).
+  Future<({bool reboot, String reason})> _decideReboot() async {
+    Map<String, dynamic>? state;
+    try {
+      state = await repo.getState();
+    } catch (_) {
+      // fall through to null handling
+    }
+    if (state == null) {
+      return (reboot: false, reason: 'device state unreadable');
+    }
+    final on = state['on'] == true;
+    final activePs = _asInt(state['ps']);
+    int? bootPs;
+    final r = repo;
+    if (r is WledService) {
+      bootPs = await r.getBootPresetId();
+    }
+    final go = shouldRebootAfterHostHeal(
+      deviceOn: on,
+      activePresetId: activePs,
+      bootPresetId: bootPs,
+    );
+    return (
+      reboot: go,
+      reason: 'on=$on activePs=$activePs bootPs=$bootPs',
+    );
   }
 
   Future<bool> _post(
