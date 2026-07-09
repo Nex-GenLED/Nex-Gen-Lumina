@@ -102,12 +102,18 @@ class ControllerClockInfo {
   final double? latitude;
   final double? longitude;
 
+  /// NTP server host from cfg.if.ntp.host. Null when cfg unavailable (relay
+  /// mode) or the field is absent. Used by the on-connect healer to detect the
+  /// known-bad default pool host that fails on some networks.
+  final String? ntpHost;
+
   const ControllerClockInfo({
     this.deviceTime,
     this.tzIndex,
     this.tzOffsetSeconds,
     this.latitude,
     this.longitude,
+    this.ntpHost,
   });
 
   /// True when timezone fields were readable (local mode). False in relay mode
@@ -116,6 +122,9 @@ class ControllerClockInfo {
 
   /// True when location fields were readable.
   bool get locationKnown => latitude != null && longitude != null;
+
+  /// True when the NTP host field was readable (local mode only).
+  bool get ntpHostKnown => ntpHost != null;
 
   /// Build from the raw /json/info and (optional) /json/cfg maps.
   factory ControllerClockInfo.fromMaps(
@@ -127,6 +136,7 @@ class ControllerClockInfo {
     int? ofs;
     double? lat;
     double? lon;
+    String? host;
     final ifBlock = (cfg != null && cfg['if'] is Map) ? cfg['if'] as Map : null;
     final ntp = (ifBlock != null && ifBlock['ntp'] is Map)
         ? ifBlock['ntp'] as Map
@@ -140,6 +150,8 @@ class ControllerClockInfo {
       if (la is num) lat = la.toDouble();
       final lo = ntp['ln'];
       if (lo is num) lon = lo.toDouble();
+      final h = ntp['host'];
+      if (h is String) host = h;
     }
     return ControllerClockInfo(
       deviceTime: deviceTime,
@@ -147,6 +159,7 @@ class ControllerClockInfo {
       tzOffsetSeconds: ofs,
       latitude: lat,
       longitude: lon,
+      ntpHost: host,
     );
   }
 }

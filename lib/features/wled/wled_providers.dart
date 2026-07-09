@@ -11,7 +11,7 @@ import 'package:nexgen_command/features/wled/ddp_service.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
-import 'package:nexgen_command/features/wled/clock_health_providers.dart';
+import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
@@ -505,16 +505,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     } catch (_) {
       // No binding (unit test) — lifecycle backoff is inert here.
     }
-    // Gamma self-heal: re-assert cfg.light.gc once each time we connect to a
-    // NEW LAN controller — an external reset (reflash / WLED web-UI cfg save /
-    // factory restore) otherwise persists until a manual Re-sync. Fire-and-
-    // forget; failures retry on the next connect. The baseUrl guard in
-    // [shouldSelfHealGammaOnConnect] keeps this to once per controller, so the
-    // frequent wledRepositoryProvider rebuilds (connectivity/profile churn,
-    // each emitting a fresh WledService for the same IP) don't re-fire it.
+    // Controller-defaults self-heal: on each NEW controller connect, remediate
+    // the silent schedule-killers clock-health detects (failed NTP host, UTC
+    // tz, 0,0 coords) plus the color-gamma standard — heal-only-broken, one
+    // evaluation per connect, surgical POSTs. Fire-and-forget; failures retry
+    // on the next connect. The endpoint guard in [shouldHealOnConnect] keeps
+    // this to once per controller, so the frequent wledRepositoryProvider
+    // rebuilds (connectivity/profile churn, each a fresh repo for the same
+    // endpoint) don't re-fire the evaluation.
     ref.listen<WledRepository?>(wledRepositoryProvider, (prev, next) {
-      if (shouldSelfHealGammaOnConnect(prev, next)) {
-        unawaited(ref.read(gammaSelfHealProvider)());
+      if (shouldHealOnConnect(prev, next)) {
+        unawaited(ref.read(controllerDefaultsHealerProvider)());
       }
     }, fireImmediately: true);
     _startPolling();

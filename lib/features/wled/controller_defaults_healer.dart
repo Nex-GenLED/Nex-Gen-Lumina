@@ -1,0 +1,512 @@
+// lib/features/wled/controller_defaults_healer.dart
+//
+// CONTROLLER DEFAULTS SELF-HEAL (2.5.2) — on-connect remediation of the silent
+// schedule-killers the clock-health evaluator (BUG-CLOCK-1, 8d27bb3) already
+// DETECTS: a failed/unreachable NTP host, a UTC timezone, 0,0 coordinates —
+// plus the color-gamma standard folded in from the prior gamma self-heal.
+//
+// Policy is HEAL-ONLY-BROKEN: a healthy controller receives ZERO writes. Each
+// heal is its own SURGICAL /json/cfg POST (never one combined blob — the P0 cfg
+// lesson: a broad cfg POST risks clobbering unrelated deliberate config). One
+// evaluation per connect; silent on success; a debug line per heal; inert on
+// failure (the next connect retries). Firmware impact: none — keys-only merge.
+//
+// Reboot: WLED only re-attempts NTP on boot, so an NTP host/enable heal is
+// followed by a reboot (applyJson {'rb':true}). tz/coords/gamma never reboot.
+//
+// LAN vs RELAY: LAN reads /json/cfg so all four heals are evaluable and
+// readback-verifiable. Relay CANNOT read cfg (no getCfg bridge command), so
+// only CLOCK_UNSET — derivable from info-time device clock — gates a relay
+// heal, and that heal is a blind-assert of the known-good host + reboot.
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:nexgen_command/services/wled_config_pusher.dart';
+
+// ── Constants (tunable) ──────────────────────────────────────────────────────
+
+/// The NTP host we heal broken controllers to. The stock WLED default
+/// ([kKnownBadNtpHost]) is unreachable on some customer networks; time.google.com
+/// is confirmed reachable across the fleet.
+const String kHealNtpHost = 'time.google.com';
+
+/// The stock WLED default NTP host. Presence of this host (on a LAN controller
+/// whose cfg we can read) is treated as unhealed even if the clock happens to
+/// be set — it's the root cause of the fleet's NTP failures.
+const String kKnownBadNtpHost = '0.wled.pool.ntp.org';
+
+// ── Pure planners (no I/O — unit-tested directly) ────────────────────────────
+
+/// True when the controller's NTP host should be healed to [kHealNtpHost].
+///
+/// Fires when the clock is unset (NTP never synced — current host unreachable
+/// on this network) OR the readable host is the known-bad default pool.
+/// [currentHost] is null in relay mode (cfg unreadable); there only the
+/// clock-unset signal (available from info-time) can drive the heal.
+bool ntpHostNeedsHeal({required bool clockUnset, String? currentHost}) {
+  if (clockUnset) return true;
+  return currentHost == kKnownBadNtpHost;
+}
+
+/// A timezone heal: either a WLED tz enum index (`if.ntp.tz`) or, for a zone we
+/// can't map, a manual UTC offset in seconds (`if.ntp.offset`, with tz forced
+/// to UTC). WLED's tz field is an INDEX into a fixed firmware table, not an
+/// offset — see [kWledTzByIana].
+@immutable
+class TzHeal {
+  final int? tzIndex;
+  final int? offsetSeconds;
+  const TzHeal.index(int this.tzIndex) : offsetSeconds = null;
+  const TzHeal.offset(int this.offsetSeconds) : tzIndex = null;
+  bool get isIndex => tzIndex != null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TzHeal &&
+      other.tzIndex == tzIndex &&
+      other.offsetSeconds == offsetSeconds;
+  @override
+  int get hashCode => Object.hash(tzIndex, offsetSeconds);
+  @override
+  String toString() =>
+      isIndex ? 'TzHeal.index($tzIndex)' : 'TzHeal.offset($offsetSeconds)';
+}
+
+/// Resolve the timezone heal when [tzSuspect] (device UTC, phone not).
+///
+/// Prefers the WLED tz enum index for the user's IANA zone ([kWledTzByIana] —
+/// the same mapping the installer uses); falls back to a manual [phoneOffset]
+/// when the zone is null or unmapped. Returns null when not suspect (heal-only-
+/// broken). NOTE: Dart exposes no reliable IANA name from the phone directly,
+/// so the user's stored profile timezone is the canonical zone source here; the
+/// offset fallback covers any unmapped zone.
+TzHeal? tzHealFor({
+  required bool tzSuspect,
+  String? ianaTimezone,
+  required Duration phoneOffset,
+}) {
+  if (!tzSuspect) return null;
+  final idx = ianaTimezone == null ? null : kWledTzByIana[ianaTimezone];
+  if (idx != null && idx != kWledTzUtc) return TzHeal.index(idx);
+  return TzHeal.offset(phoneOffset.inSeconds);
+}
+
+/// A coordinate heal, rounded to 2 decimals.
+@immutable
+class CoordHeal {
+  final double lat;
+  final double lon;
+  const CoordHeal(this.lat, this.lon);
+
+  @override
+  bool operator ==(Object other) =>
+      other is CoordHeal && other.lat == lat && other.lon == lon;
+  @override
+  int get hashCode => Object.hash(lat, lon);
+  @override
+  String toString() => 'CoordHeal($lat, $lon)';
+}
+
+double _round2(double v) => (v * 100).roundToDouble() / 100;
+bool _usable(double? v) => v != null && v != 0;
+
+/// Resolve the coordinate heal when [locationUnset] (device at 0,0).
+///
+/// Source order: stored home (profile geocode) → phone position (already-
+/// granted permission only; the caller resolves it lazily) → skip. Rounds to 2
+/// decimals — solar math needs no more, and we don't put precise user location
+/// on the device. Returns null to SKIP (clock-health's solar warning still
+/// covers an un-healed 0,0).
+CoordHeal? coordHealFor({
+  required bool locationUnset,
+  double? profileLat,
+  double? profileLon,
+  double? phoneLat,
+  double? phoneLon,
+}) {
+  if (!locationUnset) return null;
+  if (_usable(profileLat) && _usable(profileLon)) {
+    return CoordHeal(_round2(profileLat!), _round2(profileLon!));
+  }
+  if (phoneLat != null && phoneLon != null) {
+    return CoordHeal(_round2(phoneLat), _round2(phoneLon));
+  }
+  return null;
+}
+
+// ── Surgical cfg payloads (one field family each) ────────────────────────────
+
+Map<String, dynamic> ntpHostHealPayload() => {
+      'if': {
+        'ntp': {'host': kHealNtpHost, 'en': true},
+      },
+    };
+
+Map<String, dynamic> tzHealPayload(TzHeal heal) => heal.isIndex
+    ? {
+        'if': {
+          'ntp': {'tz': heal.tzIndex},
+        },
+      }
+    : {
+        'if': {
+          'ntp': {'tz': kWledTzUtc, 'offset': heal.offsetSeconds},
+        },
+      };
+
+Map<String, dynamic> coordHealPayload(CoordHeal heal) => {
+      'if': {
+        'ntp': {'lt': heal.lat, 'ln': heal.lon},
+      },
+    };
+
+// ── Orchestration ────────────────────────────────────────────────────────────
+
+/// Injected inputs the healer needs that come from providers / platform, kept
+/// out of the pure class so it stays unit-testable.
+class ControllerHealContext {
+  final double? profileLat;
+  final double? profileLon;
+  final String? ianaTimezone;
+
+  /// Resolves the phone's position ONLY if location permission is already
+  /// granted; returns null otherwise (never prompts).
+  final Future<({double lat, double lon})?> Function() resolvePhonePosition;
+
+  /// Phone wall-clock supplier (injected for deterministic tests).
+  final DateTime Function() now;
+
+  /// Phone UTC offset used for clock-health evaluation and the tz offset
+  /// fallback. Injected (not derived from [now]) so tests are deterministic
+  /// regardless of the machine timezone; the provider wires `now().timeZoneOffset`.
+  final Duration phoneUtcOffset;
+
+  const ControllerHealContext({
+    required this.profileLat,
+    required this.profileLon,
+    required this.ianaTimezone,
+    required this.resolvePhonePosition,
+    required this.now,
+    required this.phoneUtcOffset,
+  });
+}
+
+/// What the healer did — surfaced for logging and asserted by tests.
+class ControllerHealReport {
+  bool reachable = true;
+  bool ntpHostHealed = false;
+  bool tzHealed = false;
+  bool coordsHealed = false;
+  bool gammaHealed = false;
+  bool rebooted = false;
+  final List<String> log = [];
+
+  bool get anyHealed =>
+      ntpHostHealed || tzHealed || coordsHealed || gammaHealed;
+
+  @override
+  String toString() {
+    final parts = <String>[
+      if (ntpHostHealed) 'ntp-host',
+      if (tzHealed) 'tz',
+      if (coordsHealed) 'coords',
+      if (gammaHealed) 'gamma',
+      if (rebooted) 'reboot',
+    ];
+    return parts.isEmpty ? 'no-op' : parts.join('+');
+  }
+}
+
+/// Evaluates + heals one controller's defaults on connect. Constructed fresh
+/// per connect by [controllerDefaultsHealerProvider]; unit-testable with a fake
+/// repo + context.
+class ControllerDefaultsHealer {
+  final WledRepository repo;
+
+  /// True when [repo] is a direct-LAN [WledService] (cfg readable → all heals);
+  /// false for relay (cfg unreadable → CLOCK_UNSET host heal only).
+  final bool isLan;
+
+  /// LAN baseUrl host / relay controllerIp — the target for the gamma raw-HTTP
+  /// push (LAN only). Null skips gamma.
+  final String? controllerIp;
+
+  final ControllerHealContext ctx;
+  final GammaSelfHealAction gammaAction;
+
+  const ControllerDefaultsHealer({
+    required this.repo,
+    required this.isLan,
+    required this.controllerIp,
+    required this.ctx,
+    required this.gammaAction,
+  });
+
+  Future<ControllerHealReport> run() async {
+    final report = ControllerHealReport();
+    final source = repo;
+    if (source is! ClockInfoSource) {
+      report.reachable = false;
+      return report;
+    }
+
+    ControllerClockInfo? info;
+    try {
+      info = await (source as ClockInfoSource).fetchClockInfo();
+    } catch (e) {
+      report.reachable = false;
+      report.log.add('fetchClockInfo failed: $e');
+      return report;
+    }
+    if (info == null) {
+      report.reachable = false;
+      return report;
+    }
+
+    final now = ctx.now();
+    final health = evaluateClockHealth(
+      device: info,
+      phoneNow: now,
+      phoneUtcOffset: ctx.phoneUtcOffset,
+    );
+
+    // (a) NTP host — the only heal available in relay mode, gated to CLOCK_UNSET
+    // there (info-time signal); LAN also heals the known-bad default host.
+    bool ntpRetryFieldChanged = false;
+    final hostHeal = isLan
+        ? ntpHostNeedsHeal(clockUnset: health.clockUnset, currentHost: info.ntpHost)
+        : health.clockUnset;
+    if (hostHeal) {
+      if (await _post(ntpHostHealPayload(), 'ntp-host', report)) {
+        report.ntpHostHealed = true;
+        ntpRetryFieldChanged = true;
+      }
+    }
+
+    // (b)-(d) LAN only — tz/coords/gamma require reading cfg, impossible on relay.
+    if (isLan) {
+      // (b) timezone
+      final tz = tzHealFor(
+        tzSuspect: health.tzSuspect,
+        ianaTimezone: ctx.ianaTimezone,
+        phoneOffset: ctx.phoneUtcOffset,
+      );
+      if (tz != null) {
+        if (await _post(tzHealPayload(tz), 'tz', report)) report.tzHealed = true;
+      }
+
+      // (c) coordinates — profile home → phone (granted only) → skip
+      if (health.locationUnset) {
+        double? phoneLat, phoneLon;
+        if (!(_usable(ctx.profileLat) && _usable(ctx.profileLon))) {
+          final phone = await ctx.resolvePhonePosition();
+          phoneLat = phone?.lat;
+          phoneLon = phone?.lon;
+        }
+        final coord = coordHealFor(
+          locationUnset: true,
+          profileLat: ctx.profileLat,
+          profileLon: ctx.profileLon,
+          phoneLat: phoneLat,
+          phoneLon: phoneLon,
+        );
+        if (coord != null) {
+          if (await _post(coordHealPayload(coord), 'coords', report)) {
+            report.coordsHealed = true;
+          }
+        } else {
+          report.log.add('coords 0,0 but no source (profile/phone) — skipped');
+        }
+      }
+
+      // (d) gamma — folded in; pushGammaConfig readback-skips when already correct
+      final ip = controllerIp;
+      if (ip != null && ip.isNotEmpty) {
+        try {
+          final g = await gammaAction(ip);
+          if (g.success && !g.noChange) report.gammaHealed = true;
+        } catch (e) {
+          report.log.add('gamma heal failed: $e');
+        }
+      }
+    }
+
+    // (e) reboot ONLY when an NTP-retry field (host/en) changed — never for
+    // tz/coords/gamma. WLED re-attempts NTP only on boot.
+    if (ntpRetryFieldChanged) {
+      try {
+        report.rebooted = await repo.applyJson({'rb': true});
+      } catch (e) {
+        report.log.add('reboot failed: $e');
+      }
+    }
+
+    // Best-effort LAN readback-verify (relay can't read cfg; skip after a reboot
+    // since the device is cycling). Advisory only — never flips success.
+    if (isLan && report.anyHealed && !report.rebooted) {
+      await _verify(source as ClockInfoSource, report);
+    }
+
+    return report;
+  }
+
+  Future<bool> _post(
+    Map<String, dynamic> payload,
+    String label,
+    ControllerHealReport report,
+  ) async {
+    try {
+      final ok = await repo.applyConfig(payload);
+      if (!ok) {
+        report.log.add('$label POST returned false');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      report.log.add('$label POST error: $e');
+      return false;
+    }
+  }
+
+  Future<void> _verify(
+    ClockInfoSource source,
+    ControllerHealReport report,
+  ) async {
+    try {
+      final after = await source.fetchClockInfo();
+      if (after == null) return;
+      if (report.ntpHostHealed &&
+          after.ntpHost != null &&
+          after.ntpHost != kHealNtpHost) {
+        report.log.add('readback: ntp host still ${after.ntpHost}');
+      }
+      if (report.coordsHealed &&
+          after.latitude == 0 &&
+          after.longitude == 0) {
+        report.log.add('readback: coords still 0,0');
+      }
+    } catch (e) {
+      report.log.add('readback error: $e');
+    }
+  }
+}
+
+// ── Connect-lifecycle predicate ──────────────────────────────────────────────
+
+String? _endpointKey(WledRepository? repo) {
+  if (repo is WledService) return 'lan:${repo.baseUrl}';
+  if (repo is CloudRelayRepository) {
+    return 'relay:${repo.controllerId}:${repo.controllerIp}';
+  }
+  return null;
+}
+
+/// True when a [wledRepositoryProvider] transition is a NEW controller connect
+/// that warrants a heal — [next] reaches a clock-readable endpoint (LAN
+/// WledService or relay CloudRelayRepository) different from [prev]'s. Guards
+/// the [WledNotifier] listener so the frequent provider rebuilds that reuse the
+/// same endpoint (connectivity/profile churn emits a fresh instance) don't
+/// re-fire the evaluation. Pure — unit-testable.
+bool shouldHealOnConnect(WledRepository? previous, WledRepository? next) {
+  final nextKey = _endpointKey(next);
+  if (nextKey == null) return false;
+  return _endpointKey(previous) != nextKey;
+}
+
+// ── Providers ────────────────────────────────────────────────────────────────
+
+/// The device write a gamma heal performs. Injected so tests observe/stub it
+/// without HTTP. Default delegates to [pushGammaConfig] (readback → skip when
+/// already correct, else POST + verify).
+typedef GammaSelfHealAction = Future<WledConfigPushResult> Function(String ip);
+
+/// Test seam for the gamma half of the healer.
+final gammaSelfHealActionProvider = Provider<GammaSelfHealAction>(
+  (ref) => (ip) => pushGammaConfig(ip),
+);
+
+/// Phone wall-clock supplier (overridable in tests for deterministic clock
+/// health).
+final healerPhoneNowProvider = Provider<DateTime Function()>((ref) => DateTime.now);
+
+/// Resolves the phone position ONLY if location permission is already granted —
+/// never prompts (constraint). Overridable in tests.
+final healerPhonePositionProvider =
+    Provider<Future<({double lat, double lon})?> Function()>(
+  (ref) => _resolvePhonePositionIfPermitted,
+);
+
+Future<({double lat, double lon})?> _resolvePhonePositionIfPermitted() async {
+  try {
+    final perm = await Geolocator.checkPermission();
+    if (perm != LocationPermission.always &&
+        perm != LocationPermission.whileInUse) {
+      return null; // never prompt for a background heal
+    }
+    final pos = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.low,
+        timeLimit: Duration(seconds: 5),
+      ),
+    );
+    return (lat: pos.latitude, lon: pos.longitude);
+  } catch (e) {
+    debugPrint('[Healer] phone position unavailable: $e');
+    return null;
+  }
+}
+
+/// Returns a callable that runs the on-connect controller-defaults heal for the
+/// currently-connected controller. Fired imperatively by the [WledNotifier]
+/// connect listener (see [shouldHealOnConnect]) so no widget has to watch it.
+final controllerDefaultsHealerProvider =
+    Provider<Future<ControllerHealReport> Function()>((ref) {
+  return () async {
+    final repo = ref.read(wledRepositoryProvider);
+    // Demo/mock repos aren't a ClockInfoSource; run() short-circuits on that.
+    if (repo == null) {
+      return ControllerHealReport()..reachable = false;
+    }
+
+    final isLan = repo is WledService;
+    String? ip;
+    if (repo is WledService) {
+      ip = Uri.tryParse(repo.baseUrl)?.host;
+    } else if (repo is CloudRelayRepository) {
+      ip = repo.controllerIp;
+    }
+
+    final profile = ref.read(currentUserProfileProvider).valueOrNull;
+    final nowFn = ref.read(healerPhoneNowProvider);
+    final ctx = ControllerHealContext(
+      profileLat: profile?.latitude,
+      profileLon: profile?.longitude,
+      ianaTimezone: profile?.timeZone,
+      resolvePhonePosition: ref.read(healerPhonePositionProvider),
+      now: nowFn,
+      phoneUtcOffset: nowFn().timeZoneOffset,
+    );
+
+    final healer = ControllerDefaultsHealer(
+      repo: repo,
+      isLan: isLan,
+      controllerIp: ip,
+      ctx: ctx,
+      gammaAction: ref.read(gammaSelfHealActionProvider),
+    );
+
+    final report = await healer.run();
+    if (report.anyHealed || report.rebooted) {
+      debugPrint('[Healer] $report on ${ip ?? "(unknown)"}'
+          '${report.log.isEmpty ? '' : ' — ${report.log.join('; ')}'}');
+    }
+    return report;
+  };
+});
