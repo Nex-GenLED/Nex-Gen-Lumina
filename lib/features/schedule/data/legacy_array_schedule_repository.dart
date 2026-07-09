@@ -3,25 +3,50 @@
 // The default [ScheduleRepository] backend: schedules live as the `schedules`
 // array field on the /users/{uid} document.
 //
-// The bodies below are EXTRACTED VERBATIM from UserService's former schedule
-// methods (fetchSchedulesFromServer, saveSchedules, addSchedule, addSchedules,
-// removeSchedule, updateSchedule, streamSchedules) plus their private helpers
-// (_writeWithRetry, verifyServerWrite). Firestore behaviour — arrayUnion paths,
-// UserService.sanitizeForFirestore usage, whole-array read-modify-write,
-// best-effort server verification, retry/backoff — is byte-for-byte identical
-// to prior releases.
+// Prompt 3 extracted the former UserService bodies here verbatim. Prompt 4
+// makes two behavioural changes, both about correctness/convergence — never
+// about what the caller observes:
+//
+//   1. remove() and update() are now transactional, per-user-serialized
+//      read-modify-writes (applyArrayTxn) instead of a bare get-then-write.
+//      This closes the lost-update race that was the whole reason the
+//      subcollection migration exists. add/addAll (arrayUnion) and saveAll
+//      (deliberate whole-array overwrite) are unchanged.
+//
+//   2. Every successful primary write mirrors its delta to the
+//      /users/{uid}/schedules/{id} subcollection so both shapes converge
+//      regardless of the schedules_subcollection flag. Mirrors are best-effort
+//      (runMirror swallows failures). saveAll AWAITS its mirror so a following
+//      read under the subcollection repo is deterministic; the single-item
+//      mirrors are fire-and-forget (kept off the write hot path) but exposed
+//      via [lastMirror] so tests can await convergence.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_store_sync.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 class LegacyArrayScheduleRepository implements ScheduleRepository {
-  LegacyArrayScheduleRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  LegacyArrayScheduleRepository({
+    FirebaseFirestore? firestore,
+    FirebaseFirestore? mirrorFirestore,
+  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+        _mirrorFirestore = mirrorFirestore ?? firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+
+  /// Firestore used for the subcollection mirror. Defaults to [_firestore];
+  /// injectable so a test can point the mirror at a failing store to prove the
+  /// primary write still succeeds.
+  final FirebaseFirestore _mirrorFirestore;
+
+  /// The most recent fire-and-forget mirror future. Non-blocking mirror paths
+  /// (add/addAll/update/remove) assign it so tests can `await repo.lastMirror`
+  /// to observe convergence deterministically. Never awaited in production.
+  @visibleForTesting
+  Future<void>? lastMirror;
 
   static const _retryDelays = [Duration(seconds: 2), Duration(seconds: 5)];
 
@@ -81,12 +106,7 @@ class LegacyArrayScheduleRepository implements ScheduleRepository {
         .doc(userId)
         .get(const GetOptions(source: Source.server));
     if (!doc.exists) return [];
-    final data = doc.data()!;
-    return (data['schedules'] as List?)
-            ?.whereType<Map<String, dynamic>>()
-            .map((e) => ScheduleItem.fromJson(e))
-            .toList() ??
-        [];
+    return decodeScheduleArray(doc.data());
   }
 
   @override
@@ -109,6 +129,11 @@ class LegacyArrayScheduleRepository implements ScheduleRepository {
     } else {
       debugPrint('✅ Schedules saved and verified: ${schedules.length} items');
     }
+
+    // AWAITED mirror: saveAll is the bulk path a cross-repo read commonly
+    // follows, so we block on convergence here (Addition B).
+    await runMirror(userId, 'legacy.saveAll->sub',
+        () => subReplaceAll(_mirrorFirestore, userId, schedules));
   }
 
   @override
@@ -123,6 +148,8 @@ class LegacyArrayScheduleRepository implements ScheduleRepository {
       );
     });
     debugPrint('✅ Schedule added: ${schedule.id}');
+    lastMirror = runMirror(userId, 'legacy.add->sub',
+        () => subUpsert(_mirrorFirestore, userId, schedule));
   }
 
   @override
@@ -140,66 +167,41 @@ class LegacyArrayScheduleRepository implements ScheduleRepository {
     });
     debugPrint('✅ ${items.length} schedules added atomically: '
         '${items.map((i) => i.id).join(", ")}');
+    lastMirror = runMirror(userId, 'legacy.addAll->sub',
+        () => subUpsertAll(_mirrorFirestore, userId, items));
   }
 
   @override
   Future<void> remove(String userId, String scheduleId) async {
-    await _writeWithRetry(() async {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .where((s) => s.id != scheduleId)
-              .toList() ??
-          [];
-
-      await _firestore.collection('users').doc(userId).update(
-        UserService.sanitizeForFirestore({
-          'schedules': schedules.map((e) => e.toJson()).toList(),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
+    // Transactional + per-user-serialized: closes the lost-update race a bare
+    // get-then-write suffered when remove raced a concurrent update.
+    await applyArrayTxn(_firestore, userId,
+        (current) => current.where((s) => s.id != scheduleId).toList());
     debugPrint('✅ Schedule removed: $scheduleId');
+    lastMirror = runMirror(userId, 'legacy.remove->sub',
+        () => subDelete(_mirrorFirestore, userId, scheduleId));
   }
 
   @override
   Future<void> update(String userId, ScheduleItem schedule) async {
-    await _writeWithRetry(() async {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .map((s) => s.id == schedule.id ? schedule : s)
-              .toList() ??
-          [];
-
-      await _firestore.collection('users').doc(userId).update(
-        UserService.sanitizeForFirestore({
-          'schedules': schedules.map((e) => e.toJson()).toList(),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
+    // In-place update (unknown ids are a no-op, matching the former semantics).
+    await applyArrayTxn(
+      _firestore,
+      userId,
+      (current) =>
+          current.map((s) => s.id == schedule.id ? schedule : s).toList(),
+    );
     debugPrint('✅ Schedule updated: ${schedule.id}');
+    lastMirror = runMirror(userId, 'legacy.update->sub',
+        () => subUpsert(_mirrorFirestore, userId, schedule));
   }
 
   @override
   Stream<List<ScheduleItem>> streamSchedules(String userId) {
-    return _firestore.collection('users').doc(userId).snapshots().map((doc) {
-      if (!doc.exists) return [];
-      final data = doc.data()!;
-      return (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .toList() ??
-          [];
-    });
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((doc) => doc.exists ? decodeScheduleArray(doc.data()) : <ScheduleItem>[]);
   }
 }
