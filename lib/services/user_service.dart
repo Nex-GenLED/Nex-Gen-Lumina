@@ -5,6 +5,8 @@ import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/data/legacy_array_schedule_repository.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/debug_capture.dart';
@@ -13,6 +15,17 @@ import 'package:nexgen_command/services/encryption_service.dart';
 /// Service for managing user data in Firestore
 class UserService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  /// Backing store for the user's schedules. Defaults to the legacy
+  /// array-on-user-doc implementation so behaviour is unchanged; the
+  /// `userServiceProvider` injects the feature-flag-selected repository so the
+  /// storage backend can be swapped without touching any caller of the
+  /// schedule methods below.
+  final ScheduleRepository _scheduleRepository;
+
+  UserService({ScheduleRepository? scheduleRepository})
+      : _scheduleRepository =
+            scheduleRepository ?? LegacyArrayScheduleRepository();
 
   /// Create a new user profile
   Future<void> createUser(UserModel user) async {
@@ -789,58 +802,23 @@ class UserService {
   }
 
   /// Fetches schedules directly from the Firestore server, bypassing cache.
-  Future<List<ScheduleItem>> fetchSchedulesFromServer(String userId) async {
-    final doc = await _firestore
-        .collection('users')
-        .doc(userId)
-        .get(const GetOptions(source: Source.server));
-    if (!doc.exists) return [];
-    final data = doc.data()!;
-    return (data['schedules'] as List?)
-            ?.whereType<Map<String, dynamic>>()
-            .map((e) => ScheduleItem.fromJson(e))
-            .toList() ??
-        [];
-  }
+  ///
+  /// Delegates to the active [ScheduleRepository]; the legacy backend is
+  /// byte-identical to the previous inline implementation.
+  Future<List<ScheduleItem>> fetchSchedulesFromServer(String userId) =>
+      _scheduleRepository.fetchSchedules(userId);
 
   /// Save all schedules for a user (replaces existing schedules).
   /// Throws on persistent write failure — callers can inspect the
   /// FirebaseException for permission-denied / not-found / unavailable.
   /// Server-side verification is best-effort: a verification miss does
   /// NOT mark the write as failed (the write itself succeeded).
-  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) async {
-    await _writeWithRetry(() async {
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'schedules': schedules.map((e) => e.toJson()).toList(),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-
-    // Verification is informational only. We log a warning on mismatch but
-    // never fail the call — a stale/offline read shouldn't roll back a
-    // successful Firestore write in the caller's eyes.
-    final verified = await verifyServerWrite(userId, schedules.length);
-    if (!verified) {
-      debugPrint('⚠️ saveSchedules: write accepted but server verification failed');
-    } else {
-      debugPrint('✅ Schedules saved and verified: ${schedules.length} items');
-    }
-  }
+  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) =>
+      _scheduleRepository.saveAll(userId, schedules);
 
   /// Add a single schedule item. Throws on persistent write failure.
-  Future<void> addSchedule(String userId, ScheduleItem schedule) async {
-    await _writeWithRetry(() async {
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'schedules': FieldValue.arrayUnion([sanitizeForFirestore(schedule.toJson())]),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-    debugPrint('✅ Schedule added: ${schedule.id}');
-  }
+  Future<void> addSchedule(String userId, ScheduleItem schedule) =>
+      _scheduleRepository.add(userId, schedule);
 
   /// Add multiple schedule items in a single Firestore write. Throws on
   /// persistent write failure.
@@ -849,87 +827,20 @@ class UserService {
   /// Firestore-write layer). Used by the compound-schedule batch path
   /// where a single Lumina prompt produces multiple ScheduleItems and
   /// partial success would leave the user with an incoherent schedule.
-  ///
-  /// Mirrors [addSchedule]'s shape: arrayUnion + _writeWithRetry + same
-  /// error propagation. arrayUnion deduplicates identical encoded objects
-  /// server-side, which is fine for items with fresh unique ids.
-  Future<void> addSchedules(String userId, List<ScheduleItem> items) async {
-    if (items.isEmpty) return;
-    await _writeWithRetry(() async {
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'schedules': FieldValue.arrayUnion(
-            items.map((i) => sanitizeForFirestore(i.toJson())).toList(),
-          ),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-    debugPrint('✅ ${items.length} schedules added atomically: '
-        '${items.map((i) => i.id).join(", ")}');
-  }
+  Future<void> addSchedules(String userId, List<ScheduleItem> items) =>
+      _scheduleRepository.addAll(userId, items);
 
   /// Remove a schedule item by ID. Throws on persistent write failure.
-  /// arrayRemove requires exact match, so we fetch and resave.
-  Future<void> removeSchedule(String userId, String scheduleId) async {
-    await _writeWithRetry(() async {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .where((s) => s.id != scheduleId)
-              .toList() ??
-          [];
-
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'schedules': schedules.map((e) => e.toJson()).toList(),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-    debugPrint('✅ Schedule removed: $scheduleId');
-  }
+  Future<void> removeSchedule(String userId, String scheduleId) =>
+      _scheduleRepository.remove(userId, scheduleId);
 
   /// Update a single schedule item. Throws on persistent write failure.
-  Future<void> updateSchedule(String userId, ScheduleItem schedule) async {
-    await _writeWithRetry(() async {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .map((s) => s.id == schedule.id ? schedule : s)
-              .toList() ??
-          [];
-
-      await _firestore.collection('users').doc(userId).update(
-        sanitizeForFirestore({
-          'schedules': schedules.map((e) => e.toJson()).toList(),
-          'updated_at': FieldValue.serverTimestamp(),
-        }),
-      );
-    });
-    debugPrint('✅ Schedule updated: ${schedule.id}');
-  }
+  Future<void> updateSchedule(String userId, ScheduleItem schedule) =>
+      _scheduleRepository.update(userId, schedule);
 
   /// Stream user's schedules.
-  Stream<List<ScheduleItem>> streamSchedules(String userId) {
-    return _firestore.collection('users').doc(userId).snapshots().map((doc) {
-      if (!doc.exists) return [];
-      final data = doc.data()!;
-      return (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .toList() ??
-          [];
-    });
-  }
+  Stream<List<ScheduleItem>> streamSchedules(String userId) =>
+      _scheduleRepository.streamSchedules(userId);
 
   // ==================== Calendar Entry Management ====================
 

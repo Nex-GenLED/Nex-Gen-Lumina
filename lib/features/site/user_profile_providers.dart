@@ -5,11 +5,20 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/models/installation_model.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
-/// Exposes UserService via Riverpod
-final userServiceProvider = Provider<UserService>((ref) => UserService());
+/// Exposes UserService via Riverpod.
+///
+/// The schedule backend is injected from [scheduleRepositoryProvider], which
+/// selects legacy-array vs. subcollection storage from the
+/// schedules_subcollection feature flag (default false → legacy → unchanged).
+final userServiceProvider = Provider<UserService>((ref) {
+  return UserService(
+    scheduleRepository: ref.watch(scheduleRepositoryProvider),
+  );
+});
 
 /// Streams the current user's profile document from Firestore.
 /// Returns null if not signed in or if document doesn't exist yet.
