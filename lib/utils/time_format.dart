@@ -97,6 +97,29 @@ String formatTimeLabel(String? label, {String timeFormat = kTimeFormatDefault}) 
   return label;
 }
 
+/// Render a schedule's on/off window for display.
+///
+/// When [offLabel] is present and non-empty, BOTH boundaries are shown with an
+/// explicit "off at" so the sunrise/evening OFF that turns the lights off is
+/// never silent:
+///   "Sunset → off at Sunrise"  ·  "7:00 PM → off at 11:00 PM"
+/// When there is no off boundary, only the ON time is shown. Solar tokens
+/// render as their word (Sunrise/Sunset) via [formatTimeLabel].
+///
+/// This is the single source of truth for the "X → off at Y" phrasing so no
+/// schedule surface can display an ON boundary while hiding its OFF.
+String formatScheduleWindow(
+  String? onLabel,
+  String? offLabel, {
+  String timeFormat = kTimeFormatDefault,
+}) {
+  final on = formatTimeLabel(onLabel, timeFormat: timeFormat);
+  final hasOff = offLabel != null && offLabel.trim().isNotEmpty;
+  if (!hasOff) return on;
+  final off = formatTimeLabel(offLabel, timeFormat: timeFormat);
+  return '$on → off at $off';
+}
+
 /// Exposes the current user's [UserModel.timeFormat] preference.
 /// Falls back to 12-hour when the profile is unloaded or unset.
 final timeFormatPreferenceProvider = Provider<String>((ref) {

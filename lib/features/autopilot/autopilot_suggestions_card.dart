@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/utils/time_format.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 
 /// A card displaying pending autopilot suggestions.
 ///
@@ -106,6 +107,7 @@ class _AutopilotSuggestionsCardState
                       ),
                     );
                   }
+                  maybeShowManualApplyOffWarning(ref);
                 },
                 onReject: () async {
                   // Use scheduler to record rejection feedback

@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
@@ -376,6 +377,7 @@ class RecentPatternsSection extends ConsumerWidget {
           SnackBar(content: Text('Applied: ${pattern.name}')),
         );
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply recent pattern failed: $e');
       if (context.mounted) {

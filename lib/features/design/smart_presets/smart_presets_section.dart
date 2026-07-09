@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_apply.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_models.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
@@ -131,6 +132,7 @@ class SmartPresetsSection extends ConsumerWidget {
         messenger.showSnackBar(
           const SnackBar(content: Text('Applied.'), backgroundColor: Colors.green),
         );
+        maybeShowManualApplyOffWarning(ref);
         break;
       case SmartPresetApplyResult.staleApplied:
         messenger.showSnackBar(SnackBar(
@@ -142,6 +144,7 @@ class SmartPresetsSection extends ConsumerWidget {
             onPressed: () => context.push(AppRoutes.rooflineRefine),
           ),
         ));
+        maybeShowManualApplyOffWarning(ref);
         break;
       case SmartPresetApplyResult.noMap:
         messenger.showSnackBar(SnackBar(

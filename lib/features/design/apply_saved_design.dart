@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -95,6 +96,7 @@ Future<void> applySavedDesign(
       SnackBar(content: Text('Applied: ${design.name}')),
     );
   }
+  maybeShowManualApplyOffWarning(ref);
 }
 
 /// Gather up to 3 preview colors across all included channels. Falls back to

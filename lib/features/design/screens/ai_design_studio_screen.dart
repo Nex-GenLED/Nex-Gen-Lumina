@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/design/manual_editor/design_preview.dart
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
 import 'package:nexgen_command/features/design/widgets/ai_understanding_panel.dart';
 import 'package:nexgen_command/features/design/widgets/clarification_dialog.dart';
@@ -600,6 +601,10 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: color),
       );
+      if (result == DesignApplyResult.applied ||
+          result == DesignApplyResult.staleApplied) {
+        maybeShowManualApplyOffWarning(ref);
+      }
     } catch (e) {
       debugPrint('DesignStudio apply error: $e');
       if (mounted) {

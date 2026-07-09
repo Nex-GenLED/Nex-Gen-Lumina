@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
     show WledEffectsCatalog;
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
@@ -746,6 +747,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply pattern failed: $e');
       if (context.mounted) {
@@ -838,6 +840,7 @@ class _CompactPatternItemCard extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply with color failed: $e');
       if (context.mounted) {

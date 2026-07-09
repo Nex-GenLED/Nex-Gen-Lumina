@@ -32,6 +32,7 @@ import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
@@ -1209,6 +1210,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
                   }
+                  maybeShowManualApplyOffWarning(ref);
                 } else {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1296,6 +1298,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     SnackBar(content: Text('Applied: ${favorite.displayName}'), backgroundColor: Colors.green.shade700),
                   );
                 }
+                maybeShowManualApplyOffWarning(ref);
               } else {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1416,7 +1419,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       const SizedBox(height: 2),
                       Text(
                         hasSchedule
-                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → $offTime' : ''}'
+                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → off at $offTime' : ''}'
                             : 'No schedule — tap to add one',
                         style: TextStyle(
                           fontSize: 13,

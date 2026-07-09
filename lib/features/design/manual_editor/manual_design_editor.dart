@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
 import 'package:nexgen_command/features/design/manual_editor/edit_history.dart';
@@ -227,6 +228,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           backgroundColor: ok ? Colors.green : Colors.red.shade800,
         ));
       }
+      if (ok) maybeShowManualApplyOffWarning(ref);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

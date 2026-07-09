@@ -3442,11 +3442,14 @@ class _ScheduleCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final timeFormat = ref.watch(timeFormatPreferenceProvider);
-    // Build time display string
-    final timeDisplay = item.hasOffTime
-        ? '${formatTimeLabel(item.timeLabel, timeFormat: timeFormat)} → '
-            '${formatTimeLabel(item.offTimeLabel, timeFormat: timeFormat)}'
-        : formatTimeLabel(item.timeLabel, timeFormat: timeFormat);
+    // Build time display string. Any schedule with an off boundary shows BOTH
+    // boundaries explicitly ("<on> → off at <off>") so the sunrise/evening OFF
+    // that turns the lights off is never silent.
+    final timeDisplay = formatScheduleWindow(
+      item.timeLabel,
+      item.hasOffTime ? item.offTimeLabel : null,
+      timeFormat: timeFormat,
+    );
 
     // Extract preview colors from WLED payload
     final previewColors = _extractStripColors(null, item.wledPayload);
