@@ -8,10 +8,6 @@ exports.claudeProxy = claudeProxy;
 
 admin.initializeApp();
 
-// Import TypeScript-compiled Lumina AI command processor
-const { processLuminaCommand } = require("./lib/processLuminaCommand");
-exports.processLuminaCommand = processLuminaCommand;
-
 // Import TypeScript-compiled Lumina AI schedule command processor
 const { processScheduleCommand } = require("./lib/processScheduleCommand");
 exports.processScheduleCommand = processScheduleCommand;

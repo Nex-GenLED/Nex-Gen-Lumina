@@ -1,5 +1,6 @@
 /**
- * Input Validation & Rate Limiting for processLuminaCommand
+ * Input Validation & Rate Limiting for the Lumina AI Cloud Functions
+ * (currently processScheduleCommand; formerly processLuminaCommand too).
  *
  * - Schema validation for the request payload
  * - Per-user rate limiting (20 requests/minute) via Firestore
