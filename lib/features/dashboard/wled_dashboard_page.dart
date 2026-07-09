@@ -33,6 +33,7 @@ import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
+import 'package:nexgen_command/features/dashboard/tonight_label.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
@@ -1408,7 +1409,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'TONIGHT',
+                        // Time-aware: morning/afternoon event → TODAY,
+                        // evening/night → TONIGHT (BUG-SCHED-UX-3). Follows the
+                        // shown event's ON time, falling back to now when none.
+                        upcomingScheduleHeaderLabel(rawOnTime, today),
                         style: TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.w700,

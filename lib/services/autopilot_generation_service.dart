@@ -35,10 +35,15 @@ class AutopilotGenerationService {
     final end = start.add(const Duration(days: 7));
     final suggestions = <AutopilotScheduleItem>[];
 
-    // Always add a daily warm white sunset-to-sunrise schedule as the baseline
-    final dailyWarmWhite = await _generateDailyWarmWhiteSchedule(profile);
-    if (dailyWarmWhite != null) {
-      suggestions.add(dailyWarmWhite);
+    // Daily warm-white sunset-to-sunrise baseline. Consent-gated: seeded only
+    // when the user hasn't unchecked it in autopilot setup
+    // (autopilotBaselineEnabled, default true). Honoring a decline HERE is what
+    // stops regeneration from re-adding a baseline the user removed.
+    if (profile.autopilotBaselineEnabled) {
+      final dailyWarmWhite = await _generateDailyWarmWhiteSchedule(profile);
+      if (dailyWarmWhite != null) {
+        suggestions.add(dailyWarmWhite);
+      }
     }
 
     // Get calendar events for the week

@@ -2741,12 +2741,80 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard>
 
               // Autopilot toggle (unchanged from original)
               _AutopilotRow(),
+              // Consent-gated daily warm-white baseline (pre-checked). Self-
+              // hides when autopilot is off. Unchecking persists so a future
+              // regeneration never re-adds the baseline.
+              const _BaselineConsentTile(),
             ],
           ),
         ),
       ),
     ), // end AnimatedBuilder child (ClipRRect)
     ); // end AnimatedBuilder
+  }
+}
+
+// ─── Baseline consent (daily warm-white) ──────────────────────────────────────
+//
+// Pre-checked option surfaced under the Autopilot toggle. Discloses that
+// autopilot seeds a daily "warm white from sunset, off at sunrise" baseline —
+// the schedule that silently turned users' lights off at sunrise. Unchecking
+// persists (autopilotBaselineEnabled=false) so regeneration never re-adds it.
+// It does NOT touch existing baseline schedules — those stay visible and
+// deletable in the list. Self-hides when autopilot is off.
+class _BaselineConsentTile extends ConsumerWidget {
+  const _BaselineConsentTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(autopilotEnabledProvider)) return const SizedBox.shrink();
+    final enabled = ref.watch(baselineWarmWhiteEnabledProvider);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        onTap: () => ref
+            .read(autopilotSettingsServiceProvider)
+            .setBaselineWarmWhite(!enabled),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                enabled
+                    ? Icons.check_box_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                size: 20,
+                color: enabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Daily evening lighting',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: NexGenPalette.textHigh,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Warm white from sunset, off at sunrise',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: NexGenPalette.textMedium),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

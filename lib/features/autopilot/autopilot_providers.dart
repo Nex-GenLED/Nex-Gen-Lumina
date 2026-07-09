@@ -27,6 +27,17 @@ final autopilotEnabledProvider = Provider<bool>((ref) {
   );
 });
 
+/// Whether autopilot seeds the daily warm-white baseline. Pre-checked (true)
+/// by default; unchecking in autopilot setup persists and stops regeneration
+/// from re-adding it.
+final baselineWarmWhiteEnabledProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.autopilotBaselineEnabled ?? true,
+    orElse: () => true,
+  );
+});
+
 /// Whether the current user has a commercial profile type.
 final isCommercialProfileProvider = Provider<bool>((ref) {
   final profileAsync = ref.watch(currentUserProfileProvider);
@@ -697,6 +708,17 @@ class AutopilotSettingsService {
   Future<void> setScoreCelebrations(bool enabled) async {
     await _updateProfile((p) => p.copyWith(
           scoreCelebrations: enabled,
+          updatedAt: DateTime.now(),
+        ));
+  }
+
+  /// Enable or disable the daily warm-white baseline seed. Unchecking persists
+  /// (autopilotBaselineEnabled) so a future regeneration never re-adds the
+  /// baseline the user declined. Existing baseline schedules are left as-is —
+  /// they remain visible and deletable in My Schedule.
+  Future<void> setBaselineWarmWhite(bool enabled) async {
+    await _updateProfile((p) => p.copyWith(
+          autopilotBaselineEnabled: enabled,
           updatedAt: DateTime.now(),
         ));
   }
