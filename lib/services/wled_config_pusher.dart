@@ -13,17 +13,24 @@ class WledConfigPushResult {
   final String? errorMessage;
   final List<String> warnings;
 
+  /// True when the call intentionally wrote NOTHING to the device (a no-op:
+  /// inputs missing, or the device already matched the desired config). Lets
+  /// callers stay silent on a healthy skip while still logging an actual write.
+  /// Only [skipped] sets this; every real POST path leaves it false.
+  final bool noChange;
+
   const WledConfigPushResult({
     required this.success,
     this.errorMessage,
     this.warnings = const [],
+    this.noChange = false,
   });
 
   /// Soft-success: the operation was a no-op because the inputs were
-  /// missing. Surfaces the reason as a single warning so callers can log
-  /// it but doesn't fail the parent flow.
+  /// missing (or the device already matched). Surfaces the reason as a single
+  /// warning so callers can log it but doesn't fail the parent flow.
   factory WledConfigPushResult.skipped(String reason) =>
-      WledConfigPushResult(success: true, warnings: [reason]);
+      WledConfigPushResult(success: true, warnings: [reason], noChange: true);
 
   /// Soft-success: the write succeeded but a post-write check flagged a
   /// concern (e.g. readback mismatch). Caller decides whether to retry.
