@@ -7,9 +7,29 @@
  * recently appended items.
  *
  * Server-side defense-in-depth for the same cap enforced at write-time by
- * SchedulesNotifier.addAll on the client. Catches users on older app builds
- * that don't enforce the cap, and any drift that the client-side dedup
+ * SchedulesNotifier.addAll on the client
+ * (lib/features/schedule/schedule_providers.dart:461). Catches users on older
+ * app builds that don't enforce the cap, and any drift the client-side dedup
  * doesn't catch.
+ *
+ * TWO correctness properties this file guarantees:
+ *
+ *   1. TRANSACTIONAL. The array read-trim-write runs inside a per-user
+ *      runTransaction. This is the LAST blind whole-array overwrite in the
+ *      system — a third writer the client-side per-uid lock cannot see (it
+ *      runs in this Cloud Functions process). Wrapping it in a transaction
+ *      means a concurrent client remove/update can't be silently clobbered:
+ *      the trim re-reads inside the txn and Firestore retries on conflict.
+ *
+ *   2. MIGRATION-AWARE. If (and only if) trimming occurred, the identical trim
+ *      is applied to the /users/{uid}/schedules subcollection via batched
+ *      deletes of the removed ids (translated through the same scheduleSubDocId
+ *      contract the client uses). This keeps both shapes convergent during the
+ *      array→subcollection dual-write window. Users with no subcollection docs
+ *      yet just no-op the deletes.
+ *
+ * Idempotent (a second run finds length <= cap and does nothing); users
+ * without a `schedules` array field are skipped.
  *
  * Deployment:
  *   cd functions
@@ -53,8 +73,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.enforceScheduleLimits = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const admin = __importStar(require("firebase-admin"));
+const scheduleMigrationShared_1 = require("./scheduleMigrationShared");
 // admin.initializeApp() is called in index.js — do not call again here.
-const MAX_SCHEDULES = 50;
+// Firestore batch limit is 500; keep headroom.
+const DELETE_BATCH_SIZE = 450;
 exports.enforceScheduleLimits = (0, scheduler_1.onSchedule)({
     schedule: "every sunday 19:00",
     timeZone: "UTC",
@@ -65,25 +87,48 @@ exports.enforceScheduleLimits = (0, scheduler_1.onSchedule)({
     const db = admin.firestore();
     const usersSnap = await db.collection("users").get();
     console.log(`[enforceScheduleLimits] scanning ${usersSnap.size} users, ` +
-        `cap=${MAX_SCHEDULES}`);
+        `cap=${scheduleMigrationShared_1.MAX_SCHEDULES}`);
     let trimmedCount = 0;
     let totalRemoved = 0;
+    let subDocsDeleted = 0;
     const errors = [];
     for (const userDoc of usersSnap.docs) {
-        const data = userDoc.data();
-        const schedules = data.schedules;
-        if (!Array.isArray(schedules))
+        // Cheap pre-filter to avoid a transaction for the overwhelming majority
+        // of users who are within the cap. The transaction re-reads and
+        // re-checks authoritatively, so this is just an optimization.
+        const preSchedules = userDoc.data().schedules;
+        if (!Array.isArray(preSchedules))
             continue;
-        if (schedules.length <= MAX_SCHEDULES)
+        if (preSchedules.length <= scheduleMigrationShared_1.MAX_SCHEDULES)
             continue;
-        const trimmed = schedules.slice(-MAX_SCHEDULES);
-        const removed = schedules.length - trimmed.length;
+        const userRef = userDoc.ref;
         try {
-            await userDoc.ref.update({ schedules: trimmed });
-            console.log(`[enforceScheduleLimits] ${userDoc.id}: ` +
-                `${schedules.length} → ${trimmed.length} (removed ${removed})`);
+            // ── 1. Transactional array trim ─────────────────────────────
+            const removedIds = await db.runTransaction(async (txn) => {
+                const snap = await txn.get(userRef);
+                const schedules = snap.get("schedules");
+                const plan = (0, scheduleMigrationShared_1.planScheduleTrim)(schedules, scheduleMigrationShared_1.MAX_SCHEDULES);
+                if (!plan.trimmed)
+                    return [];
+                txn.update(userRef, { schedules: plan.kept });
+                return plan.removedIds;
+            });
+            if (removedIds.length === 0)
+                continue; // raced away; nothing to do
             trimmedCount++;
-            totalRemoved += removed;
+            totalRemoved += removedIds.length;
+            console.log(`[enforceScheduleLimits] ${userDoc.id}: trimmed ${removedIds.length} ` +
+                `entr${removedIds.length === 1 ? "y" : "ies"}`);
+            // ── 2. Mirror the trim to the subcollection ─────────────────
+            const schedulesCol = userRef.collection("schedules");
+            for (let i = 0; i < removedIds.length; i += DELETE_BATCH_SIZE) {
+                const batch = db.batch();
+                for (const rawId of removedIds.slice(i, i + DELETE_BATCH_SIZE)) {
+                    batch.delete(schedulesCol.doc((0, scheduleMigrationShared_1.scheduleSubDocId)(rawId)));
+                }
+                await batch.commit();
+                subDocsDeleted += Math.min(DELETE_BATCH_SIZE, removedIds.length - i);
+            }
         }
         catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -92,7 +137,8 @@ exports.enforceScheduleLimits = (0, scheduler_1.onSchedule)({
         }
     }
     console.log(`[enforceScheduleLimits] done — usersTrimmed=${trimmedCount}, ` +
-        `totalEntriesRemoved=${totalRemoved}, errors=${errors.length}`);
+        `totalEntriesRemoved=${totalRemoved}, ` +
+        `subDocsDeleted=${subDocsDeleted}, errors=${errors.length}`);
     if (errors.length > 0) {
         console.error(`[enforceScheduleLimits] errors:`, JSON.stringify(errors));
     }

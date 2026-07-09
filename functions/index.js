@@ -57,6 +57,10 @@ exports.sendWeeklyBrief = sendWeeklyBrief;
 const { enforceScheduleLimits } = require("./lib/enforceScheduleLimits");
 exports.enforceScheduleLimits = enforceScheduleLimits;
 
+// Admin callable: backfill legacy schedules array -> subcollection (Prompt A-4)
+const { backfillSchedulesSubcollection } = require("./lib/backfillSchedulesSubcollection");
+exports.backfillSchedulesSubcollection = backfillSchedulesSubcollection;
+
 // ── Messaging ──────────────────────────────────────────────────────────────
 // SMS + email customer messaging pipeline. messaging-helpers.ts is a
 // shared support module imported by both functions below — it has no

@@ -1,5 +1,20 @@
 /**
- * migrateClearScheduleItemsV1 — One-time migration callable.
+ * migrateClearScheduleItemsV1 — One-time migration callable. **RETIRED.**
+ *
+ * ⛔ DO NOT RUN post-subcollection migration. This function clears ONLY the
+ *    `schedules` ARRAY field on each user doc — it does not touch the
+ *    /users/{uid}/schedules subcollection. Once the array→subcollection
+ *    dual-write / backfill is live, running this would wipe the array while
+ *    leaving the subcollection populated, DESYNCING the two shapes (and, with
+ *    the flag on, the subcollection is the source of truth, so the clear would
+ *    silently accomplish nothing while corrupting the migration invariant).
+ *    It is retained only as a completed historical record of the Item #72 dow
+ *    fix; its idempotency doc keeps a re-invocation a no-op, but treat this as
+ *    dead code — do not deploy or invoke it again. No logic change here.
+ *
+ * ── Original (Item #72) documentation follows ──
+ *
+ * One-time migration callable.
  *
  * Clears every user's `schedules` array so the entire production
  * fleet starts from a clean slate after the WLED dow off-by-one fix

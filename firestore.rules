@@ -236,9 +236,24 @@ service cloud.firestore {
         }
       }
 
-      // NOTE: Schedules are stored as an array field on the /users/{userId}
-      // document (not a subcollection). The user document update rule above
-      // governs schedule persistence. No subcollection rules needed.
+      // Schedules subcollection — /users/{userId}/schedules/{scheduleId}.
+      //
+      // Backs the array→subcollection migration (schedules_subcollection flag).
+      // Schedules are ALSO still stored as the `schedules` array field on the
+      // user doc (governed by the user-doc update rule above); this rule covers
+      // only the per-schedule documents.
+      //
+      // OWNER-ONLY (request.auth.uid == userId, via isOwner). No staff-claim
+      // branch: mirrored on the closest sibling subcollection /commands
+      // (line ~244), which is owner + bridge only — NEITHER /commands nor
+      // /controllers uses hasStaffClaim at the subcollection level (only the
+      // nested /controllers/.../pixelMap does), so it is omitted here.
+      // DELIBERATELY NO `|| request.auth != null` fallback — that broad grant
+      // (the parent user-doc pattern) is banned for new rules; a different
+      // authenticated uid must be DENIED.
+      match /schedules/{scheduleId} {
+        allow read, write: if isOwner(userId);
+      }
 
       // Commands subcollection - Cloud Relay commands for remote WLED control
       match /commands/{commandId} {
@@ -1061,6 +1076,26 @@ service cloud.firestore {
       // updates and deletes are console-only.
       allow create: if request.auth != null &&
                        request.resource.data.liveWritesEnabled == false;
+      allow update, delete: if false;
+    }
+
+    // ── Schedules Subcollection Feature Flag (array→subcollection migration) ──
+    // config/schedules_subcollection.enabled gates whether schedules persist
+    // under /users/{uid}/schedules (default false → legacy array backend).
+    //
+    // There is NO rule for config/sync_fanout (the Dart flag this one clones) —
+    // it is default-deny, so its reads only ever fall back to false. The
+    // existing config rules are all doc-specific, and the closest analog is
+    // config/calendar_leases (above): read open to any authenticated user so
+    // the StreamProvider picks up flips without a restart, bootstrap-only
+    // create with the safe default, console-only flips. Mirrored here so the
+    // flag is genuinely readable (rather than silently default-denied).
+    match /config/schedules_subcollection {
+      allow read: if request.auth != null;
+      // Bootstrap-only create with the safe default (enabled=false). Any
+      // subsequent flip is console-only.
+      allow create: if request.auth != null &&
+                       request.resource.data.enabled == false;
       allow update, delete: if false;
     }
 
