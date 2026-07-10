@@ -162,6 +162,58 @@ void main() {
     });
   });
 
+  group('migration byte-parity seam (device-A lazy == device-B server)', () {
+    // THE seam A-6 Gate 5 guards: one device migrates lazily (client) while
+    // another was migrated by the server backfill. Their subcollection docs
+    // must be BYTE-IDENTICAL, else the two devices diverge. The server
+    // (planBackfill, jest-verified) writes `{...rawArrayItem, sortKey: index}`
+    // — raw spread, so wledPayload String stays verbatim. This asserts the
+    // client migrator produces the exact same document map for every field:
+    //   • doc id == scheduleSubDocId(rawId)
+    //   • sortKey == array index
+    //   • wledPayload == the verbatim jsonEncoded String (#84) — the client's
+    //     decode→re-encode round-trip must be idempotent
+    //   • every other field preserved
+    test('lazy migrator doc == server backfill doc, field-for-field', () async {
+      final fs = FakeFirebaseFirestore();
+      const uid = 'u-seam';
+      final wled = <String, dynamic>{
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {'id': 0, 'col': [[255, 0, 0, 0], [0, 255, 0, 0]]}
+        ],
+      };
+      // As the client persists it: wledPayload is a jsonEncoded String in the
+      // array element (ScheduleItem.toJson).
+      final rawA = ScheduleItem(
+        id: 'a/b', timeLabel: '7:00 PM', offTimeLabel: '11:00 PM',
+        repeatDays: const ['Mon', 'Wed'], actionLabel: 'Pattern: A',
+        enabled: true, wledPayload: wled,
+      ).toJson();
+      final rawB = mk('z9').toJson();
+      await seedArray(fs, uid, [rawA, rawB]);
+
+      await migratorFor(fs).ensureMigrated(uid);
+
+      // What the SERVER backfill would write for the same input: raw item spread
+      // with the index-derived sortKey (planBackfill's exact rule).
+      final expectedA = {...rawA, 'sortKey': 0};
+      final expectedB = {...rawB, 'sortKey': 1};
+
+      final docA = await fs.collection('users').doc(uid).collection('schedules')
+          .doc(scheduleSubDocId('a/b')).get();
+      final docB = await fs.collection('users').doc(uid).collection('schedules')
+          .doc(scheduleSubDocId('z9')).get();
+
+      expect(docA.data(), expectedA,
+          reason: 'lazy client doc must equal server backfill doc byte-for-byte');
+      expect(docB.data(), expectedB);
+      // Explicit #84 verbatim check on the wledPayload String.
+      expect(docA.data()!['wledPayload'], rawA['wledPayload']);
+    });
+  });
+
   group('read-path flip matrix (userSchedulesStreamProvider)', () {
     ProviderContainer container({
       required bool flagOn,
