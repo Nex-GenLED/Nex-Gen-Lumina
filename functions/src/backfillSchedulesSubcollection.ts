@@ -198,6 +198,36 @@ export async function planFleetBackfill(
   return response;
 }
 
+/**
+ * THE single write implementation for the backfill — used by both the deployed
+ * callable (non-dryRun path) and scripts/backfill_run.js, so the write behaviour
+ * never diverges. Streams a user's upserts to their /schedules subcollection
+ * (batched), then stamps schedulesMigratedAt. Returns the number of docs written.
+ * Only ever reached off the dryRun path; a dry run passes no writer at all.
+ */
+export function makeBackfillWriter(
+  db: FirebaseFirestore.Firestore,
+): (u: UserPlan) => Promise<number> {
+  return async ({ userRef, upserts }: UserPlan): Promise<number> => {
+    let written = 0;
+    for (let i = 0; i < upserts.length; i += UPSERT_BATCH_SIZE) {
+      const batch = db.batch();
+      for (const { docId, item } of upserts.slice(i, i + UPSERT_BATCH_SIZE)) {
+        batch.set(
+          userRef.collection("schedules").doc(docId),
+          item as FirebaseFirestore.DocumentData,
+        );
+      }
+      await batch.commit();
+      written += Math.min(UPSERT_BATCH_SIZE, upserts.length - i);
+    }
+    await userRef.update({
+      schedulesMigratedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return written;
+  };
+}
+
 export const backfillSchedulesSubcollection = onCall(
   { region: "us-central1", timeoutSeconds: 540, memory: "512MiB" },
   async (request): Promise<BackfillResponse> => {
@@ -233,32 +263,10 @@ export const backfillSchedulesSubcollection = onCall(
         `${singleUid ? `uid=${singleUid}` : "mode=batch"} dryRun=${dryRun}`,
     );
 
-    // Writer callback — passed ONLY on the non-dryRun path, so a dry run reaches
-    // no .set/.commit/.update. Streams each user's upserts, then stamps the
-    // migration marker (identical behaviour to the pre-extraction inline path).
-    const writeUser = async ({ userRef, upserts }: UserPlan): Promise<number> => {
-      let written = 0;
-      for (let i = 0; i < upserts.length; i += UPSERT_BATCH_SIZE) {
-        const batch = db.batch();
-        for (const { docId, item } of upserts.slice(i, i + UPSERT_BATCH_SIZE)) {
-          batch.set(
-            userRef.collection("schedules").doc(docId),
-            item as FirebaseFirestore.DocumentData,
-          );
-        }
-        await batch.commit();
-        written += Math.min(UPSERT_BATCH_SIZE, upserts.length - i);
-      }
-      await userRef.update({
-        schedulesMigratedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      return written;
-    };
-
     const response = await planFleetBackfill(
       db,
       { singleUid, pageSize },
-      dryRun ? undefined : writeUser,
+      dryRun ? undefined : makeBackfillWriter(db),
     );
     response.dryRun = dryRun;
 
