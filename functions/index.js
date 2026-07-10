@@ -106,12 +106,21 @@ const db = admin.firestore();
 // through intentCore — see functions/src/voice/googleSmartHome.ts.
 const googleVoice = require("./lib/voice/googleSmartHome");
 
+// Voice: Alexa Smart Home fulfillment + the JWT access-token signer (B-3b) —
+// see functions/src/voice/alexaSmartHome.ts and alexaJwt.ts.
+const alexaVoice = require("./lib/voice/alexaSmartHome");
+const { signAlexaJwt } = require("./lib/voice/alexaJwt");
+
 // Define the OpenAI API key parameter (reads from .env file)
 const openaiApiKey = defineString("OPENAI_API_KEY");
 
 // Alexa OAuth configuration (add to .env file)
 const alexaClientId = defineString("ALEXA_CLIENT_ID");
 const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
+// B-3b: HS256 signing secret for the Alexa access-token JWT. Falls back to the
+// existing ALEXA_CLIENT_SECRET when ALEXA_JWT_SECRET is not set in .env, so the
+// signer (alexaToken) and verifier (alexaSmartHome) always agree.
+const alexaJwtSecret = defineString("ALEXA_JWT_SECRET");
 
 // Google Home OAuth configuration (add to .env file)
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
@@ -832,8 +841,14 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
       // Mark the code as used (one-time use only)
       await codeDoc.ref.update({ used: true });
 
-      // Generate a fresh custom token for the user
-      const customToken = await admin.auth().createCustomToken(userId);
+      // B-3b(a): issue a self-signed short-lived JWT (uid + client claims)
+      // instead of a Firebase custom token — Amazon replays the access token on
+      // every directive and custom tokens cannot be verified server-side. The
+      // refresh-token rotation below is unchanged and format-independent.
+      const customToken = signAlexaJwt(
+        { uid: userId, client_id },
+        alexaJwtSecret.value() || alexaClientSecret.value()
+      );
 
       // Store the link in Firestore
       await db.collection("users").doc(userId).collection("integrations").doc("alexa").set({
@@ -884,8 +899,12 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
 
       const userId = tokenData.userId;
 
-      // Generate a new custom token for the user
-      const customToken = await admin.auth().createCustomToken(userId);
+      // B-3b(a): re-issue the self-signed JWT on refresh (same format as the
+      // authorization_code grant; the refresh token itself is unchanged).
+      const customToken = signAlexaJwt(
+        { uid: userId, client_id },
+        alexaJwtSecret.value() || alexaClientSecret.value()
+      );
 
       console.log(`Refreshed access token for user ${userId}`);
 
@@ -903,6 +922,29 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
   } catch (error) {
     console.error("Token exchange error:", error);
     res.status(400).json({ error: "invalid_grant", error_description: error.message });
+  }
+});
+
+/**
+ * Alexa Smart Home Fulfillment — Discovery / PowerController /
+ * BrightnessController / SceneController / ReportState, all routed through
+ * intentCore. Access-token JWT verified in-handler. See
+ * functions/src/voice/alexaSmartHome.ts.
+ */
+exports.alexaSmartHome = onRequest({ region: "us-central1" }, async (req, res) => {
+  addSecurityHeaders(res);
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed");
+    return;
+  }
+  try {
+    const secret = alexaJwtSecret.value() || alexaClientSecret.value();
+    const response = await alexaVoice.handleAlexaDirective(req.body, secret, db);
+    res.json(response);
+  } catch (error) {
+    console.error("Alexa Smart Home directive error:", error);
+    // Always return a well-formed Alexa envelope (HTTP 200), never a bare 500.
+    res.json(alexaVoice.internalError(req.body));
   }
 });
 
