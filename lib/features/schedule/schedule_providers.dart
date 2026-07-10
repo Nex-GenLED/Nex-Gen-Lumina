@@ -303,6 +303,39 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     );
   }
 
+  // ─── Sort-key assignment (A-5-prime) ───────────────────────────
+
+  /// THE single place client-created schedules receive their monotonic
+  /// per-user [ScheduleItem.sortKey]. Every create path on this notifier
+  /// (add / addAll / mergeWithDedup / replaceAll) routes new items through
+  /// here, so manual entry, autopilot merge, commercial events, and the AI
+  /// intent handler all get consistent keys without each caller knowing about
+  /// ordering.
+  ///
+  /// Any item lacking a positive sortKey is stamped with a contiguous,
+  /// increasing key starting at (max sortKey over current [state]) + 1 — so
+  /// subcollection reads (ordered by sortKey) reproduce the legacy array's
+  /// insertion order. Items that ALREADY carry a positive sortKey (e.g. an
+  /// existing item re-persisted through a full-overwrite path) keep it. List
+  /// order within [items] is preserved as a contiguous block (intra-batch
+  /// order intact). Runs under both flag states — harmless when the legacy
+  /// array backend ignores order, ready when the subcollection backend uses it.
+  List<ScheduleItem> _assignSortKeys(List<ScheduleItem> items) {
+    var nextKey = _maxSortKey(state) + 1;
+    return [
+      for (final item in items)
+        item.sortKey > 0 ? item : item.copyWith(sortKey: nextKey++),
+    ];
+  }
+
+  static int _maxSortKey(List<ScheduleItem> items) {
+    var max = 0;
+    for (final s in items) {
+      if (s.sortKey > max) max = s.sortKey;
+    }
+    return max;
+  }
+
   // ─── Mutations ─────────────────────────────────────────────────
 
   /// Toggle a schedule's enabled state
@@ -341,13 +374,16 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
   /// Add a new schedule.
   /// Pass [resolution] after showing the conflict dialog to handle overlaps.
-  Future<void> add(ScheduleItem item,
+  Future<void> add(ScheduleItem rawItem,
       {ConflictResolution? resolution}) async {
     final userId = _userId;
     if (userId == null) {
       debugPrint('SchedulesNotifier: Cannot add - no user signed in');
       return;
     }
+
+    // A-5-prime: stamp the monotonic ordering key before anything persists.
+    final item = _assignSortKeys([rawItem]).first;
 
     // Refuse-and-warn: a schedule with no valid repeat days would arm a WLED
     // timer that never fires (dow:0). Don't persist it. (Manual picker and AI
@@ -458,6 +494,11 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // revert restores every item together.
     final oldState = List<ScheduleItem>.from(state);
 
+    // A-5-prime: stamp a contiguous, increasing sortKey block so the batch's
+    // intra-order is preserved under the subcollection backend. Computed after
+    // conflict-resolution removals so the base reflects the trimmed state.
+    final stamped = _assignSortKeys(items);
+
     // Hard cap at 50 schedules — same bound (and keep-newest trim) as
     // [mergeWithDedup], applied here so compound AI batches can't grow the
     // user-doc array unbounded. Existing first, new items appended last, so
@@ -465,7 +506,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // (identical semantics to mergeWithDedup's trim). Interim protection on
     // the array shape; the subcollection migration (#TD-1) is unaffected.
     const maxSchedules = 50;
-    var combined = [...oldState, ...items];
+    var combined = [...oldState, ...stamped];
     final needsTrim = combined.length > maxSchedules;
     if (needsTrim) {
       final removed = combined.length - maxSchedules;
@@ -489,7 +530,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       if (needsTrim) {
         await _ref.read(userServiceProvider).saveSchedules(userId, combined);
       } else {
-        await _ref.read(userServiceProvider).addSchedules(userId, items);
+        await _ref.read(userServiceProvider).addSchedules(userId, stamped);
       }
       debugPrint(
           'SchedulesNotifier: addAll persisted ${items.length} items atomically'
@@ -546,6 +587,16 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return;
     }
 
+    // A-5-prime: an edit must never reset the ordering key. If the editor
+    // reconstructed the item without a sortKey (0), inherit the existing
+    // item's key so its subcollection position stays stable.
+    if (item.sortKey <= 0) {
+      final existing = state.where((s) => s.id == item.id);
+      if (existing.isNotEmpty) {
+        item = item.copyWith(sortKey: existing.first.sortKey);
+      }
+    }
+
     _isMutating = true;
 
     // Store previous state for revert
@@ -580,6 +631,11 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
     // Store old state for revert
     final oldState = List<ScheduleItem>.from(state);
+
+    // A-5-prime: autopilot builds fresh items (sortKey 0); stamp them in list
+    // order so the regenerated set keeps its intended ordering under the
+    // subcollection backend. Items already carrying a positive key keep it.
+    schedules = _assignSortKeys(schedules);
 
     // Optimistically update local state
     state = schedules;
@@ -645,7 +701,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return true; // already present = nothing to persist, not a failure
     }
 
-    var merged = [...state, ...newItems];
+    // A-5-prime: stamp a contiguous ordering block for the surviving new items.
+    final stampedNew = _assignSortKeys(newItems);
+
+    var merged = [...state, ...stampedNew];
 
     // Hard cap at 50 schedules. Defends against runaway autopilot regen
     // loops appending duplicates faster than dedup can catch them — keeps

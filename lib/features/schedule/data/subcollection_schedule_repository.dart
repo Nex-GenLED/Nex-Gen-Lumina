@@ -47,10 +47,12 @@ class SubcollectionScheduleRepository implements ScheduleRepository {
 
   @override
   Stream<List<ScheduleItem>> streamSchedules(String userId) {
-    // Ordered by document id for a stable, deterministic emission order. No
-    // sortKey field is added to ScheduleItem — ordering is by the existing id.
+    // A-5-prime: ordered by the monotonic `sortKey` so this backend's read
+    // order reproduces the legacy array's insertion order (documentId order
+    // — the prior key — diverged from insertion order and changed which WLED
+    // timers armed / which schedule won findCurrentSchedule ties).
     return _col(userId)
-        .orderBy(FieldPath.documentId)
+        .orderBy('sortKey')
         .snapshots()
         .map((snap) =>
             snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList());
@@ -59,7 +61,7 @@ class SubcollectionScheduleRepository implements ScheduleRepository {
   @override
   Future<List<ScheduleItem>> fetchSchedules(String userId) async {
     final snap = await _col(userId)
-        .orderBy(FieldPath.documentId)
+        .orderBy('sortKey')
         .get(const GetOptions(source: Source.server));
     return snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList();
   }

@@ -6,11 +6,14 @@
  * preserving ids: the sanitized id becomes the document id, the RAW id is kept
  * verbatim inside the doc body (as written by the client's ScheduleItem.toJson,
  * including the already-encoded `wledPayload` String — copied verbatim, never
- * decoded). After a user's docs are written, `schedulesMigratedAt` is stamped
- * on the user doc with a server timestamp.
+ * decoded). Each doc is stamped with a `sortKey` = its ARRAY INDEX so the
+ * subcollection's `orderBy('sortKey')` read reproduces the user's exact legacy
+ * insertion order (A-5-prime). After a user's docs are written,
+ * `schedulesMigratedAt` is stamped on the user doc with a server timestamp.
  *
- * Idempotent: upserts are keyed by doc id, so a rerun overwrites identical
- * content and converges (the planBackfill diff reports zero NEW docs on the
+ * Idempotent: upserts are keyed by doc id, and sortKey is only stamped where a
+ * doc has none — an already-assigned key is preserved, so a rerun never
+ * renumbers and converges (the planBackfill diff reports zero NEW docs on the
  * second pass). Safe to run repeatedly.
  *
  * Contract:
@@ -33,6 +36,7 @@
  *       newCount: number,
  *       skippedMalformed: number,
  *       newDocIds: string[],     // capped sample for readability
+ *       sortKeyAssignments: Array<{docId,sortKey}>,  // index→sortKey sample
  *     }>,
  *   }
  *
@@ -65,6 +69,8 @@ interface PerUserResult {
   newCount: number;
   skippedMalformed: number;
   newDocIds: string[];
+  /** Index→sortKey assignment sample (dryRun-visible). */
+  sortKeyAssignments: Array<{ docId: string; sortKey: number }>;
 }
 
 interface BackfillResponse {
@@ -130,9 +136,16 @@ export const backfillSchedulesSubcollection = onCall(
 
       const schedulesCol = userDoc.ref.collection("schedules");
       const existingSnap = await schedulesCol.get();
-      const existingDocIds = existingSnap.docs.map((d) => d.id);
+      // docId → existing sortKey (undefined when the doc has none). Lets the
+      // plan preserve already-assigned keys on rerun (never renumber).
+      const existing = new Map(
+        existingSnap.docs.map((d) => {
+          const sk = d.get("sortKey");
+          return [d.id, { sortKey: typeof sk === "number" ? sk : undefined }];
+        }),
+      );
 
-      const plan = planBackfill(arrayItems, existingDocIds);
+      const plan = planBackfill(arrayItems, existing);
       response.totalNewDocs += plan.newDocIds.length;
 
       response.perUser.push({
@@ -142,6 +155,8 @@ export const backfillSchedulesSubcollection = onCall(
         newCount: plan.newDocIds.length,
         skippedMalformed: plan.skippedMalformed,
         newDocIds: plan.newDocIds.slice(0, NEW_DOC_ID_SAMPLE_CAP),
+        // dryRun surfaces the exact index→sortKey assignment (capped sample).
+        sortKeyAssignments: plan.sortKeyAssignments.slice(0, NEW_DOC_ID_SAMPLE_CAP),
       });
 
       if (dryRun) return; // WRITE NOTHING

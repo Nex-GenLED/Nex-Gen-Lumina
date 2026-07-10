@@ -121,44 +121,79 @@ describe("planScheduleTrim", () => {
 });
 
 describe("planBackfill", () => {
-  test("fresh backfill: all docs are new", () => {
+  // existing subcollection docs are now passed as a Map<docId, {sortKey?}>.
+  const noneExisting = () => new Map();
+  const existingWith = (entries) => new Map(entries); // [[docId, {sortKey}], ...]
+
+  test("fresh backfill: all docs new, sortKey stamped = array index", () => {
     const items = [mk("a"), mk("b/c"), mk("d")];
-    const plan = planBackfill(items, []);
+    const plan = planBackfill(items, noneExisting());
     expect(plan.arrayCount).toBe(3);
     expect(plan.existingCount).toBe(0);
     expect(plan.upserts.map((u) => u.docId)).toEqual(["a", "b_c", "d"]);
     expect(plan.newDocIds).toEqual(["a", "b_c", "d"]);
     expect(plan.skippedMalformed).toBe(0);
+    // sortKey = array index, stamped onto both the upsert and the item body.
+    expect(plan.upserts.map((u) => u.sortKey)).toEqual([0, 1, 2]);
+    expect(plan.upserts.map((u) => u.item.sortKey)).toEqual([0, 1, 2]);
+    expect(plan.sortKeyAssignments).toEqual([
+      { docId: "a", sortKey: 0 },
+      { docId: "b_c", sortKey: 1 },
+      { docId: "d", sortKey: 2 },
+    ]);
   });
 
-  test("slash id maps to sanitized docId, raw item preserved in upsert", () => {
+  test("slash id maps to sanitized docId, raw item + wledPayload preserved", () => {
     const item = mk("a/b/c", { wledPayload: '{"on":true,"seg":[{"col":[[255,0,0,0]]}]}' });
-    const plan = planBackfill([item], []);
+    const plan = planBackfill([item], noneExisting());
     expect(plan.upserts[0].docId).toBe("a_b_c");
     // Raw id kept verbatim in the body; wledPayload String untouched.
     expect(plan.upserts[0].item.id).toBe("a/b/c");
     expect(plan.upserts[0].item.wledPayload).toBe(item.wledPayload);
+    expect(plan.upserts[0].item.sortKey).toBe(0);
   });
 
-  test("idempotency: converged state yields zero new docs on rerun", () => {
+  test("idempotency: converged state yields zero new docs AND does not renumber", () => {
     const items = [mk("a"), mk("b/c"), mk("d")];
-    const firstDocIds = planBackfill(items, []).upserts.map((u) => u.docId);
-    const second = planBackfill(items, firstDocIds);
+    const first = planBackfill(items, noneExisting());
+    // Simulate the docs now existing with the keys the first pass assigned.
+    const existing = existingWith(
+      first.upserts.map((u) => [u.docId, { sortKey: u.sortKey }]),
+    );
+    const second = planBackfill(items, existing);
     expect(second.newDocIds).toEqual([]);
-    // Still upserts everything (overwrite converges) but nothing is new.
     expect(second.upserts).toHaveLength(3);
+    // Preserved, not renumbered.
+    expect(second.upserts.map((u) => u.sortKey)).toEqual([0, 1, 2]);
   });
 
-  test("counts malformed items as skipped, not upserted", () => {
-    const plan = planBackfill([mk("a"), { id: 7 }, null, mk("b")], []);
+  test("preserves an existing sortKey even when it differs from the index", () => {
+    // Doc "d" already carries sortKey 99 (e.g. client-assigned post-migration);
+    // rerun must keep 99, not renumber to its array index 2.
+    const items = [mk("a"), mk("b/c"), mk("d")];
+    const existing = existingWith([["d", { sortKey: 99 }]]);
+    const plan = planBackfill(items, existing);
+    expect(plan.upserts.map((u) => ({ id: u.docId, k: u.sortKey }))).toEqual([
+      { id: "a", k: 0 }, // absent → index 0
+      { id: "b_c", k: 1 }, // absent → index 1
+      { id: "d", k: 99 }, // present → preserved
+    ]);
+  });
+
+  test("malformed items are skipped but still consume their index slot", () => {
+    // index:      0        1(bad)    2(bad)  3
+    const plan = planBackfill([mk("a"), { id: 7 }, null, mk("b")], noneExisting());
     expect(plan.skippedMalformed).toBe(2);
     expect(plan.upserts.map((u) => u.docId)).toEqual(["a", "b"]);
+    // "b" keeps its TRUE array index 3 (gap at 1,2 is harmless — order holds).
+    expect(plan.upserts.map((u) => u.sortKey)).toEqual([0, 3]);
   });
 
   test("non-array input yields an empty plan", () => {
-    const plan = planBackfill(undefined, []);
+    const plan = planBackfill(undefined, noneExisting());
     expect(plan.arrayCount).toBe(0);
     expect(plan.upserts).toEqual([]);
     expect(plan.newDocIds).toEqual([]);
+    expect(plan.sortKeyAssignments).toEqual([]);
   });
 });

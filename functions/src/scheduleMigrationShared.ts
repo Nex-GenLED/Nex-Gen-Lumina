@@ -67,9 +67,18 @@ export function planScheduleTrim(
   return { trimmed: true, kept, removedIds };
 }
 
+/** Existing subcollection doc, as far as the backfill cares: its sortKey. */
+export interface ExistingSubDoc {
+  sortKey?: number;
+}
+
 export interface BackfillPlan {
-  /** Every array item mapped to its target { docId, item } upsert. */
-  upserts: Array<{ docId: string; item: unknown }>;
+  /**
+   * Every array item mapped to its upsert. `item` is the array element with a
+   * `sortKey` stamped on it (index-derived or preserved). `sortKey` is the
+   * assigned value (mirrors item.sortKey) for convenient reporting/assertions.
+   */
+  upserts: Array<{ docId: string; item: unknown; sortKey: number }>;
   /** Count of array items considered. */
   arrayCount: number;
   /** Count of subcollection docs already present before this run. */
@@ -78,32 +87,51 @@ export interface BackfillPlan {
   newDocIds: string[];
   /** RAW ids skipped because they were malformed (no string id). */
   skippedMalformed: number;
+  /** Per-doc sortKey assignment — surfaced by the callable's dryRun output. */
+  sortKeyAssignments: Array<{ docId: string; sortKey: number }>;
 }
 
 /**
  * Plans an array → subcollection backfill for one user. Pure: takes the array
- * items and the set of existing subcollection doc ids, returns the upserts and
- * a diff. Idempotent by construction — once every array item's docId is in
- * [existingDocIds], `newDocIds` is empty (rerunning converges).
+ * items and a map of existing subcollection docs (docId → {sortKey}), returns
+ * the upserts (each stamped with a sortKey) and a diff.
+ *
+ * sortKey policy — the array INDEX is the source of truth for insertion order
+ * (a serverTimestamp would race dual-write and a backfilled user has no true
+ * creation time). For each valid item at array position i:
+ *   • if the existing subcollection doc already has a numeric sortKey → KEEP it
+ *     (idempotent rerun must never renumber);
+ *   • else → stamp the array index i.
+ * Malformed items are skipped but still consume their index slot, so surviving
+ * items keep their true array position (gaps are harmless — order is preserved).
+ *
+ * Idempotent by construction: once every doc exists with a sortKey, a rerun
+ * produces identical assignments and `newDocIds` is empty.
  */
 export function planBackfill(
   arrayItems: unknown,
-  existingDocIds: Iterable<string>,
+  existing: Map<string, ExistingSubDoc>,
 ): BackfillPlan {
   const items = Array.isArray(arrayItems) ? arrayItems : [];
-  const existing = new Set(existingDocIds);
-  const upserts: Array<{ docId: string; item: unknown }> = [];
+  const upserts: Array<{ docId: string; item: unknown; sortKey: number }> = [];
   const newDocIds: string[] = [];
+  const sortKeyAssignments: Array<{ docId: string; sortKey: number }> = [];
   let skippedMalformed = 0;
 
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     const id = getScheduleId(item);
     if (id === null) {
       skippedMalformed++;
-      continue;
+      continue; // index i is intentionally skipped (leaves a harmless gap)
     }
     const docId = scheduleSubDocId(id);
-    upserts.push({ docId, item });
+    const existingSortKey = existing.get(docId)?.sortKey;
+    const sortKey =
+      typeof existingSortKey === "number" ? existingSortKey : i;
+    const stamped = { ...(item as Record<string, unknown>), sortKey };
+    upserts.push({ docId, item: stamped, sortKey });
+    sortKeyAssignments.push({ docId, sortKey });
     if (!existing.has(docId)) newDocIds.push(docId);
   }
 
@@ -113,5 +141,6 @@ export function planBackfill(
     existingCount: existing.size,
     newDocIds,
     skippedMalformed,
+    sortKeyAssignments,
   };
 }

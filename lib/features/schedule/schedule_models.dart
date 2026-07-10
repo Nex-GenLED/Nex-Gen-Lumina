@@ -60,6 +60,15 @@ class ScheduleItem {
   /// deserialize to null without migration.
   final String? sourcePromptId;
 
+  /// Monotonic per-user insertion-order key (A-5-prime). The subcollection
+  /// backend orders its stream/fetch by this, so its read order reproduces the
+  /// legacy `schedules` array's insertion order (array reads are already
+  /// insertion-ordered). Assigned on create as (max sortKey over the user's
+  /// current schedules) + 1; the array→subcollection backfill stamps it = the
+  /// array index. Absent on any pre-migration doc → 0 (back-compat), so legacy
+  /// docs collapse to a stable 0-tie that the backfill then re-stamps.
+  final int sortKey;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -72,6 +81,7 @@ class ScheduleItem {
     this.useAudioReactive,
     this.disabledUntil,
     this.sourcePromptId,
+    this.sortKey = 0,
   });
 
   /// UI-safe action label. Routes the pattern-name portion of a
@@ -120,6 +130,7 @@ class ScheduleItem {
     DateTime? disabledUntil,
     bool clearDisabledUntil = false,
     String? sourcePromptId,
+    int? sortKey,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -134,6 +145,7 @@ class ScheduleItem {
         disabledUntil:
             clearDisabledUntil ? null : (disabledUntil ?? this.disabledUntil),
         sourcePromptId: sourcePromptId ?? this.sourcePromptId,
+        sortKey: sortKey ?? this.sortKey,
       );
 
   Map<String, dynamic> toJson() => {
@@ -149,6 +161,8 @@ class ScheduleItem {
         if (disabledUntil != null)
           'disabledUntil': disabledUntil!.toIso8601String(),
         if (sourcePromptId != null) 'sourcePromptId': sourcePromptId,
+        // Always emitted — it's a first-class ordering field, not optional.
+        'sortKey': sortKey,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -167,6 +181,8 @@ class ScheduleItem {
         // all collapse to null so a corrupt field can't crash boot.
         disabledUntil: _tryParseDisabledUntil(json['disabledUntil']),
         sourcePromptId: json['sourcePromptId'] as String?,
+        // Absent on pre-migration docs → 0 (back-compat). Tolerate num.
+        sortKey: (json['sortKey'] as num?)?.toInt() ?? 0,
       );
 
   static DateTime? _tryParseDisabledUntil(dynamic raw) {
