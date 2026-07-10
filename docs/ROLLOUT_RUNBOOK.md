@@ -32,18 +32,23 @@ below.
 ### (a) Emulator rules + function suites — LOCAL, green — **[HARD GATE]**
 The Firestore rules tests and Cloud Function integration tests
 (`functions/test/emulator/schedulesRules.emulator.test.ts`,
-`scheduleFunctions.emulator.test.ts`) are **written but NOT executed** in the
-dev sandbox (no emulator, no `@firebase/rules-unit-testing`). They MUST be run
-green locally before any deploy:
+`scheduleFunctions.emulator.test.ts`) MUST be run green locally before any
+deploy. The harness is now in-repo (`jest.emulator.config.js`, the
+`test:emulator` script, the four dev deps: `@firebase/rules-unit-testing` /
+`firebase` / `ts-jest` / `@types/jest`, and the `firebase.json` emulator port),
+so after a fresh `npm install`:
 ```
 cd functions
-npm i -D @firebase/rules-unit-testing ts-jest @types/jest
-firebase emulators:exec --only firestore "npx jest --config jest.emulator.config.js"
+firebase emulators:exec --only firestore "npm run test:emulator"
 ```
-Do not proceed past (a) until these pass. This gate covers: owner-only
-`/schedules` access, a different uid DENIED (parent broad grant not inherited),
-unauthenticated denied, flag-doc readable, backfill idempotency + dryRun-writes-
-nothing, and `enforceScheduleLimits` trimming both shapes.
+**Requires JDK 21+** — firebase-tools 15.x refuses older Java; point `JAVA_HOME`
+at a 21+ JDK if the machine default is older. Do not proceed past (a) until
+these pass. This gate covers: owner-only `/schedules` access, a different uid
+DENIED (parent broad grant not inherited), unauthenticated denied, flag-doc
+readable, backfill idempotency + dryRun-writes-nothing, and
+`enforceScheduleLimits` trimming both shapes.
+
+STATUS: **cleared** — 8/8 green (2 suites), run 2026-07-10.
 
 ### (b) Create the flag doc
 Console → Firestore → `config/schedules_subcollection` → `{ enabled: false }`.

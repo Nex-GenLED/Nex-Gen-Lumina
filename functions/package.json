@@ -6,6 +6,7 @@
     "build:watch": "tsc --watch",
     "test": "jest",
     "test:unit": "tsc && jest",
+    "test:emulator": "jest --config jest.emulator.config.js --runInBand",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
@@ -24,9 +25,13 @@
     "twilio": "^5.13.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
+    "firebase": "^12.16.0",
     "firebase-functions-test": "^3.1.0",
     "jest": "^30.2.0",
+    "ts-jest": "^29.4.11",
     "typescript": "^5.4.0"
   },
   "private": true
