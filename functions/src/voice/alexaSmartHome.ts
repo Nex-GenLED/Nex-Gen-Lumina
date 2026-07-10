@@ -268,7 +268,7 @@ export async function handleAlexaDirective(
     );
   }
   const uid = claims.uid;
-  const enabled = await readVoiceControlEnabled(db);
+  const enabled = await readVoiceControlEnabled(db, uid);
 
   // Discovery
   if (namespace === "Alexa.Discovery" && name === "Discover") {

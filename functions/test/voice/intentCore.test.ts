@@ -395,6 +395,38 @@ test("flag reader is defensive-false for missing/non-bool/error", async () => {
   assert.equal(await readVoiceControlEnabled(asDb(s)), true);
 });
 
+test("flag: allowlistUids enables a uid even when globally disabled", async () => {
+  const s = new Store();
+  s.seed("config/voice_control", { enabled: false, allowlistUids: ["founder"] });
+  assert.equal(await readVoiceControlEnabled(asDb(s), "founder"), true);
+  assert.equal(await readVoiceControlEnabled(asDb(s), "other"), false);
+  assert.equal(await readVoiceControlEnabled(asDb(s)), false); // no uid
+});
+
+test("flag: rolloutPercent gates by stable bucket (0 off / 100 on / allowlist wins)", async () => {
+  const s = new Store();
+  s.seed("config/voice_control", { enabled: true, rolloutPercent: 0 });
+  assert.equal(await readVoiceControlEnabled(asDb(s), "u"), false);
+
+  s.seed("config/voice_control", { enabled: true, rolloutPercent: 100 });
+  assert.equal(await readVoiceControlEnabled(asDb(s), "u"), true);
+
+  // Deterministic per uid across calls.
+  s.seed("config/voice_control", { enabled: true, rolloutPercent: 50 });
+  assert.equal(
+    await readVoiceControlEnabled(asDb(s), "u"),
+    await readVoiceControlEnabled(asDb(s), "u")
+  );
+
+  // Allowlist overrides a 0% rollout.
+  s.seed("config/voice_control", {
+    enabled: true,
+    rolloutPercent: 0,
+    allowlistUids: ["founder"],
+  });
+  assert.equal(await readVoiceControlEnabled(asDb(s), "founder"), true);
+});
+
 // ---------------------------------------------------------------------------
 // 7. awaitOutcome × 3 outcomes + 8. listener cleanup
 // ---------------------------------------------------------------------------

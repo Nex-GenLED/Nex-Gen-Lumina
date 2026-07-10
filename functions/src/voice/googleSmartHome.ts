@@ -47,7 +47,7 @@ export async function handleSync(
   userId: string,
   db: Firestore = admin.firestore()
 ): Promise<Json> {
-  if (!(await readVoiceControlEnabled(db))) {
+  if (!(await readVoiceControlEnabled(db, userId))) {
     return {
       requestId,
       payload: {
@@ -78,7 +78,7 @@ export async function handleQuery(
   const devices: Json[] = payload?.devices ?? [];
   const deviceStates: Record<string, Json> = {};
 
-  if (!(await readVoiceControlEnabled(db))) {
+  if (!(await readVoiceControlEnabled(db, userId))) {
     for (const d of devices) {
       deviceStates[d.id] = {
         online: false,
@@ -125,7 +125,7 @@ export async function handleExecute(
 ): Promise<Json> {
   const commands: Json[] = payload?.commands ?? [];
 
-  if (!(await readVoiceControlEnabled(db))) {
+  if (!(await readVoiceControlEnabled(db, userId))) {
     const results = commands.map((c: Json) => ({
       ids: (c.devices ?? []).map((d: Json) => d.id),
       status: "ERROR",

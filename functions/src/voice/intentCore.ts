@@ -25,7 +25,7 @@
  */
 
 import * as admin from "firebase-admin";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { resolveScenes } from "./deviceResolver";
 
 type Firestore = admin.firestore.Firestore;
@@ -100,13 +100,49 @@ function clamp(n: number, lo: number, hi: number): number {
 // missing doc / missing field / non-bool / read error → false. Read fresh each
 // invocation (no cache beyond the function instance).
 // ---------------------------------------------------------------------------
-export async function readVoiceControlEnabled(db: Firestore): Promise<boolean> {
+export async function readVoiceControlEnabled(
+  db: Firestore,
+  uid?: string
+): Promise<boolean> {
   try {
     const doc = await db.collection("config").doc("voice_control").get();
-    return doc.data()?.enabled === true;
+    const data = (doc.data() ?? {}) as admin.firestore.DocumentData;
+
+    // Precedence — lets the founder account run in isolation while the flag is
+    // globally OFF, then a percentage ramp, before public:
+    //   1. uid in allowlistUids           → true (even when enabled is false)
+    if (
+      uid &&
+      Array.isArray(data.allowlistUids) &&
+      data.allowlistUids.includes(uid)
+    ) {
+      return true;
+    }
+    //   2. enabled !== true               → false (defensive-false)
+    if (data.enabled !== true) return false;
+    //   3. rolloutPercent not a number    → true (enabled, no gate = fully on)
+    const pct = data.rolloutPercent;
+    if (typeof pct !== "number") return true;
+    //   4/5. clamp ends
+    if (pct <= 0) return false;
+    if (pct >= 100) return true;
+    //   6. no uid to bucket               → conservative false
+    if (!uid) return false;
+    //   7. stable per-uid bucket
+    return stableBucket(uid) < pct;
   } catch (_e) {
     return false;
   }
+}
+
+/**
+ * Stable per-uid rollout bucket in [0,99], deterministic across invocations
+ * (sha256 of the uid → first 4 bytes mod 100). Same hashing approach the repo
+ * already uses for staff PIN digests.
+ */
+function stableBucket(uid: string): number {
+  const digest = createHash("sha256").update(uid).digest();
+  return digest.readUInt32BE(0) % 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,8 +420,8 @@ export async function executeIntent(p: ExecuteParams): Promise<ExecuteResult> {
     );
   }
 
-  // Feature flag (defensive-false).
-  if (!(await readVoiceControlEnabled(db))) {
+  // Feature flag (defensive-false + staged-rollout gating on this uid).
+  if (!(await readVoiceControlEnabled(db, p.uid))) {
     return err("not_enabled", "Voice control is not enabled for this account.");
   }
 
