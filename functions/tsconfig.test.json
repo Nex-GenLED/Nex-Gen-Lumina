@@ -1,0 +1,15 @@
+{
+  // Test-only build. Compiles src + test into a SEPARATE outDir (lib-test/)
+  // that is gitignored and never deployed, so the intentCore test cannot leak
+  // into the deploy surface (lib/). Run via `npm test`:
+  //   tsc -p tsconfig.test.json && node --test lib-test/test
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "lib-test",
+    "rootDir": ".",
+    "declaration": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src", "test"]
+}

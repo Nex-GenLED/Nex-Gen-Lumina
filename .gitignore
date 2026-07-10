@@ -222,3 +222,5 @@ marketing/
 
 # Cloud Functions TypeScript build output
 functions/lib/
+# Cloud Functions test-only build output (tsconfig.test.json → node --test)
+functions/lib-test/

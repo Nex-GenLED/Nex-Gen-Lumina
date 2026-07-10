@@ -136,10 +136,9 @@ async function loadControllersOldestFirst(
  *   controller is its own LIGHT device.
  */
 export async function resolveDevices(
-  userId: string
+  userId: string,
+  db: admin.firestore.Firestore = admin.firestore()
 ): Promise<SmartHomeDevice[]> {
-  const db = admin.firestore();
-
   const userDoc = await db.collection("users").doc(userId).get();
   const profile = (userDoc.data() ?? {}) as admin.firestore.DocumentData;
   const propertyName =
@@ -211,10 +210,9 @@ export async function resolveDevices(
  * Mirrors handleGoogleSync: reads /users/{uid}/scenes, skips type:"system".
  */
 export async function resolveScenes(
-  userId: string
+  userId: string,
+  db: admin.firestore.Firestore = admin.firestore()
 ): Promise<SmartHomeDevice[]> {
-  const db = admin.firestore();
-
   const scenesSnap = await db
     .collection("users")
     .doc(userId)
