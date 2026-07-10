@@ -11,6 +11,7 @@ const {
   MAX_SCHEDULES,
   scheduleSubDocId,
   getScheduleId,
+  scheduleIdOrReason,
   planScheduleTrim,
   planBackfill,
 } = require("../../lib/scheduleMigrationShared");
@@ -68,6 +69,30 @@ describe("getScheduleId", () => {
     expect(getScheduleId({ id: 42 })).toBeNull();
     expect(getScheduleId({ id: "" })).toBeNull();
     expect(getScheduleId("not-an-object")).toBeNull();
+  });
+});
+
+describe("scheduleIdOrReason — id or the exact malformed reason", () => {
+  test("valid id", () => {
+    expect(scheduleIdOrReason(mk("s1"))).toEqual({ id: "s1" });
+  });
+  test("not-a-map for null / non-object", () => {
+    expect(scheduleIdOrReason(null)).toEqual({ skipReason: "not-a-map" });
+    expect(scheduleIdOrReason("x")).toEqual({ skipReason: "not-a-map" });
+    expect(scheduleIdOrReason(5)).toEqual({ skipReason: "not-a-map" });
+  });
+  test("missing-id-field", () => {
+    expect(scheduleIdOrReason({ timeLabel: "7pm" })).toEqual({
+      skipReason: "missing-id-field",
+    });
+  });
+  test("non-string-id names the offending type", () => {
+    expect(scheduleIdOrReason({ id: 42 })).toEqual({
+      skipReason: "non-string-id (number)",
+    });
+  });
+  test("empty-id", () => {
+    expect(scheduleIdOrReason({ id: "" })).toEqual({ skipReason: "empty-id" });
   });
 });
 
@@ -187,6 +212,11 @@ describe("planBackfill", () => {
     expect(plan.upserts.map((u) => u.docId)).toEqual(["a", "b"]);
     // "b" keeps its TRUE array index 3 (gap at 1,2 is harmless — order holds).
     expect(plan.upserts.map((u) => u.sortKey)).toEqual([0, 3]);
+    // skippedDetails names each bad index + why (drives the dry-run report).
+    expect(plan.skippedDetails).toEqual([
+      { index: 1, reason: "non-string-id (number)" },
+      { index: 2, reason: "not-a-map" },
+    ]);
   });
 
   test("non-array input yields an empty plan", () => {
@@ -195,5 +225,6 @@ describe("planBackfill", () => {
     expect(plan.upserts).toEqual([]);
     expect(plan.newDocIds).toEqual([]);
     expect(plan.sortKeyAssignments).toEqual([]);
+    expect(plan.skippedDetails).toEqual([]);
   });
 });

@@ -30,12 +30,26 @@ export function scheduleSubDocId(id: string): string {
 }
 
 /** Extracts a schedule's string id, or null if malformed. */
+export type ScheduleIdResult = { id: string } | { skipReason: string };
+
+/**
+ * Extract a schedule array element's id, OR the reason it's unusable. Single
+ * source of truth for "is this element malformed and why" — planBackfill and
+ * the dry-run report both derive from it, so the reasons a dry-run surfaces are
+ * exactly what the real run skips on.
+ */
+export function scheduleIdOrReason(item: unknown): ScheduleIdResult {
+  if (item == null || typeof item !== "object") return { skipReason: "not-a-map" };
+  if (!("id" in item)) return { skipReason: "missing-id-field" };
+  const raw = (item as { id: unknown }).id;
+  if (typeof raw !== "string") return { skipReason: `non-string-id (${typeof raw})` };
+  if (raw.length === 0) return { skipReason: "empty-id" };
+  return { id: raw };
+}
+
 export function getScheduleId(item: unknown): string | null {
-  if (item != null && typeof item === "object" && "id" in item) {
-    const raw = (item as { id: unknown }).id;
-    if (typeof raw === "string" && raw.length > 0) return raw;
-  }
-  return null;
+  const r = scheduleIdOrReason(item);
+  return "id" in r ? r.id : null;
 }
 
 export interface TrimPlan {
@@ -87,6 +101,8 @@ export interface BackfillPlan {
   newDocIds: string[];
   /** RAW ids skipped because they were malformed (no string id). */
   skippedMalformed: number;
+  /** Per-skipped-item detail: the array index and WHY it was flagged. */
+  skippedDetails: Array<{ index: number; reason: string }>;
   /** Per-doc sortKey assignment — surfaced by the callable's dryRun output. */
   sortKeyAssignments: Array<{ docId: string; sortKey: number }>;
 }
@@ -116,15 +132,18 @@ export function planBackfill(
   const upserts: Array<{ docId: string; item: unknown; sortKey: number }> = [];
   const newDocIds: string[] = [];
   const sortKeyAssignments: Array<{ docId: string; sortKey: number }> = [];
+  const skippedDetails: Array<{ index: number; reason: string }> = [];
   let skippedMalformed = 0;
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const id = getScheduleId(item);
-    if (id === null) {
+    const idr = scheduleIdOrReason(item);
+    if ("skipReason" in idr) {
       skippedMalformed++;
+      skippedDetails.push({ index: i, reason: idr.skipReason });
       continue; // index i is intentionally skipped (leaves a harmless gap)
     }
+    const id = idr.id;
     const docId = scheduleSubDocId(id);
     const existingSortKey = existing.get(docId)?.sortKey;
     const sortKey =
@@ -141,6 +160,7 @@ export function planBackfill(
     existingCount: existing.size,
     newDocIds,
     skippedMalformed,
+    skippedDetails,
     sortKeyAssignments,
   };
 }

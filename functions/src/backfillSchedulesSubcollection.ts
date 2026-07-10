@@ -16,33 +16,28 @@
  * renumbers and converges (the planBackfill diff reports zero NEW docs on the
  * second pass). Safe to run repeatedly.
  *
+ * The planning/aggregation is the exported READ-ONLY [planFleetBackfill]; the
+ * callable adds a writer callback on the non-dryRun path, and
+ * scripts/backfill_dryrun.js calls the SAME function with no callback (so a
+ * dry-run previews the exact numbers a real run produces, and never writes).
+ *
  * Contract:
  *   request.data: {
  *     uid?:      string,   // single-user mode; omit for full-fleet batch mode
- *     dryRun?:   boolean,  // default false. When true, WRITES NOTHING —
- *                          // returns per-user counts + id diffs only.
+ *     dryRun?:   boolean,  // default false. When true, WRITES NOTHING.
  *     pageSize?: number,   // batch-mode page size (default 200, max 500)
  *   }
- *   response: {
- *     dryRun: boolean,
- *     usersProcessed: number,
- *     usersWithSchedules: number,
- *     totalUpserts: number,      // docs written (0 when dryRun)
- *     totalNewDocs: number,      // docs that did NOT already exist
- *     perUser: Array<{
- *       uid: string,
- *       arrayCount: number,
- *       existingCount: number,
- *       newCount: number,
- *       skippedMalformed: number,
- *       newDocIds: string[],     // capped sample for readability
- *       sortKeyAssignments: Array<{docId,sortKey}>,  // index→sortKey sample
- *     }>,
+ *   response: BackfillResponse {
+ *     dryRun, usersProcessed, usersWithSchedules, usersAlreadyMigrated,
+ *     totalUpserts (0 when dryRun), totalNewDocs,
+ *     perUser: Array<{ uid, arrayCount, existingCount, newCount,
+ *       skippedMalformed, skippedDetails:[{index,reason}], migratedAlready,
+ *       newDocIds:[], sortKeyAssignments:[{docId,sortKey}] }>,
  *   }
  *
  * Auth: caller must hold the `admin` custom claim (mirrors
- * backfillUserLocations). No in-app surface; run from the Firebase console or
- * functions shell.
+ * backfillUserLocations). No in-app surface; run from the Firebase console,
+ * functions shell, or scripts/backfill_dryrun.js (dry-run only).
  *
  * Deployment:
  *   cd functions
@@ -62,24 +57,145 @@ const MAX_PAGE_SIZE = 500;
 const UPSERT_BATCH_SIZE = 400; // headroom under the 500 write/txn limit
 const NEW_DOC_ID_SAMPLE_CAP = 25;
 
-interface PerUserResult {
+export interface PerUserResult {
   uid: string;
   arrayCount: number;
   existingCount: number;
   newCount: number;
   skippedMalformed: number;
+  /** Per-skipped-item detail (array index + reason), from planBackfill. */
+  skippedDetails: Array<{ index: number; reason: string }>;
+  /** True when the user doc already carries schedulesMigratedAt (prior run). */
+  migratedAlready: boolean;
   newDocIds: string[];
   /** Index→sortKey assignment sample (dryRun-visible). */
   sortKeyAssignments: Array<{ docId: string; sortKey: number }>;
 }
 
-interface BackfillResponse {
+export interface BackfillResponse {
   dryRun: boolean;
   usersProcessed: number;
   usersWithSchedules: number;
+  /** Users already carrying schedulesMigratedAt (prior-run indicator). */
+  usersAlreadyMigrated: number;
   totalUpserts: number;
   totalNewDocs: number;
   perUser: PerUserResult[];
+}
+
+/** One user's pending writes, handed to the callable's writer callback. */
+export interface UserPlan {
+  userRef: FirebaseFirestore.DocumentReference;
+  upserts: Array<{ docId: string; item: unknown; sortKey: number }>;
+}
+
+/**
+ * THE shared, READ-ONLY fleet planner. Pages /users (or a single uid), reads
+ * each user's `schedules` array + existing subcollection docs, plans the
+ * backfill via the shared `planBackfill`, and aggregates the report. It writes
+ * NOTHING itself.
+ *
+ * When [onUserPlanned] is supplied (the callable's non-dryRun path only), each
+ * user's pending writes are handed to that callback and its returned
+ * written-count is added to `totalUpserts` — so write STREAMING is preserved and
+ * ONLY the callable, never the dry-run script, contains .set/.commit/.update.
+ *
+ * Both the deployed callable and scripts/backfill_dryrun.js call this exact
+ * function, so a dry-run previews the SAME numbers the real run produces (no
+ * divergent reimplementation).
+ */
+export async function planFleetBackfill(
+  db: FirebaseFirestore.Firestore,
+  opts: { singleUid: string | null; pageSize: number },
+  onUserPlanned?: (u: UserPlan) => Promise<number>,
+): Promise<BackfillResponse> {
+  const response: BackfillResponse = {
+    dryRun: onUserPlanned == null,
+    usersProcessed: 0,
+    usersWithSchedules: 0,
+    usersAlreadyMigrated: 0,
+    totalUpserts: 0,
+    totalNewDocs: 0,
+    perUser: [],
+  };
+
+  const planOne = async (
+    userDoc: FirebaseFirestore.QueryDocumentSnapshot |
+      FirebaseFirestore.DocumentSnapshot,
+  ): Promise<void> => {
+    response.usersProcessed++;
+    const arrayItems = userDoc.get("schedules");
+    if (!Array.isArray(arrayItems) || arrayItems.length === 0) return;
+    response.usersWithSchedules++;
+
+    const migratedAlready = userDoc.get("schedulesMigratedAt") != null;
+    if (migratedAlready) response.usersAlreadyMigrated++;
+
+    const schedulesCol = userDoc.ref.collection("schedules");
+    const existingSnap = await schedulesCol.get();
+    const existing = new Map(
+      existingSnap.docs.map((d) => {
+        const sk = d.get("sortKey");
+        return [d.id, { sortKey: typeof sk === "number" ? sk : undefined }];
+      }),
+    );
+
+    const plan = planBackfill(arrayItems, existing);
+    response.totalNewDocs += plan.newDocIds.length;
+    response.perUser.push({
+      uid: userDoc.id,
+      arrayCount: plan.arrayCount,
+      existingCount: plan.existingCount,
+      newCount: plan.newDocIds.length,
+      skippedMalformed: plan.skippedMalformed,
+      skippedDetails: plan.skippedDetails.slice(0, NEW_DOC_ID_SAMPLE_CAP),
+      migratedAlready,
+      newDocIds: plan.newDocIds.slice(0, NEW_DOC_ID_SAMPLE_CAP),
+      sortKeyAssignments: plan.sortKeyAssignments.slice(0, NEW_DOC_ID_SAMPLE_CAP),
+    });
+
+    if (onUserPlanned) {
+      response.totalUpserts += await onUserPlanned({
+        userRef: userDoc.ref,
+        upserts: plan.upserts,
+      });
+    }
+  };
+
+  if (opts.singleUid) {
+    const userDoc = await db.collection("users").doc(opts.singleUid).get();
+    if (!userDoc.exists) {
+      throw new HttpsError("not-found", `User ${opts.singleUid} not found`);
+    }
+    await planOne(userDoc);
+  } else {
+    let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    let page = 0;
+    for (;;) {
+      let query = db
+        .collection("users")
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(opts.pageSize);
+      if (last) query = query.startAfter(last.id);
+      const snap = await query.get();
+      if (snap.empty) break;
+
+      for (const userDoc of snap.docs) await planOne(userDoc);
+
+      page++;
+      logger.info(
+        `backfillSchedulesSubcollection: page ${page} (${snap.size} users) — ` +
+          `processed=${response.usersProcessed} ` +
+          `withSchedules=${response.usersWithSchedules} ` +
+          `upserts=${response.totalUpserts} newDocs=${response.totalNewDocs}`,
+      );
+
+      last = snap.docs[snap.docs.length - 1];
+      if (snap.size < opts.pageSize) break;
+    }
+  }
+
+  return response;
 }
 
 export const backfillSchedulesSubcollection = onCall(
@@ -111,113 +227,40 @@ export const backfillSchedulesSubcollection = onCall(
     );
 
     const db = admin.firestore();
-    const response: BackfillResponse = {
-      dryRun,
-      usersProcessed: 0,
-      usersWithSchedules: 0,
-      totalUpserts: 0,
-      totalNewDocs: 0,
-      perUser: [],
-    };
 
     logger.info(
       `backfillSchedulesSubcollection: start ` +
         `${singleUid ? `uid=${singleUid}` : "mode=batch"} dryRun=${dryRun}`,
     );
 
-    const processUser = async (
-      userDoc: FirebaseFirestore.QueryDocumentSnapshot |
-        FirebaseFirestore.DocumentSnapshot,
-    ): Promise<void> => {
-      response.usersProcessed++;
-      const arrayItems = userDoc.get("schedules");
-      if (!Array.isArray(arrayItems) || arrayItems.length === 0) return;
-      response.usersWithSchedules++;
-
-      const schedulesCol = userDoc.ref.collection("schedules");
-      const existingSnap = await schedulesCol.get();
-      // docId → existing sortKey (undefined when the doc has none). Lets the
-      // plan preserve already-assigned keys on rerun (never renumber).
-      const existing = new Map(
-        existingSnap.docs.map((d) => {
-          const sk = d.get("sortKey");
-          return [d.id, { sortKey: typeof sk === "number" ? sk : undefined }];
-        }),
-      );
-
-      const plan = planBackfill(arrayItems, existing);
-      response.totalNewDocs += plan.newDocIds.length;
-
-      response.perUser.push({
-        uid: userDoc.id,
-        arrayCount: plan.arrayCount,
-        existingCount: plan.existingCount,
-        newCount: plan.newDocIds.length,
-        skippedMalformed: plan.skippedMalformed,
-        newDocIds: plan.newDocIds.slice(0, NEW_DOC_ID_SAMPLE_CAP),
-        // dryRun surfaces the exact index→sortKey assignment (capped sample).
-        sortKeyAssignments: plan.sortKeyAssignments.slice(0, NEW_DOC_ID_SAMPLE_CAP),
-      });
-
-      if (dryRun) return; // WRITE NOTHING
-
-      // Upsert each array item to its subcollection doc (verbatim body).
-      for (let i = 0; i < plan.upserts.length; i += UPSERT_BATCH_SIZE) {
+    // Writer callback — passed ONLY on the non-dryRun path, so a dry run reaches
+    // no .set/.commit/.update. Streams each user's upserts, then stamps the
+    // migration marker (identical behaviour to the pre-extraction inline path).
+    const writeUser = async ({ userRef, upserts }: UserPlan): Promise<number> => {
+      let written = 0;
+      for (let i = 0; i < upserts.length; i += UPSERT_BATCH_SIZE) {
         const batch = db.batch();
-        for (const { docId, item } of plan.upserts.slice(
-          i,
-          i + UPSERT_BATCH_SIZE,
-        )) {
-          batch.set(schedulesCol.doc(docId), item as FirebaseFirestore.DocumentData);
+        for (const { docId, item } of upserts.slice(i, i + UPSERT_BATCH_SIZE)) {
+          batch.set(
+            userRef.collection("schedules").doc(docId),
+            item as FirebaseFirestore.DocumentData,
+          );
         }
         await batch.commit();
-        response.totalUpserts += Math.min(
-          UPSERT_BATCH_SIZE,
-          plan.upserts.length - i,
-        );
+        written += Math.min(UPSERT_BATCH_SIZE, upserts.length - i);
       }
-
-      // Stamp the migration marker on the user doc.
-      await userDoc.ref.update({
+      await userRef.update({
         schedulesMigratedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      return written;
     };
 
-    if (singleUid) {
-      const userDoc = await db.collection("users").doc(singleUid).get();
-      if (!userDoc.exists) {
-        throw new HttpsError("not-found", `User ${singleUid} not found`);
-      }
-      await processUser(userDoc);
-    } else {
-      // Full-fleet batch mode — page through /users by document id.
-      let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-      let page = 0;
-      for (;;) {
-        let query = db
-          .collection("users")
-          .orderBy(admin.firestore.FieldPath.documentId())
-          .limit(pageSize);
-        if (last) query = query.startAfter(last.id);
-        const snap = await query.get();
-        if (snap.empty) break;
-
-        for (const userDoc of snap.docs) {
-          await processUser(userDoc);
-        }
-
-        page++;
-        logger.info(
-          `backfillSchedulesSubcollection: page ${page} ` +
-            `(${snap.size} users) — processed=${response.usersProcessed} ` +
-            `withSchedules=${response.usersWithSchedules} ` +
-            `upserts=${response.totalUpserts} newDocs=${response.totalNewDocs}`,
-        );
-
-        last = snap.docs[snap.docs.length - 1];
-        if (snap.size < pageSize) break;
-      }
-    }
+    const response = await planFleetBackfill(
+      db,
+      { singleUid, pageSize },
+      dryRun ? undefined : writeUser,
+    );
+    response.dryRun = dryRun;
 
     logger.info(
       `backfillSchedulesSubcollection: done dryRun=${dryRun} ` +
