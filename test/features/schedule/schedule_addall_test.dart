@@ -37,12 +37,20 @@ class _FakeUser implements User {
 /// path can be exercised.
 class _FakeUserService implements UserService {
   final List<List<ScheduleItem>> addSchedulesCalls = [];
+  final List<List<ScheduleItem>> saveSchedulesCalls = [];
   Object? addSchedulesThrow;
 
   @override
   Future<void> addSchedules(String userId, List<ScheduleItem> items) async {
     addSchedulesCalls.add(List.of(items));
     if (addSchedulesThrow != null) throw addSchedulesThrow!;
+  }
+
+  // The 50-cap trim path (addAll needsTrim / mergeWithDedup) persists via
+  // saveSchedules(fullTrimmedList) instead of the arrayUnion addSchedules.
+  @override
+  Future<void> saveSchedules(String userId, List<ScheduleItem> items) async {
+    saveSchedulesCalls.add(List.of(items));
   }
 
   // Stream the in-memory schedules so SchedulesNotifier's _init listener
@@ -355,6 +363,47 @@ void main() {
       // Still 1 item; the duplicate was filtered out before write.
       expect(h.container.read(schedulesProvider).length, 1);
       expect(h.container.read(schedulesProvider).first.id, 'orig');
+    });
+  });
+
+  // ─── 50-cap (A-5) ─────────────────────────────────────────────────────────
+  //
+  // The 50-item cap is enforced in SchedulesNotifier (schedule_providers.dart
+  // :461 addAll, :650 mergeWithDedup) BEFORE persistence, so it holds
+  // IDENTICALLY regardless of which repository the injected UserService uses —
+  // the repo only ever receives the already-trimmed set. Both trim paths
+  // persist the full trimmed list via saveSchedules.
+  group('50-cap holds identically regardless of backend', () {
+    List<ScheduleItem> many(int n, String prefix) => [
+          for (var i = 0; i < n; i++)
+            _mk(id: '$prefix-$i', timeLabel: '7:00 PM', repeatDays: const ['Mon']),
+        ];
+
+    test('addAll of 60 → state capped to 50, saveSchedules persists 50',
+        () async {
+      final h = _harness();
+      final notifier = await _readNotifier(h.container);
+
+      await notifier.addAll(many(60, 'a'));
+
+      expect(h.container.read(schedulesProvider).length, 50);
+      expect(h.userService.saveSchedulesCalls.single.length, 50,
+          reason: 'trim path persists the full capped set');
+      // Keeps the most-recently-appended 50 (oldest dropped).
+      final ids = h.container.read(schedulesProvider).map((e) => e.id).toList();
+      expect(ids.first, 'a-10');
+      expect(ids.last, 'a-59');
+    });
+
+    test('mergeWithDedup of 60 → state capped to 50, saveSchedules persists 50',
+        () async {
+      final h = _harness();
+      final notifier = await _readNotifier(h.container);
+
+      await notifier.mergeWithDedup(many(60, 'm'));
+
+      expect(h.container.read(schedulesProvider).length, 50);
+      expect(h.userService.saveSchedulesCalls.single.length, 50);
     });
   });
 }

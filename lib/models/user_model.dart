@@ -625,6 +625,13 @@ class UserModel {
       'profile_type': profileType,
       if (managerEmail != null) 'manager_email': managerEmail,
       'happy_hour_locks': happyHourLocks,
+      // A-5 coherence pin: the schedules ARRAY is still serialized on the user
+      // doc even under the subcollection backend. During the array↔subcollection
+      // dual-write window it stays current (every subcollection write mirrors
+      // back to this array), so it remains a valid fallback / rollback source.
+      // Do NOT drop it until dual-write is retired. Note: SchedulesNotifier owns
+      // schedule writes — profile-sync must never clobber this array (see the
+      // 'schedules' skip in AutopilotNotifier._updateProfile / its pin test).
       'schedules': schedules.map((e) => e.toJson()).toList(),
       // Installation access control
       if (installationId != null) 'installation_id': installationId,

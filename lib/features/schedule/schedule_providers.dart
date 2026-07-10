@@ -8,24 +8,53 @@ import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_lazy_migrator.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/schedules_subcollection_feature_flag.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 
-/// Streams the current user's schedules from Firestore.
-/// This is the source of truth for schedule data. Reads via
-/// [effectiveUserUidProvider] so installer impersonation transparently
-/// scopes the stream to the chosen customer's account.
-final userSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) {
+/// Streams the current user's schedules from Firestore — THE app-wide source of
+/// truth (SchedulesNotifier and all 14 consumers read through it). Reads via
+/// [effectiveUserUidProvider] so installer impersonation transparently scopes
+/// the stream to the chosen customer's account.
+///
+/// A-5 read-path flip: the stream is now sourced from
+/// [scheduleRepositoryProvider], which the schedules_subcollection flag selects:
+///   • flag OFF (default) → LegacyArrayScheduleRepository — the byte-identical
+///     legacy array snapshot stream (unchanged behavior).
+///   • flag ON → SubcollectionScheduleRepository — the /schedules subcollection
+///     listener, ordered by sortKey (== insertion order; proven equivalent in
+///     A-5-prime), so no consumer logic changes.
+///
+/// Under flag ON we first run the lazy-migration safety net so a user the
+/// server backfill hasn't reached yet is migrated (array → subcollection,
+/// sortKey = array index) BEFORE their subcollection is read — otherwise they'd
+/// momentarily read an empty list. A migration failure is logged, never
+/// surfaced: we fall through and read the subcollection as-is (the unset marker
+/// makes it retry next launch).
+final userSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) async* {
   final uid = ref.watch(effectiveUserUidProvider);
-  if (uid == null) return const Stream.empty();
+  if (uid == null) return;
 
-  final userService = ref.watch(userServiceProvider);
-  return userService.streamSchedules(uid);
+  final repo = ref.watch(scheduleRepositoryProvider);
+  final subEnabled = ref.watch(schedulesSubcollectionEnabledSyncProvider);
+
+  if (subEnabled) {
+    try {
+      await ref.read(scheduleLazyMigratorProvider).ensureMigrated(uid);
+    } catch (e) {
+      debugPrint(
+          'userSchedulesStream: lazy migration failed — $e (reading subcollection as-is)');
+    }
+  }
+
+  yield* repo.streamSchedules(uid);
 });
 
 /// Notifier that manages schedule state and syncs with Firestore.

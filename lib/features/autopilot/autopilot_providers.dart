@@ -785,22 +785,37 @@ class AutopilotSettingsService {
 
     final updated = updater(profile);
 
-    // Diff the old vs new toJson to find only changed fields
-    final oldJson = profile.toJson();
-    final newJson = updated.toJson();
-    final changedFields = <String, dynamic>{};
-    for (final key in newJson.keys) {
-      // Skip the schedules field — managed by SchedulesNotifier
-      if (key == 'schedules') continue;
-      if (newJson[key] != oldJson[key]) {
-        changedFields[key] = newJson[key];
-      }
-    }
+    final changedFields =
+        computeChangedProfileFields(profile.toJson(), updated.toJson());
 
     if (changedFields.isEmpty) return;
 
     final userService = _ref.read(userServiceProvider);
     await userService.updateUserProfile(profile.id, changedFields);
+  }
+
+  /// Diffs old→new profile JSON to the set of changed fields for a partial
+  /// Firestore `update`, DELIBERATELY excluding `schedules`.
+  ///
+  /// A-5 coherence pin: `schedules` is owned exclusively by SchedulesNotifier.
+  /// While the array↔subcollection dual-write is live, the profile snapshot's
+  /// copy of the array can lag SchedulesNotifier's latest writes, so folding it
+  /// into a profile-settings update would clobber schedules with stale data.
+  /// This skip must never be removed while dual-write is live — the pin test
+  /// asserts a differing `schedules` field is dropped from the diff.
+  @visibleForTesting
+  static Map<String, dynamic> computeChangedProfileFields(
+    Map<String, dynamic> oldJson,
+    Map<String, dynamic> newJson,
+  ) {
+    final changed = <String, dynamic>{};
+    for (final key in newJson.keys) {
+      if (key == 'schedules') continue; // owned by SchedulesNotifier
+      if (newJson[key] != oldJson[key]) {
+        changed[key] = newJson[key];
+      }
+    }
+    return changed;
   }
 }
 
