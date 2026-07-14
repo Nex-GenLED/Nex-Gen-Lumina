@@ -58,6 +58,31 @@ class DealerInfo {
   );
 }
 
+/// The staff role an installer doc grants when its PIN is matched.
+///
+/// Mirrors `StaffRole` in functions/src/staffAuth.ts:148 — the wire values
+/// MUST stay identical, because mintStaffToken compares this field against
+/// `roleForMode(mode)` with a strict `!==` (staffAuth.ts:356-357).
+///
+/// `owner` is deliberately absent: it is mintable only from the master
+/// corporate PIN (staffAuth.ts:212), never from an installers doc.
+enum InstallerRole {
+  /// Sales-mode session. mintStaffToken mode 'sales' → role 'salesperson'.
+  salesperson,
+
+  /// Install-mode session. mode 'installer' → role 'installer'.
+  installer,
+
+  /// Dealer-admin session. mode 'admin' → role 'admin'.
+  admin,
+}
+
+extension InstallerRoleWire on InstallerRole {
+  /// The exact string persisted to `/installers/{id}.role` and compared by
+  /// staffAuth.ts:357. Do not localize or prettify.
+  String get wire => name;
+}
+
 /// Model representing a registered installer under a dealer
 class InstallerInfo {
   final String installerCode; // 2-digit code (00-99)
@@ -70,6 +95,29 @@ class InstallerInfo {
   final DateTime? registeredAt;
   final int totalInstallations;
 
+  /// The staff role this installer authenticates as.
+  ///
+  /// ## Why this field exists (C4)
+  ///
+  /// `toMap()` did not emit `role`, but mintStaffToken REQUIRES it:
+  ///
+  /// ```ts
+  /// const docRole = data.role as string | undefined;
+  /// if (docRole !== roleForMode(mode)) return null;   // staffAuth.ts:356-357
+  /// ```
+  ///
+  /// A missing `role` is a mismatch, so every installer the admin UI could
+  /// create was permanently unable to authenticate — the dealer could add
+  /// staff who could never sign in. The function's own comment
+  /// (staffAuth.ts:352-355) predicted this and asked for the writer to be
+  /// updated; that never happened, which is why the only working staff auth
+  /// today is the four master PINs (all hardwired to
+  /// MASTER_DEALER_CODE '55').
+  ///
+  /// Defaults to [InstallerRole.installer] — the overwhelmingly common case
+  /// and the least-privileged of the three.
+  final InstallerRole role;
+
   const InstallerInfo({
     required this.installerCode,
     required this.dealerCode,
@@ -79,6 +127,7 @@ class InstallerInfo {
     this.isActive = true,
     this.registeredAt,
     this.totalInstallations = 0,
+    this.role = InstallerRole.installer,
   }) : fullPin = '$dealerCode$installerCode';
 
   InstallerInfo.withFullPin({
@@ -91,6 +140,7 @@ class InstallerInfo {
     this.isActive = true,
     this.registeredAt,
     this.totalInstallations = 0,
+    this.role = InstallerRole.installer,
   });
 
   Map<String, dynamic> toMap() => {
@@ -103,7 +153,28 @@ class InstallerInfo {
     'isActive': isActive,
     'registeredAt': registeredAt != null ? Timestamp.fromDate(registeredAt!) : FieldValue.serverTimestamp(),
     'totalInstallations': totalInstallations,
+    // C4: REQUIRED by staffAuth.ts:357 — without it the doc can never
+    // authenticate. Wire value must match StaffRole (staffAuth.ts:148).
+    'role': role.wire,
   };
+
+  /// Tolerant read: legacy docs written before C4 carry no `role`, and
+  /// hand-seeded docs may carry an unrecognized one. Both fall back to
+  /// [InstallerRole.installer] rather than throwing — a staff-management
+  /// list must still render a doc that cannot authenticate, so the dealer
+  /// can see it and the backfill can find it.
+  ///
+  /// NOTE: this fallback is display-only. It does NOT make a legacy doc
+  /// authenticate — mintStaffToken reads Firestore directly and still sees
+  /// a missing `role` (staffAuth.ts:356). Only the backfill fixes that:
+  /// scripts/backfill_installer_roles.js.
+  static InstallerRole parseRole(Object? raw) {
+    if (raw is! String) return InstallerRole.installer;
+    for (final r in InstallerRole.values) {
+      if (r.wire == raw) return r;
+    }
+    return InstallerRole.installer;
+  }
 
   factory InstallerInfo.fromMap(Map<String, dynamic> map) {
     final dealerCode = map['dealerCode'] as String? ?? '';
@@ -118,8 +189,17 @@ class InstallerInfo {
       isActive: map['isActive'] as bool? ?? true,
       registeredAt: (map['registeredAt'] as Timestamp?)?.toDate(),
       totalInstallations: map['totalInstallations'] as int? ?? 0,
+      role: parseRole(map['role']),
     );
   }
+
+  /// True when this doc, as stored, can actually mint a staff token.
+  /// Mirrors the `docRole !== roleForMode(mode)` check at staffAuth.ts:357.
+  /// Useful for surfacing "this installer cannot sign in" in the UI and for
+  /// the backfill's dry-run census.
+  static bool canAuthenticate(Map<String, dynamic> map) =>
+      map['role'] is String &&
+      InstallerRole.values.any((r) => r.wire == map['role']);
 }
 
 /// Current session info when an installer is authenticated
