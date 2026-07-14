@@ -350,11 +350,34 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// order intact). Runs under both flag states — harmless when the legacy
   /// array backend ignores order, ready when the subcollection backend uses it.
   List<ScheduleItem> _assignSortKeys(List<ScheduleItem> items) {
-    var nextKey = _maxSortKey(state) + 1;
+    var nextKey = nextSortKeySeed(state);
     return [
       for (final item in items)
         item.sortKey > 0 ? item : item.copyWith(sortKey: nextKey++),
     ];
+  }
+
+  /// First key handed to a newly created item, seeded from [current] state.
+  ///
+  /// Normally (max sortKey) + 1. The `current.length` floor is belt-and-braces
+  /// against a backfill gap: a user whose ARRAY items predate the sortKey field
+  /// deserializes to all-zero (`ScheduleItem.fromJson: ?? 0`), so the max-based
+  /// seed collapses to 1 — which COLLIDES with the contiguous 0..n-1 the
+  /// array→subcollection backfill already stamped into their subcollection. The
+  /// mirrored write would then tie on `sortKey`, and the subcollection's
+  /// orderBy read would diverge from the array's insertion order. Seeding at no
+  /// less than the item count clears a contiguous backfilled block.
+  ///
+  /// This is a safety net, not a proof: it assumes the backfill's contiguous
+  /// 0..n-1 numbering and array/subcollection count parity (both hold for every
+  /// user the real backfill touched). The actual repair is making the array
+  /// carry the same keys as the subcollection — see
+  /// functions/scripts/repair_array_sortkeys.js. The floor never LOWERS the
+  /// seed, so it can never collide with a key already present in [current].
+  @visibleForTesting
+  static int nextSortKeySeed(List<ScheduleItem> current) {
+    final byMax = _maxSortKey(current) + 1;
+    return byMax > current.length ? byMax : current.length;
   }
 
   static int _maxSortKey(List<ScheduleItem> items) {
