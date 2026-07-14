@@ -95,6 +95,27 @@ service cloud.firestore {
             || request.auth.token.get('role', '') == 'installer');
     }
 
+    // The dealer_code stamped on a customer's user doc at install time. The
+    // scoping value for hasStaffClaim() on that customer's subcollections:
+    // staff may only reach their OWN dealer's customers. Extracted from the
+    // inline get() the pixelMap rule already uses so the commercial
+    // subcollections read the same way. Defaults to '' for a user doc with no
+    // dealer_code (self-signup), which no real staff dealerCode claim matches.
+    function dealerCodeOf(userId) {
+      return get(/databases/$(database)/documents/users/$(userId))
+               .data.get('dealer_code', '');
+    }
+
+    // Membership check for /commercial_organizations: the caller's own user
+    // doc points at this org. Mirrors commercialOrgProvider, which reads the
+    // org named by the caller's organization_id.
+    function isOrgMember(orgId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+             .data.get('organization_id', '') == orgId;
+    }
+
     // Caller-only check: the staff custom token has role: 'admin'.
     // Distinct from isAdmin() above (which checks installation_role on
     // the user doc) — different identity, different concept. Admin-claim
@@ -453,23 +474,35 @@ service cloud.firestore {
       // existing `commercial_profile` map field on the user doc, which holds
       // hours, channels, teams, and day-parts from CommercialOnboardingWizard.
       match /brand_profile/{docId} {
-        // Owner can read; media/dealer/admin roles can read for support and
-        // content creation, mirroring properties/controllers visibility.
-        // Any authenticated user can also read so the installer wizard
-        // can verify pre-seed state during the commit batch.
-        allow read: if canReadUserData(userId) || request.auth != null;
+        // SECURITY (2026-07-14): the `|| request.auth != null` fallback is
+        // GONE from every branch. It existed because the installer wizard ran
+        // its pre-seed as a BARE ANONYMOUS session — createUserWithEmailAndPassword
+        // clobbered the installer's staff session and the wizard recovered via
+        // signInAnonymously(), so no claim was available to scope against. The
+        // wizard now restores its mintStaffToken claims instead
+        // (installer_setup_wizard.dart _restoreInstallerAuth), so the
+        // installer is a genuine hasStaffClaim() caller and the broad grant —
+        // the neighborhoods outage class, banned for new rules per the LOCKED
+        // pixelMap precedent above — is obsolete. Item #31.
+        //
+        // Read: owner + media/dealer/admin (support, content creation), plus
+        // the customer's own dealer's staff. NOT every signed-in user.
+        allow read: if canReadUserData(userId)
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
 
-        // Mirrors the commercial_locations rule pattern (commit 156ec67):
-        // any authenticated user can create/update so the installer wizard
-        // can pre-seed under the customer's UID while signed in as the
-        // installer/anonymous. isUserRoleAdmin retained on update for
-        // corporate-approved brand-library correction propagation. Delete
-        // is owner-or-installer to match the rest of this subcollection
-        // group; broader corporate cleanup paths haven't been a need yet.
-        // Item #31 documents the broader installer-write pattern.
-        allow create: if request.auth != null;
-        allow update: if isOwner(userId) || isUserRoleAdmin() || request.auth != null;
-        allow delete: if isOwner(userId) || request.auth != null;
+        // isUserRoleAdmin retained on update for corporate-approved
+        // brand-library correction propagation.
+        allow create: if isOwner(userId)
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
+        allow update: if isOwner(userId)
+          || isUserRoleAdmin()
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
+        allow delete: if isOwner(userId)
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
       }
 
       // Commercial Events subcollection - sales/marketing events that
@@ -481,23 +514,39 @@ service cloud.firestore {
       }
 
       // Commercial Locations subcollection - per-location commercial
-      // configuration written by the canonical commercial onboarding
-      // wizard (review_go_live_screen.dart) and by the installer setup
-      // wizard's commercial branch (installer_setup_wizard.dart).
+      // configuration.
       //
-      // Mirrors the controllers/{controllerId} write pattern (above):
-      // any authenticated user can create/update because the install
-      // wizard writes under the customer's UID while signed in as the
-      // installer/anonymous. Without this rule the atomic batch in
-      // both wizards (user-doc commercial_mode flags + this doc) rolls
-      // back, leaving customers in profile_type='commercial' but no
-      // location doc — route guard then falls back to residential
-      // (Item #29 in project memory documents the discovery).
+      // SECURITY (2026-07-14): the `|| request.auth != null` fallback is GONE.
+      // It let ANY signed-in user create/update/delete ANY other user's
+      // locations — the isOwner(userId) prefix was dead code, swallowed by the
+      // bare auth check. It existed because BOTH activation batches ran client
+      // side under an anonymous installer session (see brand_profile above,
+      // and Item #29 for the rollback this originally fixed).
+      //
+      // Neither batch exists any more: setAccountProfile (the callable) is now
+      // the single activation path and writes this doc with the Admin SDK,
+      // which bypasses rules entirely. No client writes this collection —
+      // every remaining client reference is a READ (commercial_mode_providers,
+      // FleetDashboardScreen, CommercialScheduleScreen). So the write branches
+      // below exist for future in-app editing (Item #33) and the installer
+      // capture path, not for activation.
       match /commercial_locations/{locationId} {
-        allow read: if canReadUserData(userId) || request.auth != null;
-        allow create: if request.auth != null;
-        allow update: if isOwner(userId) || request.auth != null;
-        allow delete: if isOwner(userId) || request.auth != null;
+        allow read: if canReadUserData(userId)
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
+        allow create, update, delete: if isOwner(userId)
+          || hasStaffClaim(dealerCodeOf(userId))
+          || hasAdminOrOwnerClaim();
+      }
+
+      // Commercial Hours subcollection — /users/{uid}/commercial_hours/{id}.
+      // Written by setAccountProfile (Admin SDK, bypasses rules); read by the
+      // owner. Deliberately owner-scoped: business hours are private operating
+      // data with no support/content-creation use case.
+      match /commercial_hours/{locationId} {
+        allow read: if isOwner(userId) || hasAdminOrOwnerClaim();
+        allow create, update, delete: if isOwner(userId)
+          || hasAdminOrOwnerClaim();
       }
     }
 
@@ -1451,6 +1500,44 @@ service cloud.firestore {
     match /brand_library/{brandId} {
       allow read: if request.auth != null;
       allow create, update, delete: if isUserRoleAdmin();
+    }
+
+    // ── Commercial Organizations ─────────────────────────────────
+    // Multi-location parent org. Had NO rule block at all, so it was
+    // DEFAULT-DENIED: every read from commercialOrgProvider /
+    // commercialUserRoleProvider (commercial_mode_providers.dart:111,140)
+    // threw permission-denied and was swallowed by their `catch (_) =>
+    // null`. commercialOrgProvider therefore always returned null in
+    // production and no user could ever resolve to corporateAdmin via org
+    // ownership. (2026-07-14 commercial audit.)
+    //
+    // Read: the org's owner, any member (their user doc names this org), or
+    // an admin/owner claim. Writes are admin/owner-claim only — nothing in
+    // the app creates an org today, so a client write path would be
+    // speculative surface area.
+    match /commercial_organizations/{orgId} {
+      allow read: if isOwner(resource.data.get('owner_id', ''))
+        || isOrgMember(orgId)
+        || hasAdminOrOwnerClaim();
+      allow create, update, delete: if hasAdminOrOwnerClaim();
+    }
+
+    // ── Campaigns ────────────────────────────────────────────────
+    // Named corporate pushes (corporate_push_service.dart pushCampaign).
+    // Also had NO rule block → default-denied, so EVERY corporate push
+    // failed 100% of the time, silently. (2026-07-14 commercial audit.)
+    //
+    // The doc carried no ownership field to scope by, so `created_by` is now
+    // stamped at write time; this rule keys on it. A legacy campaign without
+    // created_by resolves to '' — matching no uid — and stays reachable only
+    // by an admin/owner claim, which is the intended failure direction.
+    match /campaigns/{campaignId} {
+      allow read: if isOwner(resource.data.get('created_by', ''))
+        || hasAdminOrOwnerClaim();
+      allow create: if isOwner(request.resource.data.get('created_by', ''))
+        || hasAdminOrOwnerClaim();
+      allow update, delete: if isOwner(resource.data.get('created_by', ''))
+        || hasAdminOrOwnerClaim();
     }
 
     // ── Brand Library Corrections ────────────────────────────────

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/models/commercial/commercial_schedule.dart';
 import 'package:nexgen_command/services/user_service.dart';
@@ -92,6 +93,11 @@ class CorporatePushService {
         'location_ids': locationIds,
         'start_date': startDate.toIso8601String(),
         'end_date': endDate.toIso8601String(),
+        // Ownership stamp — /campaigns had NO owner field, so its (missing)
+        // security rule had nothing to scope by and every write was
+        // permission-denied. The rule keys on this; a campaign without it is
+        // readable/writable only by an admin/owner claim.
+        'created_by': FirebaseAuth.instance.currentUser?.uid,
         'created_at': FieldValue.serverTimestamp(),
       }));
 
