@@ -61,6 +61,12 @@ exports.enforceScheduleLimits = enforceScheduleLimits;
 const { backfillSchedulesSubcollection } = require("./lib/backfillSchedulesSubcollection");
 exports.backfillSchedulesSubcollection = backfillSchedulesSubcollection;
 
+// The single residential<->commercial activation path. Owns the cross-doc
+// batch (users + installations) that no client can write; absorbs the two
+// diverged in-app batches (item #32).
+const { setAccountProfile } = require("./lib/setAccountProfile");
+exports.setAccountProfile = setAccountProfile;
+
 // ── Messaging ──────────────────────────────────────────────────────────────
 // SMS + email customer messaging pipeline. messaging-helpers.ts is a
 // shared support module imported by both functions below — it has no

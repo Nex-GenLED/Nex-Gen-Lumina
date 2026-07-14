@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,9 +43,10 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
 
     try {
       final uid = user.uid;
+      // Still used by the best-effort brand_profile write below; the
+      // activation batch itself now lives in the setAccountProfile callable.
       final userRef =
           FirebaseFirestore.instance.collection('users').doc(uid);
-      final firestore = FirebaseFirestore.instance;
 
       // Build a structured commercial_profile map from the wizard draft.
       // Stored on the user doc so the residential→commercial mode switcher
@@ -78,50 +80,40 @@ class _ReviewGoLiveScreenState extends ConsumerState<ReviewGoLiveScreen> {
         'default_ambient_design_id': draft.defaultAmbientDesignId,
         'org_name': draft.orgName,
         'has_multiple_locations': draft.hasMultipleLocations,
-        'updated_at': FieldValue.serverTimestamp(),
+        // NO FieldValue.serverTimestamp() here: this map is now a callable
+        // payload and must stay JSON-serializable. setAccountProfile stamps
+        // commercial_profile.updated_at server-side instead.
       };
 
-      // Primary commercial_location doc — minimum required for the route
-      // guard to recognise the user as a configured commercial customer.
-      final locationDoc = <String, dynamic>{
-        'location_id': 'primary',
-        'org_id': '',
-        'location_name': draft.businessName.isEmpty
-            ? 'Primary Location'
-            : draft.businessName,
-        'address': draft.primaryAddress,
-        'lat': 0.0,
-        'lng': 0.0,
-        'controller_id': '',
-        'business_hours_id': '',
-        'schedule_id': '',
-        'teams_config_id': '',
-        'is_using_org_template': false,
-        'channel_configs':
-            draft.channelConfigs.map((c) => c.toJson()).toList(),
-        'managers': [
-          {
-            'user_id': uid,
-            'role': 'corporateAdmin',
-            'assigned_at': DateTime.now().toIso8601String(),
-          }
-        ],
-        'created_at': FieldValue.serverTimestamp(),
-        'active': true,
-      };
-
-      final batch = firestore.batch();
-      batch.set(userRef, {
-        'profile_type': 'commercial',
-        'commercial_mode_enabled': true,
-        'commercial_mode_override': true,
-        'commercial_profile': commercialProfile,
-      }, SetOptions(merge: true));
-      batch.set(
-        userRef.collection('commercial_locations').doc('primary'),
-        locationDoc,
-      );
-      await batch.commit();
+      // Activate via the setAccountProfile callable — THE single activation
+      // path (item #32). This screen used to run its own client batch here;
+      // that batch and the installer wizard's copy had already diverged (this
+      // one hardcoded lat/lng 0.0 and wrote profile_type + commercial_profile;
+      // the installer wrote real coords but neither field). Both now call the
+      // same function, which additionally reconciles /installations
+      // (site_mode + max_sub_users: 20) — a doc no client can write, and the
+      // reason a converted account kept residential invite limits forever.
+      //
+      // The caller here IS the account owner, so the callable's auth gate is
+      // satisfied by request.auth.uid == uid.
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('setAccountProfile');
+      await callable.call<Map<String, dynamic>>({
+        'uid': uid,
+        'direction': 'commercial',
+        'commercialProfile': commercialProfile,
+        'location': {
+          'locationName': draft.businessName.isEmpty
+              ? 'Primary Location'
+              : draft.businessName,
+          'address': draft.primaryAddress,
+          'channelConfigs':
+              draft.channelConfigs.map((c) => c.toJson()).toList(),
+          // No lat/lng: this wizard never collected them. The callable falls
+          // back to the user doc's own coords, then null — never the fake
+          // 0.0 (the Gulf of Guinea) this screen used to write.
+        },
+      });
 
       // Persist the rich brand profile + auto-generate the five canonical
       // brand designs. Done after the batch commit so the user-doc and

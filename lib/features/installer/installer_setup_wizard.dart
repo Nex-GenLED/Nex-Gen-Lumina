@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
@@ -675,10 +676,58 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     );
   }
 
+  /// True once [_restoreInstallerAuth] has put the installer's STAFF CLAIMS
+  /// back on the Firebase Auth session. False means we fell back to an
+  /// anonymous session and hold no `role`/`dealerCode` claim.
+  bool _installerClaimsRestored = false;
+
+  /// Restore the installer's claim-bearing session after
+  /// `createUserWithEmailAndPassword` signed us in as the customer.
+  ///
+  /// Re-signs with the custom token cached at PIN entry
+  /// (InstallerSession.staffToken), which carries `role: 'installer'` +
+  /// `dealerCode`. Those claims are what firestore.rules hasStaffClaim() and
+  /// the setAccountProfile callable check.
+  ///
+  /// Falls back to anonymous — today's behavior — if no token was cached or
+  /// the token has aged out (custom tokens live ONE HOUR). The fallback is
+  /// deliberately non-fatal so residential installs keep working exactly as
+  /// before; commercial activation checks [_installerClaimsRestored] and fails
+  /// loud instead, because the callable will reject a claim-less caller.
+  ///
+  /// Returns true when the claims were restored.
+  Future<bool> _restoreInstallerAuth(InstallerSession? session) async {
+    final token = session?.staffToken;
+    if (token != null) {
+      try {
+        await FirebaseAuth.instance.signInWithCustomToken(token);
+        _installerClaimsRestored = true;
+        debugPrint('Installer: staff claims restored after account creation');
+        return true;
+      } catch (e) {
+        // Most likely the 1-hour custom-token TTL expired mid-install.
+        debugPrint('Installer: staff-claim restore FAILED ($e) — falling back '
+            'to anonymous. Commercial activation will be blocked.');
+      }
+    } else {
+      debugPrint('Installer: no cached staff token — falling back to '
+          'anonymous. Commercial activation will be blocked.');
+    }
+
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (e) {
+      debugPrint('Installer: anonymous fallback also failed: $e');
+    }
+    _installerClaimsRestored = false;
+    return false;
+  }
+
   Future<void> _completeSetup() async {
     final customerInfo = ref.read(installerCustomerInfoProvider);
     final session = ref.read(installerSessionProvider);
     final draft = ref.read(installerPreferenceDraftProvider);
+    _installerClaimsRestored = false;
 
     if (session == null) {
       _showError('Installer session expired. Please re-enter your PIN.');
@@ -705,9 +754,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       // 2. Create Firebase Auth account for customer (or link existing account)
       //
       // IMPORTANT: createUserWithEmailAndPassword() auto-signs-in as the new
-      // user, which would kill our anonymous installer session. After creating
-      // the account we immediately sign back in anonymously so the remaining
-      // Firestore writes succeed under the anonymous token.
+      // user, which kills the installer's session. We then restore the
+      // installer's STAFF-CLAIM session (not an anonymous one) so the
+      // remaining writes carry role + dealerCode — see _restoreInstallerAuth.
       String userId;
       bool isExistingAccount = false;
       try {
@@ -727,8 +776,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         } catch (resetErr) {
           debugPrint('Installer: password reset email failed (non-blocking): $resetErr');
         }
-        // Customer account created — sign back in anonymously for remaining writes
-        await FirebaseAuth.instance.signInAnonymously();
+        // Customer account created — restore the installer's staff claims for
+        // the remaining writes.
+        await _restoreInstallerAuth(session);
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
           // Account already exists — look up the existing user doc to
@@ -981,73 +1031,58 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         }
       }
 
-      // For commercial installs: write the route-guard-required fields
-      // and a commercial_locations/primary stub so the customer lands on
-      // the commercial dashboard immediately on first sign-in. Without
-      // these the route guard at route_guards.dart:266-275 sees
-      // profile_type == 'commercial' but no commercial_locations doc and
-      // falls back to the residential dashboard.
+      // For commercial installs: activate commercial mode via the
+      // setAccountProfile callable — THE single activation path (item #32).
+      // It owns the writes this batch used to do inline, plus the
+      // /installations reconciliation (site_mode + max_sub_users: 20) that
+      // this path could never do from the client and therefore skipped,
+      // leaving commercial accounts on residential invite limits forever.
       //
-      // Mirrors the canonical batch in
-      // lib/screens/commercial/onboarding/screens/review_go_live_screen.dart
-      // (the CommercialOnboardingWizard's "Go Live" step) so an
-      // installer-driven commercial install produces the same
-      // route-guard-recognised state the self-service flow does.
-      //
-      // Wrapped in try/catch + debugPrint, non-blocking, consistent with
-      // the brand pre-seed below — a failure leaves the account in the
-      // pre-fix state, which can be patched via Firebase Console.
+      // The callable authorises on the installer's staff claim, restored by
+      // _restoreInstallerAuth after customer-account creation. Without those
+      // claims it will (correctly) reject us, so fail loud rather than seed a
+      // half-configured commercial account.
       if (siteMode == SiteMode.commercial) {
-        try {
-          final locationDoc = <String, dynamic>{
-            'location_id': 'primary',
-            'org_id': '',
-            'location_name': customerInfo.name.isNotEmpty
-                ? customerInfo.name
-                : 'Primary Location',
-            'address':
-                '${customerInfo.address}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}'
-                    .trim(),
-            'lat': customerInfo.latitude ?? 0.0,
-            'lng': customerInfo.longitude ?? 0.0,
-            'controller_id': '',
-            'business_hours_id': '',
-            'schedule_id': '',
-            'teams_config_id': '',
-            'is_using_org_template': false,
-            'channel_configs': const [],
-            'managers': [
-              {
-                'user_id': userId,
-                'role': 'corporateAdmin',
-                'assigned_at': DateTime.now().toIso8601String(),
-              }
-            ],
-            'created_at': FieldValue.serverTimestamp(),
-            'active': true,
-          };
-
-          final commercialBatch = FirebaseFirestore.instance.batch();
-          commercialBatch.set(
-            FirebaseFirestore.instance.collection('users').doc(userId),
-            {
-              'commercial_mode_enabled': true,
-              'commercial_mode_override': true,
-            },
-            SetOptions(merge: true),
+        if (!_installerClaimsRestored) {
+          debugPrint('Installer: commercial activation SKIPPED — staff claims '
+              'were not restored (token missing or expired).');
+          _showError(
+            'Commercial setup could not be completed: your installer session '
+            'expired during setup. The system is installed and the customer '
+            'can sign in, but their account is still Residential. Re-enter '
+            'your installer PIN and re-run setup for this customer to '
+            'activate Commercial mode.',
           );
-          commercialBatch.set(
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(userId)
-                .collection('commercial_locations')
-                .doc('primary'),
-            locationDoc,
-          );
-          await commercialBatch.commit();
-        } catch (e) {
-          debugPrint('Installer: commercial flag/location seed failed '
-              '(non-blocking): $e');
+        } else {
+          try {
+            final callable =
+                FirebaseFunctions.instanceFor(region: 'us-central1')
+                    .httpsCallable('setAccountProfile');
+            await callable.call<Map<String, dynamic>>({
+              'uid': userId,
+              'direction': 'commercial',
+              'location': {
+                'locationName': customerInfo.name.isNotEmpty
+                    ? customerInfo.name
+                    : 'Primary Location',
+                'address':
+                    '${customerInfo.address}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}'
+                        .trim(),
+                // Real coords — the callable falls back to the user doc's own
+                // lat/lng, then null. Never a fake 0.0 on the equator.
+                if (customerInfo.latitude != null) 'lat': customerInfo.latitude,
+                if (customerInfo.longitude != null)
+                  'lng': customerInfo.longitude,
+              },
+            });
+          } catch (e) {
+            // Non-blocking, consistent with the brand pre-seed below: the
+            // install itself succeeded and the customer can sign in. The
+            // account stays residential and is repairable by re-running
+            // setAccountProfile (it is idempotent).
+            debugPrint('Installer: commercial activation failed '
+                '(non-blocking): $e');
+          }
         }
       }
 

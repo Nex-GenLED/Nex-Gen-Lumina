@@ -128,10 +128,28 @@ class InstallerSession {
   final DealerInfo dealer;
   final DateTime authenticatedAt;
 
+  /// The custom token minted by `mintStaffToken` for this session.
+  ///
+  /// Cached so the session's staff claims (`role`, `dealerCode`) can be
+  /// RESTORED after the install flow creates the customer's Firebase Auth
+  /// account. `createUserWithEmailAndPassword` auto-signs-in as the new
+  /// customer, destroying the installer's claim-bearing session; the wizard
+  /// used to recover by signing in ANONYMOUSLY, so every remaining write ran
+  /// with no claims at all. That is the sole reason firestore.rules carried
+  /// `|| request.auth != null` on commercial_locations / brand_profile — the
+  /// banned outage-class fallback existed to admit an anonymous installer.
+  ///
+  /// Re-signing with this token restores the claims instead. Custom tokens are
+  /// valid for ONE HOUR from mint; past that, restoration fails and the caller
+  /// must surface it rather than silently continuing claim-less.
+  /// See installer_setup_wizard.dart `_restoreInstallerAuth`.
+  final String? staffToken;
+
   const InstallerSession({
     required this.installer,
     required this.dealer,
     required this.authenticatedAt,
+    this.staffToken,
   });
 
   /// Get a display string for the current session
@@ -215,6 +233,9 @@ class InstallerModeNotifier extends StateNotifier<bool> {
         installer: installer,
         dealer: dealer,
         authenticatedAt: DateTime.now(),
+        // Cached so the wizard can restore these staff claims after customer
+        // account creation clobbers the session — see InstallerSession.staffToken.
+        staffToken: token,
       );
 
       state = true;
