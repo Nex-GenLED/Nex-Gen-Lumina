@@ -240,7 +240,15 @@ class _OverviewTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final jobsAsync = ref.watch(dealerJobsProvider(dealerCode));
-    final installersAsync = ref.watch(dealerInstallersProvider(dealerCode));
+    // D3-S1: /installers is admin/owner-only since the D3-HOTFIX. Only
+    // subscribe when the session actually holds the claim — otherwise the
+    // stream returns permission-denied and _buildStatCards' `?? []` would
+    // silently render "0 active installers", which is a WRONG NUMBER rather
+    // than an honest "restricted". Passing null makes the card show '—'.
+    final canReadInstallers = ref.watch(hasAdminOrOwnerSessionProvider);
+    final installersAsync = canReadInstallers
+        ? ref.watch(dealerInstallersProvider(dealerCode))
+        : null;
     final pendingAsync = ref.watch(dealerPendingPayoutsProvider(dealerCode));
     final activityAsync = ref.watch(dealerRecentActivityProvider(dealerCode));
     final revenueStats = ref.watch(dealerRevenueStatsProvider(dealerCode));
@@ -308,9 +316,12 @@ class _OverviewTab extends ConsumerWidget {
     );
   }
 
+  /// [installersAsync] is NULL when the session lacks the admin/owner claim
+  /// that `/installers` now requires (D3-HOTFIX). Null renders the installer
+  /// stat as '—' rather than a fabricated 0 — see the call site.
   Widget _buildStatCards(
     AsyncValue<List<SalesJob>> jobsAsync,
-    AsyncValue<List<InstallerInfo>> installersAsync,
+    AsyncValue<List<InstallerInfo>>? installersAsync,
     AsyncValue<List<ReferralPayout>> pendingAsync,
   ) {
     final jobs = jobsAsync.valueOrNull ?? [];
@@ -318,8 +329,10 @@ class _OverviewTab extends ConsumerWidget {
         jobs.where((j) => j.status != SalesJobStatus.installComplete).length;
     final completedJobs =
         jobs.where((j) => j.status == SalesJobStatus.installComplete).length;
-    final activeInstallers =
-        (installersAsync.valueOrNull ?? []).where((i) => i.isActive).length;
+    // '—' distinguishes "you may not see this" from "there are none".
+    final activeInstallersLabel = installersAsync == null
+        ? '—'
+        : '${(installersAsync.valueOrNull ?? []).where((i) => i.isActive).length}';
     final pendingCount = (pendingAsync.valueOrNull ?? []).length;
 
     return Column(
@@ -349,7 +362,7 @@ class _OverviewTab extends ConsumerWidget {
             Expanded(
               child: _StatCard(
                   label: 'Active installers',
-                  value: '$activeInstallers',
+                  value: activeInstallersLabel,
                   icon: Icons.engineering_outlined,
                   color: NexGenPalette.violet),
             ),
@@ -835,6 +848,20 @@ class _TeamTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // D3-S1: `/installers` is admin/owner-only since the D3-HOTFIX (those
+    // docs hold cleartext PINs, and mintStaffToken is callable
+    // unauthenticated, so any reader could harvest a working credential).
+    // This tab is reachable under installer/salesperson claims via
+    // installer_landing_screen.dart:171 and sales_landing_screen.dart:158 —
+    // without this gate they'd subscribe and render a raw
+    // "Error: [cloud_firestore/permission-denied]" string.
+    //
+    // Ask before reading, and say WHY. Slice 3 relaxes this back to
+    // hasStaffClaim(dealerCode) once the PINs are salted-hashed.
+    if (!ref.watch(hasAdminOrOwnerSessionProvider)) {
+      return const _TeamRestrictedNotice();
+    }
+
     final installersAsync = ref.watch(dealerInstallersProvider(dealerCode));
 
     return installersAsync.when(
@@ -904,6 +931,57 @@ class _TeamTab extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Shown on the Team tab when the session lacks the admin/owner claim that
+/// `/installers` requires (D3-HOTFIX).
+///
+/// Deliberately explains rather than just hiding: an installer who taps
+/// "Team" and sees a blank pane assumes the app is broken. Naming the reason
+/// — and that it is temporary — is the honest degradation. Removed in
+/// slice 3, when hashed PINs let this read relax to hasStaffClaim(dealerCode).
+class _TeamRestrictedNotice extends StatelessWidget {
+  const _TeamRestrictedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.lock_outline,
+              size: 40,
+              color: NexGenPalette.textMedium.withValues(alpha: 0.6),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Team roster is admin-only',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Installer records contain sign-in credentials, so they are '
+              'restricted to admin and owner sessions. Ask your dealer admin '
+              'to view or change the team.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: NexGenPalette.textMedium,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
