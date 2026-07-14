@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/corporate/models/network_announcement.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Dealers — re-uses the same `dealers` collection used by the existing
@@ -212,33 +213,82 @@ class CorporateAdminService {
     await ref.update(updates);
   }
 
-  /// Generates a new dealer code in the format `NXG-DEALER-{STATE}-{###}`.
+  /// Allocates the next free CANONICAL dealer code — the 2-digit form
+  /// (`'01'`..`'99'`), per [DealerCode].
   ///
-  /// The numeric component is a count of existing dealers in [stateCode]
-  /// (defaults to `XX` when no state given). The full string is also used
-  /// as the doc id.
+  /// ## Why this changed (C1)
+  ///
+  /// This used to mint `NXG-DEALER-{STATE}-{###}`. That format is unusable:
+  /// the staff PIN system composes `fullPin = dealerCode + installerCode`
+  /// (installer_providers.dart:82) and requires exactly 4 digits — client
+  /// gate at installer_providers.dart:168, server `PIN_REGEX = /^\d{4,6}$/`
+  /// at staffAuth.ts:112. A prefixed dealer could never have an installer
+  /// who could sign in, so the only *reachable* Add-Dealer UI could not
+  /// produce a functioning dealer. Every consumer expects 2-digit; the live
+  /// functional staff data already uses it. See [DealerCode] for the full
+  /// evidence.
+  ///
+  /// [stateCode] is retained as the caller's territory hint — it is stored
+  /// on the `territory` field but is deliberately NO LONGER encoded into the
+  /// code itself. Territory belongs in a queryable field, not smuggled into
+  /// an identifier the PIN parser has to survive.
+  ///
+  /// ## Allocation
+  ///
+  /// Scans every existing dealer, collects the codes already in canonical
+  /// form, and returns the LOWEST unused one. Deliberately gap-filling:
+  /// codes are a scarce 99-wide keyspace, and a deleted dealer's code should
+  /// become reusable.
+  ///
+  /// Non-conforming legacy docs are SKIPPED, not parsed. This matters — the
+  /// rival allocator (`AdminService.getNextDealerCode`,
+  /// admin_providers.dart:256) does `int.parse` on the highest-sorted
+  /// dealerCode and therefore already throws `FormatException` against the
+  /// live `NXG-DEALER-MISSOURI-001` doc. This one tolerates that doc.
+  ///
+  /// [DealerCode.masterReserved] (`'55'`) is never allocated — see that
+  /// field's doc for why handing it to a real dealer would expose them to
+  /// every master-PIN session in the fleet.
+  ///
+  /// Throws [StateError] when the 2-digit space is exhausted.
   Future<String> generateDealerCode({String? stateCode}) async {
-    final state = (stateCode == null || stateCode.isEmpty)
-        ? 'XX'
-        : stateCode.toUpperCase();
-    final existing = await _db
-        .collection('dealers')
-        .where('territory', isEqualTo: state)
-        .count()
-        .get();
-    final count = (existing.count ?? 0) + 1;
-    final padded = count.toString().padLeft(3, '0');
-    return 'NXG-DEALER-$state-$padded';
+    final snap = await _db.collection('dealers').get();
+
+    final used = <int>{};
+    for (final doc in snap.docs) {
+      final code = doc.data()['dealerCode'];
+      // Skip anything non-canonical (legacy prefixed docs) rather than
+      // int.parse it — parsing is exactly how the rival allocator breaks.
+      if (code is String && DealerCode.isValid(code)) {
+        used.add(int.parse(code));
+      }
+    }
+    used.add(int.parse(DealerCode.masterReserved));
+
+    for (var i = 1; i <= DealerCode.maxCode; i++) {
+      if (!used.contains(i)) return i.toString().padLeft(2, '0');
+    }
+    throw StateError(
+      'No dealer code available: the 2-digit space (01-99, minus the '
+      'reserved master code ${DealerCode.masterReserved}) is exhausted.',
+    );
   }
 
+  /// Creates a dealer with a freshly-allocated canonical code.
+  ///
+  /// The code is [DealerCode.validate]d before the write, so a
+  /// non-conforming code can never reach Firestore through this path even if
+  /// [generateDealerCode] is later changed or overridden.
   Future<void> createDealer({
     required String businessName,
     required String contactEmail,
     required String contactPhone,
     String? territory,
   }) async {
-    final stateCode = territory;
-    final code = await generateDealerCode(stateCode: stateCode);
+    final code = DealerCode.validate(
+      await generateDealerCode(stateCode: territory),
+      context: 'CorporateAdminService.createDealer',
+    );
     await _db.collection('dealers').doc(code).set({
       'dealerCode': code,
       'name': businessName,

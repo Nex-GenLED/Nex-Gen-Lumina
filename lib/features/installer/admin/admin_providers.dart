@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 
 /// Admin session timeout duration (30 minutes).
 ///
@@ -240,26 +241,34 @@ class AdminService {
 
   // ============ DEALER OPERATIONS ============
 
-  /// Get next available dealer code
+  /// Get next available dealer code (canonical 2-digit — see [DealerCode]).
+  ///
+  /// C1: this previously did `int.parse` on the highest-sorted `dealerCode`,
+  /// which throws `FormatException` the moment ANY non-numeric code exists —
+  /// and one does live today (`NXG-DEALER-MISSOURI-001`, minted by the old
+  /// CorporateAdminService.generateDealerCode before C1). It now skips
+  /// non-canonical docs instead of parsing them, gap-fills the lowest free
+  /// code, and never hands out [DealerCode.masterReserved].
+  ///
+  /// Kept in sync with `CorporateAdminService.generateDealerCode` — that one
+  /// is the reachable path; this serves the orphaned DealerManagementScreen.
+  /// Consolidating the two is deferred (see the audit's P2 dead-code item).
   Future<String> getNextDealerCode() async {
-    final snapshot = await _firestore
-        .collection('dealers')
-        .orderBy('dealerCode', descending: true)
-        .limit(1)
-        .get();
+    final snapshot = await _firestore.collection('dealers').get();
 
-    if (snapshot.docs.isEmpty) {
-      return '01';
+    final used = <int>{};
+    for (final doc in snapshot.docs) {
+      final code = doc.data()['dealerCode'];
+      if (code is String && DealerCode.isValid(code)) {
+        used.add(int.parse(code));
+      }
     }
+    used.add(int.parse(DealerCode.masterReserved));
 
-    final lastCode = snapshot.docs.first.data()['dealerCode'] as String;
-    final nextCode = (int.parse(lastCode) + 1).toString().padLeft(2, '0');
-
-    if (int.parse(nextCode) > 99) {
-      throw Exception('Maximum dealer limit (99) reached');
+    for (var i = 1; i <= DealerCode.maxCode; i++) {
+      if (!used.contains(i)) return i.toString().padLeft(2, '0');
     }
-
-    return nextCode;
+    throw Exception('Maximum dealer limit (${DealerCode.maxCode}) reached');
   }
 
   /// Check if a dealer code is available
@@ -273,7 +282,19 @@ class AdminService {
   }
 
   /// Add a new dealer
+  ///
+  /// C1: the code is [DealerCode.validate]d before the write. This writer is
+  /// currently unreachable (its only caller, DealerManagementScreen, has no
+  /// route — see the dealer/corporate audit), but the guard ships anyway so
+  /// that reviving the screen cannot reintroduce a non-canonical code. The
+  /// canonical form is 2-digit; see [DealerCode] for why the PIN system
+  /// admits nothing else.
   Future<void> addDealer(DealerInfo dealer) async {
+    DealerCode.validate(
+      dealer.dealerCode,
+      context: 'AdminService.addDealer',
+    );
+
     // Check if code is available
     final available = await isDealerCodeAvailable(dealer.dealerCode);
     if (!available) {
