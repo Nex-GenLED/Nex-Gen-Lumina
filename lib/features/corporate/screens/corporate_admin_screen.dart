@@ -29,6 +29,8 @@ class CorporateAdminScreen extends ConsumerWidget {
         children: const [
           _DealerManagementSection(),
           SizedBox(height: 16),
+          _DealerAccountsSection(),
+          SizedBox(height: 16),
           _BrandLibrarySection(),
           SizedBox(height: 16),
           _ProductCatalogSection(),
@@ -408,6 +410,326 @@ class _DealerEditSheetState extends ConsumerState<_DealerEditSheet> {
 // though the corporate dashboard is reachable by any signed-in user
 // who passed the corporate PIN. The full management screens enforce
 // user_role == 'admin' before allowing any writes.
+
+// ═══════════════════════════════════════════════════════════════════════
+// DEALER ACCOUNTS — promote a user to user_role:'dealer'  (C3)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Before this, `user_role` had NO writer anywhere in the app. UserRole.dealer
+// was parsed and displayed but never assigned, so making someone a dealer
+// meant hand-editing Firestore in the console — a founder-manual step sitting
+// on the critical path of every new dealer.
+//
+// This section is admin-gated by construction: it is only reachable from the
+// corporate admin tab, which runs under a mintStaffToken admin/owner session.
+// That matters for the rules — see promoteUserToDealer's doc comment for why
+// this write survives both the D0 hotfix and the coming D3 retrofit.
+
+class _DealerAccountsSection extends ConsumerStatefulWidget {
+  const _DealerAccountsSection();
+
+  @override
+  ConsumerState<_DealerAccountsSection> createState() =>
+      _DealerAccountsSectionState();
+}
+
+class _DealerAccountsSectionState
+    extends ConsumerState<_DealerAccountsSection> {
+  final _emailCtrl = TextEditingController();
+
+  bool _searching = false;
+  bool _searched = false;
+  String? _foundUid;
+  Map<String, dynamic>? _foundData;
+  String? _selectedDealerCode;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty) return;
+
+    setState(() {
+      _searching = true;
+      _searched = false;
+      _foundUid = null;
+      _foundData = null;
+    });
+
+    try {
+      final hit =
+          await ref.read(corporateAdminServiceProvider).findUserByEmail(email);
+      if (!mounted) return;
+      setState(() {
+        _foundUid = hit?.uid;
+        _foundData = hit?.data;
+        _searched = true;
+        _searching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _searched = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lookup failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmPromote() async {
+    final uid = _foundUid;
+    final code = _selectedDealerCode;
+    if (uid == null || code == null) return;
+
+    final name = (_foundData?['display_name'] as String?) ??
+        (_foundData?['email'] as String?) ??
+        uid;
+    final currentRole = (_foundData?['user_role'] as String?) ?? 'residential';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal,
+        title: const Text('Promote to dealer?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          '$name will become a DEALER account associated with dealer $code.\n\n'
+          'This grants cross-dealer visibility of customer accounts. Current '
+          'role: $currentRole.',
+          style: const TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.gold,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Promote'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await ref
+          .read(corporateAdminServiceProvider)
+          .promoteUserToDealer(uid: uid, dealerCode: code);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name is now a dealer on $code.')),
+      );
+      await _search(); // refresh the shown role
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Promotion failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmDemote() async {
+    final uid = _foundUid;
+    if (uid == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal,
+        title: const Text('Revoke dealer role?',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'This account returns to a standard residential role and loses '
+          'cross-dealer visibility. Their dealer association is kept.',
+          style: TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Revoke'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await ref.read(corporateAdminServiceProvider).demoteDealerUser(uid: uid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Dealer role revoked.')),
+      );
+      await _search();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Revoke failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dealersAsync = ref.watch(allDealersProvider);
+    final role = _foundData?['user_role'] as String?;
+    final isDealer = role == 'dealer';
+
+    return _SectionCard(
+      title: 'Dealer Accounts',
+      subtitle:
+          'Grant a signed-up user the dealer role and associate them with a '
+          'dealer code. The user must already have an account.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'User email',
+                    hintText: 'dealer@example.com',
+                  ),
+                  onSubmitted: (_) => _search(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _searching ? null : _search,
+                child: _searching
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Find'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_searched && _foundUid == null)
+            _emptyRow(
+              'No account found for that email. The user must sign up first — '
+              'this promotes an existing account, it does not create one.',
+            ),
+          if (_foundUid != null) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: NexGenPalette.gunmetal,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: NexGenPalette.line),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    (_foundData?['display_name'] as String?) ?? '(no name)',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'role: ${role ?? 'residential'}'
+                    '${_foundData?['dealer_code'] != null ? '  ·  dealer_code: ${_foundData!['dealer_code']}' : ''}',
+                    style: const TextStyle(
+                      color: NexGenPalette.textMedium,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            dealersAsync.when(
+              loading: () => const _Loader(),
+              error: (e, _) => _ErrorRow(message: 'Failed to load dealers: $e'),
+              data: (dealers) {
+                if (dealers.isEmpty) {
+                  return _emptyRow(
+                    'No dealers exist yet. Create one in Dealer Management '
+                    'first — a user can only be promoted into an existing '
+                    'dealer.',
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedDealerCode,
+                      dropdownColor: NexGenPalette.gunmetal,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Associate with dealer',
+                      ),
+                      items: dealers
+                          .map(
+                            (d) => DropdownMenuItem(
+                              value: d.dealerCode,
+                              child: Text('${d.dealerCode} — ${d.companyName}'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) =>
+                          setState(() => _selectedDealerCode = v),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed:
+                              _selectedDealerCode == null ? null : _confirmPromote,
+                          icon: const Icon(Icons.upgrade, size: 16),
+                          label: Text(
+                            isDealer ? 'Re-associate' : 'Promote to dealer',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: NexGenPalette.gold,
+                            foregroundColor: Colors.black,
+                          ),
+                        ),
+                        if (isDealer) ...[
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: _confirmDemote,
+                            child: const Text(
+                              'Revoke',
+                              style: TextStyle(color: NexGenPalette.textMedium),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 class _BrandLibrarySection extends ConsumerWidget {
   const _BrandLibrarySection();

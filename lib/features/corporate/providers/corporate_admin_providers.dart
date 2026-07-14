@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/corporate/models/network_announcement.da
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/models/dealer_code.dart';
+import 'package:nexgen_command/models/user_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Dealers — re-uses the same `dealers` collection used by the existing
@@ -300,6 +301,105 @@ class CorporateAdminService {
       'isActive': true,
       'registeredAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ── Dealer provisioning (C3) ──
+
+  /// Looks up a user by [email] for the promote-to-dealer flow.
+  ///
+  /// Returns `(uid, data)` or null when no account matches. Email is
+  /// normalized to lowercase — `UserModel.toJson` writes `email` verbatim and
+  /// the auth layer lowercases, so a case-mismatched query silently misses.
+  ///
+  /// Requires an admin/owner staff session: the /users read rule
+  /// (firestore.rules:158-162) admits a global read only via
+  /// canReadUserData()/hasAdminOrOwnerClaim(); an installer/salesperson claim
+  /// is scoped to its own dealer_code and would not see an unaffiliated user.
+  Future<({String uid, Map<String, dynamic> data})?> findUserByEmail(
+    String email,
+  ) async {
+    final normalized = email.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+
+    final snap = await _db
+        .collection('users')
+        .where('email', isEqualTo: normalized)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return (uid: snap.docs.first.id, data: snap.docs.first.data());
+  }
+
+  /// Promotes [uid] to `user_role: 'dealer'` and associates them with
+  /// [dealerCode].
+  ///
+  /// ## Why this exists (C3)
+  ///
+  /// `user_role` had NO writer anywhere in the codebase. `UserRole.dealer`
+  /// was parsed (user_model.dart:551) and displayed (:31) but never assigned,
+  /// so the only way to create a dealer account was hand-editing Firestore in
+  /// the console — a founder-manual step on the critical path to onboarding
+  /// any new dealer. This is the in-app path.
+  ///
+  /// ## Survives the D3 retrofit
+  ///
+  /// This write sets BOTH privilege fields that the D0 hotfix guards
+  /// (firestore.rules `/users` create+update): `user_role` → a privileged
+  /// role, and `dealer_code` → possibly a reassignment. D0 denies both
+  /// *unless* `hasAdminOrOwnerClaim()`. This method is reachable only from
+  /// the corporate admin tab, which runs under a mintStaffToken admin/owner
+  /// session, so it satisfies that claim and is unaffected.
+  ///
+  /// The same holds for the coming D3 retrofit: D3 narrows the broad
+  /// `|| request.auth != null` grants toward `hasStaffClaim()` /
+  /// `hasAdminOrOwnerClaim()`. An admin-claim caller is precisely what
+  /// survives that narrowing. Do NOT re-route this write through an
+  /// anonymous or installer-claim session — that is exactly the class of
+  /// caller D3 is closing off.
+  ///
+  /// [dealerCode] is validated against the canonical 2-digit format so this
+  /// path cannot associate a user with a code the PIN system can't use.
+  Future<void> promoteUserToDealer({
+    required String uid,
+    required String dealerCode,
+  }) async {
+    DealerCode.validate(
+      dealerCode,
+      context: 'CorporateAdminService.promoteUserToDealer',
+    );
+
+    final dealerRef = await _dealerDocByCode(dealerCode);
+    if (dealerRef == null) {
+      throw StateError(
+        'Dealer $dealerCode not found. Create the dealer before promoting a '
+        'user into it.',
+      );
+    }
+
+    await _db.collection('users').doc(uid).set(
+      {
+        'user_role': UserRole.dealer.name,
+        'dealer_code': dealerCode,
+        'updated_at': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Demotes [uid] back to `user_role: 'residential'`.
+  ///
+  /// Leaves `dealer_code` intact — a demoted dealer is still affiliated with
+  /// the dealer for support/attribution purposes; only their global
+  /// cross-dealer read (hasMediaAccess, firestore.rules:14) is revoked.
+  /// Same admin-claim requirement as [promoteUserToDealer].
+  Future<void> demoteDealerUser({required String uid}) async {
+    await _db.collection('users').doc(uid).set(
+      {
+        'user_role': UserRole.residential.name,
+        'updated_at': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   // ── Pricing defaults ──
