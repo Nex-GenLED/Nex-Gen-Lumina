@@ -14,7 +14,6 @@ import 'package:nexgen_command/features/neighborhood/services/sync_event_backgro
 import 'package:nexgen_command/services/suggestion_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/screens/commercial/commercial_mode_providers.dart';
 
 /// Background service for running periodic habit analysis and suggestion generation.
 ///
@@ -69,14 +68,18 @@ class BackgroundLearningService {
   ///     (or null), regenerate immediately — never silently skip.
   ///
   /// Must be called from a Riverpod-aware context.
+  ///
+  /// Runs for residential AND commercial accounts alike. This previously
+  /// early-returned on commercial mode, deferring to DayPartSchedulerService —
+  /// but that handoff was never wired: the scheduler's only caller is a manual
+  /// save inside the orphaned /commercial shell, and nothing ever writes the
+  /// `commercial_schedule` collection it reads. The gate therefore left
+  /// commercial accounts with residential automation OFF and commercial
+  /// automation never ON, so their lights silently stopped changing. Standard
+  /// autopilot is the correct baseline for both profile types until
+  /// business-hours overrides land. See the 2026-07-14 commercial audit.
   static Future<void> checkAndRunSundayRegen(WidgetRef ref) async {
     try {
-      // Commercial mode uses the day-part scheduler — skip standard autopilot
-      // regeneration so the two systems don't conflict.
-      final isCommercial =
-          await ref.read(commercialModeEnabledProvider.future);
-      if (isCommercial) return;
-
       final enabled = ref.read(autopilotEnabledProvider);
       if (!enabled) return;
 
@@ -241,13 +244,11 @@ class BackgroundLearningService {
   /// This must be called from a Riverpod-aware context (e.g. a
   /// ConsumerWidget) because BackgroundLearningService itself is a plain
   /// singleton with no access to the provider graph.
+  ///
+  /// Runs for residential AND commercial accounts alike — see
+  /// [checkAndRunSundayRegen] for why the commercial early-return was removed.
   static Future<void> runAutopilotRegenIfNeeded(WidgetRef ref) async {
     try {
-      // Commercial mode uses day-part scheduler — skip autopilot regen.
-      final isCommercial =
-          await ref.read(commercialModeEnabledProvider.future);
-      if (isCommercial) return;
-
       final enabled = ref.read(autopilotEnabledProvider);
       final needsRegen = ref.read(needsScheduleRegenerationProvider);
 
