@@ -161,21 +161,97 @@ service cloud.firestore {
                       request.auth.token.get('role', '') in ['installer', 'salesperson'] &&
                       resource.data.get('dealer_code', '') == request.auth.token.get('dealerCode', ''));
 
+      // ── PRIVILEGE-FIELD ESCALATION GUARD (D0 hotfix) ─────────────
+      // `user_role` and `dealer_code` are privilege fields, not profile
+      // data:
+      //   • user_role gates hasMediaAccess() (line ~14) and
+      //     isUserRoleAdmin() (~67) → global cross-dealer read of every
+      //     customer, plus write on the corporate catalogs.
+      //   • dealer_code gates every dealer-scoped rule and the
+      //     installer/salesperson branch of the /users read above.
+      // Without a guard, the broad `|| request.auth != null` disjunct
+      // below lets ANY authenticated caller (including anonymous) grant
+      // itself either one.
+      //
+      // WHY THE BROAD GRANT STAYS: the installer wizard writes the
+      // customer's user doc under an ANONYMOUS session — it calls
+      // signInAnonymously() (installer_setup_wizard.dart:731) right
+      // after creating the customer's auth account, then
+      // set(merge:true) at :937. It has no staff claim at that moment,
+      // so it cannot satisfy hasStaffClaim()/hasAdminOrOwnerClaim().
+      // Narrowing the broad grant is the P1 structural fix (re-mint the
+      // staff token instead of going anonymous); this hotfix is scoped
+      // to the two privilege fields only and leaves every other field's
+      // allowance byte-for-byte unchanged.
+      //
+      // VERIFIED AGAINST THE WIZARD'S ACTUAL FIELD SET:
+      // UserModel.toJson() ALWAYS emits 'user_role' (user_model.dart:569)
+      // and emits 'dealer_code' when non-null (:595) — the wizard sets
+      // both (:912). So a blanket "deny any write touching these fields"
+      // would break every install. These guards therefore deny only the
+      // dangerous transitions:
+      //   • user_role → a PRIVILEGED value (the wizard writes
+      //     'residential', which is not privileged → still allowed)
+      //   • dealer_code → a DIFFERENT non-empty value (reassignment).
+      //     Set-when-absent stays allowed: that is the wizard's
+      //     documented "convert a self-registered customer into a
+      //     dealer-affiliated one on installer link" merge (:907-912).
+      // All /users writes are .update() or .set(merge:true), so
+      // request.resource.data is the POST-WRITE document — a write that
+      // merely omits dealer_code reads as unchanged, not as a removal.
+
+      // Roles that confer cross-dealer or global privilege.
+      function privilegedRoles() {
+        return ['admin', 'dealer', 'media'];
+      }
+
+      // The user_role the document would carry AFTER this write.
+      function incomingRole() {
+        return request.resource.data.get('user_role', '');
+      }
+
+      // CREATE: a brand-new doc may not be born privileged.
+      function createsPrivilegedRole() {
+        return incomingRole() in privilegedRoles();
+      }
+
+      // UPDATE: deny ELEVATION to a privileged role. An UNCHANGED value
+      // stays allowed so an existing admin/dealer/media user can still
+      // save their own profile (toJson re-emits user_role every write).
+      function elevatesRole() {
+        return incomingRole() in privilegedRoles()
+            && incomingRole() != resource.data.get('user_role', '');
+      }
+
+      // UPDATE: deny REASSIGNING an already-set dealer_code (moving a
+      // customer from one dealer to another).
+      function reassignsDealerCode() {
+        return resource.data.get('dealer_code', '') != ''
+            && request.resource.data.get('dealer_code', '')
+               != resource.data.get('dealer_code', '');
+      }
+
       // SECURITY: On create, enforce owner_id matches auth uid
       // OR any authenticated user (installer setup creates customer profiles;
-      // PIN validation happens app-side)
-      allow create: if (isOwner(userId) &&
+      // PIN validation happens app-side).
+      // D0: ...but never with a privileged user_role unless admin/owner.
+      allow create: if ((isOwner(userId) &&
                       request.resource.data.owner_id == userId &&
                       request.resource.data.id == userId &&
                       isValidDealerEmail(request.resource.data.get('dealer_email', null)))
-                    || request.auth != null;
+                    || request.auth != null)
+                    && (!createsPrivilegedRole() || hasAdminOrOwnerClaim());
 
       // SECURITY: On update, prevent tampering with critical fields
-      // OR any authenticated user (installer setup updates customer profiles)
-      allow update: if (isOwner(userId) &&
+      // OR any authenticated user (installer setup updates customer profiles).
+      // D0: ...but never elevating user_role or reassigning dealer_code
+      // unless admin/owner.
+      allow update: if ((isOwner(userId) &&
                       cannotModifyCriticalFields() &&
                       isValidDealerEmail(request.resource.data.get('dealer_email', null)))
-                    || request.auth != null;
+                    || request.auth != null)
+                    && (!elevatesRole() || hasAdminOrOwnerClaim())
+                    && (!reassignsDealerCode() || hasAdminOrOwnerClaim());
 
       allow delete: if isOwner(userId);
 
