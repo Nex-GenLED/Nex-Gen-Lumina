@@ -938,8 +938,69 @@ service cloud.firestore {
                 resource.data.get('role', '') == 'admin');
       }
 
-      // Authenticated users can read installers (for PIN validation)
-      allow read: if request.auth != null || hasAdminOrOwnerClaim();
+      // ── D3-HOTFIX: /installers read is ADMIN/OWNER ONLY ──────────────
+      //
+      // WAS: read allowed to ANY authenticated caller (an `auth != null`
+      // disjunct OR'd with the admin/owner claim), justified by the comment
+      // "Authenticated users can read installers (for PIN validation)".
+      // That premise was FALSE, and the rule was a live credential leak.
+      // (The old predicate is described rather than quoted verbatim on
+      // purpose — a literal copy here would show up in the pre-deploy grep
+      // that checks whether the vulnerable pattern is gone.)
+      //
+      // THE VECTOR (confirmed against production data):
+      //   1. These docs store `fullPin` in CLEARTEXT (InstallerInfo.toMap →
+      //      'fullPin', installer_providers.dart).
+      //   2. The old rule let ANY authenticated session — including an
+      //      anonymous one — list every installer in the fleet.
+      //   3. mintStaffToken NEVER reads request.auth (staffAuth.ts:424-440);
+      //      it is callable unauthenticated. A PIN is a complete credential.
+      //   => list /installers -> read the admin doc's cleartext PIN ->
+      //      mintStaffToken({mode:'admin', pin}) -> an admin-claim token ->
+      //      global cross-dealer read + corporate catalog writes.
+      //   Two live docs (test_admin_5520 role=admin, test_installer_5510)
+      //   are active and carry valid roles, so this was exploitable NOW —
+      //   not gated behind the missing-role bug, as first assumed.
+      //
+      // WHY PIN VALIDATION IS UNAFFECTED:
+      //   mintStaffToken reads /installers through the ADMIN SDK —
+      //   `const db = admin.firestore()` (staffAuth.ts:453) passed into
+      //   tryInstallersDoc (:329-338). The Admin SDK bypasses security
+      //   rules entirely, so this read allowance was never what made PIN
+      //   login work. The old comment's "(for PIN validation)" rationale
+      //   was simply wrong: no client path validates PINs — that moved
+      //   server-side in the mintStaffToken migration.
+      //
+      // WHY NOT hasStaffClaim(resource.data.dealerCode) INSTEAD:
+      //   It would preserve more UI (see BREAKS below) and would close the
+      //   anonymous/random-auth vector — but it is NOT adequate while PINs
+      //   are cleartext. The master installer PIN is a fleet-shared,
+      //   never-rotating secret; every installer holds it. A staff-claim
+      //   read would let any of them read the ADMIN doc's cleartext PIN for
+      //   their dealer and escalate to an admin claim — the same vector with
+      //   one extra step. While the credential is stored in plaintext, ANY
+      //   read is a leak. Admin/owner is the only defensible scope.
+      //
+      // BREAKS (known, accepted, follow-up filed):
+      //   • dealer_dashboard_providers.dart:155 dealerInstallersProvider —
+      //     streamed by _OverviewTab (dealer_dashboard_screen.dart:243) and
+      //     _TeamTab (:838). Neither is admin-gated, and the dashboard is
+      //     pushed from installer_landing_screen.dart:171 (installer claim)
+      //     and sales_landing_screen.dart:158 (salesperson claim). Those two
+      //     tabs will now surface a permission error for non-admin staff
+      //     sessions. Admin/owner sessions (via dealer_detail_screen.dart:21)
+      //     are unaffected.
+      //   • AdminService's installer queries (admin_providers.dart:224, 331,
+      //     352, 375, 409, 451) reached from installer_management_screen ←
+      //     dealer_dashboard_screen.dart:884. Same story.
+      //   The correct follow-up is to hash the PINs (defense-in-depth, out of
+      //   scope here) and THEN relax this read to hasStaffClaim(dealerCode)
+      //   so a dealer's own staff roster renders again. Gating those tabs to
+      //   admin-only is the cheaper interim.
+      //
+      // Reuses hasAdminOrOwnerClaim() (firestore.rules:128) — the same helper
+      // D0 deployed and C3's promote-to-dealer path depends on.
+      allow read: if hasAdminOrOwnerClaim();
 
       // Create/delete: existing dealer-admin path, plus admin/owner claims
       allow create, delete: if isDealerAdmin() || hasAdminOrOwnerClaim();
