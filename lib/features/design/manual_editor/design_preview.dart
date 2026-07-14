@@ -28,25 +28,119 @@ class DesignPreview extends ConsumerWidget {
         config.segments.any((s) => s.points.length >= 2);
 
     if (traced && photo != null) {
+      // Resolve the trace's source aspect: the config's persisted value, else
+      // the legacy mask provider's value. If both are absent (older configs),
+      // _HousePreview falls back to the loaded photo's intrinsic aspect. The
+      // aspect is REQUIRED to project the trace onto the cover-cropped photo —
+      // without it the roofline renders low + flattened (the dashboard has
+      // always had it via its mask).
+      final maskAspect = ref.watch(rooflineMaskProvider)?.sourceAspectRatio;
+      final storedAspect = config.sourceAspectRatio ?? maskAspect;
       return _HousePreview(
-          config: config, frame: frame, photoUrl: photo, height: height);
+        config: config,
+        frame: frame,
+        photoUrl: photo,
+        height: height,
+        storedAspect: storedAspect,
+      );
     }
     return _StripPreview(frame: frame, height: height);
   }
 }
 
-class _HousePreview extends StatelessWidget {
+class _HousePreview extends StatefulWidget {
   const _HousePreview({
     required this.config,
     required this.frame,
     required this.photoUrl,
     required this.height,
+    required this.storedAspect,
   });
 
   final RooflineConfiguration config;
   final DesignFrame frame;
   final String photoUrl;
   final double height;
+
+  /// Source aspect ratio resolved from the config / mask provider. When null we
+  /// fall back to the loaded photo's intrinsic aspect (resolved below).
+  final double? storedAspect;
+
+  @override
+  State<_HousePreview> createState() => _HousePreviewState();
+}
+
+class _HousePreviewState extends State<_HousePreview> {
+  RooflineConfiguration get config => widget.config;
+  DesignFrame get frame => widget.frame;
+  String get photoUrl => widget.photoUrl;
+  double get height => widget.height;
+
+  /// Photo intrinsic aspect (width / height), resolved via an [ImageStream]
+  /// only when [_HousePreview.storedAspect] is null (older configs with no
+  /// persisted aspect and no legacy mask).
+  double? _intrinsicAspect;
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+
+  ImageProvider get _imageProvider {
+    final url = photoUrl;
+    if (url.startsWith('http')) return NetworkImage(url);
+    return AssetImage(url.isEmpty ? 'assets/images/Demohomephoto.jpg' : url);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeResolveIntrinsic();
+  }
+
+  @override
+  void didUpdateWidget(_HousePreview old) {
+    super.didUpdateWidget(old);
+    if (old.photoUrl != widget.photoUrl || old.storedAspect != widget.storedAspect) {
+      _intrinsicAspect = null;
+      _maybeResolveIntrinsic();
+    }
+  }
+
+  /// Resolve the photo's intrinsic aspect only when we have no stored aspect.
+  void _maybeResolveIntrinsic() {
+    if (widget.storedAspect != null) return; // stored value wins — no decode.
+    _detachStream();
+    final stream = _imageProvider.resolve(ImageConfiguration.empty);
+    final listener = ImageStreamListener((info, _) {
+      final w = info.image.width.toDouble();
+      final h = info.image.height.toDouble();
+      if (h > 0 && mounted) {
+        setState(() => _intrinsicAspect = w / h);
+        assert(() {
+          debugPrint('DesignPreview: no stored source aspect — using the loaded '
+              "photo's intrinsic aspect ${(w / h).toStringAsFixed(3)}. This is "
+              'correct as long as the displayed photo is the one the roofline '
+              'was traced on (it is — config.photoPath).');
+          return true;
+        }());
+      }
+    });
+    stream.addListener(listener);
+    _stream = stream;
+    _listener = listener;
+  }
+
+  void _detachStream() {
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
+    _stream = null;
+    _listener = null;
+  }
+
+  @override
+  void dispose() {
+    _detachStream();
+    super.dispose();
+  }
 
   Color? _tintFor(RooflineSegment s) {
     if (s.type == SegmentType.peak ||
@@ -71,6 +165,9 @@ class _HousePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Source aspect for projecting the trace onto the cover-cropped photo:
+    // config/mask value if present, else the decoded photo's intrinsic aspect.
+    final sourceAspect = widget.storedAspect ?? _intrinsicAspect;
     return SizedBox(
       height: height,
       child: LayoutBuilder(builder: (context, constraints) {
@@ -84,6 +181,7 @@ class _HousePreview extends StatelessWidget {
                 pixelCount: s.pixelCount,
                 ledColors: _ledColorsFor(s),
                 featureTint: _tintFor(s),
+                sourceAspectRatio: sourceAspect,
               ),
         ];
         return ClipRRect(
@@ -93,17 +191,22 @@ class _HousePreview extends StatelessWidget {
             children: [
               _photo(photoUrl),
               Container(color: Colors.black.withValues(alpha: 0.15)),
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: RooflineLightPainter(
-                    colors: const [Colors.white],
-                    segmentPaths: segmentPaths,
-                    realIndexMode: true,
-                    useBoxFitCover: true,
-                    targetAspectRatio: aspect,
+              // Defer the overlay until we have a source aspect (a frame at most,
+              // only for older configs with no stored value) so the trace never
+              // paints through the un-compensated fallback.
+              if (sourceAspect != null)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: RooflineLightPainter(
+                      colors: const [Colors.white],
+                      segmentPaths: segmentPaths,
+                      realIndexMode: true,
+                      useBoxFitCover: true,
+                      targetAspectRatio: aspect,
+                      sourceAspectRatio: sourceAspect,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         );

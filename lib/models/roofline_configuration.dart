@@ -29,6 +29,14 @@ class RooflineConfiguration {
   /// May be a URL (Firebase Storage) or local asset path.
   final String? photoPath;
 
+  /// Aspect ratio (width / height) of the photo the roofline was traced on.
+  /// Required to project the segments' normalized points correctly under
+  /// BoxFit.cover (Design Studio preview + dashboard overlay). Additive and
+  /// nullable: configs saved before this field existed read back as null, and
+  /// consumers fall back to the mask provider's value or the loaded photo's
+  /// intrinsic aspect.
+  final double? sourceAspectRatio;
+
   /// Total number of independent WLED channels (hardware buses).
   /// Derived from the max channelIndex across all segments + 1,
   /// but can be overridden when the user adds channels before tracing.
@@ -47,6 +55,7 @@ class RooflineConfiguration {
     required this.createdAt,
     required this.updatedAt,
     this.photoPath,
+    this.sourceAspectRatio,
     this.totalChannelCount = 1,
     this.controllerId = '',
   });
@@ -326,6 +335,7 @@ class RooflineConfiguration {
     DateTime? updatedAt,
     String? photoPath,
     bool clearPhotoPath = false,
+    double? sourceAspectRatio,
     int? totalChannelCount,
     String? controllerId,
   }) {
@@ -336,6 +346,7 @@ class RooflineConfiguration {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
       photoPath: clearPhotoPath ? null : (photoPath ?? this.photoPath),
+      sourceAspectRatio: sourceAspectRatio ?? this.sourceAspectRatio,
       totalChannelCount: totalChannelCount ?? this.totalChannelCount,
       controllerId: controllerId ?? this.controllerId,
     );
@@ -374,6 +385,7 @@ class RooflineConfiguration {
       createdAt: (json['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (json['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       photoPath: json['photo_path'] as String?,
+      sourceAspectRatio: (json['source_aspect_ratio'] as num?)?.toDouble(),
       totalChannelCount: json['total_channel_count'] as int? ?? 1,
     );
   }
@@ -386,6 +398,7 @@ class RooflineConfiguration {
       'created_at': Timestamp.fromDate(createdAt),
       'updated_at': Timestamp.fromDate(updatedAt),
       if (photoPath != null) 'photo_path': photoPath,
+      if (sourceAspectRatio != null) 'source_aspect_ratio': sourceAspectRatio,
       'total_channel_count': totalChannelCount,
     };
   }
@@ -429,11 +442,13 @@ RooflineConfiguration migrateFromLegacyMask({
   required List<Offset> maskPoints,
   required int totalPixelCount,
   String? photoPath,
+  double? sourceAspectRatio,
 }) {
   final now = DateTime.now();
   return RooflineConfiguration(
     id: '',
     name: 'My Roofline',
+    sourceAspectRatio: sourceAspectRatio,
     segments: [
       RooflineSegment(
         id: 'migrated_main',

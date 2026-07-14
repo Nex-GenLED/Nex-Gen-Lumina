@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:nexgen_command/widgets/roofline_projection.dart';
+
 /// Model representing the roofline mask for AR preview overlay.
 ///
 /// The roofline can be defined either:
@@ -83,49 +85,33 @@ class RooflineMask {
   ///
   /// [targetAspectRatio] - the aspect ratio (width/height) of the display container.
   /// [alignment] - the alignment used for the image (default center).
+  ///
+  /// Thin wrapper over [projectRoofline] (the single source of truth for this
+  /// math) that returns *normalized* container coordinates (0-1) rather than
+  /// screen pixels — the shape this legacy API promised. Prefer calling
+  /// [projectRoofline] directly with a real canvas size.
+  @Deprecated('Use projectRoofline() with the canvas size; kept for API compat.')
   List<Offset> getPointsForCover({
     required double targetAspectRatio,
     Offset alignment = Offset.zero,
   }) {
-    // If no source aspect ratio stored, or points are empty, return as-is
+    // If no source aspect ratio stored, or points are empty, return as-is.
     if (sourceAspectRatio == null || points.isEmpty) {
       return points;
     }
 
-    final srcAspect = sourceAspectRatio!;
-
-    // Calculate how the image is cropped with BoxFit.cover
-    // If srcAspect > targetAspect: image is cropped horizontally (left/right cut off)
-    // If srcAspect < targetAspect: image is cropped vertically (top/bottom cut off)
-
-    double scaleX = 1.0;
-    double scaleY = 1.0;
-    double offsetX = 0.0;
-    double offsetY = 0.0;
-
-    if (srcAspect > targetAspectRatio) {
-      // Image is wider than container - horizontal crop
-      // The visible width is a fraction of the full image width
-      final visibleFraction = targetAspectRatio / srcAspect;
-      scaleX = 1.0 / visibleFraction;
-      // Center alignment means we crop equally from both sides
-      // alignment.dx ranges from -1 (left) to 1 (right), with 0 being center
-      offsetX = (1.0 - visibleFraction) * (0.5 + alignment.dx * 0.5);
-    } else if (srcAspect < targetAspectRatio) {
-      // Image is taller than container - vertical crop
-      final visibleFraction = srcAspect / targetAspectRatio;
-      scaleY = 1.0 / visibleFraction;
-      // alignment.dy ranges from -1 (top) to 1 (bottom)
-      offsetY = (1.0 - visibleFraction) * (0.5 + alignment.dy * 0.5);
-    }
-
-    // Transform each point
-    return points.map((p) {
-      // Adjust for the cropping offset and scale
-      final newX = (p.dx - offsetX) * scaleX;
-      final newY = (p.dy - offsetY) * scaleY;
-      return Offset(newX.clamp(0.0, 1.0), newY.clamp(0.0, 1.0));
-    }).toList();
+    // Project into a unit-height canvas of the target aspect, then normalize the
+    // screen result back to 0-1 (x by width == targetAspectRatio, y by 1).
+    final projected = projectRoofline(
+      normalized: points,
+      canvasSize: Size(targetAspectRatio, 1.0),
+      sourceAspectRatio: sourceAspectRatio!,
+      // fit defaults to BoxFit.cover (not importing flutter into the model).
+      alignment: alignment,
+    );
+    return [
+      for (final p in projected) Offset(p.dx / targetAspectRatio, p.dy),
+    ];
   }
 
   /// Whether this mask has custom user-drawn points

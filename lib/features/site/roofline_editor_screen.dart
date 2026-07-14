@@ -629,6 +629,10 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
 
       configEditor.setPhotoPath(imageUrl);
       configEditor.setTotalChannelCount(_totalChannelCount);
+      // Persist the traced photo's aspect so the preview/overlay project the
+      // segments correctly under BoxFit.cover (mask carries it from the editor's
+      // intrinsic image size).
+      configEditor.setSourceAspectRatio(mask.sourceAspectRatio);
       await configEditor.save();
 
       if (mounted) {

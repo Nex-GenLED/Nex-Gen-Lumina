@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/widgets/roofline_projection.dart';
 
 /// Lightweight data carrier for a single roofline segment's spatial path.
 ///
@@ -31,6 +32,13 @@ class SegmentPathData {
   /// house photo shows both the pixels and their architectural meaning.
   final Color? featureTint;
 
+  /// Aspect ratio (width / height) of the photo this segment was traced on.
+  /// Travels with the segment because the segment carries that trace's
+  /// normalized points. Used to project the points correctly under
+  /// BoxFit.cover; when null the painter falls back to its own
+  /// [RooflineLightPainter.sourceAspectRatio], then the mask's.
+  final double? sourceAspectRatio;
+
   const SegmentPathData({
     required this.points,
     required this.channelIndex,
@@ -39,6 +47,7 @@ class SegmentPathData {
     this.pixelCount,
     this.ledColors,
     this.featureTint,
+    this.sourceAspectRatio,
   });
 }
 
@@ -76,6 +85,15 @@ class RooflineLightPainter extends CustomPainter {
 
   /// Whether the image is displayed with BoxFit.cover (true) or BoxFit.contain (false).
   final bool useBoxFitCover;
+
+  /// Aspect ratio (width / height) of the photo the roofline was traced on.
+  /// The painter needs this — not a whole [mask] — to project points under
+  /// BoxFit.cover. Resolution order per segment:
+  /// [SegmentPathData.sourceAspectRatio] → this field → [mask]'s
+  /// `sourceAspectRatio`. When cover is requested and none is available the
+  /// painter asserts (debug) and falls back to [targetAspectRatio] rather than
+  /// silently skipping the transform (which rendered the trace low + flattened).
+  final double? sourceAspectRatio;
 
   /// Background color for non-active pixels (default black/off).
   /// Used in effects like Star/Twinkle where background pixels are visible.
@@ -118,6 +136,7 @@ class RooflineLightPainter extends CustomPainter {
     this.targetAspectRatio,
     this.imageAlignment = Offset.zero,
     this.useBoxFitCover = false,
+    this.sourceAspectRatio,
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
     this.spacing = 0,
@@ -139,18 +158,11 @@ class RooflineLightPainter extends CustomPainter {
       for (final seg in segmentPaths!) {
         if (seg.points.length < 2) continue;
 
-        List<Offset> normalizedPoints = seg.points;
-
-        // Transform points if using BoxFit.cover
-        if (useBoxFitCover && targetAspectRatio != null) {
-          // Apply same cover transformation as RooflineMask.getPointsForCover
-          normalizedPoints = _transformPointsForCover(
-            normalizedPoints, targetAspectRatio!, imageAlignment);
-        }
-
-        final canvasPoints = normalizedPoints
-            .map((p) => Offset(p.dx * size.width, p.dy * size.height))
-            .toList();
+        final canvasPoints = _projectPoints(
+          seg.points,
+          size,
+          seg.sourceAspectRatio,
+        );
 
         // Real-index mode: place exactly pixelCount dots with explicit colors.
         if (realIndexMode &&
@@ -176,22 +188,7 @@ class RooflineLightPainter extends CustomPainter {
 
     // Check if we have custom roofline points
     if (mask != null && mask!.hasCustomPoints && mask!.points.length >= 2) {
-      // Get the points, potentially transformed for BoxFit.cover
-      List<Offset> normalizedPoints = mask!.points;
-
-      // Transform points if using BoxFit.cover and we have aspect ratio info
-      if (useBoxFitCover && targetAspectRatio != null && mask!.sourceAspectRatio != null) {
-        normalizedPoints = mask!.getPointsForCover(
-          targetAspectRatio: targetAspectRatio!,
-          alignment: imageAlignment,
-        );
-      }
-
-      // Convert normalized points to canvas coordinates
-      final canvasPoints = normalizedPoints
-          .map((p) => Offset(p.dx * size.width, p.dy * size.height))
-          .toList();
-
+      final canvasPoints = _projectPoints(mask!.points, size, null);
       _paintAlongPath(canvas, size, canvasPoints, effectiveColors, brightnessFactor, category);
       return;
     }
@@ -454,36 +451,50 @@ class RooflineLightPainter extends CustomPainter {
     canvas.drawCircle(pos, dotRadius * 0.35, lensPaint);
   }
 
-  /// Transform normalized points for BoxFit.cover display.
-  /// Mirrors the logic in RooflineMask.getPointsForCover but works without
-  /// requiring a source aspect ratio (uses the target ratio directly).
-  List<Offset> _transformPointsForCover(
+  /// Projects a segment's normalized trace points to canvas coordinates through
+  /// the shared [projectRoofline] — the ONLY place this math lives.
+  ///
+  /// [segmentAspect] is the per-segment source aspect (may be null). The
+  /// effective source aspect resolves segment → painter → mask. When cover is
+  /// requested but none is available the transform can't be computed correctly;
+  /// rather than silently skip it (the bug that rendered the trace low +
+  /// flattened) we assert loudly in debug and fall back to [targetAspectRatio]
+  /// (identity crop) in release.
+  List<Offset> _projectPoints(
     List<Offset> points,
-    double targetAspectRatio,
-    Offset alignment,
+    Size size,
+    double? segmentAspect,
   ) {
-    // Without source aspect info, we can't transform — return as-is
-    if (mask?.sourceAspectRatio == null) return points;
-
-    final srcAspect = mask!.sourceAspectRatio!;
-    double scaleX = 1.0, scaleY = 1.0;
-    double offsetX = 0.0, offsetY = 0.0;
-
-    if (srcAspect > targetAspectRatio) {
-      final visibleFraction = targetAspectRatio / srcAspect;
-      scaleX = 1.0 / visibleFraction;
-      offsetX = (1.0 - visibleFraction) * (0.5 + alignment.dx * 0.5);
-    } else if (srcAspect < targetAspectRatio) {
-      final visibleFraction = srcAspect / targetAspectRatio;
-      scaleY = 1.0 / visibleFraction;
-      offsetY = (1.0 - visibleFraction) * (0.5 + alignment.dy * 0.5);
+    if (!useBoxFitCover) {
+      // Legacy stretch-to-fill map (no cover crop requested).
+      return projectRoofline(
+        normalized: points,
+        canvasSize: size,
+        sourceAspectRatio: 0, // ignored under fill
+        fit: BoxFit.fill,
+      );
     }
 
-    return points.map((p) {
-      final newX = (p.dx - offsetX) * scaleX;
-      final newY = (p.dy - offsetY) * scaleY;
-      return Offset(newX.clamp(0.0, 1.0), newY.clamp(0.0, 1.0));
-    }).toList();
+    var srcAspect = segmentAspect ?? sourceAspectRatio ?? mask?.sourceAspectRatio;
+    if (srcAspect == null) {
+      assert(
+        false,
+        'RooflineLightPainter: BoxFit.cover requested but no sourceAspectRatio '
+        'is available (segment, painter, and mask are all null). Provide '
+        'SegmentPathData.sourceAspectRatio or RooflineLightPainter.sourceAspectRatio '
+        'so the trace projects onto the cover-cropped photo. Falling back to '
+        'targetAspectRatio (identity crop) — the trace may render mis-placed.',
+      );
+      srcAspect = targetAspectRatio ?? (size.width / size.height);
+    }
+
+    return projectRoofline(
+      normalized: points,
+      canvasSize: size,
+      sourceAspectRatio: srcAspect,
+      fit: BoxFit.cover,
+      alignment: imageAlignment,
+    );
   }
 
   /// Generate a default gentle-arc roofline path when no custom mask exists.
@@ -821,6 +832,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.targetAspectRatio != targetAspectRatio ||
         oldDelegate.imageAlignment != imageAlignment ||
         oldDelegate.useBoxFitCover != useBoxFitCover ||
+        oldDelegate.sourceAspectRatio != sourceAspectRatio ||
         oldDelegate.backgroundColor != backgroundColor ||
         oldDelegate.colorGroupSize != colorGroupSize ||
         oldDelegate.spacing != spacing ||

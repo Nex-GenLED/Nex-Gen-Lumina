@@ -372,6 +372,7 @@ final rooflineLegacyMigrationProvider = FutureProvider<void>((ref) async {
     maskPoints: mask.points,
     totalPixelCount: totalPixels,
     photoPath: photoPath,
+    sourceAspectRatio: mask.sourceAspectRatio,
   );
 
   final configToSave = migrated.copyWith(id: 'config');
@@ -467,6 +468,13 @@ class RooflineConfigEditorNotifier
   void setTotalChannelCount(int count) {
     if (state == null) return;
     state = state!.copyWith(totalChannelCount: count);
+  }
+
+  /// Persist the traced photo's aspect ratio (width / height) so the preview
+  /// and overlay can project the segments correctly under BoxFit.cover.
+  void setSourceAspectRatio(double? aspect) {
+    if (state == null || aspect == null) return;
+    state = state!.copyWith(sourceAspectRatio: aspect);
   }
 
   /// Update the spatial points for a segment (from trace tool).
