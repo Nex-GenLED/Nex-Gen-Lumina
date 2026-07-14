@@ -222,3 +222,10 @@ marketing/
 
 # Cloud Functions TypeScript build output
 functions/lib/
+
+# One-off diagnostic scripts (underscore-prefixed) — throwaway probes written
+# during an investigation. Durable, reusable tools live in functions/scripts/
+# WITHOUT the underscore and ARE committed (e.g. repair_array_sortkeys.js,
+# backfill_dryrun.js). Ignored because these dump per-user/PII output and are
+# shaped for one session's question, not for reuse.
+functions/scripts/_*.js
