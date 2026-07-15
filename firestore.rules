@@ -6,18 +6,87 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Helper function to check if the authenticated user has media/admin access
-    // Media users can view any customer's data for content creation purposes
-    function hasMediaAccess() {
+    // ── REMOVED: hasMediaAccess() — D3-S2 ────────────────────────────
+    //
+    // It resolved `user_role in ['media', 'dealer', 'admin']`, and its
+    // 'dealer' member was the single largest isolation defect in this
+    // ruleset: every rule gated on it granted EVERY dealer access to EVERY
+    // other dealer's data — customers, pipeline, pricing, stock, ship-to.
+    // The name implied a media/content concern; the behavior was a
+    // cross-tenant grant.
+    //
+    // All 16 call sites were swapped individually in D3-S2 (search
+    // "D3-S2 SITE"), each to the narrowest claim that preserves its real
+    // caller:
+    //   • isMediaOrAdmin()        — corporate reporting/audit, no dealer
+    //   • hasStaffClaim(code)     — a dealer's own staff, scoped
+    //   • isUserRoleAdmin()       — where the site already meant admin-only
+    //   • hasAdminOrOwnerClaim()  — corporate override
+    //
+    // The function is DELETED rather than left dead so it cannot be reached
+    // for again: a helper named hasMediaAccess() reads like the obvious
+    // choice for "can this staff member see customer data", and the next
+    // author would have reintroduced the leak in one keystroke.
+    //
+    // DO NOT REINTRODUCE. If you need "corporate can read anything", that
+    // is isMediaOrAdmin() (below). If you need "this dealer's own staff",
+    // that is hasStaffClaim(dealerCode).
+
+    // ── D3-S2 FINDING A — "affiliated" is not "staff" ────────────────
+    //
+    // Distinguishes a DEALER-STAFF account from a CUSTOMER who merely
+    // belongs to that dealer. Both carry `dealer_code`.
+    //
+    // WHY THIS EXISTS: every isDealerMember() copy treated a matching
+    // `users.dealer_code` as proof of dealer membership. But the installer
+    // wizard stamps dealer_code onto every CUSTOMER's user doc
+    // (installer_setup_wizard.dart:912) so the /users read rule can scope
+    // PIN sessions. Consequence, live before this commit and NOT caused by
+    // the hasMediaAccess sweep: every customer satisfied isDealerMember()
+    // for their own dealer — and since pricing/inventory/config/
+    // shipping_address are `allow write: if isDealerMember()`, a CUSTOMER
+    // could REWRITE their dealer's pricing, stock, messaging templates, and
+    // ship-to address. Caught by the D3-S2 isolation suite
+    // ("customer cannot read a dealer doc / catalog / pricing / records").
+    //
+    // Requiring user_role in ['dealer','admin'] means affiliation alone is
+    // no longer authority. Staff PIN sessions are unaffected — they come in
+    // via hasStaffClaim(dealerCode), a separate branch.
+    function isDealerStaffAccount(code) {
       return request.auth != null &&
+             code != null &&
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role in ['media', 'dealer', 'admin'];
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == code &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin'];
     }
 
     // Helper function to check if user can read another user's data
-    // Either the owner OR a user with media access privileges
+    // Either the owner OR a corporate (media/admin) reader.
+    //
+    // ── D3-S2 SITE 1 of 19 ───────────────────────────────────────────
+    // WAS: isOwner(userId) || hasMediaAccess()
+    //
+    // hasMediaAccess() resolves user_role in ['media','dealer','admin'],
+    // so the old form let ANY dealer read EVERY customer's profile and
+    // subcollections, system-wide — dealer A reading dealer B's entire
+    // customer base. isMediaOrAdmin() (line ~80) is the same check with
+    // 'dealer' excluded; it was written for exactly this and applied to
+    // referral_payouts read, then never propagated.
+    //
+    // Dealers do NOT lose legitimate access: /users read (~:179) carries a
+    // separate installer/salesperson branch scoped to the caller's own
+    // dealerCode claim. This removes the CROSS-dealer grant only.
+    //
+    // FAN-OUT — this helper gates 10 read rules. Each was reviewed; the
+    // answer is the same for all ten (a dealer must not read another
+    // dealer's customers), which is why it stays one helper rather than
+    // ten inlined copies:
+    //   :179 /users            :298 controllers      :358 commands
+    //   :373 bridge_status     :385 geofences        :400 properties
+    //   :417 roofline_config   :456 referrals        :490 brand_profile
+    //   :534 commercial_locations
     function canReadUserData(userId) {
-      return isOwner(userId) || hasMediaAccess();
+      return isOwner(userId) || isMediaOrAdmin();
     }
 
     // Helper function to check if the requester is the paired Lumina Bridge
@@ -176,8 +245,24 @@ service cloud.firestore {
       // intended enforcement, not a bug). Customers with no dealer_code
       // (self-registered, legacy) are intentionally invisible to PIN
       // sessions and only visible via canReadUserData or admin/owner.
+      // ── D3-S2 FINDING B — dealer accounts keep their OWN customers ──
+      //
+      // Site 1 removed 'dealer' from canReadUserData, which correctly ended
+      // cross-dealer reads. But it also removed a dealer's access to their
+      // OWN customers: the staff branch below requires an installer/
+      // salesperson CLAIM, and a plain user_role:'dealer' ACCOUNT (no PIN
+      // session) carries none. That would have broken canViewCustomerSystems
+      // (user_model.dart:40, media_access_providers.dart) — the dealer's
+      // legitimate customer-support view. Caught by the D3-S2 isolation
+      // suite ("dealer account reads its OWN customer").
+      //
+      // This branch restores exactly that and no more: a dealer-staff
+      // account may read a user whose dealer_code matches their own.
+      // Resource-scoped, so like the staff branch it requires a matching
+      // .where('dealer_code', ==, X) filter on list queries.
       allow read: if canReadUserData(userId)
                   || hasAdminOrOwnerClaim()
+                  || isDealerStaffAccount(resource.data.get('dealer_code', ''))
                   || (request.auth != null &&
                       request.auth.token.get('role', '') in ['installer', 'salesperson'] &&
                       resource.data.get('dealer_code', '') == request.auth.token.get('dealerCode', ''));
@@ -891,27 +976,59 @@ service cloud.firestore {
 
     // Dealers collection - managed by admins
     match /dealers/{dealerCode} {
-      // Authenticated users can read dealers (for validation during installer login)
-      allow read: if request.auth != null || hasAdminOrOwnerClaim();
+      // ── D3-S2 SITE 2 of 19 (sibling 1 of 3) ────────────────────────
+      // WAS: read allowed to ANY authenticated caller (an `auth != null`
+      // disjunct OR'd with the admin/owner claim), justified by the
+      // comment "for validation during installer login".
+      //
+      // That justification was FALSE — the same stale-comment class as
+      // the /installers "for PIN validation" lie the D3-HOTFIX removed.
+      // Installer login does NOT read this collection: PIN validation is
+      // server-side in mintStaffToken via the ADMIN SDK (staffAuth.ts:453),
+      // and the client rebuilds InstallerSession from the mint RESPONSE.
+      // Verified: no read of collection('dealers') exists in
+      // installer_providers.dart or sales_providers.dart. Its only client
+      // readers are corporate/admin surfaces
+      // (corporate_admin_providers.dart:21/159/256,
+      // corporate_network_providers.dart:14, admin_providers.dart:214).
+      //
+      // Leak closed: any authenticated user could enumerate the entire
+      // dealer network (names, emails, phones, territories).
+      //
+      // hasStaffClaim(dealerCode) keeps a single-doc get working for a
+      // dealer's own staff. It cannot satisfy an unfiltered LIST query —
+      // that is intentional; the admin/corporate list paths are covered by
+      // the caller-only isMediaOrAdmin()/hasAdminOrOwnerClaim() clauses,
+      // which Firestore CAN prove for a list.
+      allow read: if hasStaffClaim(dealerCode)
+                  || isMediaOrAdmin()
+                  || hasAdminOrOwnerClaim();
 
-      // Existing user_role admin path — preserved so corporate-admin
-      // dealer management UI keeps working pre-corporate-migration.
-      function isUserRoleAdminWithMedia() {
-        return hasMediaAccess() &&
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin';
-      }
+      // ── D3-S2 SITE 3 of 19 ─────────────────────────────────────────
+      // WAS: a local isUserRoleAdminWithMedia() = hasMediaAccess() &&
+      //      user_role == 'admin'.
+      //
+      // Not a leak — the `user_role == 'admin'` conjunct already excluded
+      // dealers, so hasMediaAccess() was redundant there. Removed anyway:
+      // it is the last local dependency on the dealer-inclusive helper in
+      // this block, and a rule whose name says "WithMedia" while meaning
+      // "admin only" is exactly the misleading-name class that produced
+      // the two stale comments above. isUserRoleAdmin() (line ~67) says
+      // what it does.
+      //
+      // Behavior is unchanged for create/delete/update.
 
       // Create + delete: admin-or-owner staff claim, OR existing
       // user_role admin path
-      allow create: if isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim();
-      allow delete: if isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim();
+      allow create: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
+      allow delete: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
 
       // Update: admin-or-owner-staff and existing user_role admins can
       // update non-isActive fields. isActive flips require owner — a
       // dealer activation/deactivation is a privilege boundary worth
       // gating to the highest role.
       allow update: if (
-        (isUserRoleAdminWithMedia() || hasAdminOrOwnerClaim()) &&
+        (isUserRoleAdmin() || hasAdminOrOwnerClaim()) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive'])
       ) || hasOwnerClaim();
     }
@@ -1015,8 +1132,24 @@ service cloud.firestore {
 
     // Installation records - created during customer setup
     match /installations/{installationId} {
-      // Users who belong to this installation can read it, plus media/dealer/admin
-      allow read: if belongsToInstallation(installationId) || hasMediaAccess() || isAdmin()
+      // ── D3-S2 SITE 4 of 19 ─────────────────────────────────────────
+      // hasMediaAccess() -> isMediaOrAdmin(): a dealer could read EVERY
+      // installation in the fleet. The corporate reader (media/admin) is
+      // preserved — customer_lookup_service.dart:70-78
+      // (getInstallationsByDealer, reached via media_access_providers.dart)
+      // runs under user_role 'media' and filters by dealerCode, so it is
+      // unaffected. isMediaOrAdmin() is caller-only, so its LIST query
+      // still resolves.
+      //
+      // NOTE — the `|| request.auth != null` disjunct below is left INTACT
+      // and still makes this read effectively open. Removing it is a
+      // wizard-path decision (installer_setup_wizard.dart writes
+      // /installations at :912 under an anonymous session) and belongs to
+      // slice 5, gated on slice 4's token re-mint. This site is swept here
+      // only to remove the dealer-inclusive helper; the swap is a no-op
+      // until that disjunct goes. Called out so the residual is not
+      // mistaken for closed.
+      allow read: if belongsToInstallation(installationId) || isMediaOrAdmin() || isAdmin()
                     || request.auth != null
                     || hasAdminOrOwnerClaim();
 
@@ -1033,8 +1166,13 @@ service cloud.firestore {
 
       // Sub-users subcollection - managed by primary users
       match /subUsers/{subUserId} {
+        // ── D3-S2 SITE 5 of 19 ───────────────────────────────────────
+        // hasMediaAccess() -> isMediaOrAdmin(): a dealer could read the
+        // sub-user roster of every installation in the fleet, including
+        // other dealers' customers. Installation members and corporate
+        // (media/admin) keep their access.
         // Anyone in the installation can read sub-users list
-        allow read: if belongsToInstallation(installationId) || hasMediaAccess();
+        allow read: if belongsToInstallation(installationId) || isMediaOrAdmin();
 
         // Primary users of this installation can manage sub-users
         allow create, update, delete: if isPrimaryUserOfInstallation(installationId) || isAdmin();
@@ -1076,10 +1214,32 @@ service cloud.firestore {
 
     // ── Installation Records (installer activity tracking) ──
     match /installation_records/{recordId} {
-      // Authenticated users can create records during installer setup (PIN validated app-side)
+      // NOT TIGHTENED HERE — DELIBERATE. installer_setup_wizard.dart:1175
+      // writes this collection under an ANONYMOUS session (the wizard calls
+      // signInAnonymously at :718 after creating the customer's account), so
+      // it holds no claim. Requiring one would break EVERY install. This
+      // create moves to a staff claim in slice 5, gated on slice 4 proving
+      // the token re-mint. "PIN validated app-side" is stale — PIN
+      // validation is server-side in mintStaffToken — but the anonymous
+      // session is real, so the grant stays until slice 4 lands.
       allow create: if request.auth != null;
-      // Installers and admins can read records
-      allow read: if request.auth != null || hasAdminOrOwnerClaim();
+
+      // ── D3-S2 SITE 6 of 19 (sibling 2 of 3) ────────────────────────
+      // WAS: read allowed to ANY authenticated caller (an `auth != null`
+      // disjunct OR'd with the admin/owner claim).
+      //
+      // Leak closed: any authenticated user could read every dealer's
+      // install activity — dealer_code, installer_code, customer linkage.
+      // Nothing in lib/ READS this collection (the sole client reference is
+      // the wizard's write at :1175), so scoping the read breaks no known
+      // caller; it is kept staff-dealer-scoped rather than admin-only so a
+      // dealer's own activity stays legible to their own staff.
+      //
+      // Field name is dealer_code (snake_case) per installation_model.dart:122.
+      allow read: if (resource.data.get('dealer_code', '') != '' &&
+                      hasStaffClaim(resource.data.get('dealer_code', '')))
+                  || isMediaOrAdmin()
+                  || hasAdminOrOwnerClaim();
       // Only admins can update or delete
       allow update, delete: if isAdmin() || hasAdminOrOwnerClaim();
     }
@@ -1115,13 +1275,45 @@ service cloud.firestore {
         isMediaOrAdmin() ||
         hasAdminOrOwnerClaim()
       );
-      // Only dealers/admins can create or update payouts. Write scoping
-      // intentionally NOT tightened in this commit — the writers today
-      // are dealer/media/admin via in-app flows, and constraining them
-      // to per-dealer scope would require auditing every write site.
-      // Tracked as a follow-up if cross-dealer write becomes a concern.
-      allow create: if hasMediaAccess();
-      allow update: if hasMediaAccess();
+      // ── D3-S2 SITES 7 & 8 of 19 ────────────────────────────────────
+      // WAS: create/update: hasMediaAccess() — i.e. ANY dealer could
+      // create or rewrite ANY other dealer's payouts. This is the
+      // follow-up the comment above predicted; the read rule was fixed
+      // with isMediaOrAdmin() in the 2026-05-05 revision and the write
+      // was explicitly deferred. Deferred no longer.
+      //
+      // The write sites were audited (that was the stated blocker):
+      //   dealer_dashboard_screen.dart:1507 (approve) and :1568 (reject/
+      //   pay) — the Payouts tab, reached from installer_landing:171 /
+      //   sales_landing:158 (staff claims) or corporate (admin claim).
+      //   dealer_dashboard_providers.dart:129/145/311 are reads.
+      // So the real writers hold either a staff claim for their own
+      // dealer, or an admin/owner claim. Both are preserved below.
+      //
+      // Scoped on the payout's own dealerCode, mirroring the read rule
+      // directly above. The user-doc dealer_code branch is kept so a
+      // signed-in dealer account (no PIN session) can still write its own
+      // dealer's payouts, as today — minus the cross-dealer reach.
+      // Uses isDealerStaffAccount (not a bare dealer_code match) for the
+      // same reason as the isDealerMember copies — see FINDING A. Otherwise
+      // any CUSTOMER of this dealer could create/approve payouts against it,
+      // since customers carry dealer_code too.
+      function isPayoutDealerScoped(code) {
+        return code != null && (
+          isDealerStaffAccount(code) ||
+          hasStaffClaim(code)
+        );
+      }
+      allow create: if request.auth != null && (
+        isPayoutDealerScoped(request.resource.data.get('dealerCode', null)) ||
+        isMediaOrAdmin() ||
+        hasAdminOrOwnerClaim()
+      );
+      allow update: if request.auth != null && (
+        isPayoutDealerScoped(resource.data.get('dealerCode', null)) ||
+        isMediaOrAdmin() ||
+        hasAdminOrOwnerClaim()
+      );
       // Only admins can delete
       allow delete: if isAdmin();
     }
@@ -1297,9 +1489,20 @@ service cloud.firestore {
 
     // ── Sales Jobs ───────────────────────────────────────────────
     match /sales_jobs/{jobId} {
+      // ── D3-S2 SITE 9 of 19 ─────────────────────────────────────────
+      // WAS: isJobStakeholder() opened with `hasMediaAccess() ||`, so ANY
+      // dealer was a "stakeholder" in EVERY job — the single widest
+      // cross-dealer leak in the ruleset. It gated read AND update, so
+      // dealer A could read and REWRITE dealer B's entire prospect
+      // pipeline: customer names, addresses, pricing, job status.
+      //
+      // Removed. The remaining branches are all genuinely job-scoped
+      // (user-doc dealer_code, installer_dealer_code, or a staff claim
+      // matching the job's own dealerCode). Corporate keeps global reach
+      // via the isMediaOrAdmin()/hasAdminOrOwnerClaim() clauses on the
+      // read/update rules below — see sites 10 and 11.
       function isJobStakeholder() {
         return request.auth != null && (
-          hasMediaAccess() ||
           (resource != null &&
            resource.data.dealerCode != null &&
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode) ||
@@ -1312,9 +1515,21 @@ service cloud.firestore {
         );
       }
 
-      allow read: if request.auth != null && (isJobStakeholder() || hasMediaAccess() || hasAdminOrOwnerClaim());
+      // ── D3-S2 SITES 10 & 11 of 19 ──────────────────────────────────
+      // hasMediaAccess() -> isMediaOrAdmin() on read and update. Same leak
+      // as site 9, reachable even if isJobStakeholder() were fixed alone —
+      // both had to go together, which is why they are one reviewed unit.
+      // Corporate (media/admin) keeps the cross-dealer read the pipeline
+      // dashboard needs; dealers no longer do.
+      allow read: if request.auth != null && (isJobStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim());
+
+      // NOT TIGHTENED — DELIBERATE. Bare `auth != null` create is a
+      // wizard/sales-path grant (prospect_info_screen.dart:198/283 writes
+      // under a staff session, but the anonymous wizard also touches this
+      // surface). Moves to a staff claim in slice 5, gated on slice 4.
       allow create: if request.auth != null;
-      allow update: if request.auth != null && (isJobStakeholder() || hasMediaAccess() || hasAdminOrOwnerClaim());
+
+      allow update: if request.auth != null && (isJobStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim());
       allow delete: if false;
 
       // Material list — single document per job
@@ -1332,19 +1547,42 @@ service cloud.firestore {
 
     // ── Dealer Material Catalog ──────────────────────────────────
     match /dealers/{dealerCode}/materialCatalog/{itemId} {
-      allow read: if request.auth != null || hasAdminOrOwnerClaim();
-      allow write: if (hasMediaAccess() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.user_role == 'admin')
-        || hasAdminOrOwnerClaim();
+      // ── D3-S2 SITE 12 of 19 (sibling 3 of 3) ───────────────────────
+      // WAS: read allowed to ANY authenticated caller (an `auth != null`
+      // disjunct OR'd with the admin/owner claim).
+      //
+      // Leak closed: any authenticated user — including a CUSTOMER — could
+      // read any dealer's material catalog, i.e. their per-item cost basis.
+      // Scoped to the dealer's own staff plus corporate.
+      //
+      // Consumers are dealer-scoped already: inventory_service.dart and
+      // material_final_checkin_screen.dart:53 read
+      // /dealers/{code}/materialCatalog under a staff session.
+      allow read: if hasStaffClaim(dealerCode)
+                  || isMediaOrAdmin()
+                  || hasAdminOrOwnerClaim();
+
+      // ── D3-S2 SITE 13 of 19 ────────────────────────────────────────
+      // WAS: (hasMediaAccess() && user_role == 'admin') || claim.
+      // Not a leak — the user_role conjunct already excluded dealers — but
+      // the same misleading construction as site 3. isUserRoleAdmin() says
+      // it plainly. Behavior unchanged.
+      allow write: if isUserRoleAdmin() || hasAdminOrOwnerClaim();
     }
 
     // ── Dealer Inventory ─────────────────────────────────────────
     match /dealers/{dealerCode}/inventory/{itemId} {
+      // ── D3-S2 SITE 14 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess() ||` from isDealerMember(). The helper
+      // NAME says dealer-scoped; the hasMediaAccess() disjunct made it
+      // globally open to every dealer — this rule is read AND write, so
+      // dealer A could rewrite dealer B's stock counts.
+      // Corporate keeps access via hasAdminOrOwnerClaim(). Media loses it:
+      // deliberate — a content/marketing role has no business writing a
+      // dealer's inventory, and no client path does so.
       function isDealerMember() {
         return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
-          hasMediaAccess() ||
+          isDealerStaffAccount(dealerCode) ||
           hasStaffClaim(dealerCode) ||
           hasAdminOrOwnerClaim()
         );
@@ -1354,11 +1592,16 @@ service cloud.firestore {
 
     // ── Dealer Inventory Ledger (append-only) ────────────────────
     match /dealers/{dealerCode}/inventoryLedger/{entryId} {
+      // ── D3-S2 SITE 15 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess()` from isDealerMember(). This gates
+      // `allow create` on an APPEND-ONLY audit trail, so the old form let
+      // any dealer forge entries in any other dealer's ledger — the exact
+      // thing an append-only trail exists to prevent.
+      // Note this copy is shaped differently from the others (no
+      // installer_dealer_code branch, staff/admin inlined on read below) —
+      // reviewed and preserved as-is; only the cross-dealer grant is gone.
       function isDealerMember() {
-        return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          hasMediaAccess()
-        );
+        return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
       // (not in isDealerMember) so the create rule below stays gated by
@@ -1380,11 +1623,13 @@ service cloud.firestore {
     //         needed (computed), reorder_threshold,
     //         auto_reorder_enabled, auto_reorder_qty, last_updated.
     match /dealers/{dealerCode}/sku_inventory/{sku} {
+      // ── D3-S2 SITE 16 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess() ||` from isDealerMember(). Read AND
+      // write, so dealer A could rewrite dealer B's warehouse stock and
+      // reorder thresholds. Same shape and rationale as site 14.
       function isDealerMember() {
         return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
-          hasMediaAccess() ||
+          isDealerStaffAccount(dealerCode) ||
           hasStaffClaim(dealerCode) ||
           hasAdminOrOwnerClaim()
         );
@@ -1398,11 +1643,14 @@ service cloud.firestore {
     // scoped to the subcollection so future expansion (additional
     // warehouses, return centers) doesn't require a rule change.
     match /dealers/{dealerCode}/shipping_address/{docId} {
+      // ── D3-S2 SITE 17 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess() ||` from isDealerMember(). Highest-
+      // consequence of the six: this is the ship-to on every dealer_orders
+      // write, so the old form let any dealer REDIRECT another dealer's
+      // hardware shipments to an address of their choosing.
       function isDealerMember() {
         return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == dealerCode ||
-          hasMediaAccess() ||
+          isDealerStaffAccount(dealerCode) ||
           hasStaffClaim(dealerCode) ||
           hasAdminOrOwnerClaim()
         );
@@ -1412,11 +1660,13 @@ service cloud.firestore {
 
     // ── Dealer Pricing ───────────────────────────────────────────
     match /dealers/{dealerCode}/pricing/{docId} {
+      // ── D3-S2 SITE 18 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess()` from isDealerMember(), which gates
+      // `allow write` here: any dealer could rewrite any other dealer's
+      // pricing — the numbers their estimates are built from. Tier 1 of
+      // the pricing cascade (dealer_pricing_service.dart:25) reads this.
       function isDealerMember() {
-        return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          hasMediaAccess()
-        );
+        return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
       // (not in isDealerMember) so write stays gated by user-doc
@@ -1427,11 +1677,13 @@ service cloud.firestore {
 
     // ── Dealer Config (messaging templates, dealer-scoped settings) ──
     match /dealers/{dealerCode}/config/{docId} {
+      // ── D3-S2 SITE 19 of 19 ────────────────────────────────────────
+      // Dropped `hasMediaAccess()` from isDealerMember(), which gates
+      // `allow write` here: any dealer could rewrite any other dealer's
+      // messaging templates — the copy sent to that dealer's customers
+      // under their name.
       function isDealerMember() {
-        return request.auth != null && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == dealerCode ||
-          hasMediaAccess()
-        );
+        return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
       // (not in isDealerMember) so write stays gated by user-doc
