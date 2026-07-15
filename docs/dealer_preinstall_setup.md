@@ -142,11 +142,36 @@ This step makes the Lumina app's channel-aware features work correctly.
 4. **Important**: segment Start/Stop indices must exactly match the bus boundaries from Section 2.3, otherwise channel filtering in the Lumina app won't behave correctly.
 5. Save.
 
-### 2.5 Smoke-test on bench (optional but recommended)
+### 2.5 Disable the AudioReactive usermod (REQUIRED — do not skip)
+
+**The flash image ships this usermod ENABLED, and it stalls effects on every controller that has no microphone.** Our controllers are flashed with the AudioReactive build variant (the controller name ends in `-AR`, e.g. `Dig-Octa-ESP32-8L-Eth-AR`). That image is built with the usermod default-on and a digital mic pre-configured on **GPIO 32/15 — pins our hardware does not have**. The usermod's I2S read + FFT task then competes with the LED show task and **freezes motion and effects**.
+
+This is confirmed on hardware, not theoretical: it was found on the bench controller *and* on a live customer install (Blue Line Bar, 417 LEDs). Disabling it cleared the freeze immediately in both cases.
+
+Treat this as a standing never-default of the flash procedure, in the same class as *erase flash first*, *ABL never default*, and *NTP host → `time.google.com`*.
+
+1. Navigate to `http://4.3.2.1` → **Config** → **Usermods**.
+2. Find the **AudioReactive** section.
+3. Set **Enable** → **OFF**.
+4. Click **Save**.
+5. **No reboot needed** — the controller suspends audio processing immediately. Do **not** change the mic type or GPIO fields while you're in there; those are the only usermod settings that *would* require a reboot, and leaving them alone keeps the change clean.
+
+**Verify** (optional, from a laptop on the controller's AP):
+
+```bash
+curl http://4.3.2.1/json/cfg
+# → "um":{"AudioReactive":{"enabled":false, ...}}
+```
+
+> **Already-shipped controllers:** the Lumina app self-heals this. Its controller-defaults healer reads `um.AudioReactive.enabled` on each local connect and surgically disables it (no reboot) when it finds it on. That covers the existing fleet as owners open the app on-site — but it only works on the local network, so **still do this step at the bench** rather than leaving a customer to see a frozen effect first.
+
+> **If a controller genuinely has a microphone** (a unit built for Audio Mode), disabling this turns Audio Mode off — and the app's healer will keep turning it off on every connect. No controller shipped to date has a working mic, so this step is correct for all current builds. Raise it with engineering before flashing any mic-equipped unit.
+
+### 2.6 Smoke-test on bench (optional but recommended)
 
 If you have a spare LED strip on the bench, plug it into channel 0 and verify it lights when you tap a color on the WLED UI. Disconnect after — the controller ships without strips attached.
 
-### 2.6 Label the controller
+### 2.7 Label the controller
 
 Print or write on a label affixed to the controller body:
 
@@ -161,7 +186,7 @@ Pre-configured: 2026-MM-DD by <staff initials>
 
 Keep this label readable — the install crew uses it as the source-of-truth confirmation when they unbox on-site.
 
-### 2.7 Power down
+### 2.8 Power down
 
 Disconnect from the controller's AP. Power off the 12V supply. The controller's saved WiFi creds and LED config persist in flash across power cycles.
 

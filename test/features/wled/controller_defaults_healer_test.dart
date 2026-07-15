@@ -4,12 +4,14 @@
 //
 // Coverage: pure planners (ntp host / tz mapping incl. unmappable fallback /
 // coords source order + skip), the heal-only-broken orchestration matrix,
-// reboot-only-on-clock-change, relay gating, gamma cases, and the connect
-// predicate. No HTTP: the repo is a recording fake, gamma is an injected action.
+// reboot-only-on-clock-change, relay gating, gamma cases, the AudioReactive
+// usermod disable, and the connect predicate. No HTTP: the repo is a recording
+// fake, gamma is an injected action.
 
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
@@ -19,11 +21,15 @@ import 'package:nexgen_command/services/wled_config_pusher.dart';
 
 // A recording WLED repo that also serves canned clock info. Extends the base
 // (inheriting concrete defaults) and adds the ClockInfoSource capability.
-class _FakeHealRepo extends WledRepository implements ClockInfoSource {
+class _FakeHealRepo extends WledRepository
+    implements ClockInfoSource, AudioReactiveConfigSource {
   _FakeHealRepo(
     this._clockInfo, {
     this.applyConfigResult = true,
     this.stateResponse,
+    this.audioReactiveEnabled,
+    this.audioReactiveReadThrows = false,
+    this.audioReactiveWriteSticks = true,
   });
 
   final ControllerClockInfo? _clockInfo;
@@ -31,6 +37,18 @@ class _FakeHealRepo extends WledRepository implements ClockInfoSource {
 
   /// Canned /json/state for the reboot-deferral gate (on/ps). Null = unreadable.
   final Map<String, dynamic>? stateResponse;
+
+  /// Canned `cfg.um.AudioReactive.enabled`. Null models a firmware build with
+  /// no AudioReactive usermod (or an unreadable cfg) — both mean "don't heal".
+  bool? audioReactiveEnabled;
+  final bool audioReactiveReadThrows;
+
+  /// When false, a successful disable POST leaves the device flag ON — models a
+  /// write that silently didn't take, so the readback verify has something to
+  /// catch.
+  final bool audioReactiveWriteSticks;
+
+  int audioReactiveReads = 0;
 
   final List<Map<String, dynamic>> configPosts = [];
   final List<Map<String, dynamic>> jsonPosts = [];
@@ -42,8 +60,20 @@ class _FakeHealRepo extends WledRepository implements ClockInfoSource {
   Future<Map<String, dynamic>?> getState() async => stateResponse;
 
   @override
+  Future<bool?> readAudioReactiveEnabled() async {
+    audioReactiveReads++;
+    if (audioReactiveReadThrows) throw Exception('cfg read boom');
+    return audioReactiveEnabled;
+  }
+
+  @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
     configPosts.add(cfg);
+    if (applyConfigResult &&
+        audioReactiveWriteSticks &&
+        cfg.containsKey('um')) {
+      audioReactiveEnabled = false; // the device honoured the disable
+    }
     return applyConfigResult;
   }
 
@@ -273,6 +303,175 @@ void main() {
     });
   });
 
+  group('pure planner — audioReactiveNeedsHeal', () {
+    test('usermod ON → heal', () {
+      expect(audioReactiveNeedsHeal(true), true);
+    });
+    test('already disabled → no heal', () {
+      expect(audioReactiveNeedsHeal(false), false);
+    });
+    test('absent (non-AR build) or unreadable → no heal', () {
+      // Null must never be treated as "on": a firmware without the usermod must
+      // not have a `um` block written into it from nothing.
+      expect(audioReactiveNeedsHeal(null), false);
+    });
+  });
+
+  group('pure — audioReactiveEnabledFromCfg', () {
+    test('reads the flag from a real captured cfg shape', () {
+      // Shape taken from a live Dig-Octa-ESP32-8L-Eth-AR controller.
+      expect(
+          audioReactiveEnabledFromCfg({
+            'um': {
+              'AudioReactive': {
+                'enabled': true,
+                'digitalmic': {
+                  'type': 1,
+                  'pin': [32, 15, 14, -1],
+                },
+              },
+            },
+          }),
+          true);
+    });
+    test('non-AR firmware / missing block / null cfg → null', () {
+      expect(audioReactiveEnabledFromCfg(null), isNull);
+      expect(audioReactiveEnabledFromCfg({}), isNull);
+      expect(audioReactiveEnabledFromCfg({'um': {}}), isNull);
+      expect(audioReactiveEnabledFromCfg({'um': <String, dynamic>{'AudioReactive': {}}}),
+          isNull);
+    });
+    test('malformed values → null, never throws', () {
+      expect(audioReactiveEnabledFromCfg({'um': 'nope'}), isNull);
+      expect(
+          audioReactiveEnabledFromCfg({
+            'um': {'AudioReactive': 'nope'},
+          }),
+          isNull);
+      expect(
+          audioReactiveEnabledFromCfg({
+            'um': {
+              'AudioReactive': {'enabled': 1},
+            },
+          }),
+          isNull);
+    });
+  });
+
+  group('audioreactive heal (LAN)', () {
+    test('already disabled → ZERO POSTs', () async {
+      final repo = _FakeHealRepo(_healthy(), audioReactiveEnabled: false);
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(repo.configPosts, isEmpty);
+      expect(report.audioReactiveHealed, false);
+      expect(report.anyHealed, false);
+      expect(repo.audioReactiveReads, 1, reason: 'evaluated once, not written');
+    });
+
+    test('firmware without the usermod (null) → ZERO POSTs', () async {
+      final repo = _FakeHealRepo(_healthy()); // audioReactiveEnabled null
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(repo.configPosts, isEmpty);
+      expect(report.audioReactiveHealed, false);
+    });
+
+    test('ENABLED → exactly one surgical POST + readback verify, NO reboot',
+        () async {
+      final repo = _FakeHealRepo(_healthy(), audioReactiveEnabled: true);
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(repo.configPosts, hasLength(1));
+      expect(
+        repo.configPosts.single,
+        {
+          'um': {
+            'AudioReactive': {'enabled': false},
+          },
+        },
+        reason: 'enabled-only: mic type/pins must never be sent — changing '
+            'those is the ONLY thing that would demand a reboot',
+      );
+      expect(report.audioReactiveHealed, true);
+      expect(repo.audioReactiveReads, 2, reason: 'evaluate + readback verify');
+
+      // The whole point: disabling takes effect on the controller's next
+      // loop(), so this heal must never trigger a reboot.
+      expect(report.rebooted, false);
+      expect(report.rebootDeferred, false);
+      expect(repo.jsonPosts, isEmpty);
+      expect(report.log, isEmpty);
+    });
+
+    test('POST rejected → not marked healed, no readback, no reboot', () async {
+      final repo = _FakeHealRepo(_healthy(),
+          audioReactiveEnabled: true, applyConfigResult: false);
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(repo.configPosts, hasLength(1), reason: 'attempted');
+      expect(report.audioReactiveHealed, false);
+      expect(repo.audioReactiveReads, 1, reason: 'no readback after a failure');
+      expect(report.rebooted, false);
+      expect(repo.jsonPosts, isEmpty);
+      expect(report.log.any((l) => l.contains('audioreactive POST returned false')),
+          true);
+    });
+
+    test('cfg read failure is inert — no POST, run completes', () async {
+      final repo = _FakeHealRepo(_healthy(), audioReactiveReadThrows: true);
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(repo.configPosts, isEmpty);
+      expect(report.audioReactiveHealed, false);
+      expect(report.anyHealed, false);
+      expect(report.log.any((l) => l.contains('audioreactive read failed')), true);
+    });
+
+    test('write that silently did not take → readback logs it, still no reboot',
+        () async {
+      final repo = _FakeHealRepo(_healthy(),
+          audioReactiveEnabled: true, audioReactiveWriteSticks: false);
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(report.audioReactiveHealed, true, reason: 'the POST was accepted');
+      expect(
+          report.log
+              .any((l) => l.contains('readback: audioreactive still enabled')),
+          true);
+      expect(report.rebooted, false);
+    });
+
+    test('alongside an NTP heal → separate surgical POSTs; reboot is NTP-only',
+        () async {
+      final repo = _FakeHealRepo(_clockUnset(),
+          stateResponse: {'on': false}, audioReactiveEnabled: true);
+      final report = await _healer(repo, isLan: true).run();
+
+      // Never one combined blob.
+      expect(repo.configPosts, hasLength(2));
+      expect(repo.configPosts[0], {
+        'if': {
+          'ntp': {'host': kHealNtpHost, 'en': true},
+        },
+      });
+      expect(repo.configPosts[1], {
+        'um': {
+          'AudioReactive': {'enabled': false},
+        },
+      });
+      expect(report.ntpHostHealed, true);
+      expect(report.audioReactiveHealed, true);
+      // The reboot is driven by the NTP host change alone — audioreactive
+      // contributes nothing to that decision.
+      expect(report.rebooted, true);
+      expect(repo.jsonPosts, [
+        {'rb': true}
+      ]);
+      expect(report.toString(), 'ntp-host+audioreactive+reboot');
+    });
+  });
+
   group('heal-only-broken matrix (LAN)', () {
     test('healthy controller → ZERO cfg POSTs, no reboot', () async {
       final repo = _FakeHealRepo(_healthy());
@@ -460,6 +659,20 @@ void main() {
       expect(report.ntpHostHealed, true);
       expect(report.rebooted, true);
       expect(gamma.calls, isEmpty, reason: 'gamma is LAN-only');
+    });
+
+    test('relay + AudioReactive ON → never read, never POSTed', () async {
+      // The bridge exposes only getState/getInfo — it cannot GET /json/cfg, so
+      // the usermod flag is not evaluable off-LAN. Same gating as tz/coords.
+      final repo = _FakeHealRepo(
+        ControllerClockInfo(deviceTime: _now), // clock fine → no host heal
+        audioReactiveEnabled: true,
+      );
+      final report = await _healer(repo, isLan: false).run();
+
+      expect(repo.audioReactiveReads, 0, reason: 'cfg is unreadable over relay');
+      expect(repo.configPosts, isEmpty);
+      expect(report.audioReactiveHealed, false);
     });
 
     test('relay + healthy clock → ZERO POSTs (tz/coords/gamma not evaluable)',

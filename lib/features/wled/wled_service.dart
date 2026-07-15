@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
@@ -135,7 +136,12 @@ List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhit
   return [finalR, finalG, finalB, finalW];
 }
 
-class WledService implements WledRepository, PerPixelWriter, ClockInfoSource {
+class WledService
+    implements
+        WledRepository,
+        PerPixelWriter,
+        ClockInfoSource,
+        AudioReactiveConfigSource {
   final String baseUrl; // e.g., http://192.168.1.23
   late final bool _simulate;
   bool? _supportsRgbwCache;
@@ -318,6 +324,21 @@ class WledService implements WledRepository, PerPixelWriter, ClockInfoSource {
       return null;
     } finally {
       client.close(force: true);
+    }
+  }
+
+  /// Reads `cfg.um.AudioReactive.enabled` — whether the AudioReactive usermod
+  /// (which stalls effects on our mic-less controllers) is running. Read-only.
+  /// Returns null in sim mode, on any failure, or on a firmware build with no
+  /// AudioReactive usermod — all of which mean "don't heal".
+  @override
+  Future<bool?> readAudioReactiveEnabled() async {
+    if (_simulate) return null;
+    try {
+      return audioReactiveEnabledFromCfg(await _fetchCfgRaw());
+    } catch (e) {
+      debugPrint('WLED readAudioReactiveEnabled failed: $e');
+      return null;
     }
   }
 

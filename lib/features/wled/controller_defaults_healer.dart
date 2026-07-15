@@ -12,9 +12,11 @@
 // failure (the next connect retries). Firmware impact: none — keys-only merge.
 //
 // Reboot: WLED only re-attempts NTP on boot, so an NTP host/enable heal is
-// followed by a reboot (applyJson {'rb':true}). tz/coords/gamma never reboot.
+// followed by a reboot (applyJson {'rb':true}). tz/coords/gamma/audioreactive
+// never reboot — the audioreactive disable takes effect on the controller's
+// next loop() iteration (see audioreactive_health.dart for the firmware proof).
 //
-// LAN vs RELAY: LAN reads /json/cfg so all four heals are evaluable and
+// LAN vs RELAY: LAN reads /json/cfg so all five heals are evaluable and
 // readback-verifiable. Relay CANNOT read cfg (no getCfg bridge command), so
 // only CLOCK_UNSET — derivable from info-time device clock — gates a relay
 // heal, and that heal is a blind-assert of the known-good host + reboot.
@@ -23,6 +25,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -236,6 +239,10 @@ class ControllerHealReport {
   bool tzHealed = false;
   bool coordsHealed = false;
   bool gammaHealed = false;
+
+  /// The AudioReactive usermod was found ON and disabled. Never triggers a
+  /// reboot — the controller suspends the FFT task on its next loop().
+  bool audioReactiveHealed = false;
   bool rebooted = false;
 
   /// The ntp-host heal was written but the reboot was DEFERRED to the next
@@ -244,7 +251,11 @@ class ControllerHealReport {
   final List<String> log = [];
 
   bool get anyHealed =>
-      ntpHostHealed || tzHealed || coordsHealed || gammaHealed;
+      ntpHostHealed ||
+      tzHealed ||
+      coordsHealed ||
+      gammaHealed ||
+      audioReactiveHealed;
 
   @override
   String toString() {
@@ -253,6 +264,7 @@ class ControllerHealReport {
       if (tzHealed) 'tz',
       if (coordsHealed) 'coords',
       if (gammaHealed) 'gamma',
+      if (audioReactiveHealed) 'audioreactive',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
     ];
@@ -372,12 +384,23 @@ class ControllerDefaultsHealer {
           report.log.add('gamma heal failed: $e');
         }
       }
+
+      // (e) AudioReactive usermod — the flash image ships it ENABLED with a mic
+      // on GPIOs our hardware doesn't have; its I2S+FFT task starves the LED
+      // show task and freezes effects. Own surgical POST, no reboot: the
+      // controller suspends sound processing on its next loop() and the payload
+      // omits the only reboot-requiring fields (mic type/pins). Structurally
+      // LAN-only — CloudRelayRepository is not an AudioReactiveConfigSource.
+      final arSource = repo;
+      if (arSource is AudioReactiveConfigSource) {
+        await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
+      }
     }
 
-    // (e) reboot ONLY when an NTP-retry field (host/en) changed — never for
-    // tz/coords/gamma. WLED re-attempts NTP only on boot. Gate on device state
-    // so we don't reboot an actively-running non-boot look: defer instead (the
-    // cfg write persists and applies on the next natural boot).
+    // (f) reboot ONLY when an NTP-retry field (host/en) changed — never for
+    // tz/coords/gamma/audioreactive. WLED re-attempts NTP only on boot. Gate on
+    // device state so we don't reboot an actively-running non-boot look: defer
+    // instead (the cfg write persists and applies on the next natural boot).
     if (ntpRetryFieldChanged) {
       final decision = await _decideReboot();
       if (decision.reboot) {
@@ -401,6 +424,39 @@ class ControllerDefaultsHealer {
     }
 
     return report;
+  }
+
+  /// Disables the AudioReactive usermod when it is found ON, then readback-
+  /// verifies. Heal-only-broken: an already-false flag, a firmware build with
+  /// no AudioReactive block, and an unreadable cfg all produce ZERO writes —
+  /// only an explicit `true` warrants the POST, so a non-AR build never gets a
+  /// `um` key written from nothing. Never reboots. Inert on failure (the next
+  /// connect retries); the readback is advisory and never flips success.
+  Future<void> _healAudioReactive(
+    AudioReactiveConfigSource source,
+    ControllerHealReport report,
+  ) async {
+    bool? enabled;
+    try {
+      enabled = await source.readAudioReactiveEnabled();
+    } catch (e) {
+      report.log.add('audioreactive read failed: $e');
+      return;
+    }
+    if (!audioReactiveNeedsHeal(enabled)) return;
+
+    if (!await _post(audioReactiveHealPayload(), 'audioreactive', report)) {
+      return;
+    }
+    report.audioReactiveHealed = true;
+
+    try {
+      if (await source.readAudioReactiveEnabled() == true) {
+        report.log.add('readback: audioreactive still enabled');
+      }
+    } catch (e) {
+      report.log.add('audioreactive readback error: $e');
+    }
   }
 
   /// Reads the live device state (on + active preset) and, on LAN, the boot
