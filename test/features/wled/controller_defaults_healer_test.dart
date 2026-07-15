@@ -49,12 +49,16 @@ class _FakeHealRepo extends WledRepository
   final bool audioReactiveWriteSticks;
 
   int audioReactiveReads = 0;
+  int clockReads = 0;
 
   final List<Map<String, dynamic>> configPosts = [];
   final List<Map<String, dynamic>> jsonPosts = [];
 
   @override
-  Future<ControllerClockInfo?> fetchClockInfo() async => _clockInfo;
+  Future<ControllerClockInfo?> fetchClockInfo() async {
+    clockReads++;
+    return _clockInfo;
+  }
 
   @override
   Future<Map<String, dynamic>?> getState() async => stateResponse;
@@ -734,42 +738,41 @@ void main() {
     });
   });
 
-  group('relay gating', () {
-    test('relay + CLOCK_UNSET (off) → ntp-host POST + reboot, gamma NOT evaluated',
-        () async {
+  group('relay is a total no-op (cfg unreachable over the bridge)', () {
+    // The healer used to run ONE relay heal: a blind-assert of the NTP host on
+    // CLOCK_UNSET. It never landed — the bridge routes applyConfig to
+    // /json/state, where WLED discards cfg keys — but the follow-up {'rb':true}
+    // DID land, so the only relay write that worked was the harmful one.
+    test('relay + CLOCK_UNSET + lights off → NO writes and NO reboot', () async {
       final repo = _FakeHealRepo(_clockUnset(), stateResponse: {'on': false});
       final gamma = _GammaSpy();
       final report =
           await _healer(repo, isLan: false, gamma: gamma.action).run();
 
-      expect(repo.configPosts, hasLength(1));
-      expect(report.ntpHostHealed, true);
-      expect(report.rebooted, true);
-      expect(gamma.calls, isEmpty, reason: 'gamma is LAN-only');
+      expect(repo.configPosts, isEmpty, reason: 'the cfg write never lands');
+      expect(repo.jsonPosts, isEmpty,
+          reason: 'REGRESSION GUARD: relay must never reboot a controller');
+      expect(report.ntpHostHealed, false);
+      expect(report.rebooted, false);
+      expect(report.anyHealed, false);
+      expect(gamma.calls, isEmpty);
     });
 
-    test('relay + AudioReactive ON → never read, never POSTed', () async {
-      // The bridge exposes only getState/getInfo — it cannot GET /json/cfg, so
-      // the usermod flag is not evaluable off-LAN. Same gating as tz/coords.
+    test('relay does not even READ the device', () async {
       final repo = _FakeHealRepo(
-        ControllerClockInfo(deviceTime: _now), // clock fine → no host heal
+        _clockUnset(),
         audioReactiveEnabled: true,
+        stateResponse: {'on': false},
       );
       final report = await _healer(repo, isLan: false).run();
 
-      expect(repo.audioReactiveReads, 0, reason: 'cfg is unreadable over relay');
-      expect(repo.configPosts, isEmpty);
-      expect(report.audioReactiveHealed, false);
+      expect(repo.clockReads, 0, reason: 'bail before any I/O');
+      expect(repo.audioReactiveReads, 0);
+      expect(report.log.single, contains('relay connect'));
     });
 
-    test('relay + healthy clock → ZERO POSTs (tz/coords/gamma not evaluable)',
-        () async {
-      // Device has a known-bad host, but relay cannot read it → no host heal
-      // unless the clock itself is unset. Clock is good here → nothing.
-      final repo = _FakeHealRepo(ControllerClockInfo(
-        deviceTime: _now,
-        // relay: tz/lat/lon/host all unknown (cfg unreadable)
-      ));
+    test('relay + healthy clock → nothing', () async {
+      final repo = _FakeHealRepo(ControllerClockInfo(deviceTime: _now));
       final report = await _healer(repo, isLan: false).run();
 
       expect(repo.configPosts, isEmpty);

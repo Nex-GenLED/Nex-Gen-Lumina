@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 /// Tests for the #52 false-timeout fix: command status is derived from
 /// presence-of-result, the watchdog never blind-overwrites a populated-result
@@ -201,5 +203,87 @@ void main() {
       await ref.update({'status': 'completed', 'result': jsonEncode({'on': true})});
       expect((await ref.get()).data()!['status'], 'completed');
     });
+  });
+
+  group('cfg writes over the relay (silent-success fix)', () {
+    // BRIDGE MODE: the firmware dispatch maps only getState → /json/state and
+    // getInfo → /json/info; EVERYTHING else, applyConfig included, falls
+    // through to POST /json/state. WLED accepts-and-ignores cfg keys there and
+    // returns 200, so the old `_executeBool('applyConfig', cfg)` saw a
+    // populated result and returned TRUE — every off-LAN cfg write reported
+    // success and changed nothing.
+    //
+    // WEBHOOK MODE is different and must keep working: the Cloud Function
+    // executes those commands and has a real `case "applyConfig":` → /json/cfg.
+
+    CloudRelayRepository bridgeRepo(FakeFirebaseFirestore fs) => repoWith(fs);
+
+    CloudRelayRepository webhookRepo(FakeFirebaseFirestore fs) =>
+        CloudRelayRepository(
+          userId: uid,
+          controllerId: 'c1',
+          controllerIp: '10.0.0.32',
+          webhookUrl: 'https://myhome.duckdns.org:8080',
+          firestore: fs,
+          commandTimeout: const Duration(milliseconds: 400),
+        );
+
+    test('bridge mode cannot write cfg; webhook mode can', () {
+      final fs = FakeFirebaseFirestore();
+      expect(bridgeRepo(fs).supportsCfgWrites, isFalse);
+      expect(webhookRepo(fs).supportsCfgWrites, isTrue);
+      expect(repoCanWriteCfg(bridgeRepo(fs)), isFalse);
+      expect(repoCanWriteCfg(webhookRepo(fs)), isTrue);
+    });
+
+    test('bridge applyConfig throws — never false-succeeds', () async {
+      await expectLater(
+        bridgeRepo(FakeFirebaseFirestore()).applyConfig({
+          'timers': {'ins': []},
+        }),
+        throwsA(isA<CfgWriteUnsupportedException>()),
+      );
+    });
+
+    test('bridge applyConfig queues NO command — no wasted round-trip', () async {
+      final fs = FakeFirebaseFirestore();
+      await expectLater(
+        bridgeRepo(fs).applyConfig({
+          'if': {
+            'ntp': {'host': 'time.google.com'}
+          }
+        }),
+        throwsA(isA<CfgWriteUnsupportedException>()),
+      );
+      expect((await commandsOf(fs).get()).docs, isEmpty);
+    });
+
+    test('the thrown reason names the dropped keys', () async {
+      try {
+        await bridgeRepo(FakeFirebaseFirestore()).applyConfig({
+          'timers': {'ins': []},
+          'hw': {'led': {}},
+        });
+        fail('expected CfgWriteUnsupportedException');
+      } on CfgWriteUnsupportedException catch (e) {
+        expect(e.toString(), contains('timers'));
+        expect(e.toString(), contains('hw'));
+      }
+    });
+
+    test('webhook mode still queues the cfg command (CF routes it to /json/cfg)',
+        () async {
+      final fs = FakeFirebaseFirestore();
+      final repo = webhookRepo(fs);
+      unawaited(bridgeRespond(fs, status: 'completed', result: {'success': true}));
+      expect(await repo.applyConfig({'timers': {'ins': []}}), isTrue);
+      final queued = (await commandsOf(fs).get()).docs.single.data();
+      expect(queued['type'], 'applyConfig');
+    });
+
+    // NOTE: no applyJson test here — it routes to /json/state and is unchanged
+    // by this fix, and exercising it drags in SharedPreferences via the
+    // neighborhood participating-channels cache. The getState cases above
+    // already prove state commands still round-trip through the bridge.
   });
 }

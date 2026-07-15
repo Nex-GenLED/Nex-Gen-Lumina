@@ -257,7 +257,16 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   .runSyncNow();
               if (!context.mounted) return;
               final messenger = ScaffoldMessenger.of(context);
-              if (!result.success) {
+              if (result.deferredOffLan) {
+                // Off-LAN: the schedule saved fine, it just can't reach the
+                // controller's timer table from here. Informational, not red.
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.summaryMessage),
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+                  duration: const Duration(seconds: 4),
+                ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
+              } else if (!result.success) {
                 messenger.showSnackBar(SnackBar(
                   content: Text(result.error ?? 'Schedule sync failed'),
                   backgroundColor: Colors.red.shade700,
@@ -677,7 +686,13 @@ class _SyncStatusRow extends ConsumerWidget {
     final IconData icon;
     final Color color;
     final String label;
-    if (!last.success) {
+    if (last.deferredOffLan) {
+      // Saved, just not armed yet — the user is away from home. Nothing failed,
+      // so this must NOT read like an error: neutral icon, neutral colour.
+      icon = Icons.home_outlined;
+      color = NexGenPalette.cyan;
+      label = last.summaryMessage;
+    } else if (!last.success) {
       icon = Icons.cloud_off_rounded;
       color = Colors.red.shade400;
       label = last.error ?? 'Not synced — controller offline';

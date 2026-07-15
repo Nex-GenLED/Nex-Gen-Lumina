@@ -5,6 +5,8 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 /// Builds the `hw.led.ins` array from the per-port UI state, preserving each
@@ -232,6 +234,26 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
       setState(() => _saving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller selected.')));
+      }
+      return;
+    }
+
+    // LED hardware changes are /json/cfg writes, which the bridge cannot carry
+    // (it only relays live state). Previously these silently "succeeded"
+    // off-LAN and nothing changed on the controller. Refuse up front and say
+    // why — note the manual-config dialog is NOT the right fallback here: it
+    // tells the user to open the controller's own web UI, which is equally
+    // unreachable from off the home network. That dialog stays for genuine
+    // on-LAN write failures, which is what it was written for.
+    if (!repoCanWriteCfg(repo)) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              "LED hardware settings can only be changed on your home WiFi. "
+              "Connect to the same network as your controller and try again."),
+          duration: Duration(seconds: 5),
+        ));
       }
       return;
     }

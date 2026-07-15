@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
 
+/// Thrown by [WledRepository.applyConfig] on a transport that cannot reach
+/// /json/cfg at all — distinct from "the write was attempted and failed".
+///
+/// Exists because the two are NOT interchangeable to a user: a failure is worth
+/// retrying and worth an error; an unsupported transport means "this will never
+/// work from here, go to your home WiFi" and must not be dressed up as a fault.
+/// Callers should prefer the cheap pre-flight [WledRepository.supportsCfgWrites]
+/// and treat this as the backstop for anything that asks anyway.
+class CfgWriteUnsupportedException implements Exception {
+  /// Human-readable reason, e.g. which transport refused and why.
+  final String reason;
+  const CfgWriteUnsupportedException(this.reason);
+
+  @override
+  String toString() => 'CfgWriteUnsupportedException: $reason';
+}
+
 /// Abstraction for controlling a WLED device.
 /// Implementations: real network service and a mock for Demo Mode.
 abstract class WledRepository {
   Future<Map<String, dynamic>?> getState();
   Future<bool> setState({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite});
   Future<bool> applyJson(Map<String, dynamic> payload);
-  /// Posts configuration payloads to /json/cfg (e.g., timers)
+
+  /// Posts configuration payloads to /json/cfg (e.g., timers).
+  ///
+  /// Returns false for a genuine delivery failure. Throws
+  /// [CfgWriteUnsupportedException] on a transport that cannot carry a cfg
+  /// write at all — see `repoCanWriteCfg` for the matching pre-flight.
   Future<bool> applyConfig(Map<String, dynamic> cfg);
   Future<bool> uploadLedMapJson(String jsonContent);
   Future<bool> configureSyncReceiver();

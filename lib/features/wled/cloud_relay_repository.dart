@@ -402,8 +402,46 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     );
   }
 
+  /// Whether THIS relay can deliver a /json/cfg write.
+  ///
+  /// Depends on WHICH relay is behind this repo — the two remote transports do
+  /// not have the same reach:
+  ///
+  ///  • Webhook Mode (DIY, [webhookUrl] set) → the Cloud Function executes the
+  ///    command and has a real `case "applyConfig": endpoint = /json/cfg`. Works.
+  ///  • Bridge Mode (default, dealer-installed, [webhookUrl] empty) → the CF
+  ///    skips the command ("ESP32 Bridge Mode: Skipping Cloud Function
+  ///    execution") and the ESP32 picks it up. The bridge's dispatch has no
+  ///    applyConfig case, so it falls through to POST /json/state. Broken.
+  ///
+  /// So this mirrors the same webhookUrl test the Cloud Function uses to decide
+  /// who executes the command.
+  bool get supportsCfgWrites => webhookUrl.isNotEmpty;
+
+  /// Throws when this repo is in Bridge Mode — cfg writes cannot be delivered.
+  ///
+  /// This used to `_executeBool('applyConfig', cfg)`, which looked correct and
+  /// was silently wrong: the bridge has no `applyConfig` case, so the payload
+  /// fell through its dispatch default to POST /json/state, where WLED ignored
+  /// the cfg keys and returned 200. The bridge marked the command `completed`
+  /// with a result, `_executeBool` saw non-null and returned TRUE. Every
+  /// off-LAN cfg write since the bridge shipped has reported success while
+  /// changing nothing — timers never armed, LED config never applied.
+  ///
+  /// Throwing instead of returning false is deliberate: false reads as "the
+  /// write failed, retry" and callers surface it as an error. This is not a
+  /// failure — it is a transport that will never carry this write, which needs
+  /// different handling and different words. Callers should gate on
+  /// [supportsCfgWrites] first; this is the backstop.
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
+    if (!supportsCfgWrites) {
+      throw CfgWriteUnsupportedException(
+        'the Lumina bridge cannot write controller config (/json/cfg) — it '
+        'only relays live state. Keys dropped: ${cfg.keys.join(', ')}',
+      );
+    }
+    // Webhook Mode: the Cloud Function routes this to /json/cfg correctly.
     return _executeBool('applyConfig', cfg);
   }
 
@@ -593,3 +631,22 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
   @override
   void reset() {}
 }
+
+/// True when [repo]'s transport can actually deliver a /json/cfg write.
+///
+/// Cheap pre-flight for callers that must decide BEFORE doing related work —
+/// e.g. the lease manager saves a preset and then arms a timer that points at
+/// it, and must not strand an orphaned preset for a timer it can never write.
+/// [CloudRelayRepository.applyConfig] throws [CfgWriteUnsupportedException]
+/// regardless, so this is a courtesy, not the guard of record.
+///
+/// Everything that is not a cloud relay (direct-LAN [WledService], demo, test
+/// fakes) reaches /json/cfg directly and answers true.
+///
+/// NOTE: the properly-typed shape for this is a `supportsCfgWrites` member on
+/// [WledRepository], which would force every implementation to answer the
+/// question — exactly the discipline whose absence let this bug ship. It is a
+/// function here to keep this fix off the ~11 test fakes that
+/// `implements WledRepository`; promote it when not shipping a hotfix.
+bool repoCanWriteCfg(WledRepository repo) =>
+    repo is! CloudRelayRepository || repo.supportsCfgWrites;

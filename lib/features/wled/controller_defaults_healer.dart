@@ -16,10 +16,23 @@
 // never reboot — the audioreactive disable takes effect on the controller's
 // next loop() iteration (see audioreactive_health.dart for the firmware proof).
 //
-// LAN vs RELAY: LAN reads /json/cfg so all five heals are evaluable and
-// readback-verifiable. Relay CANNOT read cfg (no getCfg bridge command), so
-// only CLOCK_UNSET — derivable from info-time device clock — gates a relay
-// heal, and that heal is a blind-assert of the known-good host + reboot.
+// LAN-ONLY. Every heal needs /json/cfg — to READ the current value (heal-only-
+// broken) and to WRITE the correction. The bridge can do neither: its dispatch
+// maps only getState → /json/state and getInfo → /json/info, and routes
+// applyConfig to /json/state where WLED discards it and returns 200.
+//
+// This class used to run one relay heal (a blind-assert of the NTP host on
+// CLOCK_UNSET, the one signal derivable from info-time). It never worked, and
+// it was actively harmful: the cfg write silently evaporated but reported
+// success, so the healer marked ntpHostHealed and went on to send {'rb':true} —
+// which DOES route correctly to /json/state. The useful write was dropped and
+// the disruptive one landed, rebooting customers' controllers for nothing. Of
+// the two relay writes, only the harmful one worked.
+//
+// Relay connects are now a no-op. That loses nothing real (the heal never
+// landed) and restores the class's own stated policy: heal only what you can
+// verify. Restoring relay heals requires a bridge `applyConfig`/`getCfg`
+// command — a firmware change, and the bridge has no OTA.
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,9 +71,8 @@ int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 /// True when the controller's NTP host should be healed to [kHealNtpHost].
 ///
 /// Fires when the clock is unset (NTP never synced — current host unreachable
-/// on this network) OR the readable host is the known-bad default pool.
-/// [currentHost] is null in relay mode (cfg unreadable); there only the
-/// clock-unset signal (available from info-time) can drive the heal.
+/// on this network) OR the readable host is the known-bad default pool. A null
+/// [currentHost] (field absent) falls back to the clock-unset signal alone.
 bool ntpHostNeedsHeal({required bool clockUnset, String? currentHost}) {
   if (clockUnset) return true;
   return currentHost == kKnownBadNtpHost;
@@ -305,8 +317,8 @@ class ControllerHealReport {
 class ControllerDefaultsHealer {
   final WledRepository repo;
 
-  /// True when [repo] is a direct-LAN [WledService] (cfg readable → all heals);
-  /// false for relay (cfg unreadable → CLOCK_UNSET host heal only).
+  /// True when [repo] is a direct-LAN [WledService]. False (relay) makes [run]
+  /// a no-op — cfg is neither readable nor writable over the bridge.
   final bool isLan;
 
   /// LAN baseUrl host / relay controllerIp — the target for the gamma raw-HTTP
@@ -326,6 +338,15 @@ class ControllerDefaultsHealer {
 
   Future<ControllerHealReport> run() async {
     final report = ControllerHealReport();
+
+    // Relay: nothing here is deliverable — see the file header. Bail before any
+    // read or write so a relay connect costs nothing and can never reboot.
+    if (!isLan) {
+      report.log.add('relay connect — cfg unreachable over the bridge; '
+          'no heals evaluated');
+      return report;
+    }
+
     final source = repo;
     if (source is! ClockInfoSource) {
       report.reachable = false;
@@ -352,76 +373,70 @@ class ControllerDefaultsHealer {
       phoneUtcOffset: ctx.phoneUtcOffset,
     );
 
-    // (a) NTP host — the only heal available in relay mode, gated to CLOCK_UNSET
-    // there (info-time signal); LAN also heals the known-bad default host.
+    // (a) NTP host — heal when the clock never synced or the readable host is
+    // the known-bad default pool.
     bool ntpRetryFieldChanged = false;
-    final hostHeal = isLan
-        ? ntpHostNeedsHeal(clockUnset: health.clockUnset, currentHost: info.ntpHost)
-        : health.clockUnset;
-    if (hostHeal) {
+    if (ntpHostNeedsHeal(
+        clockUnset: health.clockUnset, currentHost: info.ntpHost)) {
       if (await _post(ntpHostHealPayload(), 'ntp-host', report)) {
         report.ntpHostHealed = true;
         ntpRetryFieldChanged = true;
       }
     }
 
-    // (b)-(d) LAN only — tz/coords/gamma require reading cfg, impossible on relay.
-    if (isLan) {
-      // (b) timezone
-      final tz = tzHealFor(
-        tzSuspect: health.tzSuspect,
-        ianaTimezone: ctx.ianaTimezone,
-        phoneOffset: ctx.phoneUtcOffset,
+    // (b) timezone
+    final tz = tzHealFor(
+      tzSuspect: health.tzSuspect,
+      ianaTimezone: ctx.ianaTimezone,
+      phoneOffset: ctx.phoneUtcOffset,
+    );
+    if (tz != null) {
+      if (await _post(tzHealPayload(tz), 'tz', report)) report.tzHealed = true;
+    }
+
+    // (c) coordinates — profile home → phone (granted only) → skip
+    if (health.locationUnset) {
+      double? phoneLat, phoneLon;
+      if (!(_usable(ctx.profileLat) && _usable(ctx.profileLon))) {
+        final phone = await ctx.resolvePhonePosition();
+        phoneLat = phone?.lat;
+        phoneLon = phone?.lon;
+      }
+      final coord = coordHealFor(
+        locationUnset: true,
+        profileLat: ctx.profileLat,
+        profileLon: ctx.profileLon,
+        phoneLat: phoneLat,
+        phoneLon: phoneLon,
       );
-      if (tz != null) {
-        if (await _post(tzHealPayload(tz), 'tz', report)) report.tzHealed = true;
-      }
-
-      // (c) coordinates — profile home → phone (granted only) → skip
-      if (health.locationUnset) {
-        double? phoneLat, phoneLon;
-        if (!(_usable(ctx.profileLat) && _usable(ctx.profileLon))) {
-          final phone = await ctx.resolvePhonePosition();
-          phoneLat = phone?.lat;
-          phoneLon = phone?.lon;
+      if (coord != null) {
+        if (await _post(coordHealPayload(coord), 'coords', report)) {
+          report.coordsHealed = true;
         }
-        final coord = coordHealFor(
-          locationUnset: true,
-          profileLat: ctx.profileLat,
-          profileLon: ctx.profileLon,
-          phoneLat: phoneLat,
-          phoneLon: phoneLon,
-        );
-        if (coord != null) {
-          if (await _post(coordHealPayload(coord), 'coords', report)) {
-            report.coordsHealed = true;
-          }
-        } else {
-          report.log.add('coords 0,0 but no source (profile/phone) — skipped');
-        }
+      } else {
+        report.log.add('coords 0,0 but no source (profile/phone) — skipped');
       }
+    }
 
-      // (d) gamma — folded in; pushGammaConfig readback-skips when already correct
-      final ip = controllerIp;
-      if (ip != null && ip.isNotEmpty) {
-        try {
-          final g = await gammaAction(ip);
-          if (g.success && !g.noChange) report.gammaHealed = true;
-        } catch (e) {
-          report.log.add('gamma heal failed: $e');
-        }
+    // (d) gamma — folded in; pushGammaConfig readback-skips when already correct
+    final ip = controllerIp;
+    if (ip != null && ip.isNotEmpty) {
+      try {
+        final g = await gammaAction(ip);
+        if (g.success && !g.noChange) report.gammaHealed = true;
+      } catch (e) {
+        report.log.add('gamma heal failed: $e');
       }
+    }
 
-      // (e) AudioReactive usermod — the flash image ships it ENABLED with a mic
-      // on GPIOs our hardware doesn't have; its I2S+FFT task starves the LED
-      // show task and freezes effects. Own surgical POST, no reboot: the
-      // controller suspends sound processing on its next loop() and the payload
-      // omits the only reboot-requiring fields (mic type/pins). Structurally
-      // LAN-only — CloudRelayRepository is not an AudioReactiveConfigSource.
-      final arSource = repo;
-      if (arSource is AudioReactiveConfigSource) {
-        await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
-      }
+    // (e) AudioReactive usermod — the flash image ships it ENABLED with a mic
+    // on GPIOs our hardware doesn't have; its I2S+FFT task starves the LED
+    // show task and freezes effects. Own surgical POST, no reboot: the
+    // controller suspends sound processing on its next loop() and the payload
+    // omits the only reboot-requiring fields (mic type/pins).
+    final arSource = repo;
+    if (arSource is AudioReactiveConfigSource) {
+      await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
     }
 
     // (f) reboot ONLY when an NTP-retry field (host/en) changed — never for
@@ -444,9 +459,9 @@ class ControllerDefaultsHealer {
       }
     }
 
-    // Best-effort LAN readback-verify (relay can't read cfg; skip after a reboot
-    // since the device is cycling). Advisory only — never flips success.
-    if (isLan && report.anyHealed && !report.rebooted) {
+    // Best-effort readback-verify (skipped after a reboot since the device is
+    // cycling). Advisory only — never flips success.
+    if (report.anyHealed && !report.rebooted) {
       await _verify(source as ClockInfoSource, report);
     }
 

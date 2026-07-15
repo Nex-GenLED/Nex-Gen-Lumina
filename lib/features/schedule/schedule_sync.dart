@@ -6,7 +6,11 @@ import 'package:nexgen_command/features/audio/services/audio_capability_detector
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart'
+    show CfgWriteUnsupportedException;
 import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
@@ -586,6 +590,21 @@ class ScheduleSyncService {
       },
     };
 
+    // Arming is a /json/cfg write. The bridge cannot deliver one (it routes
+    // everything but getState/getInfo to /json/state, where WLED discards cfg
+    // keys and returns 200) — so off-LAN this used to report SUCCESS while the
+    // timers never armed. Check before spending a command round-trip, and say
+    // so plainly instead of claiming a save that didn't happen or an error that
+    // didn't occur. Presets above already landed: they go via /json/state.
+    if (!repoCanWriteCfg(repo)) {
+      debugPrint('ScheduleSync: off-LAN — timers not armed (bridge cannot '
+          'write /json/cfg); schedule saved, will arm on next LAN sync');
+      return finish(ScheduleSyncResult.deferredOffLan(
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
+      ));
+    }
+
     try {
       final ok = await repo.applyConfig(payload);
       if (!ok) {
@@ -603,6 +622,15 @@ class ScheduleSyncService {
         // Count only schedules that actually armed — never overcount a
         // schedule dropped for a full table / dow:0 / bad time.
         schedulesWithPresets: armedSchedules,
+      ));
+    } on CfgWriteUnsupportedException catch (e) {
+      // Backstop — the supportsCfgWrites pre-flight above should already have
+      // returned. Never let this reach the generic catch, which would dress a
+      // known-unsupported transport up as "Exception: ..." in the user's face.
+      debugPrint('ScheduleSync: cfg writes unsupported on this transport: $e');
+      return finish(ScheduleSyncResult.deferredOffLan(
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
       ));
     } catch (e) {
       debugPrint('ScheduleSync: Exception during sync: $e');
@@ -839,19 +867,43 @@ class ScheduleSyncResult {
   /// Used by the schedule UI to show "last synced X ago".
   final DateTime syncedAt;
 
+  /// The schedule was SAVED but its timers could not be armed because the app
+  /// is off the home network: arming is a /json/cfg write, which the bridge
+  /// cannot deliver (see [WledRepository.supportsCfgWrites]). This is NOT a
+  /// failure — nothing broke and there is nothing to retry — so [success] is
+  /// false (the timers genuinely did not arm) while the UI must present it as
+  /// neutral information, not an error. It resolves itself the next time the
+  /// user syncs on their home WiFi.
+  final bool deferredOffLan;
+
   ScheduleSyncResult({
     required this.success,
     this.error,
     this.presetErrors = const [],
     this.schedulesWithPresets = const [],
+    this.deferredOffLan = false,
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
+
+  /// Saved to the cloud, but not armed on the controller — the user is off-LAN.
+  factory ScheduleSyncResult.deferredOffLan({
+    List<ScheduleItem> schedulesWithPresets = const [],
+    List<String> presetErrors = const [],
+  }) =>
+      ScheduleSyncResult(
+        success: false,
+        deferredOffLan: true,
+        error: kScheduleOffLanNotice,
+        presetErrors: presetErrors,
+        schedulesWithPresets: schedulesWithPresets,
+      );
 
   /// Returns true if there were any preset-related errors.
   bool get hasPresetErrors => presetErrors.isNotEmpty;
 
   /// Returns a summary message suitable for user display.
   String get summaryMessage {
+    if (deferredOffLan) return kScheduleOffLanNotice;
     if (!success) {
       return error ?? 'Sync failed';
     }
@@ -861,3 +913,9 @@ class ScheduleSyncResult {
     return 'Successfully synced ${schedulesWithPresets.length} schedule(s)';
   }
 }
+
+/// User-facing copy for an off-LAN schedule save. Deliberately not phrased as a
+/// failure: the schedule IS saved, it just can't reach the controller's timer
+/// table from here.
+const String kScheduleOffLanNotice =
+    "Saved — your schedule will arm next time you're on your home WiFi.";

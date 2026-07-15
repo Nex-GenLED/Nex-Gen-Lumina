@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -198,13 +200,26 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           final withGeo = base.copyWith(latitude: result.lat, longitude: result.lon, updatedAt: DateTime.now());
           await svc.updateUser(withGeo);
 
-          // Push to WLED config so solar timers use the new location
+          // Push to WLED config so solar timers use the new location.
+          //
+          // FIXME(coords): `loc` is NOT a WLED cfg key — WLED stores latitude/
+          // longitude at if.ntp.lt / if.ntp.ln (grep the firmware's cfg.cpp:
+          // no "loc"). So this push has always been a no-op, on LAN too; it is
+          // the on-connect healer's coordHealPayload() that actually sets
+          // coordinates. Left as-is rather than silently rewired here: changing
+          // the key makes this screen start writing cfg for the first time,
+          // which deserves its own change and its own verification.
           final repo = ref.read(wledRepositoryProvider);
-          if (repo != null) {
+          if (repo == null) {
+            debugPrint('EditProfile: No WLED device selected; skipped location push');
+          } else if (!repoCanWriteCfg(repo)) {
+            // Off-LAN the bridge cannot carry a cfg write; skip rather than
+            // throw. Nothing to tell the user — the healer sets coordinates on
+            // the next on-LAN connect, and this push does nothing regardless.
+            debugPrint('EditProfile: off-LAN — skipped WLED location push');
+          } else {
             final ok = await repo.applyConfig({'loc': {'lat': result.lat, 'lon': result.lon}});
             if (!ok) debugPrint('EditProfile: WLED location push failed');
-          } else {
-            debugPrint('EditProfile: No WLED device selected; skipped location push');
           }
 
           // Background compute of today's sunset and tomorrow's sunrise

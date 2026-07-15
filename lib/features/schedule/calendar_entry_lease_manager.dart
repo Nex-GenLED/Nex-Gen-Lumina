@@ -47,6 +47,8 @@ import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/utils/async_lock.dart';
@@ -984,6 +986,16 @@ class CalendarEntryLeaseManager {
         );
         return _WriteAttempt.noRepo;
       }
+      // Arming needs /json/cfg, which the bridge cannot deliver. Check before
+      // savePreset (which DOES work off-LAN via /json/state) so we don't strand
+      // an orphaned preset on the controller for a timer we can't write.
+      if (!repoCanWriteCfg(repo)) {
+        debugPrint(
+          '$_kLogPrefix off-LAN — lease ${lease.dateKey} not armed (bridge '
+          'cannot write /json/cfg). Lease kept; next on-LAN sweep arms it.',
+        );
+        return _WriteAttempt.cfgUnsupported;
+      }
       try {
         final presetOk = await repo.savePreset(
           presetId: lease.presetId,
@@ -1045,6 +1057,13 @@ class CalendarEntryLeaseManager {
         debugPrint(
           '$_kLogPrefix _writeZeroedSlot: no repo — slot $slotIndex '
           'not cleared. Next sweep retries.',
+        );
+        return false;
+      }
+      if (!repoCanWriteCfg(repo)) {
+        debugPrint(
+          '$_kLogPrefix _writeZeroedSlot: off-LAN — slot $slotIndex not '
+          'cleared (bridge cannot write /json/cfg). Next on-LAN sweep clears it.',
         );
         return false;
       }
@@ -1281,6 +1300,13 @@ enum _WriteAttempt {
   /// No WLED repository available (offline / no controller selected).
   /// Caller keeps the lease in registry — next sweep retries.
   noRepo,
+
+  /// The connected transport cannot write /json/cfg at all — the user is
+  /// off-LAN and arming goes through the bridge, which only relays live state.
+  /// Detected BEFORE savePreset so nothing is orphaned on the controller.
+  /// Not a failure and nothing to roll back: the lease stays in the registry
+  /// and the next sweep arms it once the user is back on their home WiFi.
+  cfgUnsupported,
 
   /// Feature flag is off — no controller traffic occurred. Caller
   /// keeps the lease in registry for when the flag flips.
