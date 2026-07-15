@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
+import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/referrals/models/referral_reward.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
@@ -148,7 +150,49 @@ final dealerAllPayoutsProvider =
           snap.docs.map((doc) => ReferralPayout.fromJson(doc.data())).toList());
 });
 
+/// True when the current session holds an ADMIN or OWNER staff claim.
+///
+/// Client-side mirror of firestore.rules `hasAdminOrOwnerClaim()`
+/// (firestore.rules:128): owner sessions come from mintStaffToken
+/// `mode: 'owner'` (corporateModeActiveProvider), admin sessions from
+/// `mode: 'admin'` (adminSessionActiveProvider). Installer- and
+/// salesperson-claim sessions are NOT admin/owner and return false.
+///
+/// ## Why this exists (D3-S1)
+///
+/// The D3-HOTFIX scoped `/installers` read to `hasAdminOrOwnerClaim()`,
+/// because those docs store `fullPin` in cleartext and mintStaffToken is
+/// callable unauthenticated — so any reader could harvest a working staff
+/// credential. That closed a live vector, but it means
+/// [dealerInstallersProvider] now DENIES non-admin staff sessions, and the
+/// dealer dashboard is reachable by installer/salesperson claims
+/// (installer_landing_screen.dart:171, sales_landing_screen.dart:158).
+///
+/// This provider lets those surfaces ASK before reading, instead of
+/// subscribing and taking a permission error.
+///
+/// ## This is a client-side hint, not a security boundary
+///
+/// The rules are the boundary. This exists so the UI degrades honestly
+/// rather than lying or throwing. Never rely on it to protect data.
+///
+/// ## Slice 3 will relax this
+///
+/// Once PINs are salted-hashed and no credential is readable, the
+/// `/installers` read relaxes to `hasStaffClaim(dealerCode)` and this
+/// provider widens to include a dealer's own staff. Hash first, then relax
+/// — never the reverse.
+final hasAdminOrOwnerSessionProvider = Provider<bool>((ref) {
+  return ref.watch(corporateModeActiveProvider) ||
+      ref.watch(adminSessionActiveProvider);
+});
+
 /// Active installers under this dealer.
+///
+/// ⚠️ READS `/installers`, which is ADMIN/OWNER-ONLY since the D3-HOTFIX.
+/// Watch [hasAdminOrOwnerSessionProvider] and skip this provider when it is
+/// false — subscribing under an installer/salesperson claim yields a
+/// permission-denied stream error.
 final dealerInstallersProvider =
     StreamProvider.family<List<InstallerInfo>, String>((ref, dealerCode) {
   return FirebaseFirestore.instance
