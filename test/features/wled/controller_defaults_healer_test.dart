@@ -167,8 +167,20 @@ ControllerClockInfo _healthy() => ControllerClockInfo(
       ntpHost: kHealNtpHost, // already good
     );
 
-ControllerClockInfo _clockUnset() =>
-    const ControllerClockInfo(deviceTime: null); // no readable time
+/// No readable device time. Boot defaults default to a DEALER-CONFIGURED
+/// controller (SOP §2.3: turn-on-after-power-up OFF, no boot preset) — the
+/// shape where a post-heal reboot is safe, so the reboot-orchestration tests
+/// below exercise a real reboot. Override [turnOnAtBoot] to model a controller
+/// left at WLED's defaults, where a reboot would light the strip.
+ControllerClockInfo _clockUnset({
+  bool? turnOnAtBoot = false,
+  int? bootPresetId = kWledNoBootPreset,
+}) =>
+    ControllerClockInfo(
+      deviceTime: null,
+      turnOnAtBoot: turnOnAtBoot,
+      bootPresetId: bootPresetId,
+    );
 
 ControllerClockInfo _locationUnset() => ControllerClockInfo(
       deviceTime: _now,
@@ -574,12 +586,55 @@ void main() {
   });
 
   group('reboot-deferral predicate — shouldRebootAfterHostHeal', () {
-    test('lights off → reboot now', () {
-      expect(shouldRebootAfterHostHeal(deviceOn: false), true);
+    // A reboot must NEVER turn a customer's lights on. WLED boots the strip lit
+    // when def.on (turnOnAtBoot) is true, and a boot preset can light it even
+    // when def.on is false — so an OFF strip is only safe when both boot paths
+    // are known-quiet.
+    test('lights off + turnOnAtBoot false + no boot preset → reboot now', () {
       expect(
           shouldRebootAfterHostHeal(
-              deviceOn: false, activePresetId: 3, bootPresetId: 5),
+              deviceOn: false,
+              bootPresetId: kWledNoBootPreset,
+              turnOnAtBoot: false),
           true);
+    });
+
+    test('lights off + turnOnAtBoot TRUE → DEFER (reboot would light the strip)',
+        () {
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: false,
+              bootPresetId: kWledNoBootPreset,
+              turnOnAtBoot: true),
+          false);
+    });
+
+    test('lights off + boot preset set → DEFER (preset can light the strip)',
+        () {
+      // Even with turnOnAtBoot false, WLED fades to a boot preset that has
+      // on:true — so any configured boot preset defers.
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: false, bootPresetId: 5, turnOnAtBoot: false),
+          false);
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: false, bootPresetId: 5, turnOnAtBoot: true),
+          false);
+    });
+
+    test('lights off + boot defaults unknown (null) → DEFER, never blind-reboot',
+        () {
+      expect(shouldRebootAfterHostHeal(deviceOn: false), false);
+      expect(
+          shouldRebootAfterHostHeal(deviceOn: false, turnOnAtBoot: false),
+          false,
+          reason: 'boot preset unknown');
+      expect(
+          shouldRebootAfterHostHeal(
+              deviceOn: false, bootPresetId: kWledNoBootPreset),
+          false,
+          reason: 'turnOnAtBoot unknown');
     });
     test('on + active look IS the boot preset → reboot now', () {
       expect(
@@ -644,6 +699,38 @@ void main() {
       expect(report.ntpHostHealed, true);
       expect(report.rebooted, false);
       expect(report.rebootDeferred, true);
+    });
+
+    test(
+        'CLOCK_UNSET + lights OFF + turnOnAtBoot TRUE → heal persists, reboot '
+        'DEFERRED (a reboot would turn the customer’s lights on)', () async {
+      // The regression this gate exists to prevent: WLED boots the strip lit
+      // when def.on is true, and the clock is unset so no schedule would ever
+      // turn it back off.
+      final repo = _FakeHealRepo(
+        _clockUnset(turnOnAtBoot: true),
+        stateResponse: {'on': false},
+      );
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(report.ntpHostHealed, true, reason: 'cfg write still persists');
+      expect(report.rebooted, false);
+      expect(report.rebootDeferred, true);
+      expect(repo.jsonPosts, isEmpty, reason: 'no {rb:true} may be sent');
+      expect(report.log.any((l) => l.contains('onAtBoot=true')), true);
+    });
+
+    test('CLOCK_UNSET + lights OFF + boot preset set → reboot DEFERRED',
+        () async {
+      final repo = _FakeHealRepo(
+        _clockUnset(turnOnAtBoot: false, bootPresetId: 5),
+        stateResponse: {'on': false},
+      );
+      final report = await _healer(repo, isLan: true).run();
+
+      expect(report.rebooted, false);
+      expect(report.rebootDeferred, true);
+      expect(repo.jsonPosts, isEmpty);
     });
   });
 

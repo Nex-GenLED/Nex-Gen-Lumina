@@ -153,20 +153,47 @@ CoordHeal? coordHealFor({
 }
 
 /// Whether to reboot NOW after an NTP-host heal, vs DEFER to the next natural
-/// boot. A reboot restores WLED's boot look, so we only reboot when that is
-/// non-disruptive: the lights are OFF, or the currently-displayed look already
-/// IS the boot preset (a reboot reproduces it exactly). Otherwise DEFER — the
+/// boot. A reboot re-runs WLED's boot sequence, so we only reboot when that
+/// reproduces what the customer is already looking at. Otherwise DEFER — the
 /// host/en write persists in cfg and takes effect on the next power cycle or
 /// user reboot, whenever that is (keeps the healer stateless — no delayed-reboot
-/// scheduling). [bootPresetId] is null in relay mode (cfg.def unreadable) → any
-/// on-state defers.
+/// scheduling).
+///
+/// ── Why the lights-OFF rule flipped (was: "off → always safe") ──────────────
+/// The original gate returned true for any off strip, on the reasoning that
+/// "off → no visible disruption". That is the OPPOSITE of what WLED does. From
+/// wled00/wled.cpp's boot sequence:
+///
+///     bri = 0;                                   // start black
+///     if (turnOnAtBoot) bri = briS;              // ← comes up LIT at def.bri
+///     if (bootPreset > 0) applyPreset(bootPreset, CALL_MODE_INIT);
+///
+/// and its own comment: "if turnOnAtBoot is false: strip is set to black … if a
+/// bootup preset is set, it will fade to that preset if it has on:true set".
+/// So an OFF strip comes back ON when `cfg.def.on` is true, AND a boot preset
+/// can light it even when def.on is false. WLED ships turnOnAtBoot defaulting
+/// to TRUE, so the old rule turned customers' lights on — and because the NTP
+/// heal only fires on a clock-unset controller, no schedule would ever turn
+/// them back off.
+///
+/// Rebooting must never turn a customer's lights on. An off strip is therefore
+/// only safe when BOTH boot paths are known-quiet: [turnOnAtBoot] is explicitly
+/// false AND no boot preset is configured. Anything unknown/null (relay, cfg
+/// unreadable) defers — the same never-blind-reboot discipline as the rest of
+/// the gate. Dealer-configured controllers (SOP §2.3: turn-on-after-power-up
+/// OFF, boot preset 0) still qualify; controllers left at WLED's defaults don't.
 bool shouldRebootAfterHostHeal({
   required bool deviceOn,
   int? activePresetId,
   int? bootPresetId,
+  bool? turnOnAtBoot,
 }) {
-  if (!deviceOn) return true; // off → no visible disruption
-  // On: reboot only if the live look is exactly the configured boot preset.
+  if (!deviceOn) {
+    // Off: safe ONLY if the boot sequence leaves it off — see above.
+    return turnOnAtBoot == false && bootPresetId == kWledNoBootPreset;
+  }
+  // On: reboot only if the live look is exactly the configured boot preset, so
+  // the boot sequence reproduces it.
   if (bootPresetId != null &&
       bootPresetId != kWledNoBootPreset &&
       activePresetId == bootPresetId) {
@@ -402,7 +429,7 @@ class ControllerDefaultsHealer {
     // device state so we don't reboot an actively-running non-boot look: defer
     // instead (the cfg write persists and applies on the next natural boot).
     if (ntpRetryFieldChanged) {
-      final decision = await _decideReboot();
+      final decision = await _decideReboot(info);
       if (decision.reboot) {
         try {
           report.rebooted = await repo.applyJson({'rb': true});
@@ -459,10 +486,13 @@ class ControllerDefaultsHealer {
     }
   }
 
-  /// Reads the live device state (on + active preset) and, on LAN, the boot
-  /// preset, to decide whether the post-NTP-heal reboot is safe now or should
-  /// defer. Unreadable state → defer (never blind-reboot).
-  Future<({bool reboot, String reason})> _decideReboot() async {
+  /// Reads the live device state (on + active preset) and pairs it with the
+  /// boot defaults already carried on [info] (cfg.def.ps / cfg.def.on, from the
+  /// healer's one cfg read) to decide whether the post-NTP-heal reboot is safe
+  /// now or should defer. Unreadable state → defer (never blind-reboot).
+  Future<({bool reboot, String reason})> _decideReboot(
+    ControllerClockInfo info,
+  ) async {
     Map<String, dynamic>? state;
     try {
       state = await repo.getState();
@@ -474,19 +504,16 @@ class ControllerDefaultsHealer {
     }
     final on = state['on'] == true;
     final activePs = _asInt(state['ps']);
-    int? bootPs;
-    final r = repo;
-    if (r is WledService) {
-      bootPs = await r.getBootPresetId();
-    }
     final go = shouldRebootAfterHostHeal(
       deviceOn: on,
       activePresetId: activePs,
-      bootPresetId: bootPs,
+      bootPresetId: info.bootPresetId,
+      turnOnAtBoot: info.turnOnAtBoot,
     );
     return (
       reboot: go,
-      reason: 'on=$on activePs=$activePs bootPs=$bootPs',
+      reason: 'on=$on activePs=$activePs bootPs=${info.bootPresetId} '
+          'onAtBoot=${info.turnOnAtBoot}',
     );
   }
 

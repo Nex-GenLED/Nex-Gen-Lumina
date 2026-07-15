@@ -244,6 +244,31 @@ void main() {
       expect(c.deviceTime, isNotNull);
       expect(c.timezoneKnown, isFalse);
       expect(c.locationKnown, isFalse);
+      expect(c.bootPresetId, isNull);
+      expect(c.turnOnAtBoot, isNull);
+    });
+
+    test('reads cfg.def boot defaults (healer reboot gate)', () {
+      // Shape from a live controller dump: "def":{"ps":0,"on":true,"bri":128}.
+      final c = ControllerClockInfo.fromMaps(
+        {'time': '2026-7-6, 13:49:41'},
+        {
+          'def': {'ps': 0, 'on': true, 'bri': 128},
+        },
+      );
+      expect(c.bootPresetId, 0); // 0 = no boot preset
+      expect(c.turnOnAtBoot, true);
+    });
+
+    test('missing/malformed cfg.def → boot defaults null (never throws)', () {
+      expect(ControllerClockInfo.fromMaps({}, {}).turnOnAtBoot, isNull);
+      expect(ControllerClockInfo.fromMaps({}, {'def': 'nope'}).bootPresetId,
+          isNull);
+      final c = ControllerClockInfo.fromMaps({}, {
+        'def': {'ps': 'x', 'on': 1},
+      });
+      expect(c.bootPresetId, isNull);
+      expect(c.turnOnAtBoot, isNull);
     });
   });
 

@@ -18,6 +18,11 @@
 //   • Timezone index      → GET /json/cfg   `if.ntp.tz`   (0 = UTC).
 //   • Manual UTC offset   → GET /json/cfg   `if.ntp.offset` (seconds).
 //   • Latitude/Longitude  → GET /json/cfg   `if.ntp.lt` / `if.ntp.ln`.
+//   • Boot defaults       → GET /json/cfg   `def.ps` / `def.on` — not clock
+//                          health itself, but the healer's post-NTP-heal reboot
+//                          gate needs them to tell whether a reboot would turn
+//                          a customer's lights on. Carried here because this is
+//                          already the healer's one cfg read.
 // So the CLOCK check needs only /json/info; TZ and LOCATION need /json/cfg.
 // In RELAY mode the bridge exposes getInfo (→ device time) but NOT cfg
 // (CloudRelayRepository.getConfig returns null and there is no getCfg relay
@@ -107,6 +112,15 @@ class ControllerClockInfo {
   /// known-bad default pool host that fails on some networks.
   final String? ntpHost;
 
+  /// Boot preset id from cfg.def.ps (0 = none). WLED applies this preset on
+  /// power-up, which can light an otherwise-off strip. Null when unreadable.
+  final int? bootPresetId;
+
+  /// cfg.def.on — WLED's `turnOnAtBoot`. When true the strip comes up LIT at
+  /// cfg.def.bri. Null when unreadable. Read solely so the healer's reboot gate
+  /// can refuse to reboot a controller whose lights are off.
+  final bool? turnOnAtBoot;
+
   const ControllerClockInfo({
     this.deviceTime,
     this.tzIndex,
@@ -114,6 +128,8 @@ class ControllerClockInfo {
     this.latitude,
     this.longitude,
     this.ntpHost,
+    this.bootPresetId,
+    this.turnOnAtBoot,
   });
 
   /// True when timezone fields were readable (local mode). False in relay mode
@@ -137,6 +153,15 @@ class ControllerClockInfo {
     double? lat;
     double? lon;
     String? host;
+    int? bootPs;
+    bool? onAtBoot;
+    final def = (cfg != null && cfg['def'] is Map) ? cfg['def'] as Map : null;
+    if (def != null) {
+      final ps = def['ps'];
+      if (ps is num) bootPs = ps.toInt();
+      final on = def['on'];
+      if (on is bool) onAtBoot = on;
+    }
     final ifBlock = (cfg != null && cfg['if'] is Map) ? cfg['if'] as Map : null;
     final ntp = (ifBlock != null && ifBlock['ntp'] is Map)
         ? ifBlock['ntp'] as Map
@@ -160,6 +185,8 @@ class ControllerClockInfo {
       latitude: lat,
       longitude: lon,
       ntpHost: host,
+      bootPresetId: bootPs,
+      turnOnAtBoot: onAtBoot,
     );
   }
 }
