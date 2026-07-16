@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
@@ -81,6 +82,18 @@ InstallerWizardStep prevWizardStep(InstallerWizardStep step) {
       return InstallerWizardStep.brandSetup;
   }
 }
+
+/// True when [dealerCode] is the reserved fleet-shared master code that master
+/// installer/admin PINs mint ([DealerCode.masterReserved], '55').
+///
+/// A real customer install must never be attributed to it: every customer
+/// stamped '55' shares one dealer scope, so any master-PIN holder in the fleet
+/// could read them all (the /users read rule scopes on dealer_code). Master
+/// PINs are for support access, not installs — the wizard refuses this code up
+/// front so the install stops before any Firebase work, not at step 8 after the
+/// customer, controllers, and docs have all been written.
+bool installUsesReservedDealerCode(String dealerCode) =>
+    dealerCode == DealerCode.masterReserved;
 
 /// What to do when [_WledInstallerSetupWizardState._completeSetup] throws.
 enum InstallErrorOutcome {
@@ -756,6 +769,18 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
     if (session == null) {
       _showError('Installer session expired. Please re-enter your PIN.');
+      return;
+    }
+
+    // Refuse the reserved master code BEFORE any install work (not at step 8).
+    // A master support PIN mints DealerCode.masterReserved ('55'); attributing
+    // a customer to it collapses per-dealer scoping — see the function doc.
+    if (installUsesReservedDealerCode(session.dealer.dealerCode)) {
+      _showError(
+        "That's a master support PIN — it can't be used to set up a customer. "
+        'Re-enter your own installer PIN (your dealer code + installer code) to '
+        'install this customer.',
+      );
       return;
     }
 

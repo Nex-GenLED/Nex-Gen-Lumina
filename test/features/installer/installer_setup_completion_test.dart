@@ -12,6 +12,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 
 void main() {
   group('classifyInstallError — misleading-failure fix', () {
@@ -35,6 +36,26 @@ void main() {
         reason: 'A failure before the customer doc commits is a real install '
             'failure and must be reported.',
       );
+    });
+  });
+
+  group('installUsesReservedDealerCode — master-PIN refusal', () {
+    test('reserved master code 55 is refused', () {
+      expect(installUsesReservedDealerCode(DealerCode.masterReserved), isTrue);
+      expect(installUsesReservedDealerCode('55'), isTrue);
+    });
+
+    test('genuine per-dealer codes are allowed', () {
+      for (final code in ['01', '07', '42', '54', '56', '99', '00']) {
+        expect(installUsesReservedDealerCode(code), isFalse,
+            reason: '$code is a real dealer code and must be installable');
+      }
+    });
+
+    test('the reserved constant is exactly the staffAuth MASTER_DEALER_CODE', () {
+      // Guards against a future drift between the client constant and the
+      // server's MASTER_DEALER_CODE = "55" (staffAuth.ts:119).
+      expect(DealerCode.masterReserved, '55');
     });
   });
 }
