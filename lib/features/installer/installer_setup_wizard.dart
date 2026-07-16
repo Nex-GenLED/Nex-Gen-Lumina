@@ -82,6 +82,31 @@ InstallerWizardStep prevWizardStep(InstallerWizardStep step) {
   }
 }
 
+/// What to do when [_WledInstallerSetupWizardState._completeSetup] throws.
+enum InstallErrorOutcome {
+  /// Pre-commit failure — the customer is not provisioned. Report failure.
+  reportFailure,
+
+  /// Post-commit — the customer's account and core docs already committed, so
+  /// they can sign in. The throw is post-provisioning bookkeeping (analytics
+  /// counter, referral status); complete the install and show the handoff
+  /// screen with a warning rather than claiming the whole install failed.
+  completeWithWarning,
+}
+
+/// Classify a mid-setup exception by whether the install had already committed.
+///
+/// The commit point is the customer's user-doc write: once it lands, the
+/// controllers are migrated and the /installations doc exists, so the customer
+/// can sign in and control their lights. A blanket "Setup failed" past that
+/// point is a lie that also hides the handoff-credentials screen — the exact
+/// D3-HOTFIX regression at :1191 (an admin/owner-scoped /installers counter
+/// read denied to a non-admin installer session).
+InstallErrorOutcome classifyInstallError({required bool installCommitted}) =>
+    installCommitted
+        ? InstallErrorOutcome.completeWithWarning
+        : InstallErrorOutcome.reportFailure;
+
 /// Copies controller documents added during the installer wizard from the
 /// installer/staff UID to the customer UID, then deletes the originals — with
 /// **each controller's `pixelMap/*` subcollection carried along** (Design
@@ -742,9 +767,19 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
+    // Commit tracking for the outer catch (see classifyInstallError): flips true
+    // once the customer's user doc lands, after which a throw is post-commit
+    // bookkeeping, not an install failure. The handoff vars are hoisted so the
+    // catch can still show the credentials screen.
+    bool installCommitted = false;
+    bool isExistingAccount = false;
+    String? handoffTempPassword;
+    String? handoffInstallationId;
+
     try {
       // 1. Generate temporary password
       final tempPassword = _generateTempPassword();
+      handoffTempPassword = tempPassword;
 
       // Capture the anonymous/installer UID BEFORE createUserWithEmailAndPassword
       // overwrites FirebaseAuth.currentUser with the new customer account.
@@ -758,7 +793,6 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       // installer's STAFF-CLAIM session (not an anonymous one) so the
       // remaining writes carry role + dealerCode — see _restoreInstallerAuth.
       String userId;
-      bool isExistingAccount = false;
       try {
         final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: customerInfo.email.trim().toLowerCase(),
@@ -910,6 +944,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
       // 4. Create Installation document
       final installationRef = FirebaseFirestore.instance.collection('installations').doc();
+      handoffInstallationId = installationRef.id;
 
       final installation = Installation(
         id: installationRef.id,
@@ -988,6 +1023,15 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         userJson,
         SetOptions(merge: true),
       );
+
+      // COMMIT POINT. The customer's user doc now exists; controllers were
+      // migrated (step 2b) and the /installations doc committed (step 4) before
+      // this. The customer can sign in and control their lights. Everything
+      // below — teams, commercial activation, brand pre-seed,
+      // installation_records, referral status, the install-count bump — is
+      // post-provisioning bookkeeping: a throw past here must NOT report the
+      // install as failed (classifyInstallError).
+      installCommitted = true;
 
       // Register the installer-collected Game Day teams (#63 E1, step 3).
       //
@@ -1187,17 +1231,30 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         debugPrint('Referral pipeline update failed (non-blocking): $e');
       }
 
-      // 8. Increment installer's installation count
-      final installerQuery = await FirebaseFirestore.instance
-          .collection('installers')
-          .where('fullPin', isEqualTo: session.installer.fullPin)
-          .limit(1)
-          .get();
+      // 8. Increment installer's installation count — best-effort analytics.
+      //
+      // The /installers read is admin/owner-scoped (D3-HOTFIX,
+      // firestore.rules:1120 → hasAdminOrOwnerClaim). A non-admin installer
+      // session — anonymous fallback, or an 'installer'/'salesperson' staff
+      // claim — is DENIED here. That must never fail a completed install, so
+      // this mirrors the non-blocking referral block above. (This exact read is
+      // what surfaced the whole "install failed on a successful install" bug:
+      // it was unwrapped and threw to the outer catch after the customer was
+      // already provisioned.)
+      try {
+        final installerQuery = await FirebaseFirestore.instance
+            .collection('installers')
+            .where('fullPin', isEqualTo: session.installer.fullPin)
+            .limit(1)
+            .get();
 
-      if (installerQuery.docs.isNotEmpty) {
-        await installerQuery.docs.first.reference.update({
-          'totalInstallations': FieldValue.increment(1),
-        });
+        if (installerQuery.docs.isNotEmpty) {
+          await installerQuery.docs.first.reference.update({
+            'totalInstallations': FieldValue.increment(1),
+          });
+        }
+      } catch (e) {
+        debugPrint('Installer: installation-count bump failed (non-blocking): $e');
       }
 
       // NOTE: Do NOT sign out here. Signing out fires AuthStateListenable
@@ -1219,6 +1276,20 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       }
     } on FirebaseAuthException catch (e) {
       setState(() => _isProcessing = false);
+      // Post-commit: the customer is provisioned. Show handoff + warning, never
+      // "Setup failed" (which also hides the credentials the installer needs).
+      if (classifyInstallError(installCommitted: installCommitted) ==
+          InstallErrorOutcome.completeWithWarning) {
+        _completeWithHandoffWarning(
+          customerName: customerInfo.name,
+          email: customerInfo.email,
+          isExistingAccount: isExistingAccount,
+          tempPassword: handoffTempPassword,
+          installationId: handoffInstallationId,
+          error: e,
+        );
+        return;
+      }
       String errorMessage;
       switch (e.code) {
         case 'email-already-in-use':
@@ -1236,8 +1307,43 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       _showError(errorMessage);
     } catch (e) {
       setState(() => _isProcessing = false);
+      if (classifyInstallError(installCommitted: installCommitted) ==
+          InstallErrorOutcome.completeWithWarning) {
+        _completeWithHandoffWarning(
+          customerName: customerInfo.name,
+          email: customerInfo.email,
+          isExistingAccount: isExistingAccount,
+          tempPassword: handoffTempPassword,
+          installationId: handoffInstallationId,
+          error: e,
+        );
+        return;
+      }
       _showError('Setup failed: $e');
     }
+  }
+
+  /// Post-commit fallback: the customer is provisioned but a later bookkeeping
+  /// step threw. Show the handoff-credentials screen (the install IS done) with
+  /// a warning banner instead of a failure dialog.
+  void _completeWithHandoffWarning({
+    required String customerName,
+    required String email,
+    required bool isExistingAccount,
+    required String? tempPassword,
+    required String? installationId,
+    required Object error,
+  }) {
+    debugPrint('Installer: post-commit bookkeeping failed (non-fatal): $error');
+    if (!mounted) return;
+    _showHandoffCredentials(
+      customerName: customerName,
+      email: email,
+      tempPassword: isExistingAccount ? null : tempPassword,
+      installationId: installationId ?? '',
+      warning: 'The customer is fully set up and can sign in. A final '
+          "bookkeeping step didn't finish — no action needed.",
+    );
   }
 
   void _showError(String message) {
@@ -1262,6 +1368,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     required String email,
     required String? tempPassword,
     required String installationId,
+    String? warning,
   }) {
     final isExisting = tempPassword == null;
     showDialog(
@@ -1283,6 +1390,29 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (warning != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: Colors.orange, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(warning,
+                            style: const TextStyle(
+                                color: Colors.orange, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               Text(
                 isExisting
                     ? 'Existing account has been linked to this installation.'
