@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart';
+import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
 import 'package:nexgen_command/features/sports_alerts/models/game_state.dart';
 import 'package:nexgen_command/features/sports_alerts/models/score_alert_config.dart';
@@ -236,34 +237,99 @@ void main() {
     AutopilotSession session(String slug, AutopilotSessionPhase phase) =>
         AutopilotSession(teamSlug: slug, phase: phase);
 
-    test('liveGame + celebrate ON → included', () {
+    EphemeralGameSession ephemeral(String slug, EphemeralSessionPhase phase) =>
+        EphemeralGameSession(
+          sessionId: 'e-$slug',
+          teamSlug: slug,
+          gameId: 'g-$slug',
+          gameStart: DateTime(2026, 1, 1),
+          revertWledPayload: const {},
+          revertLabel: 'x',
+          createdAt: DateTime(2026, 1, 1),
+          phase: phase,
+        );
+
+    test('autopilot liveGame + celebrate ON → included (regression)', () {
       final teams = computeLiveCelebrationTeams(
         sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: const [],
         configs: [cfg('a')],
       );
       expect(teams.map((t) => t.teamSlug), ['a']);
     });
 
-    test('toggle OFF (scoreCelebrationEnabled=false) → excluded', () {
+    test(
+        'EPHEMERAL-only liveGame (autopilot idle) → included — THE BUG FIX: '
+        'the coordinator was blind to the machine that lights mid-game joins',
+        () {
+      final teams = computeLiveCelebrationTeams(
+        // Autopilot never armed (mid-game cold open, hasGameSoon window passed).
+        sessions: {'a': session('a', AutopilotSessionPhase.idle)},
+        // Ephemeral machine caught the in-progress join.
+        ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
+        configs: [cfg('a')],
+      );
+      expect(teams.map((t) => t.teamSlug), ['a']);
+    });
+
+    test('both machines live for the SAME team → exactly ONE entry (no dupe)',
+        () {
       final teams = computeLiveCelebrationTeams(
         sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
+        configs: [cfg('a')],
+      );
+      expect(teams, hasLength(1));
+      expect(teams.single.teamSlug, 'a');
+    });
+
+    test('both machines live for DIFFERENT teams → two entries', () {
+      final teams = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: [ephemeral('b', EphemeralSessionPhase.liveGame)],
+        configs: [cfg('a'), cfg('b')],
+      );
+      expect(teams.map((t) => t.teamSlug).toSet(), {'a', 'b'});
+    });
+
+    test('toggle OFF excludes even when live in the EPHEMERAL machine', () {
+      final teams = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.idle)},
+        ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
         configs: [cfg('a', celebrate: false)],
       );
       expect(teams, isEmpty);
     });
 
-    test('not in liveGame phase (preGame) → excluded', () {
+    test('config disabled excludes even when ephemeral-live', () {
       final teams = computeLiveCelebrationTeams(
-        sessions: {'a': session('a', AutopilotSessionPhase.preGame)},
-        configs: [cfg('a')],
+        sessions: {'a': session('a', AutopilotSessionPhase.idle)},
+        ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
+        configs: [cfg('a', enabled: false)],
       );
       expect(teams, isEmpty);
     });
 
-    test('config disabled → excluded even if live', () {
+    test('ephemeral present but NOT liveGame (preGame/postGame) → excluded', () {
+      for (final p in [
+        EphemeralSessionPhase.idle,
+        EphemeralSessionPhase.preGame,
+        EphemeralSessionPhase.postGame,
+      ]) {
+        final teams = computeLiveCelebrationTeams(
+          sessions: {'a': session('a', AutopilotSessionPhase.idle)},
+          ephemeralSessions: [ephemeral('a', p)],
+          configs: [cfg('a')],
+        );
+        expect(teams, isEmpty, reason: 'ephemeral phase $p is not live');
+      }
+    });
+
+    test('neither machine live → no teams (no polling)', () {
       final teams = computeLiveCelebrationTeams(
-        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
-        configs: [cfg('a', enabled: false)],
+        sessions: {'a': session('a', AutopilotSessionPhase.preGame)},
+        ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.preGame)],
+        configs: [cfg('a')],
       );
       expect(teams, isEmpty);
     });

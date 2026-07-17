@@ -17,6 +17,10 @@ import '../../autopilot/game_day_autopilot_providers.dart'
     show enabledAutopilotConfigsProvider, gameDayAutopilotNotifierProvider;
 import '../../autopilot/game_day_autopilot_service.dart'
     show AutopilotSession, AutopilotSessionPhase;
+import '../../game_day/ephemeral_session/ephemeral_game_session.dart'
+    show EphemeralGameSession, EphemeralSessionPhase;
+import '../../game_day/ephemeral_session/ephemeral_game_session_providers.dart'
+    show activeEphemeralSessionsProvider;
 import '../../wled/wled_payload_utils.dart' show applyChannelFilter;
 import '../../wled/wled_providers.dart' show wledRepositoryProvider;
 import '../../wled/zone_providers.dart' show deviceChannelsProvider;
@@ -85,36 +89,69 @@ final foregroundCelebrationCoordinatorProvider =
   return coordinator;
 });
 
-/// Teams currently in the liveGame phase whose Game Day config has celebrations
+/// Teams currently in a liveGame phase whose Game Day config has celebrations
 /// enabled. Empty → no polling. Respects the existing per-team
 /// `scoreCelebrationEnabled` toggle (default ON) — no parallel setting invented.
+///
+/// Reads BOTH Game Day phase machines — see [computeLiveCelebrationTeams] for
+/// why the ephemeral one has to be unioned in.
 final liveCelebrationTeamsProvider = Provider<List<CelebrationTeam>>((ref) {
   return computeLiveCelebrationTeams(
     sessions: ref.watch(gameDayAutopilotNotifierProvider),
+    ephemeralSessions:
+        ref.watch(activeEphemeralSessionsProvider).valueOrNull ?? const [],
     configs: ref.watch(enabledAutopilotConfigsProvider),
   );
 });
 
-/// Pure derivation (unit-tested): a team celebrates iff it is in the liveGame
-/// phase AND its Game Day config is enabled with `scoreCelebrationEnabled`.
-/// Sensitivity is [AlertSensitivity.allEvents] — celebrate every score the
-/// per-sport diff engine emits (it already throttles high-frequency leagues:
-/// NBA/NCAA-MB emit clutch only).
+/// Pure derivation (unit-tested): a team celebrates iff it is in a liveGame
+/// phase in EITHER Game Day phase machine AND its Game Day config is enabled
+/// with `scoreCelebrationEnabled`. Sensitivity is [AlertSensitivity.allEvents]
+/// — celebrate every score the per-sport diff engine emits (it already
+/// throttles high-frequency leagues: NBA/NCAA-MB emit clutch only).
+///
+/// ── WHY TWO SOURCES (#54 union — delete deliberately, do not resurrect) ──────
+/// The app has TWO Game Day phase machines with two separate enums:
+///   • autopilot [gameDayAutopilotNotifierProvider] → [AutopilotSessionPhase],
+///     calendar-scheduled, and it only ARMS via a 30-min pre-game window
+///     (evaluateConfigs → hasGameSoon). It never reaches liveGame on a mid-game
+///     cold open.
+///   • ephemeral [activeEphemeralSessionsProvider] → [EphemeralSessionPhase],
+///     the one-shot live session that catches in-progress joins directly
+///     (ephemeral_game_session_service.dart idle→liveGame). This is what lights
+///     the lights when a user opens the app because the game is already on.
+/// Reading ONLY autopilot meant celebrations NEVER fired in the real world —
+/// the machine that lit the lights was invisible to the coordinator. We union
+/// both live sets here as the surgical fix. #54 consolidates the two machines
+/// into one; when it lands, REMOVE the ephemeral loop deliberately as part of
+/// that unification — do NOT quietly drop back to a single-source read, which
+/// is exactly the bug this union closes.
 List<CelebrationTeam> computeLiveCelebrationTeams({
   required Map<String, AutopilotSession> sessions,
+  required List<EphemeralGameSession> ephemeralSessions,
   required List<GameDayAutopilotConfig> configs,
 }) {
+  // Union the live team slugs from both phase machines. A Set collapses a team
+  // that is live in BOTH machines to a single slug, so the emission below can
+  // never yield two entries for it (no double-poll, no stacked celebration).
   final liveSlugs = <String>{
     for (final s in sessions.values)
       if (s.phase == AutopilotSessionPhase.liveGame) s.teamSlug,
+    for (final e in ephemeralSessions)
+      if (e.phase == EphemeralSessionPhase.liveGame) e.teamSlug,
   };
   if (liveSlugs.isEmpty) return const [];
 
+  // Config still gates (enabled + scoreCelebrationEnabled) and supplies the
+  // sport. `seen` dedupes defensively in case configs ever carries a duplicate
+  // slug — one CelebrationTeam per team, period.
+  final seen = <String>{};
   return [
     for (final cfg in configs)
       if (cfg.enabled &&
           cfg.scoreCelebrationEnabled &&
-          liveSlugs.contains(cfg.teamSlug))
+          liveSlugs.contains(cfg.teamSlug) &&
+          seen.add(cfg.teamSlug))
         CelebrationTeam(
           teamSlug: cfg.teamSlug,
           sport: cfg.sport,
