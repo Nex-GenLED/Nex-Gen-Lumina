@@ -4,10 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
 import '../site/user_profile_providers.dart';
+import '../../app_providers.dart' show appForegroundProvider;
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
-import '../sports_alerts/providers/sports_alert_providers.dart';
+import '../sports_alerts/services/espn_api_service.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_crew_service.dart';
 
@@ -108,11 +109,85 @@ final gameDayTeamsProvider =
   return entries;
 });
 
-/// Check if a game exists within 24h for a given team slug.
-/// Used by both the Game Day screen and the explore flow prompt.
+// ── Live score badge (Game Day card) ────────────────────────────────────────
+
+/// Poll cadence for the Game Day card's live score badge while a game is live.
+/// 30s matches the celebration coordinator's ESPN cadence.
+const Duration kLiveScoreRefreshInterval = Duration(seconds: 30);
+
+/// How long to wait before re-fetching the score badge, or null to STOP.
+///
+/// Pure + unit-tested. Polls ONLY while the game is actively live AND the app
+/// is foregrounded — no orphaned timers pre/post game or in the background.
+Duration? liveScoreRefreshInterval({
+  required GameState? game,
+  required bool appForeground,
+}) {
+  if (!appForeground || game == null) return null;
+  final isLive = game.status == GameStatus.inProgress ||
+      game.status == GameStatus.halftime;
+  return isLive ? kLiveScoreRefreshInterval : null;
+}
+
+/// Test seam: how the badge fetches a team's current game. Defaults to a
+/// one-shot ESPN scoreboard read (the same call the phase machine uses).
+final liveScoreFetcherProvider =
+    Provider<Future<GameState?> Function(String teamSlug)>((ref) {
+  return (teamSlug) async {
+    final teamInfo = kTeamColors[teamSlug];
+    if (teamInfo == null) return null;
+    final espnApi = EspnApiService();
+    try {
+      return await espnApi.fetchTeamGame(teamInfo.sport, teamInfo.espnTeamId);
+    } finally {
+      espnApi.dispose();
+    }
+  };
+});
+
+/// Overridable poll interval so tests don't wait 30s.
+final liveScorePollIntervalProvider =
+    Provider<Duration>((ref) => kLiveScoreRefreshInterval);
+
+/// Live-updating game state for the Game Day card's score badge (also used for
+/// the card's live/final treatment).
+///
+/// WAS a one-shot `FutureProvider` that snapshotted the score at card build and
+/// never refreshed — the badge froze at whatever it read on load ("0 - 0" /
+/// "Today") and never showed the live score. It is now a self-polling stream:
+/// fetch → emit → re-fetch every [liveScorePollIntervalProvider], but ONLY
+/// while the game is live AND the app is foregrounded ([liveScoreRefreshInterval]).
+/// It stops otherwise, `autoDispose` stops it when the card scrolls off-screen,
+/// and a background→foreground flip re-runs it (it watches [appForegroundProvider])
+/// so polling resumes — no orphaned timers, no background ESPN traffic.
+///
+/// I chose this live-gated self-poll over pointing the badge at the celebration
+/// coordinator's ScoreMonitorService: the coordinator only polls when
+/// celebrations are ARMED (config enabled + `scoreCelebrationEnabled` +
+/// foreground), so a user who turned celebrations OFF — or a team with no
+/// autopilot config — would see a frozen badge again. The badge must show the
+/// score independently of the celebration toggle, so it owns its own cadence.
 final upcomingGameProvider =
-    FutureProvider.family<GameState?, String>((ref, teamSlug) async {
-  return ref.watch(activeGameProvider(teamSlug).future);
+    StreamProvider.autoDispose.family<GameState?, String>((ref, teamSlug) async* {
+  final fetch = ref.watch(liveScoreFetcherProvider);
+  final interval = ref.watch(liveScorePollIntervalProvider);
+  // Watched at the top: a foreground flip re-runs the whole provider — background
+  // ends the loop, resume restarts it.
+  final foreground = ref.watch(appForegroundProvider);
+
+  while (true) {
+    GameState? game;
+    try {
+      game = await fetch(teamSlug);
+    } catch (_) {
+      game = null;
+    }
+    yield game;
+    if (liveScoreRefreshInterval(game: game, appForeground: foreground) == null) {
+      return; // not live or backgrounded → stop polling
+    }
+    await Future<void>.delayed(interval);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

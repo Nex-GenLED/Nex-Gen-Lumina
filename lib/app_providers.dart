@@ -16,6 +16,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// if you want build-time control. Set to false for real device provisioning.
 const bool kSimulationMode = false;
 
+/// Whether the app is in the foreground (resumed). Fed by the root shell's
+/// lifecycle observer (main_scaffold `didChangeAppLifecycleState`). Consumed by
+/// surfaces that must stop work off-screen — e.g. the live score-badge poller
+/// ([upcomingGameProvider]) which must not keep hitting ESPN in the background.
+/// Defaults to true (the app is foreground at first build).
+final appForegroundProvider = StateProvider<bool>((ref) => true);
+
 // Demo state is intentionally in-memory only.
 // Resets on app restart — no persistence needed.
 

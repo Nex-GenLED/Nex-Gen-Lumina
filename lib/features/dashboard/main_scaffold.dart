@@ -102,6 +102,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final foreground = state == AppLifecycleState.resumed;
+    // Shared foreground signal — also stops the live score-badge poller
+    // ([upcomingGameProvider]) off-screen, not just the celebration coordinator.
+    ref.read(appForegroundProvider.notifier).state = foreground;
     // Score celebrations are app-open-only BY DESIGN — pause the ESPN poll +
     // celebration playback whenever the app leaves the foreground.
     ref
