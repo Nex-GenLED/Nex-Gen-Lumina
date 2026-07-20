@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart'
+    show ClockInfoSource;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
@@ -33,8 +36,30 @@ class ScheduleSyncService {
   /// Last available preset ID for user schedules
   static const int _lastSchedulePresetId = 25;
 
-  /// Total timer slots WLED honors in `timers.ins`.
+  /// GENERAL (clock) timer slots — WLED 0.15.1 `timers.ins` indices 0-7.
+  /// (Was "total slots"; solar now uses the two dedicated slots below, so this
+  /// is the general-timer capacity only.)
   static const int kMaxWledTimers = 8;
+
+  /// WLED 0.15.1 dedicates the LAST TWO `timers.ins` slots to solar triggers:
+  /// index 8 = SUNRISE, index 9 = SUNSET. `checkTimers()` special-cases them BY
+  /// POSITION (timerHours[8]/[9] are ignored; the minute field is the offset in
+  /// minutes). VERSION-SPECIFIC: a future fleet move to the post-0.15.1
+  /// TH_SUNRISE/TH_SUNSET hour-sentinel refactor would change this encoding.
+  static const int kWledSunriseSlot = 8;
+  static const int kWledSunsetSlot = 9;
+
+  /// Total slots WLED 0.15.1 reads from `timers.ins` (8 general + 2 solar).
+  static const int kWledTotalTimerSlots = 10;
+
+  /// The `hour` value WLED 0.15.1 serializes for a solar timer. `checkTimers()`
+  /// keys solar off the SLOT INDEX (8/9), not this value, but we write 255 to
+  /// match the firmware's own serialization. NOT 24/25 — the app's OLD broken
+  /// encoding, where 24 = "fire hourly" and 25 = never matches the RTC.
+  static const int kWledSolarHourMarker = 255;
+
+  /// Max minute-offset magnitude WLED accepts for a sunrise/sunset timer.
+  static const int kWledSolarOffsetLimit = 120;
 
   /// Disabled timer stub used to overwrite a vacated WLED slot. WLED merges
   /// `timers.ins` by index and never clears slots beyond the pushed array's
@@ -74,24 +99,140 @@ class ScheduleSyncService {
   /// actually armed — never overcounting a schedule that silently fell off the
   /// controller.
   static ({List<ScheduleItem> armed, bool overflowed}) splitByTimerCapacity(
-      List<ScheduleItem> armable) {
+      List<ScheduleItem> armable,
+      {bool solarEnabled = false}) {
     final armed = <ScheduleItem>[];
     var slotsUsed = 0;
     var overflowed = false;
     for (final s in armable) {
-      if (slotsUsed >= kMaxWledTimers) {
+      // Solar boundaries live in the dedicated slots 8/9, so they don't consume
+      // a general slot when solar is enabled — count only the CLOCK boundaries.
+      final onSolar = solarEnabled && _isSolarLabel(s.timeLabel);
+      final offSolar = solarEnabled &&
+          s.hasOffTime &&
+          s.offTimeLabel != null &&
+          _isSolarLabel(s.offTimeLabel!);
+      // A clock ON needs a general slot; a solar ON does not. Only overflow on
+      // a schedule that actually needs a general slot and has none left — a
+      // solar-only schedule always fits (it uses slot 8/9).
+      if (!onSolar && slotsUsed >= kMaxWledTimers) {
         overflowed = true;
         break;
       }
-      slotsUsed += 1; // ON timer
+      if (!onSolar) slotsUsed += 1; // clock ON timer
       if (s.hasOffTime &&
           s.offTimeLabel != null &&
+          !offSolar &&
           slotsUsed < kMaxWledTimers) {
-        slotsUsed += 1; // OFF timer
+        slotsUsed += 1; // clock OFF timer
       }
       armed.add(s);
     }
     return (armed: armed, overflowed: overflowed);
+  }
+
+  /// Encodes a single WLED 0.15.1 solar timer entry (for slot 8 or 9). The
+  /// slot POSITION — not this map — is what makes it sunrise vs sunset; the map
+  /// is identical either way. `hour:255` is the firmware's serialized marker;
+  /// `min` is the offset in minutes (clamped to ±120), NOT a wall-clock minute.
+  static Map<String, dynamic> buildSolarTimerEntry({
+    required int offsetMinutes,
+    required int macro,
+    required int dow,
+  }) {
+    return <String, dynamic>{
+      'en': 1,
+      'hour': kWledSolarHourMarker,
+      'min': offsetMinutes.clamp(-kWledSolarOffsetLimit, kWledSolarOffsetLimit),
+      'macro': macro,
+      'dow': dow,
+    };
+  }
+
+  /// Resolves the two solar slots (sunrise / sunset) across ALL schedules — the
+  /// constraint is cross-schedule, so it cannot live in a per-schedule guard.
+  /// WLED 0.15.1 has exactly ONE sunrise slot (8) and ONE sunset slot (9), so
+  /// each holds at most one boundary (an ON or an OFF), first-wins. Additional
+  /// sunrise/sunset boundaries are returned in [rejected] for a warning.
+  ///
+  /// Flexible pairing: a dusk-to-dawn schedule (ON at sunset, OFF at sunrise)
+  /// fills BOTH slots by itself; the two are independently assignable.
+  ({
+    Map<String, dynamic>? sunrise,
+    Map<String, dynamic>? sunset,
+    List<String> rejected,
+  }) solarTimerSlots(List<ScheduleItem> schedules) {
+    Map<String, dynamic>? sunrise;
+    Map<String, dynamic>? sunset;
+    final rejected = <String>[];
+
+    void assign(bool isSunrise, Map<String, dynamic> entry, String who) {
+      if (isSunrise) {
+        if (sunrise == null) {
+          sunrise = entry;
+        } else {
+          rejected.add(who);
+        }
+      } else {
+        if (sunset == null) {
+          sunset = entry;
+        } else {
+          rejected.add(who);
+        }
+      }
+    }
+
+    for (final s in schedules) {
+      final dow = _computeDowMask(s.repeatDays);
+      if (dow == 0) continue;
+      final presetId = s.presetId ?? _presetForAction(s.actionLabel);
+
+      // ON boundary (offset 0 — no offset UI yet; see PR bench-gate note).
+      if (_isSolarLabel(s.timeLabel)) {
+        final isSunrise = s.timeLabel.trim().toLowerCase() == 'sunrise';
+        assign(
+          isSunrise,
+          buildSolarTimerEntry(offsetMinutes: 0, macro: presetId, dow: dow),
+          '${s.actionLabel} (${s.timeLabel} ON)',
+        );
+      }
+      // OFF boundary — macro 2 is the OFF preset (same convention as clock).
+      if (s.hasOffTime &&
+          s.offTimeLabel != null &&
+          _isSolarLabel(s.offTimeLabel!)) {
+        final isSunrise = s.offTimeLabel!.trim().toLowerCase() == 'sunrise';
+        assign(
+          isSunrise,
+          buildSolarTimerEntry(offsetMinutes: 0, macro: 2, dow: dow),
+          '${s.actionLabel} (${s.offTimeLabel} OFF)',
+        );
+      }
+    }
+    return (sunrise: sunrise, sunset: sunset, rejected: rejected);
+  }
+
+  /// Assembles the full 10-entry `timers.ins` for the solar-enabled path:
+  /// [generalTimers] pad/truncate into slots 0-7, then slot 8 = [sunrise] and
+  /// slot 9 = [sunset] (disabled stubs when absent, so a removed solar timer is
+  /// reclaimed on the next push — same mechanism as the general slot reclaim).
+  static List<Map<String, dynamic>> assembleSolarAwareIns(
+    List<Map<String, dynamic>> generalTimers, {
+    Map<String, dynamic>? sunrise,
+    Map<String, dynamic>? sunset,
+  }) {
+    final out = generalTimers.length > kMaxWledTimers
+        ? generalTimers.sublist(0, kMaxWledTimers)
+        : List<Map<String, dynamic>>.from(generalTimers);
+    while (out.length < kMaxWledTimers) {
+      out.add(Map<String, dynamic>.from(_disabledTimerStub));
+    }
+    out.add(sunrise != null
+        ? Map<String, dynamic>.from(sunrise)
+        : Map<String, dynamic>.from(_disabledTimerStub)); // slot 8
+    out.add(sunset != null
+        ? Map<String, dynamic>.from(sunset)
+        : Map<String, dynamic>.from(_disabledTimerStub)); // slot 9
+    return out; // exactly kWledTotalTimerSlots (10)
   }
 
   /// Builds a WLED /json/cfg payload that sets the timer configuration.
@@ -116,7 +257,10 @@ class ScheduleSyncService {
   /// Each schedule with an on/off time generates TWO timers:
   /// 1. ON timer - triggers the pattern/action
   /// 2. OFF timer - turns lights off (if offTimeLabel is set)
-  Map<String, dynamic> buildCfgPayload(List<ScheduleItem> schedules) {
+  Map<String, dynamic> buildCfgPayload(
+    List<ScheduleItem> schedules, {
+    bool solarEnabled = false,
+  }) {
     // Eviction (Item #61 Workstream B): items soft-evicted by a
     // CalendarEntry lease are filtered here so the freed slot is
     // genuinely free on the controller side. Re-enable is automatic —
@@ -155,40 +299,49 @@ class ScheduleSyncService {
         continue;
       }
 
-      // Solar (sunrise/sunset) refuse — Option A, see
-      // memory/project_solar_schedules_never_fire. The app maps a solar label
-      // to WLED hour 24/25, which WLED does NOT honor as sunrise/sunset: hour
-      // 24 fires HOURLY and hour 25 never matches the RTC. So a solar boundary
-      // is a dead timer at best and an hourly-snap-off at worst. Refuse the
-      // WHOLE schedule (a half-solar schedule is still broken) so no solar
-      // timer is written and existing ones get reclaimed by the padded push.
-      // This is defense-in-depth: syncAll's arm guard warns the user; this
-      // covers the lease-manager path that bypasses syncAll's guards.
-      if (_isSolarLabel(s.timeLabel) ||
-          (s.hasOffTime &&
-              s.offTimeLabel != null &&
-              _isSolarLabel(s.offTimeLabel!))) {
-        debugPrint('ScheduleSync: skipped solar timer for "${s.actionLabel}" '
-            '(on=${s.timeLabel} off=${s.offTimeLabel}) — hour 24/25 is not '
-            'honored by WLED; refusing until solar is re-encoded');
-        continue;
+      final onSolar = _isSolarLabel(s.timeLabel);
+      final offSolar = s.hasOffTime &&
+          s.offTimeLabel != null &&
+          _isSolarLabel(s.offTimeLabel!);
+
+      if (!solarEnabled) {
+        // FLAG OFF (production / default): solar never fires under the old
+        // hour:24/25 encoding, so refuse the WHOLE schedule (a half-solar
+        // schedule is still broken). syncAll's arm guard warns the user; this
+        // covers the lease-manager path that bypasses those guards. See
+        // memory/project_solar_schedules_never_fire.
+        if (onSolar || offSolar) {
+          debugPrint('ScheduleSync: skipped solar timer for "${s.actionLabel}" '
+              '(on=${s.timeLabel} off=${s.offTimeLabel}) — solar disabled '
+              '(solar_scheduling flag off / bench gate)');
+          continue;
+        }
       }
+      // FLAG ON: a solar boundary is OMITTED from the general 0-7 timers here
+      // and encoded into its dedicated slot 8/9 by [solarTimerSlots] +
+      // [assembleSolarAwareIns]. The CLOCK boundary of a mixed schedule (e.g.
+      // clock ON + sunrise OFF) still lands in slots 0-7 below.
 
       // Determine preset ID: use assigned presetId if available, else fall back to legacy behavior
       final presetId = s.presetId ?? _presetForAction(s.actionLabel);
 
-      // ON timer
-      final onTimer = _buildTimerEntry(
-        timeLabel: s.timeLabel,
-        dow: dow,
-        macro: presetId,
-      );
-      if (onTimer != null) {
-        timers.add(onTimer);
+      // ON timer (clock only — a solar ON is placed positionally at slot 8/9)
+      if (!onSolar) {
+        final onTimer = _buildTimerEntry(
+          timeLabel: s.timeLabel,
+          dow: dow,
+          macro: presetId,
+        );
+        if (onTimer != null) {
+          timers.add(onTimer);
+        }
       }
 
-      // OFF timer (if schedule has an off time)
-      if (s.hasOffTime && s.offTimeLabel != null && timers.length < kMaxWledTimers) {
+      // OFF timer (clock only; if schedule has an off time)
+      if (s.hasOffTime &&
+          s.offTimeLabel != null &&
+          !offSolar &&
+          timers.length < kMaxWledTimers) {
         final offTimer = _buildTimerEntry(
           timeLabel: s.offTimeLabel!,
           dow: dow,
@@ -300,6 +453,28 @@ class ScheduleSyncService {
     // promotion of [repo] (a reassignable local) does not cross into the
     // psaveIfChanged closure, so capture it once here after the guard.
     final activeRepo = repo;
+
+    // ── Solar scheduling gate (Option B, bench-gated) ─────────────────────
+    // Correctly-encoded sunrise/sunset (WLED 0.15.1 positional slots 8/9) is
+    // routed ONLY when the solar_scheduling flag is ON *and* the controller has
+    // usable coordinates (0,0 / unset → the firmware can't compute sunrise or
+    // sunset, so the timer would never fire). Every other state keeps the
+    // a75f504 refuse. The coord fetch only runs when the flag is on, so the
+    // production (flag-off) path adds zero overhead.
+    final solarFlagOn = ref.read(solarSchedulingEnabledSyncProvider);
+    bool solarCoordsUsable = false;
+    if (solarFlagOn && activeRepo is ClockInfoSource) {
+      try {
+        final info = await (activeRepo as ClockInfoSource).fetchClockInfo();
+        final lat = info?.latitude;
+        final lon = info?.longitude;
+        solarCoordsUsable =
+            lat != null && lon != null && !(lat == 0 && lon == 0);
+      } catch (_) {
+        solarCoordsUsable = false;
+      }
+    }
+    final solarEnabled = solarFlagOn && solarCoordsUsable;
 
     final enabled = schedules.where((s) => s.enabled).toList();
 
@@ -562,15 +737,13 @@ class ScheduleSyncService {
         continue;
       }
 
-      // ── Sunrise/sunset not supported yet (refuse-and-warn) ─────────────
-      // The app maps a solar label to WLED hour 24/25, which WLED never fires
-      // as sunrise/sunset — hour 24 fires HOURLY (snapping lights off every
-      // hour on a solar-OFF boundary) and hour 25 never matches. Refuse-and-
-      // warn so the schedule surfaces instead of writing a dead/hourly timer;
-      // _isArmableTimeLabel treats solar as valid, so the bad-time guard above
-      // does NOT catch this. Restore solar as a bench-gated feature later
-      // (Option B). Both boundaries checked together — a solar OFF is as bad
-      // as a solar ON.
+      // ── Sunrise/sunset gate (refuse-and-warn unless solar is enabled) ──
+      // When the solar_scheduling flag is ON *and* the controller has usable
+      // coordinates, correctly-encoded solar (hour:255 at slot 8/9) is armed
+      // downstream — so DON'T refuse here. Otherwise refuse-and-warn (the
+      // a75f504 production behavior), distinguishing the two off states so the
+      // user gets an actionable message. _isArmableTimeLabel treats solar as
+      // valid, so the bad-time guard above does NOT catch this.
       final solarLabels = <String>[
         if (_isSolarLabel(s.timeLabel)) s.timeLabel,
         if (s.hasOffTime &&
@@ -578,12 +751,16 @@ class ScheduleSyncService {
             _isSolarLabel(s.offTimeLabel!))
           s.offTimeLabel!,
       ];
-      if (solarLabels.isNotEmpty) {
+      if (solarLabels.isNotEmpty && !solarEnabled) {
+        final why = solarFlagOn
+            ? 'needs your location set on the controller — sunrise/sunset '
+                'can\'t be computed without it'
+            : 'isn\'t supported yet — please set a specific time';
         presetErrors.add(
-            '"${s.actionLabel}" uses sunrise/sunset timing, which isn\'t '
-            'supported yet — please set a specific time.');
+            '"${s.actionLabel}" uses sunrise/sunset timing, which $why.');
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — solar '
-            'timing not supported (${solarLabels.join(", ")})');
+            'not enabled (flagOn=$solarFlagOn coordsUsable=$solarCoordsUsable; '
+            '${solarLabels.join(", ")})');
         continue;
       }
 
@@ -611,7 +788,8 @@ class ScheduleSyncService {
     // here so we (a) surface a loud warning when schedules overflow and (b)
     // count only the schedules that armed — never claim success for one that
     // silently fell off the controller.
-    final capacity = splitByTimerCapacity(armable);
+    final capacity =
+        splitByTimerCapacity(armable, solarEnabled: solarEnabled);
     final armedSchedules = capacity.armed;
     if (capacity.overflowed) {
       presetErrors.add(
@@ -621,17 +799,33 @@ class ScheduleSyncService {
           'schedule(s) could not arm — WLED timer table full (8/8)');
     }
 
-    // Step 2: Build and push timer configuration. Only armed schedules become
-    // real timers; the payload is padded to all 8 slots so any slot a
-    // now-removed schedule vacated is overwritten with a disabled stub (slot
-    // reclaim — this is what clears the accumulated dow:0 orphans).
-    final built = buildCfgPayload(armedSchedules);
+    // Step 2: Build and push timer configuration. Clock timers fill slots 0-7;
+    // the array is padded so a vacated slot is overwritten with a disabled stub
+    // (slot reclaim — clears dow:0 / stale timers). When solar is enabled the
+    // push is a 10-entry array with the sunrise timer at slot 8 and sunset at
+    // slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
+    final built =
+        buildCfgPayload(armedSchedules, solarEnabled: solarEnabled);
     final builtIns = ((built['timers'] as Map)['ins'] as List)
         .cast<Map<String, dynamic>>();
+    final List<Map<String, dynamic>> ins;
+    if (solarEnabled) {
+      final solar = solarTimerSlots(armedSchedules);
+      // Only one sunrise slot (8) and one sunset slot (9) exist — reject-and-
+      // warn any additional solar boundary (cross-schedule constraint).
+      for (final who in solar.rejected) {
+        presetErrors.add(
+            'Only one sunrise and one sunset schedule are supported per '
+            'controller — "$who" was not armed.');
+        debugPrint('ScheduleSync: solar slot already taken — dropped $who');
+      }
+      ins = assembleSolarAwareIns(builtIns,
+          sunrise: solar.sunrise, sunset: solar.sunset);
+    } else {
+      ins = padTimersToMax(builtIns);
+    }
     final payload = <String, dynamic>{
-      'timers': {
-        'ins': padTimersToMax(builtIns),
-      },
+      'timers': {'ins': ins},
     };
 
     // Arming is a /json/cfg write. The bridge cannot deliver one (it routes
