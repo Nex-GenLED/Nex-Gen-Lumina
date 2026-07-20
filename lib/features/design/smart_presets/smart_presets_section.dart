@@ -293,7 +293,11 @@ class _NoMapCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => context.push(AppRoutes.rooflineEditor),
+      // Route to the ARCHITECTURAL editor (SegmentSetupScreen) — it's the one
+      // that marks run/corner/peak/column, which is what this card's "corner &
+      // peak accents" copy promises. The photo-trace editor (rooflineEditor)
+      // can't set those. Loads existing on entry; create-mode only when none.
+      onTap: () => context.push(AppRoutes.segmentSetup),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(14),
