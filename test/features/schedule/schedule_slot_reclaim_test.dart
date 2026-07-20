@@ -98,18 +98,29 @@ void main() {
     });
   });
 
-  group('padding invariant — solar entries survive untouched', () {
-    test('sunset (hour 25) and sunrise (hour 24) keep their codes after padding',
+  group('solar refuse (Option A) — sunrise/sunset are not written', () {
+    // WAS: "solar entries survive padding" (asserted hour 25/24 preserved).
+    // That premise is now the bug: WLED does not honor hour 24/25 as
+    // sunrise/sunset (24 = hourly, 25 = never), so the app refuses solar
+    // until it's re-encoded. See memory/project_solar_schedules_never_fire.
+    test('solar schedules produce NO real timers — all slots disabled stubs',
         () {
       final ins = pushedIns([
         sched('sunsetOn', time: 'sunset'),
         sched('sunriseOn', time: 'sunrise'),
       ]);
       expect(ins.length, max);
-      expect(ins[0]['hour'], 25, reason: 'sunset code preserved');
-      expect(ins[1]['hour'], 24, reason: 'sunrise code preserved');
-      // Everything after the two real solar timers is a disabled stub.
-      expect(ins.skip(2).every(isDisabledStub), isTrue);
+      expect(ins.every(isDisabledStub), isTrue,
+          reason: 'no hour:24/25 timer is written; the reclaim push clears '
+              'any that a prior sync left on the device');
+    });
+
+    test('case-insensitive: "Sunset" / "SUNRISE" are also refused', () {
+      final ins = pushedIns([
+        sched('a', time: 'Sunset'),
+        sched('b', time: 'SUNRISE'),
+      ]);
+      expect(ins.every(isDisabledStub), isTrue);
     });
   });
 }

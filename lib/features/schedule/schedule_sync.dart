@@ -155,6 +155,25 @@ class ScheduleSyncService {
         continue;
       }
 
+      // Solar (sunrise/sunset) refuse — Option A, see
+      // memory/project_solar_schedules_never_fire. The app maps a solar label
+      // to WLED hour 24/25, which WLED does NOT honor as sunrise/sunset: hour
+      // 24 fires HOURLY and hour 25 never matches the RTC. So a solar boundary
+      // is a dead timer at best and an hourly-snap-off at worst. Refuse the
+      // WHOLE schedule (a half-solar schedule is still broken) so no solar
+      // timer is written and existing ones get reclaimed by the padded push.
+      // This is defense-in-depth: syncAll's arm guard warns the user; this
+      // covers the lease-manager path that bypasses syncAll's guards.
+      if (_isSolarLabel(s.timeLabel) ||
+          (s.hasOffTime &&
+              s.offTimeLabel != null &&
+              _isSolarLabel(s.offTimeLabel!))) {
+        debugPrint('ScheduleSync: skipped solar timer for "${s.actionLabel}" '
+            '(on=${s.timeLabel} off=${s.offTimeLabel}) — hour 24/25 is not '
+            'honored by WLED; refusing until solar is re-encoded');
+        continue;
+      }
+
       // Determine preset ID: use assigned presetId if available, else fall back to legacy behavior
       final presetId = s.presetId ?? _presetForAction(s.actionLabel);
 
@@ -543,6 +562,31 @@ class ScheduleSyncService {
         continue;
       }
 
+      // ── Sunrise/sunset not supported yet (refuse-and-warn) ─────────────
+      // The app maps a solar label to WLED hour 24/25, which WLED never fires
+      // as sunrise/sunset — hour 24 fires HOURLY (snapping lights off every
+      // hour on a solar-OFF boundary) and hour 25 never matches. Refuse-and-
+      // warn so the schedule surfaces instead of writing a dead/hourly timer;
+      // _isArmableTimeLabel treats solar as valid, so the bad-time guard above
+      // does NOT catch this. Restore solar as a bench-gated feature later
+      // (Option B). Both boundaries checked together — a solar OFF is as bad
+      // as a solar ON.
+      final solarLabels = <String>[
+        if (_isSolarLabel(s.timeLabel)) s.timeLabel,
+        if (s.hasOffTime &&
+            s.offTimeLabel != null &&
+            _isSolarLabel(s.offTimeLabel!))
+          s.offTimeLabel!,
+      ];
+      if (solarLabels.isNotEmpty) {
+        presetErrors.add(
+            '"${s.actionLabel}" uses sunrise/sunset timing, which isn\'t '
+            'supported yet — please set a specific time.');
+        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — solar '
+            'timing not supported (${solarLabels.join(", ")})');
+        continue;
+      }
+
       // ── Never arm a dead dow:0 timer ───────────────────────────────────
       // An empty or all-unrecognized repeatDays yields a zero WLED dow mask
       // ("no days"), so the timer would take a slot but never fire — the
@@ -703,6 +747,14 @@ class ScheduleSyncService {
     final l = label.trim().toLowerCase();
     if (l == 'sunrise' || l == 'sunset') return true;
     return _parseTimeLabel(label) != null;
+  }
+
+  /// True for the two solar keywords the app (wrongly) maps to WLED hour 24/25.
+  /// Used by the Option-A refuse guards until solar is re-encoded correctly —
+  /// see memory/project_solar_schedules_never_fire.
+  static bool _isSolarLabel(String label) {
+    final l = label.trim().toLowerCase();
+    return l == 'sunrise' || l == 'sunset';
   }
 
   /// Compute the WLED dow bitmask for a list of weekday names.
