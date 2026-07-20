@@ -13,7 +13,11 @@
 // #58 — typed scheduling-intent contract. fromJson reproduces the EXACT
 // defaulting/coercion the handler previously applied via raw Map access
 // (scheduling_intent_handler.dart buildScheduleItemsFromIntents):
-//   • timeLabel    absent/non-String → 'Sunset'
+//   • timeLabel    absent/non-String → '' (UNRESOLVED — never invented; the
+//                  handler refuses these and asks the user for a time. This
+//                  replaced a silent 'Sunset' default that fabricated a solar
+//                  schedule the user never asked for → an hour:25 timer that
+//                  never fires.)
 //   • offTimeLabel absent/non-String → null
 //   • repeatDays   absent/non-List   → all 7 days; elements .toString()-coerced
 //   • patternName  absent/non-String → 'Custom'
@@ -38,7 +42,8 @@
 /// CONSUMED contract exactly — see the file header for the defaulting rules.
 class SchedulingIntent {
   /// On/start time. 'HH:MM' clock time, or 'Sunset' / 'Sunrise' (resolved from
-  /// device location downstream). Defaults to 'Sunset' when absent.
+  /// device location downstream). EMPTY when the model gave no usable time —
+  /// see [timeUnresolved]. The parser NEVER invents a time.
   final String timeLabel;
 
   /// Off/end time. 'HH:MM', 'Sunset', 'Sunrise', or null for no off-time.
@@ -199,6 +204,12 @@ class SchedulingIntent {
       'every night?"). If the user confirms recurring, use the sequential '
       'chain shape above.\n\n';
 
+  /// True when the model gave us no usable start time. The parser never
+  /// invents one — it used to silently default to 'Sunset', fabricating a
+  /// solar schedule the user didn't ask for (which wrote an hour:25 timer that
+  /// never fires). The handler refuses these and asks the user for a time.
+  bool get timeUnresolved => timeLabel.trim().isEmpty;
+
   /// Parse a raw intent Map into a typed [SchedulingIntent]. Never throws.
   /// Reproduces the handler's exact field defaulting; see the file header.
   factory SchedulingIntent.fromJson(Map<String, dynamic> json) {
@@ -209,7 +220,7 @@ class SchedulingIntent {
     final rawWled = json['wled'];
 
     return SchedulingIntent(
-      timeLabel: rawTime is String ? rawTime : 'Sunset',
+      timeLabel: rawTime is String ? rawTime : '',
       offTimeLabel: rawOff is String ? rawOff : null,
       repeatDays: rawDays is List
           ? rawDays.map((e) => e.toString()).toList()

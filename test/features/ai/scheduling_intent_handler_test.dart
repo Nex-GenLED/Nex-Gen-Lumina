@@ -187,17 +187,66 @@ void main() {
       expect(items, isEmpty);
     });
 
-    test('intent missing timeLabel → defaults to "Sunset"', () {
+    test('intent missing timeLabel → REFUSED, never fabricated (was: silent '
+        '"Sunset" default → hour:25 timer that never fires)', () {
+      final intent = SchedulingIntent.fromJson({'patternName': 'Defaulty'});
+      expect(intent.timeUnresolved, isTrue,
+          reason: 'a missing time must not be invented');
+      expect(intent.timeLabel, isEmpty);
+
       final items = buildScheduleItemsFromIntents(
-        intents: [
-          SchedulingIntent.fromJson({'patternName': 'Defaulty'}),
-        ],
+        intents: [intent],
         sourcePromptId: sharedPromptId,
         batchTs: batchTs,
         sharedWledPayload: null,
       );
 
-      expect(items.first.timeLabel, 'Sunset');
+      expect(items, isEmpty,
+          reason: 'a timeless intent must never be built into a schedule');
+    });
+
+    test('non-string timeLabel (model junk) → also refused', () {
+      final intent =
+          SchedulingIntent.fromJson({'patternName': 'Junk', 'timeLabel': 25});
+      expect(intent.timeUnresolved, isTrue);
+      final items = buildScheduleItemsFromIntents(
+        intents: [intent],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: null,
+      );
+      expect(items, isEmpty);
+    });
+
+    test('genuine clock time "1:20 PM" → resolved, stored verbatim', () {
+      final intent = SchedulingIntent.fromJson(
+          {'patternName': 'Warm White', 'timeLabel': '1:20 PM'});
+      expect(intent.timeUnresolved, isFalse);
+      final items = buildScheduleItemsFromIntents(
+        intents: [intent],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: null,
+      );
+      expect(items.single.timeLabel, '1:20 PM');
+    });
+
+    test('genuine solar "Sunset"→"Sunrise" → still stored (solar creation '
+        'path preserved; whether it FIRES is a separate finding)', () {
+      final intent = SchedulingIntent.fromJson({
+        'patternName': 'Warm White',
+        'timeLabel': 'Sunset',
+        'offTimeLabel': 'Sunrise',
+      });
+      expect(intent.timeUnresolved, isFalse);
+      final items = buildScheduleItemsFromIntents(
+        intents: [intent],
+        sourcePromptId: sharedPromptId,
+        batchTs: batchTs,
+        sharedWledPayload: null,
+      );
+      expect(items.single.timeLabel, 'Sunset');
+      expect(items.single.offTimeLabel, 'Sunrise');
     });
 
     test('intent missing repeatDays → defaults to all 7 days', () {

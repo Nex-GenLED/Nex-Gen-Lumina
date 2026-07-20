@@ -113,11 +113,38 @@ Future<void> handleSchedulingIntents({
   // an explicitly-emitted empty/garbage list lands here — exactly the one-shot
   // sequence shape the prompt tells the model not to emit as repeatDays:[].
   final daysPartition = partitionSchedulableByDays(keptIntents);
-  final schedulableIntents = daysPartition.schedulable;
+  final dayOkIntents = daysPartition.schedulable;
   final unschedulableDayNames = daysPartition.unschedulableNames;
 
+  // ── Time guard (refuse-and-warn) — mirror of the days guard ───────────
+  // A missing/malformed timeLabel used to be silently defaulted to 'Sunset'
+  // (scheduling_intent.dart), fabricating a solar schedule the user never
+  // asked for — which then wrote an hour:25 timer the firmware never fires.
+  // NEVER invent a time: partition unresolved-time intents out and ask.
+  final schedulableIntents = <SchedulingIntent>[];
+  final unresolvedTimeNames = <String>[];
+  for (final intent in dayOkIntents) {
+    if (intent.timeUnresolved) {
+      unresolvedTimeNames.add(intent.patternName);
+    } else {
+      schedulableIntents.add(intent);
+    }
+  }
+
   if (schedulableIntents.isEmpty) {
-    // Nothing armable — persist NOTHING and tell the user plainly.
+    // Nothing armable — persist NOTHING and tell the user plainly. Prefer the
+    // most specific reason: a missing time is distinct from missing days.
+    if (unresolvedTimeNames.isNotEmpty) {
+      final names = unresolvedTimeNames
+          .map((n) => '"${displayNameFor(n)}"')
+          .join(', ');
+      controller.addAssistantMessage(
+        "I couldn't tell what time to run $names, and I won't guess. Tell me a "
+        "time (like \"7pm\" or \"sunset\") and I'll set it up.",
+      );
+      onMessagePosted?.call();
+      return;
+    }
     final names = unschedulableDayNames.isEmpty
         ? 'that'
         : unschedulableDayNames
@@ -441,6 +468,11 @@ List<ScheduleItem> buildScheduleItemsFromIntents({
     // timer that never fires. (Gaps in the `ai-$batchTs-$i` id sequence from a
     // skip are harmless — ids only need to be unique.)
     if (wledDowMaskForDayList(intent.repeatDays) == 0) continue;
+
+    // Defense in depth: never build a timeless item even if a caller skipped
+    // the time guard. An unresolved time can't produce a firing timer, and we
+    // must never invent one (the old 'Sunset' default did exactly that).
+    if (intent.timeUnresolved) continue;
 
     // Per-element wled wins when present; else fall back to the
     // shared top-level payload. The honesty guard upstream
