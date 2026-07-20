@@ -180,96 +180,148 @@ exports.createCustomerAccount = (0, https_1.onCall)({
             throw new https_1.HttpsError("internal", "Failed to look up existing user");
         }
     }
-    if (existingUser) {
-        firebase_functions_1.logger.info(`createCustomerAccount: user already exists for ${email} (uid=${existingUser.uid}), returning idempotent response`);
-        return {
-            uid: existingUser.uid,
-            tempPasswordSent: false,
-        };
-    }
-    // ── Create the new auth user ──────────────────────────────────────────
-    let createdUser;
-    try {
-        createdUser = await auth.createUser({
-            email,
-            displayName,
-            emailVerified: false,
-        });
-        firebase_functions_1.logger.info(`createCustomerAccount: created auth user ${createdUser.uid} for ${email}`);
-    }
-    catch (err) {
-        firebase_functions_1.logger.error(`createCustomerAccount: createUser failed for ${email}: ${err.message}`);
-        throw new https_1.HttpsError("internal", "Failed to create auth user");
-    }
-    // ── Generate the password reset link ──────────────────────────────────
-    let resetLink;
-    try {
-        resetLink = await auth.generatePasswordResetLink(email);
-    }
-    catch (err) {
-        firebase_functions_1.logger.error(`createCustomerAccount: generatePasswordResetLink failed for ${email}: ${err.message}`);
-        // Roll back the user we just created so the caller can retry
-        // cleanly. If the rollback itself fails we still throw the
-        // original error — the caller doesn't need to know about the
-        // cleanup attempt.
-        try {
-            await auth.deleteUser(createdUser.uid);
-        }
-        catch (rollbackErr) {
-            firebase_functions_1.logger.error(`createCustomerAccount: rollback deleteUser failed for ${createdUser.uid}: ${rollbackErr.message}`);
-        }
-        throw new https_1.HttpsError("internal", "Failed to generate password reset link");
-    }
-    // ── Send the welcome email via Resend ─────────────────────────────────
+    // C2: an existing account NO LONGER short-circuits the function.
     //
-    // Email failures are NOT a hard error — the auth user is already
-    // created, the user doc is about to be seeded, and the wrap-up
-    // screen will surface a snackbar to the installer either way. We
-    // log loudly so the dealer can re-trigger manually if needed.
+    // The early return used to sit HERE — above the user-doc seed — so a
+    // customer whose email already had an auth account got `{uid}` back and
+    // NO /users doc fields: no dealer_code, no installation_role. Those are
+    // exactly the fields the rest of the system gates on, so the "idempotent"
+    // path produced a half-provisioned customer. It looked idempotent only
+    // because the wipes that preceded each test deleted the auth user,
+    // forcing the create branch every time.
+    //
+    // Now: skip account CREATION for an existing user, but always fall
+    // through to the seed below. Seeding is idempotent by construction
+    // (merge:true, and created_at is only stamped when absent).
+    let uid;
     let tempPasswordSent = false;
-    try {
-        const { subject, html, text } = buildWelcomeEmail({
-            displayName,
-            email,
-            resetLink,
-        });
-        await (0, messaging_helpers_1.sendEmail)({
-            to: email,
-            subject,
-            htmlBody: html,
-            textBody: text,
-        });
-        tempPasswordSent = true;
+    if (existingUser) {
+        uid = existingUser.uid;
+        firebase_functions_1.logger.info(`createCustomerAccount: user already exists for ${email} (uid=${uid}) — reusing the account and seeding the user doc`);
     }
-    catch (err) {
-        firebase_functions_1.logger.error(`createCustomerAccount: welcome email failed for ${email}: ${err.message}`);
-        // tempPasswordSent stays false — the response signals to the
-        // wrap-up screen that the email didn't actually go out.
+    else {
+        // ── Create the new auth user ────────────────────────────────────────
+        let createdUser;
+        try {
+            createdUser = await auth.createUser({
+                email,
+                displayName,
+                emailVerified: false,
+            });
+            firebase_functions_1.logger.info(`createCustomerAccount: created auth user ${createdUser.uid} for ${email}`);
+        }
+        catch (err) {
+            firebase_functions_1.logger.error(`createCustomerAccount: createUser failed for ${email}: ${err.message}`);
+            throw new https_1.HttpsError("internal", "Failed to create auth user");
+        }
+        uid = createdUser.uid;
+        // ── Generate the password reset link ────────────────────────────────
+        let resetLink;
+        try {
+            resetLink = await auth.generatePasswordResetLink(email);
+        }
+        catch (err) {
+            firebase_functions_1.logger.error(`createCustomerAccount: generatePasswordResetLink failed for ${email}: ${err.message}`);
+            // Roll back the user we just created so the caller can retry
+            // cleanly. If the rollback itself fails we still throw the
+            // original error — the caller doesn't need to know about the
+            // cleanup attempt.
+            try {
+                await auth.deleteUser(createdUser.uid);
+            }
+            catch (rollbackErr) {
+                firebase_functions_1.logger.error(`createCustomerAccount: rollback deleteUser failed for ${createdUser.uid}: ${rollbackErr.message}`);
+            }
+            throw new https_1.HttpsError("internal", "Failed to generate password reset link");
+        }
+        // ── Send the welcome email via Resend ───────────────────────────────
+        //
+        // Email failures are NOT a hard error — the auth user is already
+        // created, the user doc is about to be seeded, and the wrap-up
+        // screen will surface a snackbar to the installer either way. We
+        // log loudly so the dealer can re-trigger manually if needed.
+        try {
+            const { subject, html, text } = buildWelcomeEmail({
+                displayName,
+                email,
+                resetLink,
+            });
+            await (0, messaging_helpers_1.sendEmail)({
+                to: email,
+                subject,
+                htmlBody: html,
+                textBody: text,
+            });
+            tempPasswordSent = true;
+        }
+        catch (err) {
+            firebase_functions_1.logger.error(`createCustomerAccount: welcome email failed for ${email}: ${err.message}`);
+            // tempPasswordSent stays false — the response signals to the
+            // wrap-up screen that the email didn't actually go out.
+        }
     }
     // ── Seed the user document ────────────────────────────────────────────
     //
-    // Matches the snake_case `installation_role` field convention used
-    // in installer_providers.dart. The 'primary' value tags this as
-    // the customer-owned account (vs an installer's sub-user account).
+    // C2: snake_case. This block used to write camelCase (`displayName`,
+    // `dealerCode`, `createdAt`), which broke three things at once:
+    //
+    //   1. firestore.rules:158-162 gates installer/salesperson reads on
+    //      `resource.data.get('dealer_code','')` — a doc carrying
+    //      `dealerCode` never matches, so the customer was INVISIBLE to
+    //      every PIN session.
+    //   2. installer_setup_wizard.dart:751-757 looks the customer up with
+    //      .where('dealer_code', ==, code) and treats an empty result as a
+    //      HARD error (:759-772) — so a wrap-up-created customer could not
+    //      be picked up by the installer wizard at all. The two halves of
+    //      the install flow did not compose.
+    //   3. UserModel.fromJson (user_model.dart:404-410) does unguarded
+    //      non-null casts on id / email / display_name / owner_id /
+    //      created_at / updated_at. The camelCase doc supplied none of
+    //      them, so parsing threw and customer_lookup_service.dart:28
+    //      swallowed it into a silent null.
+    //
+    // The field names below are the ones UserModel.toJson() emits
+    // (user_model.dart:560-600) — that is the convention of record
+    // (snake_case + Timestamp), and the wizard's later set(merge:true) of
+    // toJson() output must land on the SAME keys or it forks the doc.
+    //
+    // created_at is stamped only when absent so re-running against an
+    // existing customer cannot rewrite their original signup date;
+    // updated_at is stamped every call.
     try {
-        await db.collection("users").doc(createdUser.uid).set({
-            displayName,
+        const userRef = db.collection("users").doc(uid);
+        const existingDoc = await userRef.get();
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        await userRef.set({
+            // UserModel.fromJson requires all of these non-null.
+            id: uid,
+            owner_id: uid,
             email,
-            dealerCode,
-            jobId,
+            display_name: displayName,
+            updated_at: now,
+            ...(existingDoc.exists && existingDoc.get("created_at")
+                ? {}
+                : { created_at: now }),
+            // Per-dealer scoping — the field firestore.rules and the installer
+            // wizard actually read.
+            dealer_code: dealerCode,
             installation_role: "primary",
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            // Provenance breadcrumb; nothing reads it today.
+            job_id: jobId,
         }, { merge: true });
     }
     catch (err) {
-        firebase_functions_1.logger.error(`createCustomerAccount: failed to seed users/${createdUser.uid}: ${err.message}`);
+        firebase_functions_1.logger.error(`createCustomerAccount: failed to seed users/${uid}: ${err.message}`);
         // We don't roll back the auth user here — the user exists, the
         // welcome email may have already gone out, and the wrap-up
         // screen's setLinkedUserId call will still succeed. A missing
         // /users doc is recoverable on next sign-in.
     }
+    // `uid` is the created user's uid on the create path and the existing
+    // user's uid on the reuse path; `tempPasswordSent` stays false for reuse
+    // (no email is sent when the account already existed).
     return {
-        uid: createdUser.uid,
+        uid,
         tempPasswordSent,
     };
 });
