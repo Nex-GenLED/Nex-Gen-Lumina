@@ -15,9 +15,15 @@ import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/schedule/schedules_subcollection_feature_flag.dart';
+import 'package:nexgen_command/features/schedule/solar_schedule_cleanup.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Streams the current user's schedules from Firestore — THE app-wide source of
 /// truth (SchedulesNotifier and all 14 consumers read through it). Reads via
@@ -72,6 +78,13 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// (autopilot 7-day fan-out, batched manual edits) coalesces into a
   /// single /json/cfg push.
   Timer? _syncDebounceTimer;
+
+  /// Session guard for the one-time solar-timer cleanup (P0 hour:24/25). The
+  /// cross-session, per-account gate is a SharedPreferences flag; this only
+  /// avoids re-attempting within a single app session once a terminal state
+  /// (cleaned / already-done / no-solar / failed) is reached. Left open on an
+  /// off-LAN deferral so a LAN connect later this session still retries.
+  bool _solarCleanupAttemptedThisSession = false;
 
   SchedulesNotifier(this._ref) : super([]) {
     _init();
@@ -144,11 +157,67 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
             state = schedules;
             _initialized = true;
             debugPrint('SchedulesNotifier: Loaded ${schedules.length} schedules from Firestore');
+            // One-time solar-timer cleanup (P0 hour:24/25): now that schedules
+            // are loaded, attempt the LAN re-sync that clears stale hour:24/25
+            // timers. Fire-and-forget; internally gated + idempotent.
+            unawaited(maybeRunSolarCleanup());
           }
         });
       },
       fireImmediately: true,
     );
+
+    // Also fire the cleanup when a LAN controller becomes reachable — cfg
+    // writes only land on LAN, so a user who launched off-LAN (or before the
+    // controller connected) gets remediated the moment they're home. Idempotent
+    // and session-guarded, so this is safe on every connect.
+    _ref.listen<WledRepository?>(wledRepositoryProvider, (prev, next) {
+      if (next != null && repoCanWriteCfg(next)) {
+        unawaited(maybeRunSolarCleanup());
+      }
+    });
+  }
+
+  /// One-time, LAN-only remediation of stale solar (hour:24/25) timers left on
+  /// a controller before the Commit-2 refuse. Fire-and-forget and safe to call
+  /// on every schedule-load and LAN-connect: a per-account SharedPreferences
+  /// flag is the cross-session gate and [_solarCleanupAttemptedThisSession] the
+  /// within-session one. SILENT — no user-facing surface; off-LAN defers and
+  /// retries next LAN launch. See memory/project_solar_schedules_never_fire.
+  Future<SolarCleanupOutcome> maybeRunSolarCleanup() async {
+    if (!_initialized) return SolarCleanupOutcome.noSolar; // wait for schedules
+    if (_solarCleanupAttemptedThisSession) {
+      return SolarCleanupOutcome.alreadyDone;
+    }
+    final uid = _ref.read(effectiveUserUidProvider);
+    if (uid == null) return SolarCleanupOutcome.noSolar;
+
+    // Cheap in-memory gate first — most accounts have no solar schedules, so
+    // they never touch SharedPreferences or the network.
+    if (!scheduleListHasSolar(state)) return SolarCleanupOutcome.noSolar;
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'solar_cleanup_done_$uid';
+    final repo = _ref.read(wledRepositoryProvider);
+
+    final outcome = await runSolarScheduleCleanupIfNeeded(
+      alreadyDone: prefs.getBool(key) ?? false,
+      schedules: state,
+      onLan: repo != null && repoCanWriteCfg(repo),
+      runSync: runSyncNow,
+      markDone: () async => prefs.setBool(key, true),
+    );
+
+    // Latch the session guard for every terminal state EXCEPT an off-LAN
+    // deferral — that one must retry when the LAN connect listener fires.
+    if (outcome != SolarCleanupOutcome.deferredOffLan) {
+      _solarCleanupAttemptedThisSession = true;
+    }
+    if (outcome == SolarCleanupOutcome.cleaned) {
+      debugPrint('SchedulesNotifier: solar-timer cleanup re-sync OK — stale '
+          'hour:24/25 timers reclaimed on the controller');
+    }
+    return outcome;
   }
 
   /// Deep-compare two schedule lists by ID and enabled state.
