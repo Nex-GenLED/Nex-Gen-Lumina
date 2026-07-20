@@ -392,6 +392,7 @@ class _WledPollLifecycleObserver extends WidgetsBindingObserver {
 
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
+  GammaWatchdog? _gammaWatchdog;
   bool _posting = false;
   bool _polling = false;
   bool _infoQueried = false;
@@ -518,6 +519,15 @@ class WledNotifier extends Notifier<WledStateModel> {
         unawaited(ref.read(controllerDefaultsHealerProvider)());
       }
     }, fireImmediately: true);
+    // Gamma watchdog: the connect heal above fires once per connect, so a
+    // mid-session device-side gamma revert would persist until reconnect. This
+    // re-asserts gamma on a low-frequency (≥60s) readback-gated cadence — a
+    // healthy board incurs zero cfg writes (every tick is a GET that skips),
+    // and a real revert costs exactly one corrective write. LAN-only; ticks
+    // no-op off-LAN.
+    final gammaWatchdog = ref.read(gammaWatchdogProvider);
+    _gammaWatchdog = gammaWatchdog;
+    gammaWatchdog.start();
     _startPolling();
     ref.onDispose(() {
       _disposed = true;
@@ -526,6 +536,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       } catch (_) {}
       _poller?.cancel();
       _poller = null;
+      _gammaWatchdog?.stop();
+      _gammaWatchdog = null;
     });
     return s;
   }

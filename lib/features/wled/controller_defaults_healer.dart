@@ -34,6 +34,8 @@
 // verify. Restoring relay heals requires a bridge `applyConfig`/`getCfg`
 // command — a firmware change, and the bridge has no OTA.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -606,6 +608,108 @@ typedef GammaSelfHealAction = Future<WledConfigPushResult> Function(String ip);
 final gammaSelfHealActionProvider = Provider<GammaSelfHealAction>(
   (ref) => (ip) => pushGammaConfig(ip),
 );
+
+// ── Gamma watchdog ─────────────────────────────────────────────────────────
+
+/// Low-frequency cadence for [GammaWatchdog]. The connect-time heal fires ONCE
+/// per connect; a mid-session device-side gamma revert (cfg.light.gc dropping
+/// to default — suspected firmware/flash behavior on 0.15.1, see
+/// project_gamma_revert_open_seg_gc_phantom) would otherwise go uncorrected
+/// until the next reconnect. Two minutes catches a revert quickly while keeping
+/// the readback traffic negligible.
+const Duration kGammaWatchdogInterval = Duration(minutes: 2);
+
+/// Hard floor on the watchdog cadence. Below this, the periodic readbacks (and,
+/// on a persistently-reverting board, the corrective writes) would themselves
+/// become the flash churn we're guarding against. Any shorter interval is
+/// clamped up to this.
+const Duration kGammaWatchdogMinInterval = Duration(seconds: 60);
+
+/// Periodic, READBACK-GATED re-assert of the color-gamma standard.
+///
+/// Closes the gap the once-per-connect heal leaves: a gamma revert that happens
+/// mid-session isn't corrected until reconnect. It does so WITHOUT adding flash
+/// wear — every tick is a [GammaSelfHealAction] (default [pushGammaConfig]),
+/// which READS `/json/cfg` and SKIPS when gamma is already correct. So:
+///   • healthy board  → every tick is a GET, ZERO cfg writes;
+///   • a real revert  → exactly ONE corrective cfg write, then back to skips.
+///
+/// LAN-only (relay/mock ticks no-op — the bridge can't read/write cfg) and
+/// reentrancy-guarded so a slow network can't stack ticks.
+class GammaWatchdog {
+  GammaWatchdog({
+    required GammaSelfHealAction action,
+    required String? Function() lanIp,
+    Duration interval = kGammaWatchdogInterval,
+  })  : _action = action,
+        _lanIp = lanIp,
+        _interval = interval < kGammaWatchdogMinInterval
+            ? kGammaWatchdogMinInterval
+            : interval;
+
+  final GammaSelfHealAction _action;
+  final String? Function() _lanIp;
+  final Duration _interval;
+
+  Timer? _timer;
+  bool _inFlight = false;
+
+  /// Effective (floored) cadence — exposed so the ≥60s guard is assertable.
+  Duration get interval => _interval;
+
+  /// Corrective cfg WRITES driven so far. Readback skips are NOT counted, so a
+  /// healthy board leaves this at 0 no matter how many ticks elapse.
+  int correctiveWrites = 0;
+
+  /// Readback-gated passes performed (writes + skips). Diagnostic only.
+  int ticks = 0;
+
+  void start() {
+    stop();
+    _timer = Timer.periodic(_interval, (_) => unawaited(tickOnce()));
+  }
+
+  /// One readback-gated pass. No-ops when not on a LAN endpoint. Called by the
+  /// periodic timer and directly by tests.
+  Future<void> tickOnce() async {
+    if (_inFlight) return;
+    final ip = _lanIp();
+    if (ip == null || ip.isEmpty) return; // relay / mock / offline → no work
+    _inFlight = true;
+    try {
+      ticks++;
+      // pushGammaConfig reads cfg first and returns noChange when already
+      // correct — the readback gate is what keeps the healthy case write-free.
+      final result = await _action(ip);
+      if (result.success && !result.noChange) correctiveWrites++;
+    } catch (_) {
+      // Best-effort — the next tick retries.
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
+
+/// A [GammaWatchdog] bound to the currently-connected LAN controller. The
+/// [WledNotifier] owns its lifecycle (start on build, stop on dispose); the
+/// per-tick LAN-ip lookup re-resolves the live repo so a single instance rides
+/// endpoint changes (relay/mock ticks simply no-op).
+final gammaWatchdogProvider = Provider<GammaWatchdog>((ref) {
+  final action = ref.read(gammaSelfHealActionProvider);
+  return GammaWatchdog(
+    action: action,
+    lanIp: () {
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo is WledService) return Uri.tryParse(repo.baseUrl)?.host;
+      return null; // only a LAN WledService can read/write cfg gamma
+    },
+  );
+});
 
 /// Phone wall-clock supplier (overridable in tests for deterministic clock
 /// health).
