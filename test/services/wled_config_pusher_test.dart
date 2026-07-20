@@ -161,6 +161,34 @@ void main() {
       expect(((buildGammaPayload()['light'] as Map)['gc'] as Map)['col'], 2.8);
     });
 
+    test('format-noise echo (col:2.8004 / val:2.7997) is treated as HEALTHY '
+        '— no false-warn', () {
+      final noisy = {
+        'light': {'gc': {'bri': 1, 'col': 2.8004, 'val': 2.7997}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(noisy), true,
+          reason: 'float/format noise under 1e-3 must not report a reset');
+    });
+
+    test('genuinely zeroed gamma (col:0.0) STILL warns despite tolerance', () {
+      final zeroed = {
+        'light': {'gc': {'bri': 1, 'col': 0.0, 'val': 2.8}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(zeroed), false,
+          reason: 'a real reset is far outside 1e-3 and must trigger a push');
+    });
+
+    test('tolerance is TIGHT — col:2.79 (0.01 off) still NOT satisfied', () {
+      final off = {
+        'light': {'gc': {'bri': 1, 'col': 2.79, 'val': 2.8}},
+        'if': {'live': {'no-gc': false}},
+      };
+      expect(gammaConfigSatisfied(off), false,
+          reason: '1e-3 tolerance must reject a 0.01 deviation, not just 0');
+    });
+
     test('realtime bypass still on (no-gc:true) is NOT satisfied', () {
       final bypassOn = {
         'light': {'gc': {'bri': 1, 'col': 2.8, 'val': 2.8}},

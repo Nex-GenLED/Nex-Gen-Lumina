@@ -445,12 +445,22 @@ bool gammaConfigSatisfied(Map<String, dynamic>? rawCfg) {
   final gc = (rawCfg?['light'] as Map?)?['gc'] as Map?;
   final noGc = ((rawCfg?['if'] as Map?)?['live'] as Map?)?['no-gc'];
   double? d(dynamic v) => (v as num?)?.toDouble();
+  // Epsilon compare, not exact equality: WLED can echo 2.8 back as 2.80000 or
+  // reformat the number, and exact `== 2.8` false-warns on that noise. The
+  // tolerance is deliberately TIGHT — a genuinely reset exponent (col:1.0
+  // gamma-off is 1.8 away, col:0 is 2.8 away) is orders of magnitude outside
+  // 1e-3, so a real reset still fails the gate and gets a corrective push.
+  bool near(double? v, double target) => v != null && (v - target).abs() < _kGammaEpsilon;
   return gc != null &&
-      d(gc['col']) == 2.8 &&
-      d(gc['bri']) == 1.0 &&
-      d(gc['val']) == 2.8 &&
+      near(d(gc['col']), 2.8) &&
+      near(d(gc['bri']), 1.0) &&
+      near(d(gc['val']), 2.8) &&
       noGc == false;
 }
+
+/// Tolerance for gamma-exponent readback compares. Absorbs float/format noise
+/// (2.80000, reserialized numbers) while staying far below any real reset.
+const double _kGammaEpsilon = 1e-3;
 
 /// Pushes the NGL color-gamma standard to `cfg.light.gc` and disables the
 /// realtime gamma bypass (`cfg.if.live.no-gc`). Called during install and
@@ -474,11 +484,21 @@ Future<WledConfigPushResult> pushGammaConfig(
   if (!verifyAfterWrite) return result;
 
   // Best-effort readback on the field that matters for the wash-out (col).
+  // Retry once after a short delay: some firmware echoes the just-written cfg
+  // a beat late, so a single immediate read can mismatch on timing alone. The
+  // compare uses the same TIGHT epsilon as the gate — a real reset still warns.
   try {
-    final after = await _fetchRawConfig(controllerIp);
-    final col =
-        (((after?['light'] as Map?)?['gc'] as Map?)?['col'] as num?)?.toDouble();
-    if (col != 2.8) {
+    double? col;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      final after = await _fetchRawConfig(controllerIp);
+      col = (((after?['light'] as Map?)?['gc'] as Map?)?['col'] as num?)
+          ?.toDouble();
+      if (col != null && (col - 2.8).abs() < _kGammaEpsilon) break;
+    }
+    if (col == null || (col - 2.8).abs() >= _kGammaEpsilon) {
       return WledConfigPushResult.warning(
         'gamma write reported success but readback mismatch (light.gc.col=$col)',
       );
