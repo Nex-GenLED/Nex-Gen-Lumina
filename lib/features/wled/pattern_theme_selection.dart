@@ -191,7 +191,14 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
   /// config.
   final String? teamSlug;
 
-  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient, this.teamSlug});
+  /// When non-null, the browser is in SELECTION mode (e.g. the schedule
+  /// pattern picker): tapping a saved design or committing a catalog design
+  /// RETURNS it via this callback instead of applying to lights / Game Day.
+  /// Threaded to the leaf ([ColorwayEffectSelectorPage]) and, for drill-down,
+  /// to [LibraryNodeGrid] exactly like [teamSlug]. Null == normal browse.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
 
   @override
   ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
@@ -257,6 +264,40 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     }
     await applySavedDesign(context, ref, match);
     if (mounted && context.canPop()) context.pop();
+  }
+
+  /// Selection-mode counterpart of [_applySavedDesignAndPop]: resolve the saved
+  /// design and hand it back via [LibraryBrowserScreen.onDesignSelected] (its
+  /// RAW payload) WITHOUT applying it. The callback owns dismissing the picker.
+  void _returnSavedDesignSelection(String? designId) {
+    if (!mounted) return;
+    final cb = widget.onDesignSelected;
+    if (cb == null) return;
+    if (designId == null || designId.isEmpty) {
+      if (context.canPop()) context.pop();
+      return;
+    }
+    final designs =
+        ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    if (match == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Design not found')),
+      );
+      if (context.canPop()) context.pop();
+      return;
+    }
+    cb(LibraryDesignSelection(
+      id: match.id,
+      name: match.name,
+      wledPayload: match.toWledPayload(),
+    ));
   }
 
   @override
@@ -344,7 +385,13 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           final designId =
                               node.metadata?['sourceDesignId'] as String?;
                           WidgetsBinding.instance.addPostFrameCallback((_) async {
-                            await _applySavedDesignAndPop(designId);
+                            // Selection mode: RETURN the saved design instead of
+                            // applying it. Same raw-payload contract as catalog.
+                            if (widget.onDesignSelected != null) {
+                              _returnSavedDesignSelection(designId);
+                            } else {
+                              await _applySavedDesignAndPop(designId);
+                            }
                           });
                         }
                         return const Center(
@@ -359,13 +406,14 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         return ColorwayEffectSelectorPage(
                           paletteNode: node,
                           teamSlug: widget.teamSlug,
+                          onDesignSelected: widget.onDesignSelected,
                         );
                       }
                       if (widget.nodeId == LibraryCategoryIds.architectural) {
                         return Column(
                           children: [
                             const _KelvinReferenceChart(),
-                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug)),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected)),
                           ],
                         );
                       }
@@ -374,6 +422,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         parentAccent: widget.parentAccent,
                         parentGradient: widget.parentGradient,
                         teamSlug: widget.teamSlug,
+                        onDesignSelected: widget.onDesignSelected,
                         // #85 companion: meaningful empty-state when the My
                         // Designs surface is reached but no designs exist yet.
                         // The surface is always rendered (no longer gated on
@@ -388,7 +437,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                       );
                     },
                     loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug),
+                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected),
                   );
                 },
                 loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
