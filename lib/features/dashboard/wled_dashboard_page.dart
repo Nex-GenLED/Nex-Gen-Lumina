@@ -33,6 +33,8 @@ import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
+import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
+    show showScheduleEditor;
 import 'package:nexgen_command/features/dashboard/tonight_label.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
@@ -1378,7 +1380,14 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: GestureDetector(
-          onTap: () => context.go(AppRoutes.schedule),
+          // Tap → edit the recurring schedule shown here, pre-filled in the
+          // same editor as My Schedules (one write path). When there's no
+          // recurring schedule to edit (empty, or only a one-shot calendar /
+          // Game Day entry, which isn't a ScheduleItem), fall back to the
+          // schedule page to add one.
+          onTap: () => first != null
+              ? showScheduleEditor(context, ref, editing: first)
+              : context.go(AppRoutes.schedule),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(

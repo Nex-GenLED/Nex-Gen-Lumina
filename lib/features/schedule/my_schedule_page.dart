@@ -3492,6 +3492,46 @@ class _AutopilotModeChip extends StatelessWidget {
   }
 }
 
+/// Builds the [ScheduleItem] a Save/Update produces from the editor's resolved
+/// fields. Pure and public so the write path is unit-testable in isolation.
+///
+/// The two load-bearing invariants live here:
+///  • EDIT is in-place — [id] is the existing schedule's id (the caller passes
+///    `editing?.id ?? <new id>`), so an update replaces the same doc and never
+///    creates a duplicate.
+///  • Design fidelity — a runPattern edit that did NOT re-pick a pattern keeps
+///    the schedule's existing [ScheduleItem.wledPayload]; a re-pick uses the
+///    freshly-picked payload; audio-reactive / brightness / power-off never
+///    leak a stale design payload (they carry the existing one for round-trip
+///    stability and let syncAll's branches own the applied state).
+ScheduleItem composeEditedSchedule({
+  required String id,
+  required ScheduleItem? editing,
+  required String timeLabel,
+  required String? offTimeLabel,
+  required List<String> days,
+  required String actionLabel,
+  required bool enabled,
+  required bool isRunPattern,
+  required bool useAudioReactive,
+  required Map<String, dynamic>? pickedPayload,
+}) {
+  final wledPayload = (isRunPattern && !useAudioReactive)
+      ? (pickedPayload ?? editing?.wledPayload)
+      : editing?.wledPayload;
+  return ScheduleItem(
+    id: id,
+    timeLabel: timeLabel,
+    offTimeLabel: offTimeLabel,
+    repeatDays: days,
+    actionLabel: actionLabel,
+    enabled: enabled,
+    wledPayload: wledPayload,
+    presetId: editing?.presetId,
+    useAudioReactive: useAudioReactive ? true : null,
+  );
+}
+
 /// Opens the Schedule Editor bottom sheet.
 void showScheduleEditor(
   BuildContext context,
@@ -3543,16 +3583,11 @@ class _ScheduleCard extends ConsumerWidget {
     // Extract brightness from payload (top-level bri, 0-255)
     final payloadBri = item.wledPayload?['bri'];
     final briFraction = payloadBri is num ? (payloadBri / 255.0).clamp(0.0, 1.0) : 1.0;
-    final briPercent = payloadBri is num ? (payloadBri / 255.0 * 100).round() : null;
 
     // Extract effect name from action label
     final effectName = item.actionLabel.startsWith('Pattern: ')
         ? item.actionLabel.substring(9)
         : null;
-
-    final effectLabel = effectId != null
-        ? _wledEffectName(effectId)
-        : effectName ?? item.actionLabel;
 
     // Build recurrence label
     final recurrence = item.repeatDays.length == 7
@@ -3563,20 +3598,11 @@ class _ScheduleCard extends ConsumerWidget {
             : item.repeatDays.join(', ');
 
     return GestureDetector(
-      onTap: () => _showScheduleDetailSheet(
-        context,
-        colors: previewColors.isNotEmpty ? previewColors : const [NexGenPalette.cyan],
-        effectType: effectType,
-        speed: speed,
-        brightness: briFraction,
-        patternName: effectName ?? item.actionLabel,
-        effectName: effectLabel,
-        onTime: item.timeLabel,
-        offTime: item.offTimeLabel,
-        brightnessPercent: briPercent,
-        source: 'Recurring Schedule',
-        timeFormat: timeFormat,
-      ),
+      // Tap the card to EDIT — opens the same create-editor pre-filled with
+      // this schedule's values (single write path; the pencil icon does the
+      // same). Previously this opened a read-only detail sheet, so users had
+      // "no way to change" a schedule without finding the small pencil.
+      onTap: () => showScheduleEditor(context, ref, editing: item),
       child: Column(
         children: [
           // Pixel strip above the identity card
@@ -4154,31 +4180,20 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                         break;
                     }
 
-                    final item = ScheduleItem(
-                      id: id, // Use ID as-is to match existing schedule
+                    // Single write-path construction (pure + unit-tested):
+                    // preserves the id for in-place edit (no duplicate) and the
+                    // design-payload fallback rules. See composeEditedSchedule.
+                    final item = composeEditedSchedule(
+                      id: id, // widget.editing?.id when editing → same doc
+                      editing: widget.editing,
                       timeLabel: timeLabel,
                       offTimeLabel: offTimeLabel,
-                      repeatDays: days,
+                      days: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
-                      // Prefer the freshly-picked pattern's payload so BOTH a
-                      // new schedule AND an edit-that-re-picks persist the live
-                      // design (previously this always reused widget.editing's
-                      // payload, so a re-pick was silently ignored and a new
-                      // schedule saved null). Guarded to the runPattern path:
-                      //  • audio-reactive → payload is built at sync time, keep
-                      //    it null/existing so syncAll's audio branch wins;
-                      //  • brightness / powerOff → map to legacy presets, so a
-                      //    stale _selectedPattern must NOT leak a design payload.
-                      // The 'existing' hydration selection carries no payload,
-                      // so editing without re-picking falls back correctly.
-                      wledPayload:
-                          (_action == _ActionType.runPattern && !_useAudioReactive)
-                              ? (_selectedPattern?.wledPayload ??
-                                  widget.editing?.wledPayload)
-                              : widget.editing?.wledPayload,
-                      presetId: widget.editing?.presetId,
-                      useAudioReactive: _useAudioReactive ? true : null,
+                      isRunPattern: _action == _ActionType.runPattern,
+                      useAudioReactive: _useAudioReactive,
+                      pickedPayload: _selectedPattern?.wledPayload,
                     );
 
                     try {
