@@ -68,7 +68,18 @@ final userSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) asy
 /// automatic retry, server verification, and user-visible error reporting.
 class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   final Ref _ref;
+
+  /// Hydration flag: false until the first Firestore emission lands. Doubles as
+  /// the empty-read guard for the WLED push — see [_runWledSync] and
+  /// [_syncRequestedBeforeHydration].
   bool _initialized = false;
+
+  /// Set when a WLED sync is requested before the schedule stream has hydrated
+  /// (see [_runWledSync]). The sync is DEFERRED — never run against the empty
+  /// pre-load state, which would push disabled-stub timers over the device's
+  /// real ones and (worse) mark success on the 200. Cleared and re-run the
+  /// instant [_init]'s listener sees its first emission ([_initialized] flips).
+  bool _syncRequestedBeforeHydration = false;
 
   /// Guard flag: while a local mutation is being persisted to Firestore,
   /// suppress stream-listener overwrites to prevent flash-back-to-old-data.
@@ -124,6 +135,22 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   }
 
   Future<ScheduleSyncResult> _runWledSync() async {
+    // ── Empty-read guard (THE "schedules consistently don't fire" P0) ───────
+    // syncAll builds the timers.ins payload from `state`. Before the stream's
+    // first Firestore emission, `state` is the empty initial value — pushing it
+    // writes 8 disabled stubs over the controller's real timers, WLED returns
+    // 200, and the old path marked that a SUCCESS (silent no-op). Gate on
+    // HYDRATION (the `_initialized` loaded-flag), NOT on `state.isEmpty`: a
+    // hydrated user with genuinely zero schedules MUST still push (to clear the
+    // device), while an un-hydrated read must DEFER. The stream listener re-runs
+    // this sync once real data lands, so a schedule created moments after launch
+    // still arms without any manual action.
+    if (!_initialized) {
+      _syncRequestedBeforeHydration = true;
+      debugPrint('SchedulesNotifier: WLED sync requested before schedules '
+          'hydrated — deferring until the stream loads (no empty-stub push)');
+      return ScheduleSyncResult.notLoaded();
+    }
     try {
       final ref = _ref;
       final service = ref.read(scheduleSyncServiceProvider);
@@ -153,6 +180,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         next.whenData((schedules) {
           // Skip stream updates while a local mutation is in-flight
           if (_isMutating) return;
+          final wasInitialized = _initialized;
           if (!_initialized || !_listEquals(state, schedules)) {
             state = schedules;
             _initialized = true;
@@ -161,6 +189,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
             // are loaded, attempt the LAN re-sync that clears stale hour:24/25
             // timers. Fire-and-forget; internally gated + idempotent.
             unawaited(maybeRunSolarCleanup());
+          }
+          // Empty-read guard follow-through: a sync was requested against the
+          // empty pre-load state and deferred. Now that the stream has hydrated,
+          // run it — the deferred push arms REAL timers instead of empty stubs.
+          if (!wasInitialized && _initialized && _syncRequestedBeforeHydration) {
+            _syncRequestedBeforeHydration = false;
+            debugPrint('SchedulesNotifier: hydration complete — running deferred '
+                'WLED sync with loaded schedules');
+            _triggerWledSync();
           }
         });
       },

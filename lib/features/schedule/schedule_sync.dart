@@ -1122,12 +1122,22 @@ class ScheduleSyncResult {
   /// user syncs on their home WiFi.
   final bool deferredOffLan;
 
+  /// The sync was requested BEFORE the schedule stream hydrated from Firestore,
+  /// so it was deferred rather than run against the empty pre-load state (which
+  /// would push disabled-stub timers over the device's real ones and falsely
+  /// report success on the 200). Like [deferredOffLan] this is NOT a failure and
+  /// NOT success — nothing was written. It resolves itself: [SchedulesNotifier]
+  /// re-runs the sync the instant the stream loads. Distinct from "hydrated with
+  /// genuinely zero schedules", which DOES push (to clear the device).
+  final bool deferredNotLoaded;
+
   ScheduleSyncResult({
     required this.success,
     this.error,
     this.presetErrors = const [],
     this.schedulesWithPresets = const [],
     this.deferredOffLan = false,
+    this.deferredNotLoaded = false,
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
 
@@ -1144,12 +1154,20 @@ class ScheduleSyncResult {
         schedulesWithPresets: schedulesWithPresets,
       );
 
+  /// Deferred because the schedule stream had not yet hydrated. No device write
+  /// happened; [SchedulesNotifier] re-runs the sync once the stream loads.
+  factory ScheduleSyncResult.notLoaded() => ScheduleSyncResult(
+        success: false,
+        deferredNotLoaded: true,
+      );
+
   /// Returns true if there were any preset-related errors.
   bool get hasPresetErrors => presetErrors.isNotEmpty;
 
   /// Returns a summary message suitable for user display.
   String get summaryMessage {
     if (deferredOffLan) return kScheduleOffLanNotice;
+    if (deferredNotLoaded) return 'Loading your schedules…';
     if (!success) {
       return error ?? 'Sync failed';
     }
