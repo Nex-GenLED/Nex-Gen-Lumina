@@ -604,7 +604,12 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          if (teamSlug != null) {
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator so drill-down stays self-contained above any
+            // modal, and forward teamSlug AND onDesignSelected so the
+            // persistence / selection path survives at depth. Both additive:
+            // a plain Explore browse (both null) keeps the GoRouter path below.
             Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(
                 builder: (_) => LibraryBrowserScreen(
@@ -613,6 +618,7 @@ class LibraryNodeCard extends StatelessWidget {
                   parentAccent: accentColor,
                   parentGradient: gradientColors,
                   teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
                 ),
               ),
             );
@@ -749,7 +755,11 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          if (teamSlug != null) {
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator and forward teamSlug AND onDesignSelected so
+            // the persistence / selection path survives at depth. Additive:
+            // a plain Explore browse (both null) keeps the GoRouter path below.
             final gradientSecond = (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6);
             Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(
@@ -759,6 +769,7 @@ class LibraryNodeCard extends StatelessWidget {
                   parentAccent: primaryColor,
                   parentGradient: [primaryColor, gradientSecond],
                   teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
                 ),
               ),
             );
