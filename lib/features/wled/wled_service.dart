@@ -566,7 +566,12 @@ class WledService
       // clearWifiCredentials) uses an unchunked request.
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      // /json/cfg triggers a LittleFS flash save on the controller, which is
+      // much slower to RESPOND than an in-RAM /json/state write (15s) — 30s of
+      // headroom so a normal flash-save (aggravated by preceding preset psaves,
+      // or a firmware stall) doesn't time out and get reported as a failure.
+      // connectionTimeout stays 15s: the TCP handshake isn't the slow part.
+      final res = await req.close().timeout(const Duration(seconds: 30));
       final resBody = await res.transform(utf8.decoder).join();
       client.close(force: true);
 
@@ -582,6 +587,46 @@ class WledService
       debugPrint('❌ WLED /json/cfg exception: $e');
     }
     return false;
+  }
+
+  /// Reads the controller's current timer table (`cfg.timers.ins`) for readback
+  /// verification of a schedule sync. LAN-only (a /json/cfg GET); returns null
+  /// on any error or unexpected shape so the caller treats it as "inconclusive"
+  /// (never a false negative). Mirrors the raw-cfg readback used by
+  /// wled_config_pusher's gamma verify.
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    if (_simulate) {
+      // Echo back the last simulated cfg payload's timers so tests can verify.
+      final ins = (lastSimulatedConfigPayload?['timers'] as Map?)?['ins'];
+      if (ins is List) {
+        return ins
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      return null;
+    }
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.getUrl(_uri('/json/cfg'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final body = await res.transform(utf8.decoder).join();
+      client.close(force: true);
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final cfg = jsonDecode(body) as Map<String, dynamic>;
+        final ins = (cfg['timers'] as Map?)?['ins'];
+        if (ins is List) {
+          return ins
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('WledService.fetchTimerInstances exception: $e');
+    }
+    return null;
   }
 
   /// Clears the controller's WiFi station credentials and forces a reboot,

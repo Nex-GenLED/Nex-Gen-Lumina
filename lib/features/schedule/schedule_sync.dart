@@ -13,8 +13,42 @@ import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart'
-    show CfgWriteUnsupportedException;
+    show CfgWriteUnsupportedException, WledRepository;
 import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
+
+/// Readback comparison for the schedule cfg write: true iff every ENABLED slot
+/// in [sent] is present at the same index in [readback] with matching
+/// en/hour/min/macro/dow, and every DISABLED slot we sent reads back disabled.
+///
+/// - `en` is normalized (bool/int → int) so firmware that echoes it as a bool
+///   still compares equal (the payload sends int 0/1 post-normalization).
+/// - A disabled slot compares on the enabled bit ONLY — a cleared slot's stale
+///   hour/min/macro/dow on the controller is irrelevant to "did our timers land".
+/// - Returns false if [readback] is missing a slot we sent (can't confirm it).
+///
+/// Field-level, not raw-JSON-string equality: the controller returns extra keys
+/// (start/end/mon/day) and may reorder, so only the fields we control are compared.
+@visibleForTesting
+bool timersInsLanded(
+  List<Map<String, dynamic>> sent,
+  List<Map<String, dynamic>> readback,
+) {
+  int en(Object? v) => (v == true || v == 1) ? 1 : 0;
+  int fld(Map<String, dynamic> m, String k) =>
+      (m[k] is num) ? (m[k] as num).toInt() : -1;
+  for (var i = 0; i < sent.length; i++) {
+    if (i >= readback.length) return false;
+    final s = sent[i];
+    final r = readback[i];
+    if (en(s['en']) != en(r['en'])) return false;
+    if (en(s['en']) == 0) continue; // disabled slot — enabled bit is enough
+    if (fld(s, 'hour') != fld(r, 'hour')) return false;
+    if (fld(s, 'min') != fld(r, 'min')) return false;
+    if (fld(s, 'macro') != fld(r, 'macro')) return false;
+    if (fld(s, 'dow') != fld(r, 'dow')) return false;
+  }
+  return true;
+}
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
 ///
@@ -379,7 +413,10 @@ class ScheduleSyncService {
     if (tl == 'sunrise' || tl == 'sunset') {
       final isSunrise = tl == 'sunrise';
       return {
-        'en': true,
+        // en is int 0/1 across every timer entry (stubs, solar, clock) so the
+        // readback comparison in syncAll is a trivial int compare and the
+        // payload is uniform. WLED coerces bool/int either way.
+        'en': 1,
         'hour': isSunrise ? 24 : 25, // 24=sunrise, 25=sunset
         'min': 0, // offset from sunrise/sunset
         'macro': macro,
@@ -399,7 +436,8 @@ class ScheduleSyncService {
       return null;
     }
     return {
-      'en': true,
+      // int 0/1 (see the solar branch above) — uniform en across all entries.
+      'en': 1,
       'hour': parsed.hour,
       'min': parsed.minute,
       'macro': macro,
@@ -843,12 +881,24 @@ class ScheduleSyncService {
       ));
     }
 
+    // Settle (point 1): the preset psaves above are flash writes. Give the
+    // controller a beat to finish committing them before it must handle the cfg
+    // flash-save, so the cfg POST doesn't queue behind an in-progress commit and
+    // time out. Only when we actually wrote a preset this sync.
+    if (didWriteAnyPreset) {
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+    }
+
     try {
-      final ok = await repo.applyConfig(payload);
-      if (!ok) {
+      // Retry + readback verify (point 3), replacing the single-shot POST: a
+      // /json/cfg flash-save can time out yet still commit, so a failed POST is
+      // verified by readback before re-POSTing. Terminal states only surface
+      // after all attempts fail.
+      final landed = await _pushCfgWithVerify(ref, repo, payload, ins);
+      if (!landed) {
         return finish(ScheduleSyncResult(
           success: false,
-          error: 'Failed to save timer configuration',
+          error: kScheduleCfgWriteFailed,
           presetErrors: presetErrors,
           schedulesWithPresets: updatedSchedules,
         ));
@@ -879,6 +929,71 @@ class ScheduleSyncService {
         schedulesWithPresets: updatedSchedules,
       ));
     }
+  }
+
+  /// Pushes the timer cfg with up to 3 attempts and readback verification —
+  /// modeled on wled_config_pusher's gamma readback. Returns true iff the timers
+  /// landed on the controller.
+  ///
+  /// A /json/cfg flash-save can time out (or briefly return non-2xx under load)
+  /// yet still COMMIT, so after a failed POST we back off and READ BACK before
+  /// re-POSTing: if the controller already shows our timers, that's success, not
+  /// a retry. A 2xx is authoritative (soft-confirmed by readback; a mismatch is
+  /// warned, never re-POSTed — mirrors the gamma pusher's warning-not-failure).
+  /// Backoff is 1s then 2s. [ins] is the exact array we sent (post-normalize).
+  ///
+  /// Readback is LAN-only ([WledService]); for a webhook relay it is inconclusive
+  /// (null) and the loop simply re-POSTs. A [CfgWriteUnsupportedException] from
+  /// [WledRepository.applyConfig] propagates out (→ deferredOffLan in syncAll).
+  Future<bool> _pushCfgWithVerify(
+    Ref ref,
+    WledRepository repo,
+    Map<String, dynamic> payload,
+    List<Map<String, dynamic>> ins,
+  ) async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) {
+        // Interim status so the UI shows "saving — retrying…", not a red error,
+        // while the write is still in flight (point 4).
+        ref.read(lastScheduleSyncResultProvider.notifier).state =
+            ScheduleSyncResult.retrying();
+      }
+      final ok = await repo.applyConfig(payload);
+      if (ok) {
+        final verified = await _readbackTimersLanded(repo, ins);
+        if (verified == false) {
+          debugPrint('ScheduleSync: cfg POST returned 2xx but readback mismatch '
+              '(attempt $attempt) — trusting the write');
+        }
+        return true;
+      }
+      // POST returned false (timeout OR non-2xx). Back off — this also gives a
+      // timed-out flash-save time to finish committing — then READ BACK before
+      // deciding to re-POST: the write may already be on the controller.
+      await Future<void>.delayed(Duration(seconds: attempt == 1 ? 1 : 2));
+      final landed = await _readbackTimersLanded(repo, ins);
+      if (landed == true) {
+        debugPrint('ScheduleSync: cfg readback shows timers landed despite a '
+            'failed POST (attempt $attempt) — treating as success');
+        return true;
+      }
+      debugPrint('ScheduleSync: cfg POST attempt $attempt failed, readback '
+          'unconfirmed — ${attempt < 3 ? "retrying" : "giving up"}');
+    }
+    return false;
+  }
+
+  /// Readback verify: does the controller's timer table match what we [sent] on
+  /// the fields we control? true = match, false = mismatch, null = couldn't read
+  /// (relay/mock, or fetch error) → inconclusive, never a false negative.
+  Future<bool?> _readbackTimersLanded(
+    WledRepository repo,
+    List<Map<String, dynamic>> sent,
+  ) async {
+    if (repo is! WledService) return null; // cfg is not readable via the relay
+    final actual = await repo.fetchTimerInstances();
+    if (actual == null) return null;
+    return timersInsLanded(sent, actual);
   }
 
   /// Legacy sync method for backward compatibility.
@@ -1131,6 +1246,14 @@ class ScheduleSyncResult {
   /// genuinely zero schedules", which DOES push (to clear the device).
   final bool deferredNotLoaded;
 
+  /// Transient, interim state pushed to [lastScheduleSyncResultProvider] while
+  /// the cfg write is being RETRIED (see [ScheduleSyncService] cfg push). It is
+  /// neither success nor failure — the sync is still in flight — so the UI shows
+  /// "Controller is saving — retrying…" instead of flashing a red error. The
+  /// terminal result (success / cfg-write-failed / deferred) replaces it when
+  /// the push resolves. Never the awaited return value of a sync.
+  final bool retrying;
+
   ScheduleSyncResult({
     required this.success,
     this.error,
@@ -1138,6 +1261,7 @@ class ScheduleSyncResult {
     this.schedulesWithPresets = const [],
     this.deferredOffLan = false,
     this.deferredNotLoaded = false,
+    this.retrying = false,
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
 
@@ -1161,11 +1285,19 @@ class ScheduleSyncResult {
         deferredNotLoaded: true,
       );
 
+  /// Interim "still working the cfg write" state (see [retrying]). Pushed to the
+  /// status provider between retry attempts; never returned from a sync.
+  factory ScheduleSyncResult.retrying() => ScheduleSyncResult(
+        success: false,
+        retrying: true,
+      );
+
   /// Returns true if there were any preset-related errors.
   bool get hasPresetErrors => presetErrors.isNotEmpty;
 
   /// Returns a summary message suitable for user display.
   String get summaryMessage {
+    if (retrying) return kScheduleCfgRetrying;
     if (deferredOffLan) return kScheduleOffLanNotice;
     if (deferredNotLoaded) return 'Loading your schedules…';
     if (!success) {
@@ -1183,3 +1315,16 @@ class ScheduleSyncResult {
 /// table from here.
 const String kScheduleOffLanNotice =
     "Saved — your schedule will arm next time you're on your home WiFi.";
+
+/// Interim copy shown while the cfg write is being retried (a slow flash-save).
+/// Not an error — the sync is still in flight.
+const String kScheduleCfgRetrying = 'Controller is saving — retrying…';
+
+/// Terminal failure copy for an ON-LAN cfg write that never landed after all
+/// retries (controller slow to respond / dropped the connection during the
+/// flash-save). Actionable and distinct from the off-LAN notice: the user IS on
+/// the network, so the fix is to check the controller and try again.
+const String kScheduleCfgWriteFailed =
+    'Couldn\'t save your schedule to the controller — it was slow to respond or '
+    'dropped the connection. Check that the controller is on, then press Sync '
+    'again.';

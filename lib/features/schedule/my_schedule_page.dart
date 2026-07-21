@@ -688,7 +688,13 @@ class _SyncStatusRow extends ConsumerWidget {
     final IconData icon;
     final Color color;
     final String label;
-    if (last.deferredOffLan) {
+    if (last.retrying) {
+      // Interim: the cfg write is still being retried (a slow flash-save). Not
+      // an error — neutral, so it doesn't flash red before the write resolves.
+      icon = Icons.sync_rounded;
+      color = NexGenPalette.cyan;
+      label = last.summaryMessage;
+    } else if (last.deferredOffLan) {
       // Saved, just not armed yet — the user is away from home. Nothing failed,
       // so this must NOT read like an error: neutral icon, neutral colour.
       icon = Icons.home_outlined;
