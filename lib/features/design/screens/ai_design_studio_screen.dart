@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
@@ -68,10 +70,36 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
         bottom: false,
         child: Padding(
           padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-          child: _mode == _StudioMode.manual
-              ? const ManualDesignEditor()
-              : Column(
+          child: Column(
             children: [
+              // Roofline SETUP entry — architectural structure (corners/peaks/
+              // columns), distinct from the AI/Manual DESIGN mode pill. Routes
+              // to the existing SegmentSetupScreen (no new editor); it loads the
+              // existing map on entry (edit, never blank). Visible in BOTH modes
+              // — architectural setup is orthogonal to design coloring, and this
+              // is where users look for it.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push(AppRoutes.segmentSetup),
+                    icon: const Icon(Icons.roofing, size: 18),
+                    label: const Text('Roofline setup'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: NexGenPalette.cyan,
+                      side: BorderSide(
+                          color: NexGenPalette.cyan.withValues(alpha: 0.4)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _mode == _StudioMode.manual
+                    ? const ManualDesignEditor()
+                    : Column(
+                        children: [
               // Unified preview (Slice 4 1b) — the SAME house-photo overlay
               // both modes render on, fed the AI ComposedPattern as a per-LED
               // frame. Falls back to a strip only when there's no trace/photo.
@@ -110,6 +138,9 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
               // Quick ideas
               if (state == DesignStudioStatus.idle && intent == null)
                 _buildQuickIdeas(context),
+                        ],
+                      ),
+              ),
             ],
           ),
         ),
