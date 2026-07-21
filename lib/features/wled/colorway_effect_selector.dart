@@ -9,6 +9,8 @@ import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart' show WledStateModel;
+import 'package:nexgen_command/features/wled/wled_repository.dart' show WledRepository;
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -97,12 +99,46 @@ class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
   Timer? _debounceTimer;
 
+  /// SELECTION MODE only. The pre-preview device look, snapshotted on entry
+  /// (see [initState]) so both exits — Save ("Set design") and Cancel (backing
+  /// out / dispose) — can RESTORE it. The live preview writes to the real
+  /// lights on every adjustment ([_sendToWled]); but choosing a pattern for a
+  /// SCHEDULE must not leave it applied now, so we undo the preview on exit.
+  ///
+  /// This is [WledStateModel] — the freshest app-side device model (polled
+  /// ~1.5s by WledNotifier) — not a byte-exact external device snapshot; the
+  /// app only holds what this model can express (accepted trade-off). Restore
+  /// re-applies it via [WledRepository.applyJson], the SAME mechanism the
+  /// preview uses (no config/preset write). Null once restored/consumed so we
+  /// never restore twice.
+  WledStateModel? _capturedLook;
+
+  // ── Restore cache (selection mode) ──────────────────────────────────────
+  // The CANCEL exit runs in [dispose], where flutter_riverpod forbids `ref`.
+  // So we snapshot everything the restore write needs — the repository, the
+  // demo-mode flag, and the fully channel-filtered restore payload — while
+  // `ref` is live (on entry and refreshed each build via [_refreshRestoreCache]).
+  // [_restoreCapturedLook] then touches ONLY these fields, never `ref`, so it
+  // is safe to fire from dispose().
+  WledRepository? _restoreRepo;
+  bool _restoreDemoMode = false;
+  Map<String, dynamic>? _restorePayload;
+
   List<Color> get _paletteColors =>
       widget.paletteNode.themeColors ?? [Colors.white];
 
   @override
   void initState() {
     super.initState();
+    // CAPTURE-ON-ENTRY (selection mode): snapshot the pre-preview device look
+    // now, before any [_sendToWled] preview write can fire. Read synchronously
+    // from the polled wledStateProvider so it reflects the device state the
+    // user is leaving — held in a local field, NOT re-read later (the poll
+    // would pick up our own preview writes and pollute it).
+    if (widget.onDesignSelected != null) {
+      _capturedLook = ref.read(wledStateProvider);
+      _refreshRestoreCache();
+    }
     // Initialize selector state from palette metadata (architectural patterns
     // store grouping/spacing here) or fall back to defaults.
     final meta = widget.paletteNode.metadata;
@@ -135,7 +171,102 @@ class _ColorwayEffectSelectorPageState
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    // CANCEL exit (selection mode): if a pre-preview look was captured and NOT
+    // yet consumed by a Save, the user is backing out of the effect editor
+    // (the parent LibraryBrowserScreen owns the back button, so its pop
+    // disposes us) — restore the device now. Fire-and-forget and ref-free:
+    // [_restoreCapturedLook] uses only the cached repo/payload (dispose cannot
+    // touch `ref`). A failed write is benign — the next apply self-corrects.
+    if (_capturedLook != null) {
+      _restoreCapturedLook();
+    }
     super.dispose();
+  }
+
+  /// Snapshot everything the restore write needs while `ref` is live: the
+  /// repository, the demo-mode flag, and the fully channel-filtered restore
+  /// payload built from [_capturedLook]. Called on entry and refreshed on each
+  /// build so the CANCEL path (dispose, where `ref` is forbidden) has a current
+  /// cache. No-op outside selection mode / once the look is consumed.
+  void _refreshRestoreCache() {
+    final look = _capturedLook;
+    if (look == null) return;
+    _restoreDemoMode = ref.read(demoModeProvider);
+    _restoreRepo = ref.read(wledRepositoryProvider);
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      _restorePayload = null; // U1 gate not satisfied yet — nothing to send
+      return;
+    }
+    _restorePayload = applyChannelFilter(
+      _buildLookPayload(look),
+      channels,
+      ref.read(deviceChannelsProvider),
+    );
+  }
+
+  /// Build the raw (pre channel-filter) WLED payload that reproduces [look] —
+  /// the app-expressible restore of the pre-preview state. Palette is restored
+  /// verbatim (not effect-derived) so the prior look round-trips as closely as
+  /// the app holds.
+  Map<String, dynamic> _buildLookPayload(WledStateModel look) {
+    final List<List<int>> cols = look.colorSequence.isNotEmpty
+        ? look.colorSequence
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(),
+                (c.b * 255).round(), forceZeroWhite: true))
+            .toList()
+        : [
+            rgbToRgbw((look.color.r * 255).round(), (look.color.g * 255).round(),
+                (look.color.b * 255).round(), forceZeroWhite: true)
+          ];
+    return <String, dynamic>{
+      'on': look.isOn,
+      'bri': look.brightness,
+      'seg': [
+        {
+          'fx': look.effectId,
+          'sx': look.speed,
+          'ix': look.intensity,
+          'pal': look.paletteId,
+          'grp': look.colorGroupSize,
+          'spc': look.spacing,
+          'col': cols,
+        }
+      ],
+    };
+  }
+
+  /// Restore the pre-preview device look captured on entry ([_capturedLook]),
+  /// undoing the live preview. Uses ONLY the cached repo/payload (never `ref`),
+  /// so it is safe to fire from [dispose]. Same mechanism as the preview —
+  /// [WledRepository.applyJson] through the channel-filter chokepoint — NOT a
+  /// config/preset write.
+  ///
+  /// Returns true only when the restore write actually succeeds. On failure
+  /// (off-LAN, dropped, U1 gate) it does NOT clear [_capturedLook] and does NOT
+  /// report success, leaving the snapshot in place so the next [_sendToWled] or
+  /// manual apply corrects the device (per the locked no-cross-death-persistence
+  /// decision — leftover preview is a benign, self-correcting state).
+  Future<bool> _restoreCapturedLook() async {
+    if (_capturedLook == null) return true; // nothing to restore / consumed
+    if (_restoreDemoMode) {
+      _capturedLook = null; // demo: no device, nothing to undo
+      return true;
+    }
+    final repo = _restoreRepo;
+    final payload = _restorePayload;
+    if (repo == null || payload == null) {
+      return false; // no device / U1 gate — keep snapshot for a later retry
+    }
+    try {
+      final ok = await repo.applyJson(payload);
+      if (ok) _capturedLook = null; // consumed — never restore twice
+      return ok;
+    } catch (e) {
+      debugPrint('Selection-mode restore failed (device offline?): $e');
+      return false; // keep snapshot; next apply self-corrects
+    }
   }
 
   /// Whether this palette node carries architectural spacing metadata.
@@ -304,17 +435,27 @@ class _ColorwayEffectSelectorPageState
         ]
       };
 
-      // SELECTION MODE (e.g. the schedule picker): RETURN the chosen design's
-      // RAW payload to the caller and stop — do NOT apply to lights and do NOT
-      // persist to Game Day. Non-null callback == selection mode; null == the
-      // normal apply-on-tap path below (unchanged). Returned shape mirrors the
-      // legacy _PatternPickerSheet's PatternSelection.
+      // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
+      // preview HAS been applying to the lights on each adjustment; committing
+      // "Set design" must (1) hand the chosen design's RAW payload back to the
+      // caller for the schedule to store, and (2) RESTORE the pre-preview look
+      // — setting a design for a SCHEDULE must not leave it applied now. Do NOT
+      // apply the selection to the lights and do NOT persist to Game Day.
+      // Returned shape mirrors the legacy _PatternPickerSheet's PatternSelection.
       if (widget.onDesignSelected != null) {
-        widget.onDesignSelected!(LibraryDesignSelection(
+        final selection = LibraryDesignSelection(
           id: widget.paletteNode.id,
           name: '${widget.paletteNode.name} - $effectName',
           wledPayload: payload,
-        ));
+        );
+        // Undo the preview via the same applyJson mechanism (see
+        // _restoreCapturedLook). Await so the restore write lands before the
+        // callback tears down the picker stack. A failed restore is benign and
+        // self-correcting — it must NOT lose the user's selection, so we hand
+        // back the design regardless.
+        await _restoreCapturedLook();
+        if (!mounted) return;
+        widget.onDesignSelected!(selection);
         return;
       }
 
@@ -431,6 +572,8 @@ class _ColorwayEffectSelectorPageState
 
   @override
   Widget build(BuildContext context) {
+    // Keep the ref-free restore cache current for the CANCEL (dispose) path.
+    if (_capturedLook != null) _refreshRestoreCache();
     final effectId = ref.watch(selectorEffectIdProvider);
     final speed = ref.watch(selectorSpeedProvider);
     final intensity = ref.watch(selectorIntensityProvider);
@@ -526,11 +669,14 @@ class _ColorwayEffectSelectorPageState
                       ),
                     ),
                   ),
-                // Apply button
+                // Apply button — in SELECTION mode this commits the choice back
+                // to the caller (the schedule) and restores the pre-preview
+                // look rather than applying now, so it reads "Set design".
                 ElevatedButton.icon(
                   onPressed: _applyPattern,
                   icon: const Icon(Icons.check, size: 18),
-                  label: const Text('Apply'),
+                  label: Text(
+                      widget.onDesignSelected != null ? 'Set design' : 'Apply'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NexGenPalette.cyan,
                     foregroundColor: NexGenPalette.matteBlack,
