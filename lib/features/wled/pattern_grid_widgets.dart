@@ -21,6 +21,8 @@ import 'package:nexgen_command/features/game_day/live_scoring_prompt.dart';
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
+    show LibraryDesignSelection;
 import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
@@ -42,7 +44,12 @@ class LibraryNodeGrid extends StatelessWidget {
   /// persistence path continues working at depth.
   final String? teamSlug;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage});
+  /// Selection mode (additive, mirrors [teamSlug]): when non-null, drill-down
+  /// pushes via the root navigator and forwards this callback so a design tap
+  /// at any depth RETURNS the design instead of applying/browsing.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +82,7 @@ class LibraryNodeGrid extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
               height: 44,
-              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug),
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected),
             ),
           );
         },
@@ -94,7 +101,7 @@ class LibraryNodeGrid extends StatelessWidget {
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug);
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected);
       },
     );
   }
@@ -112,7 +119,10 @@ class LibraryNodeCard extends StatelessWidget {
   /// taps at depth continue to persist via saveDesign.
   final String? teamSlug;
 
-  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug});
+  /// Selection mode (additive, mirrors [teamSlug]): see [LibraryNodeGrid].
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
 
   /// Per-id icon for a library category/folder/palette node. Public+static so
   /// other surfaces (e.g. the Sync pattern picker's folder cards) reuse the same
@@ -495,11 +505,13 @@ class LibraryNodeCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          if (teamSlug != null) {
-            // Game Day mount: push via the root navigator so the
-            // dashboard-branch back stack (and back-arrow-to-Game-Day
-            // per Item #64) is preserved, and forward teamSlug so the
-            // persistence path survives at depth.
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator so it stays self-contained above any modal
+            // (dashboard back stack / Item #64), and forward teamSlug AND
+            // onDesignSelected so the persistence / selection path survives at
+            // depth. Both are additive: a plain Explore browse (both null)
+            // still uses the GoRouter path below, byte-identical.
             Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(
                 builder: (_) => LibraryBrowserScreen(
@@ -507,6 +519,7 @@ class LibraryNodeCard extends StatelessWidget {
                   nodeName: node.name,
                   parentAccent: accentColor,
                   teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
                 ),
               ),
             );

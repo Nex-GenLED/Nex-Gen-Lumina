@@ -28,8 +28,10 @@ import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/clock_health_providers.dart';
 import 'package:nexgen_command/features/wled/clock_health_ui.dart';
-import 'package:nexgen_command/features/wled/pattern_models.dart';
-import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
+    show LibraryDesignSelection;
+import 'package:nexgen_command/features/wled/pattern_theme_selection.dart'
+    show LibraryBrowserScreen;
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
@@ -3451,12 +3453,13 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-// ─── All original widgets kept exactly as-is below ────────────────────────────
+// ─── Schedule widgets ─────────────────────────────────────────────────────────
 // _AutopilotModeChip, _AutopilotSetupSheet, _ScheduleCard, _ScheduleEditor,
 // _DayChip, _DayCircleChip, _TimeWheel, _SolarEventPicker,
-// PatternSelection, _PatternPickerRow, _PatternPickerSheet,
-// _AggregatedPatternGrid, showScheduleEditor
-// (copy these verbatim from the original my_schedule_page.dart)
+// PatternSelection, _PatternPickerRow, showScheduleEditor.
+// The legacy _PatternPickerSheet / _AggregatedPatternGrid / _PatternTile grid
+// was retired — "Choose a pattern" now opens the Explore library
+// (LibraryBrowserScreen) in selection mode; see _PatternPickerRow.onPick.
 
 class _AutopilotModeChip extends StatelessWidget {
   final String label;
@@ -3531,6 +3534,11 @@ ScheduleItem composeEditedSchedule({
     useAudioReactive: useAudioReactive ? true : null,
   );
 }
+
+/// Root-navigator route name for the schedule pattern picker (the Explore
+/// library opened in selection mode). Used to pop the whole picker stack back
+/// to the editor once a design is chosen.
+const String _kSchedulePatternPickerRoute = 'schedule-pattern-picker';
 
 /// Opens the Schedule Editor bottom sheet.
 void showScheduleEditor(
@@ -4049,14 +4057,37 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   _PatternPickerRow(
                     selection: _selectedPattern,
                     onPick: () async {
-                      final picked = await showModalBottomSheet<PatternSelection>(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const _PatternPickerSheet(),
-                      );
+                      // Open the CURRENT Explore Designs library (top-level
+                      // catalog + My Designs) in SELECTION mode, replacing the
+                      // retired _PatternPickerSheet. Pushed on the root navigator
+                      // (above this editor sheet, self-contained drill-down —
+                      // same mechanism Game Day uses). onDesignSelected returns
+                      // the chosen design; we dismiss the whole picker stack and
+                      // store it exactly as the old sheet did.
+                      final rootNav = Navigator.of(context, rootNavigator: true);
+                      LibraryDesignSelection? sel;
+                      await rootNav.push(MaterialPageRoute(
+                        settings:
+                            const RouteSettings(name: _kSchedulePatternPickerRoute),
+                        builder: (_) => LibraryBrowserScreen(
+                          nodeId: null,
+                          onDesignSelected: (s) {
+                            sel = s;
+                            rootNav.popUntil((r) =>
+                                r.settings.name == _kSchedulePatternPickerRoute);
+                            rootNav.pop();
+                          },
+                        ),
+                      ));
                       if (!mounted) return;
-                      setState(() => _selectedPattern = picked ?? _selectedPattern);
+                      if (sel != null) {
+                        setState(() => _selectedPattern = PatternSelection(
+                              id: sel!.id,
+                              name: sel!.name,
+                              imageUrl: sel!.imageUrl,
+                              wledPayload: sel!.wledPayload,
+                            ));
+                      }
                     },
                   ),
                 if (_action == _ActionType.brightness)
@@ -4313,9 +4344,10 @@ class PatternSelection {
   final String name;
   final String imageUrl;
 
-  /// Full WLED state to apply when this pattern fires as a schedule — built
-  /// from [GradientPattern.toWledPayload] (already includes on:true + bri +
-  /// seg) at the moment the user picks it. Carrying this through the
+  /// Full WLED state to apply when this pattern fires as a schedule — the raw
+  /// design payload returned by the Explore library in selection mode
+  /// ([LibraryDesignSelection.wledPayload], already on:true + bri + seg) at the
+  /// moment the user picks it. Carrying this through the
   /// selection boundary is what lets [ScheduleSyncService.syncAll] psave a
   /// real preset instead of arming a timer macro that points at nothing.
   /// Null only for the legacy "existing" hydration case (editing a schedule
@@ -4368,279 +4400,3 @@ class _PatternPickerRow extends StatelessWidget {
   }
 }
 
-// Full-screen bottom sheet pattern picker. Mirrors the Explore screen's
-// organization (categorized sections, search bar) so installers and users
-// see the same library here as on the Explore tab — without coupling this
-// picker to Explore's deep-link / apply-on-tap behavior.
-class _PatternPickerSheet extends ConsumerStatefulWidget {
-  const _PatternPickerSheet();
-
-  @override
-  ConsumerState<_PatternPickerSheet> createState() =>
-      _PatternPickerSheetState();
-}
-
-class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
-  final TextEditingController _searchController = TextEditingController();
-  String _query = '';
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.85,
-          decoration: BoxDecoration(color: NexGenPalette.gunmetal90, border: Border(top: BorderSide(color: NexGenPalette.line))),
-          child: Column(children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(children: [
-                Text('Select Pattern', style: Theme.of(context).textTheme.titleLarge),
-                const Spacer(),
-                IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded)),
-              ]),
-            ),
-            // Search bar — instant filter on the flattened library.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-                decoration: InputDecoration(
-                  hintText: 'Search patterns…',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  isDense: true,
-                  filled: true,
-                  fillColor: NexGenPalette.matteBlack.withValues(alpha: 0.4),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: NexGenPalette.line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: NexGenPalette.line),
-                  ),
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _query = '');
-                          },
-                        ),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _AggregatedPatternGrid(
-                query: _query,
-                onSelect: (sel) => Navigator.of(context).pop(sel),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-// Pattern grid with category sections (matches Explore organization) and
-// optional flat-filter mode driven by [query]. When [query] is empty,
-// renders three sections: Architectural Elegance, Holidays & Events,
-// Sports Teams. When non-empty, flattens and case-insensitive-filters by
-// pattern name + effect name.
-class _AggregatedPatternGrid extends ConsumerWidget {
-  final ValueChanged<PatternSelection> onSelect;
-  final String query;
-  const _AggregatedPatternGrid({required this.onSelect, this.query = ''});
-
-  bool _matches(GradientPattern p, String q) {
-    if (q.isEmpty) return true;
-    final name = p.name.toLowerCase();
-    final effect = (p.effectName ?? '').toLowerCase();
-    return name.contains(q) || effect.contains(q);
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final lib = ref.watch(publicPatternLibraryProvider);
-    if (lib.all.isEmpty) return const Center(child: Text('No patterns'));
-
-    // Bottom padding clears the glass dock nav bar overlay so the last row
-    // of pattern tiles is reachable when this picker sheet is opened from
-    // the schedule editor.
-    final bottomPad = navBarTotalHeight(context) + 16;
-    final gridDelegate = const SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: 3,
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
-      childAspectRatio: 0.9,
-    );
-
-    // ── Search mode: flat grid of matches ────────────────────────────────
-    if (query.isNotEmpty) {
-      final results = lib.all.where((p) => _matches(p, query)).toList();
-      if (results.isEmpty) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Text(
-              'No patterns match "$query"',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: NexGenPalette.textMedium,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        );
-      }
-      return GridView.builder(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
-        gridDelegate: gridDelegate,
-        itemCount: results.length,
-        itemBuilder: (_, i) => _PatternTile(
-          pattern: results[i],
-          onTap: () => onSelect(_selectionFor(results[i])),
-        ),
-      );
-    }
-
-    // ── Browse mode: category-organized sections ─────────────────────────
-    return CustomScrollView(
-      slivers: [
-        ..._categorySection(
-          context: context,
-          title: 'Architectural Elegance',
-          patterns: lib.architecturalElegant,
-          gridDelegate: gridDelegate,
-        ),
-        ..._categorySection(
-          context: context,
-          title: 'Holidays & Events',
-          patterns: lib.holidaysEvents,
-          gridDelegate: gridDelegate,
-        ),
-        ..._categorySection(
-          context: context,
-          title: 'Sports Teams',
-          patterns: lib.sportsTeams,
-          gridDelegate: gridDelegate,
-        ),
-        SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
-      ],
-    );
-  }
-
-  List<Widget> _categorySection({
-    required BuildContext context,
-    required String title,
-    required List<GradientPattern> patterns,
-    required SliverGridDelegate gridDelegate,
-  }) {
-    if (patterns.isEmpty) return const [];
-    return [
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        sliver: SliverToBoxAdapter(
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: NexGenPalette.textHigh,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ),
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        sliver: SliverGrid(
-          gridDelegate: gridDelegate,
-          delegate: SliverChildBuilderDelegate(
-            (_, i) => _PatternTile(
-              pattern: patterns[i],
-              onTap: () => onSelect(_selectionFor(patterns[i])),
-            ),
-            childCount: patterns.length,
-          ),
-        ),
-      ),
-    ];
-  }
-
-  PatternSelection _selectionFor(GradientPattern p) => PatternSelection(
-        id: p.name.toLowerCase().replaceAll(' ', '_'),
-        name: p.name,
-        imageUrl: '',
-        // ROOT-CAUSE FIX: carry the full WLED payload (on:true + bri + seg)
-        // instead of dropping it here. Previously this boundary returned only
-        // a name+slug projection, so the schedule saved wledPayload:null →
-        // syncAll skipped savePreset but still armed an ON-timer macro at the
-        // assigned id → WLED fired a macro with no preset behind it → lights
-        // stayed off and never woke from off. toWledPayload() supplies on:true.
-        wledPayload: p.toWledPayload(),
-      );
-}
-
-/// Single pattern tile — gradient background + name overlay. Extracted so
-/// both the search-result grid and the category sections render identical
-/// tiles.
-class _PatternTile extends StatelessWidget {
-  final GradientPattern pattern;
-  final VoidCallback onTap;
-  const _PatternTile({required this.pattern, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Stack(children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: pattern.colors,
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    NexGenPalette.matteBlack.withValues(alpha: 0.06),
-                    NexGenPalette.matteBlack.withValues(alpha: 0.60),
-                  ],
-                ),
-                border: Border.all(color: NexGenPalette.line),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(pattern.name, style: Theme.of(context).textTheme.labelLarge),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-}

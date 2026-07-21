@@ -43,6 +43,25 @@ String composeColorwayLabel(LibraryNode paletteNode, LibraryNode? parentNode) {
   return '$parentLabel, $paletteName';
 }
 
+/// A design chosen from the library in SELECTION mode — returned to the caller
+/// (e.g. the schedule "choose a pattern" flow) instead of being applied. Same
+/// shape the legacy schedule picker returned (`PatternSelection`): the caller
+/// maps it straight into whatever it stores. [wledPayload] is the RAW design
+/// payload (pre channel-filter), matching `GradientPattern.toWledPayload()` /
+/// `CustomDesign.toWledPayload()` so it round-trips into a ScheduleItem.
+class LibraryDesignSelection {
+  final String id;
+  final String name;
+  final String imageUrl;
+  final Map<String, dynamic> wledPayload;
+  const LibraryDesignSelection({
+    required this.id,
+    required this.name,
+    required this.wledPayload,
+    this.imageUrl = '',
+  });
+}
+
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
@@ -56,10 +75,17 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// and would otherwise spam Firestore with intermediate states.
   final String? teamSlug;
 
+  /// When non-null, this selector is in SELECTION mode (e.g. the schedule
+  /// pattern picker): committing RETURNS the chosen design via this callback
+  /// instead of applying to lights or persisting to Game Day. Null (the
+  /// default) preserves the normal apply-on-tap behavior byte-for-byte.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
     this.teamSlug,
+    this.onDesignSelected,
   });
 
   @override
@@ -277,6 +303,20 @@ class _ColorwayEffectSelectorPageState
           }
         ]
       };
+
+      // SELECTION MODE (e.g. the schedule picker): RETURN the chosen design's
+      // RAW payload to the caller and stop — do NOT apply to lights and do NOT
+      // persist to Game Day. Non-null callback == selection mode; null == the
+      // normal apply-on-tap path below (unchanged). Returned shape mirrors the
+      // legacy _PatternPickerSheet's PatternSelection.
+      if (widget.onDesignSelected != null) {
+        widget.onDesignSelected!(LibraryDesignSelection(
+          id: widget.paletteNode.id,
+          name: '${widget.paletteNode.name} - $effectName',
+          wledPayload: payload,
+        ));
+        return;
+      }
 
       // Apply channel filter so all targeted segments receive the pattern
       final channels = ref.read(effectiveChannelIdsProvider);
