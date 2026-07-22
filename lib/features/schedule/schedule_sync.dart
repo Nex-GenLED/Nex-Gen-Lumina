@@ -197,9 +197,10 @@ class ScheduleSyncService {
   /// pushed payload to exactly [kMaxWledTimers] entries with these stubs makes
   /// each sync authoritative over all 8 slots. `en:0` so a stub never fires.
   static const Map<String, dynamic> _disabledTimerStub = {
-    // Type-strict bool (WLED silently treats an int as disabled) — false so a
-    // reclaimed slot reliably disables, never relying on reject-to-default.
-    'en': false,
+    // WLED reads `en` type-strictly as an INT — a JSON bool is silently stored
+    // as 0. Curl-proven 2026-07-22 on vid 2507300 (`{"en":true}`→stored en:0;
+    // `{"en":1}`→stored en:1). 0 = a reliably-disabled stub. DO NOT use a bool.
+    'en': 0,
     'hour': 0,
     'min': 0,
     'macro': 0,
@@ -272,8 +273,9 @@ class ScheduleSyncService {
     required int dow,
   }) {
     return <String, dynamic>{
-      // Type-strict bool (WLED treats an int as disabled). DO NOT change to int.
-      'en': true,
+      // WLED reads `en` as an INT; a JSON bool stores as 0 (disabled).
+      // Curl-proven 2026-07-22 on vid 2507300. DO NOT change to a bool.
+      'en': 1,
       'hour': kWledSolarHourMarker,
       'min': offsetMinutes.clamp(-kWledSolarOffsetLimit, kWledSolarOffsetLimit),
       'macro': macro,
@@ -511,10 +513,10 @@ class ScheduleSyncService {
     if (tl == 'sunrise' || tl == 'sunset') {
       final isSunrise = tl == 'sunrise';
       return {
-        // WLED cfg parser is type-strict: en MUST be JSON bool. Int is silently
-        // treated as disabled. Bench-proven 2026-07-21 on vid 2507300. DO NOT
-        // change to int.
-        'en': true,
+        // WLED cfg parser is type-strict: en MUST be a JSON INT (1/0). A bool is
+        // silently stored as 0 (disabled). Curl-proven 2026-07-22 on vid 2507300
+        // (`{"en":true}`→en:0; `{"en":1}`→en:1). DO NOT change to a bool.
+        'en': 1,
         'hour': isSunrise ? 24 : 25, // 24=sunrise, 25=sunset
         'min': 0, // offset from sunrise/sunset
         'macro': macro,
@@ -534,8 +536,8 @@ class ScheduleSyncService {
       return null;
     }
     return {
-      // Type-strict bool (see the solar branch above). DO NOT change to int.
-      'en': true,
+      // Type-strict INT (see the solar branch above). DO NOT change to a bool.
+      'en': 1,
       'hour': parsed.hour,
       'min': parsed.minute,
       'macro': macro,
@@ -1079,34 +1081,39 @@ class ScheduleSyncService {
   ) async {
     final ok = await repo.applyConfig(payload);
     if (ok) {
-      // The 2xx squeaked out before any stall — the write is authoritative, but
-      // we still readback-verify. Because content-match already tolerates the
-      // controller's echo compaction + solar sentinels, a genuine mismatch here
-      // is a real defect signal (e.g. a firmware that stored our values wrong) —
-      // FAIL, don't warn-away. Only readback==null (couldn't fetch) stays
-      // warn-only: we can't read, so we trust the 2xx.
+      // 2xx — the write reported success. Still readback-verify.
       final verified = await _readbackTimersLanded(repo, ins);
+      if (verified == true) return _CfgPushOutcome.confirmed;
       if (verified == false) {
+        // Content-match already tolerates echo compaction + solar sentinels, so
+        // a genuine mismatch is a real defect (firmware stored our values wrong).
         debugPrint('ScheduleSync: cfg 2xx but readback CONTENT-MISMATCH — the '
             'controller stored different values; failing loudly');
         return _CfgPushOutcome.mismatch;
       }
-      if (verified == null) {
-        debugPrint('ScheduleSync: cfg 2xx, readback unavailable — trusting the '
-            '2xx (write reported success)');
-      }
-      return _CfgPushOutcome.confirmed;
+      // verified == null: the readback couldn't be fetched. On this hardware a
+      // null right after a 2xx means the controller is stalling on the
+      // post-commit flash save (the GET returns an empty body). DO NOT trust the
+      // 2xx — a disabled/rejected write (e.g. the bool-en bug) would slip through
+      // green. Fall through to the patient verify-poll to wait for recovery and
+      // content-match. A relay/webhook can't be polled, so THERE a 2xx is trusted.
+      if (repo is! WledService) return _CfgPushOutcome.confirmed;
+      debugPrint('ScheduleSync: cfg 2xx but readback unavailable (controller '
+          'likely stalling) — verifying patiently, NOT trusting the 2xx');
+    } else {
+      // POST returned false. On the LAN service this is the post-commit stall:
+      // the flash write landed, but the HTTP response never came back before the
+      // web server froze. For a relay/webhook a false is a genuine failure with
+      // no stall model — fail fast (no minutes-long polling of a webhook).
+      if (repo is! WledService) return _CfgPushOutcome.notConfirmed;
+      debugPrint('ScheduleSync: cfg POST returned false on LAN — assuming the '
+          'post-commit network stall; NOT re-POSTing, verifying patiently');
     }
 
-    // POST returned false. On the LAN service this is the post-commit stall: the
-    // flash write landed, but the HTTP response never came back before the web
-    // server froze. For a relay/webhook a false is a genuine failure with no
-    // stall model — fail fast (no minutes-long polling of a webhook).
-    if (repo is! WledService) return _CfgPushOutcome.notConfirmed;
-    final wledRepo = repo; // promoted
-
-    debugPrint('ScheduleSync: cfg POST returned false on LAN — assuming the '
-        'post-commit network stall; NOT re-POSTing, verifying patiently');
+    // Patient verify-poll — reached on (applyConfig==false) OR (2xx + null
+    // readback) on the LAN service. Wait for the controller to answer again,
+    // then content-match; NO re-POST unless it recovers and still mismatches.
+    final wledRepo = repo as WledService;
     ref.read(lastScheduleSyncResultProvider.notifier).state =
         ScheduleSyncResult.verifying();
 

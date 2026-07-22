@@ -1,7 +1,8 @@
-// Builder-level tests for the P0 en-must-be-bool fix (bench-proven 2026-07-21,
-// WLED vid 2507300: the cfg parser is type-strict — an int en is silently
-// treated as DISABLED). These are the tests that were missing when a8db4ba
-// changed 'en': true → 'en': 1 and shipped disabled timers under a false green.
+// Builder-level tests for the P0 en-must-be-INT fix (curl-proven 2026-07-22,
+// WLED vid 2507300: the cfg parser reads en type-strictly as an int — a JSON
+// bool is silently stored as 0/DISABLED. `{"en":true}`→en:0; `{"en":1}`→en:1).
+// f781e68 had it backwards (int → bool) and shipped disabled timers under a
+// false green; this reverts en to int and locks the direction with a test.
 //
 // Also covers the empty-armed guard's decision predicate (isRealEnabledTimer),
 // which syncAll uses to refuse POSTing an all-stub payload that would false-green.
@@ -34,41 +35,42 @@ void main() {
       ((svc.buildCfgPayload(s)['timers'] as Map)['ins'] as List)
           .cast<Map<String, dynamic>>();
 
-  group('buildCfgPayload emits en as a JSON BOOL (the P0)', () {
-    test('enabled clock schedule → en === true (bool), correct fields', () {
+  group('buildCfgPayload emits en as a JSON INT (the P0)', () {
+    test('enabled clock schedule → en === 1 (int), correct fields', () {
       final ins = insFor([item(timeLabel: '10:40', presetId: 12)]);
       expect(ins.length, 1);
       final e = ins.single;
-      // The whole point: a real JSON boolean, NOT int 1, NOT the string "true".
-      expect(e['en'], isA<bool>(), reason: 'WLED requires a JSON bool');
-      expect(e['en'], isTrue);
-      expect(e['en'], isNot(1), reason: 'int 1 is silently disabled by WLED');
-      expect(e['en'], isNot('true'));
+      // The whole point: the integer 1, NOT a JSON bool, NOT the string "1".
+      // Curl-proven 2026-07-22: WLED stores a bool en as 0 (disabled).
+      expect(e['en'], isA<int>(), reason: 'WLED requires an int en');
+      expect(e['en'], 1);
+      expect(e['en'], isNot(true), reason: 'a JSON bool is silently disabled');
+      expect(e['en'], isNot('1'));
       expect(e['hour'], 10);
       expect(e['min'], 40);
       expect(e['macro'], 12);
       expect(e['dow'], 127); // Daily
     });
 
-    test('ON + OFF pair both emit en:true (bool); OFF macro is 2', () {
+    test('ON + OFF pair both emit en:1 (int); OFF macro is 2', () {
       final ins = insFor([item(timeLabel: '6:00 PM', offTimeLabel: '11:00 PM')]);
       expect(ins.length, 2);
       for (final e in ins) {
-        expect(e['en'], isA<bool>());
-        expect(e['en'], isTrue);
+        expect(e['en'], isA<int>());
+        expect(e['en'], 1);
       }
       expect(ins[0]['macro'], 10); // ON → presetId
       expect(ins[1]['macro'], 2); // OFF → preset 2 convention
     });
 
-    test('solar slot entry (buildSolarTimerEntry) also emits en:true (bool)', () {
+    test('solar slot entry (buildSolarTimerEntry) also emits en:1 (int)', () {
       // The production solar path is the dedicated slot 8/9 entry (hour:255),
       // built by buildSolarTimerEntry — flag-gated in buildCfgPayload, so test
-      // the builder directly. (:247)
+      // the builder directly.
       final e = ScheduleSyncService.buildSolarTimerEntry(
           offsetMinutes: 0, macro: 5, dow: 127);
-      expect(e['en'], isA<bool>());
-      expect(e['en'], isTrue);
+      expect(e['en'], isA<int>());
+      expect(e['en'], 1);
       expect(e['hour'], 255);
     });
   });
@@ -78,23 +80,22 @@ void main() {
       expect(insFor([item(timeLabel: '10:40', enabled: false)]), isEmpty);
     });
 
-    test('padTimersToMax fills empty slots with en:false (bool) stubs', () {
+    test('padTimersToMax fills empty slots with en:0 (int) stubs', () {
       final padded = ScheduleSyncService.padTimersToMax(const []);
       expect(padded.length, 8);
       for (final stub in padded) {
-        expect(stub['en'], isA<bool>());
-        expect(stub['en'], isFalse, reason: 'a stub must reliably disable');
-        expect(stub['en'], isNot(0));
+        expect(stub['en'], isA<int>());
+        expect(stub['en'], 0, reason: 'a stub must reliably disable');
+        expect(stub['en'], isNot(false));
       }
     });
 
-    test('one real timer + padding: real is en:true bool, rest en:false bool',
-        () {
+    test('one real timer + padding: real is en:1 int, rest en:0 int', () {
       final built = insFor([item(timeLabel: '10:40', presetId: 12)]);
       final padded = ScheduleSyncService.padTimersToMax(built);
       expect(padded.length, 8);
-      expect(padded.first['en'], true);
-      expect(padded.skip(1).every((s) => s['en'] == false), isTrue);
+      expect(padded.first['en'], 1);
+      expect(padded.skip(1).every((s) => s['en'] == 0), isTrue);
     });
   });
 
