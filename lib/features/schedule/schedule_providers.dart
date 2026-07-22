@@ -85,6 +85,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// suppress stream-listener overwrites to prevent flash-back-to-old-data.
   bool _isMutating = false;
 
+  /// Lock: a cfg sync (including the up-to-5-minute post-commit verification
+  /// poll) is in flight. Re-pressing Sync, or a mutation-triggered auto-sync,
+  /// during the controller's stall must NOT start a second cfg write — a
+  /// duplicate write on recovery re-triggers the stall. Requests that arrive
+  /// while this is set are dropped (returning the interim "verifying" state);
+  /// the user can Sync again once verification resolves.
+  bool _syncInFlight = false;
+
   /// Debounces WLED sync after schedule mutations. A burst of writes
   /// (autopilot 7-day fan-out, batched manual edits) coalesces into a
   /// single /json/cfg push.
@@ -151,6 +159,14 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
           'hydrated — deferring until the stream loads (no empty-stub push)');
       return ScheduleSyncResult.notLoaded();
     }
+    // In-flight lock: a cfg write / post-commit verification is already running.
+    // Do NOT start a second cfg write into the controller's stall.
+    if (_syncInFlight) {
+      debugPrint('SchedulesNotifier: sync already in flight (verifying through '
+          'controller stall) — dropping this request');
+      return ScheduleSyncResult.verifying();
+    }
+    _syncInFlight = true;
     try {
       final ref = _ref;
       final service = ref.read(scheduleSyncServiceProvider);
@@ -169,6 +185,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         success: false,
         error: 'Sync exception: $e',
       );
+    } finally {
+      _syncInFlight = false;
     }
   }
 
