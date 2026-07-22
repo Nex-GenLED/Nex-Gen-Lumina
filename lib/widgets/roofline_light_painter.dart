@@ -2,6 +2,54 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/widgets/roofline_projection.dart';
+
+/// Lightweight data carrier for a single roofline segment's spatial path.
+///
+/// Used by [RooflineLightPainter] to render per-segment effects independently.
+class SegmentPathData {
+  /// Normalized 0-1 coordinates of this segment on the photo.
+  final List<Offset> points;
+
+  /// Which channel this segment belongs to (0-based).
+  final int channelIndex;
+
+  /// Whether this segment physically connects to the previous one.
+  final bool isConnectedToPrevious;
+
+  /// Optional per-segment color override (null = use channel color).
+  final Color? overrideColor;
+
+  /// Real LED count on this segment (Design Studio Slice 4 real-index mode).
+  /// When set with [ledColors], the painter places EXACTLY this many dots
+  /// keyed to real LED indices (not path-length-distributed virtual LEDs).
+  final int? pixelCount;
+
+  /// Explicit per-LED colors, length == [pixelCount] (real-index mode).
+  final List<Color>? ledColors;
+
+  /// Subtle feature-underlay tint (corner/peak) drawn beneath the dots so the
+  /// house photo shows both the pixels and their architectural meaning.
+  final Color? featureTint;
+
+  /// Aspect ratio (width / height) of the photo this segment was traced on.
+  /// Travels with the segment because the segment carries that trace's
+  /// normalized points. Used to project the points correctly under
+  /// BoxFit.cover; when null the painter falls back to its own
+  /// [RooflineLightPainter.sourceAspectRatio], then the mask's.
+  final double? sourceAspectRatio;
+
+  const SegmentPathData({
+    required this.points,
+    required this.channelIndex,
+    this.isConnectedToPrevious = false,
+    this.overrideColor,
+    this.pixelCount,
+    this.ledColors,
+    this.featureTint,
+    this.sourceAspectRatio,
+  });
+}
 
 /// CustomPainter that renders LED light effects along the roofline.
 ///
@@ -12,6 +60,10 @@ import 'package:nexgen_command/models/roofline_mask.dart';
 /// - Rainbow: Cycling hue gradient
 /// - Twinkle: Random sparkle points
 /// - Wave: Oscillating color pattern
+///
+/// When [segmentPaths] is provided, renders each segment independently
+/// with per-channel color/effect support. Falls back to the single-path
+/// [mask] rendering when segmentPaths is null.
 class RooflineLightPainter extends CustomPainter {
   final List<Color> colors;
   final double animationPhase; // 0.0 to 1.0
@@ -34,6 +86,15 @@ class RooflineLightPainter extends CustomPainter {
   /// Whether the image is displayed with BoxFit.cover (true) or BoxFit.contain (false).
   final bool useBoxFitCover;
 
+  /// Aspect ratio (width / height) of the photo the roofline was traced on.
+  /// The painter needs this — not a whole [mask] — to project points under
+  /// BoxFit.cover. Resolution order per segment:
+  /// [SegmentPathData.sourceAspectRatio] → this field → [mask]'s
+  /// `sourceAspectRatio`. When cover is requested and none is available the
+  /// painter asserts (debug) and falls back to [targetAspectRatio] rather than
+  /// silently skipping the transform (which rendered the trace low + flattened).
+  final double? sourceAspectRatio;
+
   /// Background color for non-active pixels (default black/off).
   /// Used in effects like Star/Twinkle where background pixels are visible.
   final Color backgroundColor;
@@ -41,6 +102,26 @@ class RooflineLightPainter extends CustomPainter {
   /// Number of consecutive LEDs per color in the repeating pattern.
   /// With colorGroupSize=2 and 3 colors: AABBCCAABBCC...
   final int colorGroupSize;
+
+  /// Number of dark (off) LEDs after each lit group.
+  /// With colorGroupSize=1 and spacing=2: ● ○ ○ ● ○ ○ ...
+  final int spacing;
+
+  /// Whether the animation direction is reversed (WLED seg.rev).
+  final bool reverse;
+
+  /// Optional multi-segment path data. When non-null and non-empty,
+  /// each segment is rendered independently along its own polyline,
+  /// with per-channel color support. Falls back to single-path [mask]
+  /// rendering when null.
+  final List<SegmentPathData>? segmentPaths;
+
+  /// Design Studio Slice 4 real-LED-index mode. When true, segments that carry
+  /// [SegmentPathData.pixelCount] + [SegmentPathData.ledColors] render exactly
+  /// pixelCount dots keyed to real LED indices with explicit per-LED colors
+  /// (bypassing the effect painters). Segments without those fields fall back
+  /// to normal rendering.
+  final bool realIndexMode;
 
   RooflineLightPainter({
     required this.colors,
@@ -55,8 +136,13 @@ class RooflineLightPainter extends CustomPainter {
     this.targetAspectRatio,
     this.imageAlignment = Offset.zero,
     this.useBoxFitCover = false,
+    this.sourceAspectRatio,
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
+    this.spacing = 0,
+    this.reverse = false,
+    this.segmentPaths,
+    this.realIndexMode = false,
   });
 
   @override
@@ -67,24 +153,42 @@ class RooflineLightPainter extends CustomPainter {
     final category = categorizeEffect(effectId);
     final brightnessFactor = brightness / 255.0;
 
+    // ── Multi-segment rendering ───────────────────────────────────────
+    if (segmentPaths != null && segmentPaths!.isNotEmpty) {
+      for (final seg in segmentPaths!) {
+        if (seg.points.length < 2) continue;
+
+        final canvasPoints = _projectPoints(
+          seg.points,
+          size,
+          seg.sourceAspectRatio,
+        );
+
+        // Real-index mode: place exactly pixelCount dots with explicit colors.
+        if (realIndexMode &&
+            seg.pixelCount != null &&
+            seg.pixelCount! > 0 &&
+            seg.ledColors != null) {
+          _paintExplicitColors(canvas, canvasPoints, seg.pixelCount!,
+              seg.ledColors!, brightnessFactor, seg.featureTint);
+          continue;
+        }
+
+        // Use override color if present, otherwise use channel colors
+        final segColors = seg.overrideColor != null
+            ? [seg.overrideColor!]
+            : effectiveColors;
+
+        _paintAlongPath(canvas, size, canvasPoints, segColors, brightnessFactor, category);
+      }
+      return;
+    }
+
+    // ── Legacy single-path rendering ──────────────────────────────────
+
     // Check if we have custom roofline points
     if (mask != null && mask!.hasCustomPoints && mask!.points.length >= 2) {
-      // Get the points, potentially transformed for BoxFit.cover
-      List<Offset> normalizedPoints = mask!.points;
-
-      // Transform points if using BoxFit.cover and we have aspect ratio info
-      if (useBoxFitCover && targetAspectRatio != null && mask!.sourceAspectRatio != null) {
-        normalizedPoints = mask!.getPointsForCover(
-          targetAspectRatio: targetAspectRatio!,
-          alignment: imageAlignment,
-        );
-      }
-
-      // Convert normalized points to canvas coordinates
-      final canvasPoints = normalizedPoints
-          .map((p) => Offset(p.dx * size.width, p.dy * size.height))
-          .toList();
-
+      final canvasPoints = _projectPoints(mask!.points, size, null);
       _paintAlongPath(canvas, size, canvasPoints, effectiveColors, brightnessFactor, category);
       return;
     }
@@ -123,7 +227,12 @@ class RooflineLightPainter extends CustomPainter {
     final effectiveLedCount = ledCount ?? (totalLength / 8).round().clamp(10, 75);
 
     // Get positions along the path for each virtual LED
-    final ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
+    var ledPositions = _getLedPositionsAlongPath(points, totalLength, effectiveLedCount);
+
+    // Reverse LED order when WLED segment reverse flag is set
+    if (reverse) {
+      ledPositions = ledPositions.reversed.toList();
+    }
 
     switch (category) {
       case EffectCategory.solid:
@@ -162,6 +271,50 @@ class RooflineLightPainter extends CustomPainter {
       case EffectCategory.morphing:
         _paintMorphingPath(canvas, ledPositions, colors, brightness);
         break;
+    }
+  }
+
+  /// Real-index render (Slice 4): places EXACTLY [pixelCount] dots along the
+  /// segment's polyline, each drawn with its explicit color from [ledColors].
+  /// Optionally lays a faint [featureTint] stroke underneath (corner/peak
+  /// underlay) so the meaning of the pixels reads on the photo. Reuses the
+  /// existing position walker + [_drawLedDot] — no effect dispatch.
+  void _paintExplicitColors(
+    Canvas canvas,
+    List<Offset> points,
+    int pixelCount,
+    List<Color> ledColors,
+    double brightness,
+    Color? featureTint,
+  ) {
+    if (points.length < 2 || pixelCount <= 0) return;
+
+    double totalLength = 0;
+    for (int i = 1; i < points.length; i++) {
+      totalLength += (points[i] - points[i - 1]).distance;
+    }
+
+    // Feature underlay: a soft tinted stroke beneath the dots.
+    if (featureTint != null) {
+      final path = Path()..moveTo(points.first.dx, points.first.dy);
+      for (int i = 1; i < points.length; i++) {
+        path.lineTo(points[i].dx, points[i].dy);
+      }
+      final tintPaint = Paint()
+        ..color = featureTint.withValues(alpha: 0.18)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 10.0
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      canvas.drawPath(path, tintPaint);
+    }
+
+    var positions = _getLedPositionsAlongPath(points, totalLength, pixelCount);
+    if (reverse) positions = positions.reversed.toList();
+
+    for (int i = 0; i < pixelCount && i < positions.length; i++) {
+      final color = i < ledColors.length ? ledColors[i] : backgroundColor;
+      _drawLedDot(canvas, positions[i], color, brightness, radius: 2.6);
     }
   }
 
@@ -298,6 +451,52 @@ class RooflineLightPainter extends CustomPainter {
     canvas.drawCircle(pos, dotRadius * 0.35, lensPaint);
   }
 
+  /// Projects a segment's normalized trace points to canvas coordinates through
+  /// the shared [projectRoofline] — the ONLY place this math lives.
+  ///
+  /// [segmentAspect] is the per-segment source aspect (may be null). The
+  /// effective source aspect resolves segment → painter → mask. When cover is
+  /// requested but none is available the transform can't be computed correctly;
+  /// rather than silently skip it (the bug that rendered the trace low +
+  /// flattened) we assert loudly in debug and fall back to [targetAspectRatio]
+  /// (identity crop) in release.
+  List<Offset> _projectPoints(
+    List<Offset> points,
+    Size size,
+    double? segmentAspect,
+  ) {
+    if (!useBoxFitCover) {
+      // Legacy stretch-to-fill map (no cover crop requested).
+      return projectRoofline(
+        normalized: points,
+        canvasSize: size,
+        sourceAspectRatio: 0, // ignored under fill
+        fit: BoxFit.fill,
+      );
+    }
+
+    var srcAspect = segmentAspect ?? sourceAspectRatio ?? mask?.sourceAspectRatio;
+    if (srcAspect == null) {
+      assert(
+        false,
+        'RooflineLightPainter: BoxFit.cover requested but no sourceAspectRatio '
+        'is available (segment, painter, and mask are all null). Provide '
+        'SegmentPathData.sourceAspectRatio or RooflineLightPainter.sourceAspectRatio '
+        'so the trace projects onto the cover-cropped photo. Falling back to '
+        'targetAspectRatio (identity crop) — the trace may render mis-placed.',
+      );
+      srcAspect = targetAspectRatio ?? (size.width / size.height);
+    }
+
+    return projectRoofline(
+      normalized: points,
+      canvasSize: size,
+      sourceAspectRatio: srcAspect,
+      fit: BoxFit.cover,
+      alignment: imageAlignment,
+    );
+  }
+
   /// Generate a default gentle-arc roofline path when no custom mask exists.
   ///
   /// Creates a peaked roofline shape typical of a residential home,
@@ -316,23 +515,29 @@ class RooflineLightPainter extends CustomPainter {
     });
   }
 
-  /// Paint solid color along the roofline path - every pixel is color1.
+  /// Paint solid color along the roofline path. Cycles colors via
+  /// [_getColorForLed] so brightness-gradient patterns (multiple
+  /// progressively-dim colors with `grp` band width) render the gradient
+  /// across the strip instead of flat color1.
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
-    final color = colors.first;
+    final cycle = colorGroupSize + spacing;
     for (int i = 0; i < positions.length; i++) {
-      _drawLedDot(canvas, positions[i], color, brightness);
+      if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
+      _drawLedDot(canvas, positions[i], _getColorForLed(i, colors), brightness);
     }
   }
 
-  /// Paint breathing effect along path - every pixel is color1, brightness pulsing.
+  /// Paint breathing effect along path - pulsing opacity, color cycled per LED
+  /// so brightness-gradient breathing variants display correctly.
   void _paintBreathePath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final breathePhase = math.sin(animationPhase * math.pi * 2);
     final breatheIntensity = 0.3 + (breathePhase + 1) / 2 * 0.7;
     final effectiveBrightness = brightness * breatheIntensity;
-    final color = colors.first;
+    final cycle = colorGroupSize + spacing;
 
     for (int i = 0; i < positions.length; i++) {
-      _drawLedDot(canvas, positions[i], color, effectiveBrightness);
+      if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
+      _drawLedDot(canvas, positions[i], _getColorForLed(i, colors), effectiveBrightness);
     }
   }
 
@@ -627,7 +832,12 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.targetAspectRatio != targetAspectRatio ||
         oldDelegate.imageAlignment != imageAlignment ||
         oldDelegate.useBoxFitCover != useBoxFitCover ||
+        oldDelegate.sourceAspectRatio != sourceAspectRatio ||
         oldDelegate.backgroundColor != backgroundColor ||
-        oldDelegate.colorGroupSize != colorGroupSize;
+        oldDelegate.colorGroupSize != colorGroupSize ||
+        oldDelegate.spacing != spacing ||
+        oldDelegate.reverse != reverse ||
+        oldDelegate.segmentPaths != segmentPaths ||
+        oldDelegate.realIndexMode != realIndexMode;
   }
 }

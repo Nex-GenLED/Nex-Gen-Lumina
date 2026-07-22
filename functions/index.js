@@ -1,5 +1,6 @@
 const { onCall, HttpsError, onRequest } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineString } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { claudeProxy } = require('./src/claudeProxy');
@@ -7,13 +8,107 @@ exports.claudeProxy = claudeProxy;
 
 admin.initializeApp();
 
-// Import TypeScript-compiled Lumina AI command processor
-const { processLuminaCommand } = require("./lib/processLuminaCommand");
-exports.processLuminaCommand = processLuminaCommand;
-
 // Import TypeScript-compiled Lumina AI schedule command processor
 const { processScheduleCommand } = require("./lib/processScheduleCommand");
 exports.processScheduleCommand = processScheduleCommand;
+
+// Import TypeScript-compiled Neighborhood Sync notification sender
+const { sendSyncNotification } = require("./lib/sendSyncNotification");
+exports.sendSyncNotification = sendSyncNotification;
+
+// Import TypeScript-compiled Sync Session lifecycle functions (background service)
+const { initiateSyncSession } = require("./lib/initiateSyncSession");
+exports.initiateSyncSession = initiateSyncSession;
+
+const { endSyncSession } = require("./lib/endSyncSession");
+exports.endSyncSession = endSyncSession;
+
+const { applySyncPattern } = require("./lib/applySyncPattern");
+exports.applySyncPattern = applySyncPattern;
+
+const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
+exports.triggerSyncFailover = triggerSyncFailover;
+
+// Import TypeScript-compiled referral code assignment (onCreate /users/{uid})
+const { assignReferralCode } = require("./lib/assignReferralCode");
+exports.assignReferralCode = assignReferralCode;
+
+// Import TypeScript-compiled referral code redemption (callable)
+const { redeemReferralCode } = require("./lib/redeemReferralCode");
+exports.redeemReferralCode = redeemReferralCode;
+
+// Import TypeScript-compiled referral status change notification (onUpdate trigger)
+const { onReferralStatusChanged } = require("./lib/onReferralStatusChanged");
+exports.onReferralStatusChanged = onReferralStatusChanged;
+
+// Import TypeScript-compiled Day 2 install team notification
+const { notifyDay2Team } = require("./lib/notifyDay2Team");
+exports.notifyDay2Team = notifyDay2Team;
+
+// Import TypeScript-compiled referrer reward approval notification
+const { notifyReferrerOfApproval } = require("./lib/notifyReferrerOfApproval");
+exports.notifyReferrerOfApproval = notifyReferrerOfApproval;
+
+// Import TypeScript-compiled weekly brief scheduled function (Sunday 18:30 UTC)
+const { sendWeeklyBrief } = require("./lib/sendWeeklyBrief");
+exports.sendWeeklyBrief = sendWeeklyBrief;
+
+// Import TypeScript-compiled schedule-limit enforcer (Sunday 19:00 UTC)
+const { enforceScheduleLimits } = require("./lib/enforceScheduleLimits");
+exports.enforceScheduleLimits = enforceScheduleLimits;
+
+// Admin callable: backfill legacy schedules array -> subcollection (Prompt A-4)
+const { backfillSchedulesSubcollection } = require("./lib/backfillSchedulesSubcollection");
+exports.backfillSchedulesSubcollection = backfillSchedulesSubcollection;
+
+// The single residential<->commercial activation path. Owns the cross-doc
+// batch (users + installations) that no client can write; absorbs the two
+// diverged in-app batches (item #32).
+const { setAccountProfile } = require("./lib/setAccountProfile");
+exports.setAccountProfile = setAccountProfile;
+
+// ── Messaging ──────────────────────────────────────────────────────────────
+// SMS + email customer messaging pipeline. messaging-helpers.ts is a
+// shared support module imported by both functions below — it has no
+// require/exports entry of its own.
+
+const { onSalesJobStatusChanged } = require("./lib/onSalesJobStatusChanged");
+exports.onSalesJobStatusChanged = onSalesJobStatusChanged;
+
+const { createCustomerAccount } = require("./lib/createCustomerAccount");
+exports.createCustomerAccount = createCustomerAccount;
+
+const { sendInstallReminders } = require("./lib/sendInstallReminders");
+exports.sendInstallReminders = sendInstallReminders;
+
+// Server-side staff PIN validation — replaces the client-side hash
+// reads in sales_providers.dart / installer_providers.dart.
+const { mintStaffToken } = require("./lib/staffAuth");
+exports.mintStaffToken = mintStaffToken;
+
+// One-shot admin tool: backfills lat/lon/time_zone for /users docs that
+// were created before the installer-flow geo capture landed. Requires
+// the admin custom claim on the caller's account.
+const { backfillUserLocations } = require("./lib/backfillUserLocations");
+exports.backfillUserLocations = backfillUserLocations;
+
+// One-shot admin tool: backfills dealer_code on /users docs by joining
+// from /installations.primary_user_id -> /users.uid, copying
+// /installations.dealer_code onto the user doc. Required so installer
+// PIN sessions can find pre-fix customers via the per-dealer rule clause
+// on /users. Requires the admin custom claim on the caller's account.
+const { backfillUserDealerCodes } = require("./lib/backfillUserDealerCodes");
+exports.backfillUserDealerCodes = backfillUserDealerCodes;
+
+// One-time WLED dow off-by-one fix migration (Item #72). Clears every
+// user's `schedules` array so the production fleet starts clean on the
+// corrected Mon=bit 0 convention. Idempotent — tracks completion in
+// config/migrations/items/migrateClearScheduleItemsV1. Gated to
+// @nex-genled.com authenticated callers. Must be invoked manually via
+// Firebase Console or `firebase functions:shell` after the new build
+// is in production.
+const { migrateClearScheduleItemsV1 } = require("./lib/migrateClearScheduleItemsV1");
+exports.migrateClearScheduleItemsV1 = migrateClearScheduleItemsV1;
 
 const db = admin.firestore();
 
@@ -27,6 +122,16 @@ const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
 // Google Home OAuth configuration (add to .env file)
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
 const googleClientSecret = defineString("GOOGLE_CLIENT_SECRET");
+
+// Messaging — Twilio (SMS) configuration (add to .env file)
+const twilioAccountSid = defineString("TWILIO_ACCOUNT_SID");
+const twilioAuthToken = defineString("TWILIO_AUTH_TOKEN");
+const twilioFromNumber = defineString("TWILIO_FROM_NUMBER");
+
+// Messaging — Resend (email) configuration (add to .env file)
+const resendApiKey = defineString("RESEND_API_KEY");
+const resendFromEmail = defineString("RESEND_FROM_EMAIL");
+const resendFromName = defineString("RESEND_FROM_NAME");
 
 /**
  * OpenAI Proxy Cloud Function for Lumina AI
@@ -268,6 +373,14 @@ exports.executeWledCommand = onDocumentCreated(
 
       const baseUrl = commandData.webhookUrl.replace(/\/$/, ""); // Remove trailing slash
 
+      // The Dart app stores payload as a JSON string in Firestore (to avoid
+      // nested-array issues with the iOS Firestore SDK). Detect this and avoid
+      // double-encoding: if it's already a string, use it directly; if it's an
+      // object (legacy or bridge-written), JSON.stringify it.
+      const rawPayload = commandData.payload;
+      const payloadString =
+        typeof rawPayload === "string" ? rawPayload : JSON.stringify(rawPayload);
+
       switch (commandData.type) {
         case "getState":
           endpoint = `${baseUrl}/json/state`;
@@ -283,16 +396,18 @@ exports.executeWledCommand = onDocumentCreated(
         case "configureSyncSender":
         case "renameSegment":
         case "applyToSegments":
+        case "savePreset":
+        case "loadPreset":
           endpoint = `${baseUrl}/json/state`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
           break;
         case "applyConfig":
           endpoint = `${baseUrl}/json/cfg`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
           break;
         default:
           endpoint = `${baseUrl}/json/state`;
-          body = JSON.stringify(commandData.payload);
+          body = payloadString;
       }
 
       console.log(`📡 Calling ${method} ${endpoint}`);
@@ -335,10 +450,12 @@ exports.executeWledCommand = onDocumentCreated(
 
       console.log(`✅ Command executed successfully`);
 
-      // Update command with success result
+      // Update command with success result.
+      // Store result as a JSON string (matching Dart-side convention) to avoid
+      // nested-array structures that crash the iOS Firestore SDK.
       await commandRef.update({
         status: "completed",
-        result: result,
+        result: typeof result === "string" ? result : JSON.stringify(result),
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     } catch (error) {
@@ -873,16 +990,14 @@ function addSecurityHeaders(res) {
  * - Expired OAuth codes
  * - Suggestions older than 30 days
  */
-exports.cleanupOldData = onCall(
-  { region: "us-central1" },
-  async (request) => {
-    // Only allow admin calls (or scheduled triggers in production)
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Admin access required");
-    }
-
+// Shared cleanup routine. Extracted from the onCall handler so a scheduled
+// trigger can run it too (Slice 0 — previously onCall-only, so it NEVER fired
+// automatically and command docs accumulated forever). Returns the stats map;
+// throws on error for the caller to handle.
+async function runDataCleanup() {
     const USAGE_RETENTION_DAYS = 90;
     const SUGGESTIONS_RETENTION_DAYS = 30;
+    const COMMANDS_RETENTION_DAYS = 7;
     const usageCutoff = new Date();
     usageCutoff.setDate(usageCutoff.getDate() - USAGE_RETENTION_DAYS);
     const usageCutoffTimestamp = admin.firestore.Timestamp.fromDate(usageCutoff);
@@ -890,6 +1005,10 @@ exports.cleanupOldData = onCall(
     const suggestionsCutoff = new Date();
     suggestionsCutoff.setDate(suggestionsCutoff.getDate() - SUGGESTIONS_RETENTION_DAYS);
     const suggestionsCutoffTimestamp = admin.firestore.Timestamp.fromDate(suggestionsCutoff);
+
+    const commandsCutoff = new Date();
+    commandsCutoff.setDate(commandsCutoff.getDate() - COMMANDS_RETENTION_DAYS);
+    const commandsCutoffTimestamp = admin.firestore.Timestamp.fromDate(commandsCutoff);
 
     console.log(`Starting data cleanup:
       - Usage logs older than ${usageCutoff.toISOString()}
@@ -902,6 +1021,7 @@ exports.cleanupOldData = onCall(
         patternUsage: 0,
         habits: 0,
         suggestions: 0,
+        commands: 0,
         oauthCodes: 0,
       };
 
@@ -970,6 +1090,27 @@ exports.cleanupOldData = onCall(
           await batch4.commit();
           stats.suggestions += oldSuggestions.size;
         }
+
+        // Clean up old WLED relay command docs (Slice 0 — the TTL). Any command
+        // past the retention window is terminal-or-abandoned: the bridge/app
+        // acted on it long ago. Bounded per run (limit 450) to stay under the
+        // 500-op batch cap; the daily schedule drains any backlog over
+        // successive runs. Queries createdAt only (single-field auto-index), so
+        // no composite index is needed.
+        const oldCommands = await db
+          .collection("users")
+          .doc(userId)
+          .collection("commands")
+          .where("createdAt", "<", commandsCutoffTimestamp)
+          .limit(450)
+          .get();
+
+        if (oldCommands.size > 0) {
+          const batchC = db.batch();
+          oldCommands.docs.forEach((doc) => batchC.delete(doc.ref));
+          await batchC.commit();
+          stats.commands += oldCommands.size;
+        }
       }
 
       // Clean up expired OAuth codes (> 1 hour old)
@@ -987,10 +1128,41 @@ exports.cleanupOldData = onCall(
       }
 
       console.log(`Cleanup complete:`, stats);
-      return { success: true, stats };
+      return stats;
     } catch (error) {
       console.error("Cleanup error:", error);
+      throw error;
+    }
+}
+
+// Manual admin invocation (unchanged surface): callable, auth-gated. Returns
+// the same { success, stats } envelope as before.
+exports.cleanupOldData = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    // Only allow admin calls
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Admin access required");
+    }
+    try {
+      const stats = await runDataCleanup();
+      return { success: true, stats };
+    } catch (error) {
       throw new HttpsError("internal", error.message);
+    }
+  }
+);
+
+// Scheduled trigger so cleanup ACTUALLY runs without a manual call — this is
+// what finally gives users/{uid}/commands a real TTL (Slice 0). Daily 04:00 UTC.
+exports.scheduledDataCleanup = onSchedule(
+  { schedule: "0 4 * * *", region: "us-central1" },
+  async () => {
+    try {
+      const stats = await runDataCleanup();
+      console.log("scheduledDataCleanup complete:", stats);
+    } catch (error) {
+      console.error("scheduledDataCleanup error:", error);
     }
   }
 );

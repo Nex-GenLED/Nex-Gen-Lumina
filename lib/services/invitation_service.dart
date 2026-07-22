@@ -50,10 +50,17 @@ class InvitationService {
       throw Exception('Maximum sub-users reached ($maxSubUsers). Cannot invite more users.');
     }
 
-    // Check for existing pending invitation to same email
+    // Check for existing pending invitation to same email.
+    // primary_user_id filter is required, not optional: the /invitations read
+    // rule is per-doc owner-scoped (primary_user_id == request.auth.uid).
+    // Firestore rules aren't filters — a list query is denied unless its
+    // where-clauses prove every result is readable. primaryUserId is the
+    // caller's uid (sub_users_screen.dart passes user.uid), so this both
+    // satisfies the rule and correctly scopes the dedupe to this primary.
     final existingQuery = await _db
         .collection('invitations')
         .where('installation_id', isEqualTo: installationId)
+        .where('primary_user_id', isEqualTo: primaryUserId)
         .where('invitee_email', isEqualTo: inviteeEmail.toLowerCase().trim())
         .where('status', isEqualTo: 'pending')
         .limit(1)
@@ -246,11 +253,22 @@ class InvitationService {
     debugPrint('InvitationService: Updated permissions for user $userId');
   }
 
-  /// Stream pending invitations for an installation.
-  Stream<List<Invitation>> streamPendingInvitations(String installationId) {
+  /// Stream pending invitations for an installation, scoped to the primary
+  /// user who created them.
+  ///
+  /// [primaryUserId] is required (not just for correctness): the /invitations
+  /// read rule is per-doc owner-scoped (primary_user_id == request.auth.uid),
+  /// and Firestore rules aren't filters — a list query without this filter is
+  /// denied outright. For a single-primary installation this returns the same
+  /// set the unscoped query would have, just provably readable.
+  Stream<List<Invitation>> streamPendingInvitations(
+    String installationId,
+    String primaryUserId,
+  ) {
     return _db
         .collection('invitations')
         .where('installation_id', isEqualTo: installationId)
+        .where('primary_user_id', isEqualTo: primaryUserId)
         .where('status', isEqualTo: 'pending')
         .orderBy('created_at', descending: true)
         .snapshots()
@@ -295,10 +313,15 @@ final invitationServiceProvider = Provider<InvitationService>((ref) {
   return InvitationService();
 });
 
-/// Provider for streaming pending invitations for the current user's installation.
-final pendingInvitationsProvider =
-    StreamProvider.family<List<Invitation>, String>((ref, installationId) {
-  return ref.watch(invitationServiceProvider).streamPendingInvitations(installationId);
+/// Provider for streaming pending invitations for the current user's
+/// installation. Family arg carries both the installation id and the primary
+/// user's uid — the uid is required to scope the query so it satisfies the
+/// per-doc /invitations read rule (see [InvitationService.streamPendingInvitations]).
+final pendingInvitationsProvider = StreamProvider.family<List<Invitation>,
+    ({String installationId, String uid})>((ref, arg) {
+  return ref
+      .watch(invitationServiceProvider)
+      .streamPendingInvitations(arg.installationId, arg.uid);
 });
 
 /// SubUser model for display purposes.

@@ -1,129 +1,36 @@
-# Lumina ESP32 Bridge
+# Lumina ESP32 Bridge (Legacy — Firebase Polling)
 
-This ESP32 firmware acts as a bridge between Firebase Firestore and WLED devices on your local network, enabling remote control without requiring WLED to support MQTT+TLS.
+> **Note:** This is the **legacy** ESP32 bridge implementation. The current recommended bridge firmware is in the [`lumina-firmware/`](../lumina-firmware/) directory, which provides a branded setup experience with a captive portal wizard, web dashboard, and NVS-based configuration (no hardcoded credentials).
 
-## How It Works
+This firmware acts as a bridge between Firebase Firestore and WLED devices on your local network, enabling remote control without requiring port forwarding.
 
-1. **ESP32 connects to your home WiFi** - Same network as your WLED devices
-2. **ESP32 authenticates with Firebase** - Uses your Firebase project credentials
-3. **ESP32 polls Firestore** - Checks for pending commands every 2 seconds
-4. **ESP32 executes commands locally** - Makes HTTP requests to WLED devices
-5. **ESP32 updates command status** - Reports success/failure back to Firestore
+## Status: Superseded
 
-The Flutter app writes commands to Firestore when you're away from home, and this bridge executes them on your behalf.
+This version required hardcoding the Firebase API key, project ID, and user UID in `src/config.h` at compile time. The new `lumina-firmware/` bridge replaces this with:
 
-## Requirements
+- **Captive portal WiFi setup** — no hardcoded WiFi credentials
+- **3-step web wizard** — configure bridge auth, user pairing, and WLED IP from a phone browser
+- **NVS persistence** — settings survive firmware updates
+- **Web dashboard** — monitor bridge status, commands, and errors from a browser
+- **Heartbeat** — writes to `/users/{uid}/bridge_status/current` every 30 seconds
 
-- ESP32 development board (any variant)
-- USB cable for programming
-- PlatformIO IDE (VS Code extension recommended)
+For setup instructions, see [docs/ESP32_Bridge_Setup_Guide.md](../docs/ESP32_Bridge_Setup_Guide.md).
 
-## Setup
+## How It Worked
 
-### 1. Install PlatformIO
+1. ESP32 connects to home WiFi (credentials in `config.h`)
+2. ESP32 authenticates with Firebase using anonymous auth
+3. ESP32 polls Firestore `/users/{uid}/commands` for pending commands
+4. ESP32 forwards commands to local WLED device via HTTP
+5. ESP32 updates command status in Firestore
 
-Install the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode) in VS Code.
+## Migration
 
-### 2. Configure Credentials
+To migrate from this bridge to the new `lumina-firmware/` bridge:
 
-Edit `src/config.h` and update the following:
+1. Flash the new firmware from `lumina-firmware/` using PlatformIO
+2. Connect to the `Lumina-XXXX` AP from your phone
+3. Walk through the 3-step setup wizard (WiFi, auth, pairing)
+4. No changes needed in the Lumina app — the Firestore command format is identical
 
-```cpp
-// Your Firebase API key (from Firebase Console → Project Settings)
-#define FIREBASE_API_KEY "AIzaSy..."
-
-// Your Firebase project ID (e.g., "lumina-app-12345")
-#define FIREBASE_PROJECT_ID "lumina-app-12345"
-
-// The Firebase UID of the user whose commands this bridge will execute
-// (Find this in Firebase Console → Authentication → Users)
-#define FIREBASE_USER_UID "abc123xyz..."
-```
-
-### 3. Build and Upload
-
-1. Connect your ESP32 via USB
-2. Open this folder in VS Code
-3. Click the PlatformIO icon in the sidebar
-4. Click "Build" to compile
-5. Click "Upload" to flash the ESP32
-
-### 4. Configure WiFi
-
-On first boot (or if WiFi credentials are lost):
-
-1. The ESP32 creates an AP called "Lumina-Bridge"
-2. Connect to it from your phone (password: `luminabridge`)
-3. A configuration portal opens automatically
-4. Select your home WiFi network and enter the password
-5. The ESP32 saves the credentials and connects
-
-### 5. Verify Operation
-
-Open the Serial Monitor (115200 baud) to see status messages:
-
-```
-=========================================
-   Lumina ESP32 Bridge v1.0
-=========================================
-
-Setting up WiFi...
-Connected! IP: 192.168.1.100
-
-Setting up Firebase... Ready!
-
-Bridge initialized and ready!
-Polling for commands...
-```
-
-The blue LED will blink once every 5 seconds to indicate it's running:
-- 1 blink: All systems OK
-- 2 blinks: WiFi OK, Firebase issue
-- 3 blinks: WiFi disconnected
-
-## LED Indicators
-
-| Pattern | Meaning |
-|---------|---------|
-| Rapid blinks on startup | Initializing |
-| Solid 1 second | Successfully initialized |
-| Single blink every 5s | Normal operation |
-| LED on during processing | Executing command |
-| 2 blinks every 5s | Firebase connection issue |
-| 3 blinks every 5s | WiFi disconnected |
-
-## Troubleshooting
-
-### "Firebase not ready"
-- Check your API key and project ID in `config.h`
-- Ensure your Firebase project has Firestore enabled
-- Check that Firestore security rules allow reads/writes
-
-### "Failed to connect to WiFi"
-- The ESP32 will create an AP for configuration
-- Connect to "Lumina-Bridge" and configure WiFi
-- Make sure the password is correct
-
-### Commands not executing
-- Check that `FIREBASE_USER_UID` matches your app's logged-in user
-- Verify the WLED device IP is correct in your app
-- Check Serial Monitor for detailed error messages
-
-### Commands timing out
-- Ensure the WLED device is powered on
-- Check that ESP32 is on the same network as WLED
-- Try increasing `WLED_HTTP_TIMEOUT_MS` in config.h
-
-## Security Notes
-
-- The ESP32 uses anonymous Firebase authentication by default
-- Firestore security rules should validate that only the bridge can update command status
-- Consider adding a device token for additional security in production
-
-## Updating Firmware
-
-1. Connect the ESP32 via USB
-2. Open this project in VS Code
-3. Click "Upload" in PlatformIO
-
-The WiFi credentials are stored in flash and will persist after firmware updates.
+The new bridge uses email/password Firebase Auth instead of anonymous auth, providing better security and the ability to restrict Firestore access via security rules.

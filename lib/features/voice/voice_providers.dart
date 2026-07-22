@@ -146,7 +146,7 @@ final donateSystemShortcutsProvider = Provider<Future<void> Function()>((ref) {
 // ============== Private Handlers ==============
 
 /// Handle Siri Shortcut activation
-void _handleSiriShortcut(ProviderRef ref, String activityType, Map<String, dynamic> userInfo) {
+void _handleSiriShortcut(Ref ref, String activityType, Map<String, dynamic> userInfo) {
   switch (activityType) {
     case SiriActivityTypes.applyScene:
       final sceneId = userInfo['sceneId'] as String?;
@@ -177,7 +177,7 @@ void _handleSiriShortcut(ProviderRef ref, String activityType, Map<String, dynam
 }
 
 /// Handle Deep Link action
-void _handleDeepLinkAction(ProviderRef ref, DeepLinkAction action) {
+void _handleDeepLinkAction(Ref ref, DeepLinkAction action) {
   switch (action.type) {
     case DeepLinkActionType.powerOn:
       _setPower(ref, true);
@@ -215,7 +215,7 @@ void _handleDeepLinkAction(ProviderRef ref, DeepLinkAction action) {
 }
 
 /// Apply scene by ID
-void _applySceneById(ProviderRef ref, String sceneId) {
+void _applySceneById(Ref ref, String sceneId) {
   debugPrint('Voice: Applying scene by ID: $sceneId');
 
   final allScenesAsync = ref.read(allScenesProvider);
@@ -230,7 +230,7 @@ void _applySceneById(ProviderRef ref, String sceneId) {
 }
 
 /// Apply scene by name
-void _applySceneByName(ProviderRef ref, String sceneName) {
+void _applySceneByName(Ref ref, String sceneName) {
   debugPrint('Voice: Applying scene by name: $sceneName');
 
   final allScenesAsync = ref.read(allScenesProvider);
@@ -249,23 +249,21 @@ void _applySceneByName(ProviderRef ref, String sceneName) {
 }
 
 /// Set power on/off
-void _setPower(ProviderRef ref, bool on) {
+void _setPower(Ref ref, bool on) {
   debugPrint('Voice: Setting power: $on');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-  notifier.togglePower(on);
+  ref.read(wledStateProvider.notifier).togglePower(on);
 }
 
 /// Set brightness level
-void _setBrightness(ProviderRef ref, int level) {
+void _setBrightness(Ref ref, int level) {
   debugPrint('Voice: Setting brightness: $level');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-  notifier.setBrightness(level.clamp(0, 255));
+  ref.read(wledStateProvider.notifier).setBrightness(level.clamp(0, 255));
 }
 
 /// Set color from Siri shortcut
-void _setColor(ProviderRef ref, Map<String, dynamic> userInfo) {
+void _setColor(Ref ref, Map<String, dynamic> userInfo) {
   final r = (userInfo['r'] as num?)?.toInt() ?? 255;
   final g = (userInfo['g'] as num?)?.toInt() ?? 255;
   final b = (userInfo['b'] as num?)?.toInt() ?? 255;
@@ -274,25 +272,23 @@ void _setColor(ProviderRef ref, Map<String, dynamic> userInfo) {
 
   debugPrint('Voice: Setting color to $colorName: RGB($r, $g, $b) W:$w');
 
-  final notifier = ref.read(wledStateProvider.notifier);
-
   // Ensure lights are on
-  notifier.togglePower(true);
+  ref.read(wledStateProvider.notifier).togglePower(true);
 
   // Set the color
-  notifier.setColor(Color.fromARGB(255, r, g, b));
+  ref.read(wledStateProvider.notifier).setColor(Color.fromARGB(255, r, g, b));
 
   // Set white channel if specified (for RGBW strips)
   if (w != null && w > 0) {
-    notifier.setWarmWhite(w);
+    ref.read(wledStateProvider.notifier).setWarmWhite(w);
   }
 
   // Update the preset label
-  ref.read(activePresetLabelProvider.notifier).state = colorName;
+  ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(colorName, ref.read(wledStateProvider));
 }
 
 /// Run the current schedule - applies whatever pattern/action should be active now
-Future<void> _runSchedule(ProviderRef ref) async {
+Future<void> _runSchedule(Ref ref) async {
   debugPrint('Voice: Running schedule');
 
   // Find the current scheduled action based on time and day
@@ -317,13 +313,13 @@ Future<void> _runSchedule(ProviderRef ref) async {
 
     if (actionLower.contains('turn off') || actionLower == 'off') {
       await repo.applyJson({'on': false});
-      ref.read(activePresetLabelProvider.notifier).state = 'Off (Scheduled)';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Off (Scheduled)', ref.read(wledStateProvider));
     } else if (actionLower.startsWith('brightness')) {
       final match = RegExp(r'(\d{1,3})%').firstMatch(action);
       final brightness = int.tryParse(match?.group(1) ?? '') ?? 100;
       final bri = (brightness * 255 / 100).round().clamp(0, 255);
       await repo.applyJson({'on': true, 'bri': bri});
-      ref.read(activePresetLabelProvider.notifier).state = 'Brightness $brightness%';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Brightness $brightness%', ref.read(wledStateProvider));
     } else if (actionLower.startsWith('pattern')) {
       final idx = action.indexOf(':');
       final patternName = (idx != -1 && idx + 1 < action.length)
@@ -336,23 +332,26 @@ Future<void> _runSchedule(ProviderRef ref) async {
       ).firstOrNull;
 
       if (pattern != null) {
-        await repo.applyJson(pattern.toWledPayload());
-        ref.read(activePresetLabelProvider.notifier).state = patternName;
+        await ref
+            .read(wledStateProvider.notifier)
+            .applyToDevice(pattern.toWledPayload(), labelHint: null);
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
 
         // Track usage
         ref.trackPatternUsage(pattern: pattern, source: 'voice');
       } else {
         debugPrint('Voice: Pattern "$patternName" not found, applying generic');
-        await repo.applyJson({'on': true, 'bri': 200, 'seg': [{'id': 0, 'fx': 0}]});
-        ref.read(activePresetLabelProvider.notifier).state = patternName;
+        await ref.read(wledStateProvider.notifier).applyToDevice(
+            {'on': true, 'bri': 200, 'seg': [{'fx': 0}]}, labelHint: null);
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
       }
     } else if (actionLower.contains('turn on') || actionLower == 'on') {
       await repo.applyJson({'on': true, 'bri': 200});
-      ref.read(activePresetLabelProvider.notifier).state = 'On (Scheduled)';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('On (Scheduled)', ref.read(wledStateProvider));
     } else {
       debugPrint('Voice: Unknown schedule action: $action');
       await repo.applyJson({'on': true});
-      ref.read(activePresetLabelProvider.notifier).state = action;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(action, ref.read(wledStateProvider));
     }
 
     debugPrint('Voice: Successfully applied schedule');

@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/debug_capture.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Model representing a favorite pattern with usage metadata.
 ///
@@ -49,7 +53,7 @@ class FavoritePattern {
       name: data['name'] as String? ?? 'Unnamed Pattern',
       usageCount: data['usageCount'] as int? ?? 0,
       lastUsed: (data['lastUsed'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      wledPayload: data['wledPayload'] as Map<String, dynamic>? ?? {},
+      wledPayload: decodeWledPayload(data['wledPayload']),
       autoAdded: data['autoAdded'] as bool? ?? false,
       actionColorValues: (data['actionColorValues'] as List?)?.cast<int>(),
       backgroundColorValue: data['backgroundColorValue'] as int?,
@@ -60,6 +64,32 @@ class FavoritePattern {
       colorGroupSize: data['colorGroupSize'] as int?,
       direction: data['direction'] as String?,
     );
+  }
+
+  /// Decodes `wledPayload` from a Firestore document, tolerating both shapes:
+  /// - **String (current):** `jsonEncode`d by `addFavorite` so Firestore's
+  ///   native iOS codec doesn't reject nested arrays like `col: [[r,g,b,w]]`
+  ///   (#84 root cause — uncatchable SIGABRT in `FSTUserDataReader`).
+  /// - **Map (legacy):** docs that somehow persisted as raw Map before the
+  ///   jsonEncode fix landed; pass through so reads of old data don't throw.
+  /// Returns `{}` for null / empty / unparseable input.
+  ///
+  /// Also used in production by [GeofenceMonitor] to recover a stored
+  /// favorite's payload (Shape A String / Shape B Map) when applying a
+  /// geofence trigger, so this is a shared decode utility — not test-only.
+  static Map<String, dynamic> decodeWledPayload(dynamic raw) {
+    if (raw is String) {
+      if (raw.isEmpty) return <String, dynamic>{};
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return <String, dynamic>{};
+      }
+      return <String, dynamic>{};
+    }
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
   }
 
   Map<String, dynamic> toFirestore() {
@@ -90,6 +120,20 @@ final favoritesPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
       .collection('users/${user.uid}/favorites')
       .orderBy('usageCount', descending: true)
       .limit(5)
+      .snapshots()
+      .map((snap) =>
+          snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
+});
+
+/// Streams every favorite the user has saved (no ordering or limit).
+/// Used for name-match lookups against the active WLED preset so the
+/// Now Playing bar can prefer the Lumina-side name.
+final allFavoritesProvider = StreamProvider<List<FavoritePattern>>((ref) {
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) return Stream.value(const []);
+
+  return FirebaseFirestore.instance
+      .collection('users/${user.uid}/favorites')
       .snapshots()
       .map((snap) =>
           snap.docs.map((d) => FavoritePattern.fromFirestore(d)).toList());
@@ -150,14 +194,26 @@ class FavoritesNotifier extends Notifier<void> {
       final docRef = FirebaseFirestore.instance
           .doc('users/${user.uid}/favorites/$patternId');
 
-      await docRef.set({
+      await docRef.set(UserService.sanitizeForFirestore({
         'name': patternName,
         'usageCount': 1,
         'lastUsed': FieldValue.serverTimestamp(),
-        'wledPayload': patternData,
-        'autoAdded': autoAdded, // Store the flag in Firestore
-      }, SetOptions(merge: true));
-    } catch (e) {
+        // #84 — jsonEncode to avoid native FSTUserDataReader rejecting
+        // nested arrays like `'col': [[r,g,b,w]]` (uncatchable SIGABRT).
+        // Mirrors the 8 other WLED-payload write paths; see
+        // user_service.dart:298-300 for the canonical comment.
+        'wledPayload': jsonEncode(patternData),
+        'autoAdded': autoAdded,
+      }), SetOptions(merge: true));
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      await captureBug84(
+        marker: 'BUG84-fav-write',
+        step: 'write-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      );
       debugPrint('Failed to add favorite: $e');
       rethrow;
     }

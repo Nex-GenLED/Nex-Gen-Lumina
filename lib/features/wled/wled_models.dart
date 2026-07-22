@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 class WledStateModel {
   final bool isOn;
@@ -11,6 +12,10 @@ class WledStateModel {
   final bool supportsRgbw;
   final int effectId; // WLED fx value (0-255)
   final int paletteId; // WLED palette value
+  final int presetId; // WLED ps value (0 = no preset active)
+
+  /// Whether the first segment's effect direction is reversed (WLED seg[0].rev)
+  final bool reverse;
 
   /// Full color sequence from the pattern (all segment colors)
   /// This preserves multi-color patterns like "Chiefs Red + Chiefs Gold"
@@ -24,6 +29,14 @@ class WledStateModel {
   /// This preserves the exact effect name from AI responses
   final String? customEffectName;
 
+  /// LEDs per color group (WLED `grp`). 1 = no grouping.
+  /// Used by spacing/architectural patterns to render every Nth LED lit.
+  final int colorGroupSize;
+
+  /// Dark (off) LEDs after each lit group (WLED `spc`). 0 = no spacing.
+  /// Used by spacing/architectural patterns (e.g. "1 On 2 Off").
+  final int spacing;
+
   const WledStateModel({
     required this.isOn,
     required this.brightness,
@@ -35,9 +48,13 @@ class WledStateModel {
     required this.supportsRgbw,
     this.effectId = 0,
     this.paletteId = 0,
+    this.presetId = 0,
+    this.reverse = false,
     this.colorSequence = const [],
     this.colorNames = const [],
     this.customEffectName,
+    this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 
   WledStateModel copyWith({
@@ -51,10 +68,14 @@ class WledStateModel {
     bool? supportsRgbw,
     int? effectId,
     int? paletteId,
+    int? presetId,
+    bool? reverse,
     List<Color>? colorSequence,
     List<String>? colorNames,
     String? customEffectName,
     bool clearCustomEffectName = false,
+    int? colorGroupSize,
+    int? spacing,
   }) =>
       WledStateModel(
         isOn: isOn ?? this.isOn,
@@ -67,13 +88,17 @@ class WledStateModel {
         supportsRgbw: supportsRgbw ?? this.supportsRgbw,
         effectId: effectId ?? this.effectId,
         paletteId: paletteId ?? this.paletteId,
+        presetId: presetId ?? this.presetId,
+        reverse: reverse ?? this.reverse,
         colorSequence: colorSequence ?? this.colorSequence,
         colorNames: colorNames ?? this.colorNames,
         customEffectName: clearCustomEffectName ? null : (customEffectName ?? this.customEffectName),
+        colorGroupSize: colorGroupSize ?? this.colorGroupSize,
+        spacing: spacing ?? this.spacing,
       );
 
-  /// Get the effect name - prefers custom name from Lumina, falls back to lookup
-  String get effectName => customEffectName ?? kEffectNames[effectId] ?? 'Effect #$effectId';
+  /// Get the effect name - prefers custom name from Lumina, falls back to catalog lookup
+  String get effectName => customEffectName ?? WledEffectsCatalog.getName(effectId);
 
   /// Get display colors - prefers color sequence, falls back to single color
   List<Color> get displayColors => colorSequence.isNotEmpty ? colorSequence : [color];
@@ -89,133 +114,13 @@ class WledStateModel {
         supportsRgbw: false,
         effectId: 0,
         paletteId: 0,
+        presetId: 0,
+        reverse: false,
         colorSequence: [],
         colorNames: [],
         customEffectName: null,
+        colorGroupSize: 1,
+        spacing: 0,
       );
 }
 
-/// Common WLED effect names by ID
-const Map<int, String> kEffectNames = {
-  0: 'Solid',
-  1: 'Blink',
-  2: 'Breathe',
-  3: 'Wipe',
-  4: 'Wipe Random',
-  5: 'Random Colors',
-  6: 'Sweep',
-  7: 'Dynamic',
-  8: 'Colorloop',
-  9: 'Rainbow',
-  10: 'Scan',
-  11: 'Scan Dual',
-  12: 'Fade',
-  13: 'Theater',
-  14: 'Theater Rainbow',
-  15: 'Running',
-  16: 'Saw',
-  17: 'Twinkle',
-  18: 'Dissolve',
-  19: 'Dissolve Rnd',
-  20: 'Sparkle',
-  21: 'Sparkle Dark',
-  22: 'Sparkle+',
-  23: 'Strobe',
-  24: 'Strobe Rainbow',
-  25: 'Strobe Mega',
-  26: 'Blink Rainbow',
-  27: 'Android',
-  28: 'Chase',
-  29: 'Chase Random',
-  30: 'Chase Rainbow',
-  31: 'Chase Flash',
-  32: 'Chase Flash Rnd',
-  33: 'Rainbow Runner',
-  34: 'Colorful',
-  35: 'Traffic Light',
-  36: 'Sweep Random',
-  37: 'Candle',
-  38: 'Candle Multi',
-  39: 'Shimmers',
-  40: 'BPM',
-  41: 'Running',
-  42: 'Fireworks',
-  43: 'Twinkle',
-  44: 'Twinkle Random',
-  45: 'Twinkle Fade',
-  46: 'Twinkle Fade Rnd',
-  47: 'Sparkle+',
-  48: 'Strobe Mega',
-  49: 'Popcorn',
-  50: 'Drip',
-  51: 'Lighthouse',
-  52: 'Fireworks',
-  53: 'Fireworks 1D',
-  54: 'Fireworks Starburst',
-  55: 'Fire 2012',
-  56: 'Colorwaves',
-  57: 'Bpm',
-  58: 'Fill Noise',
-  59: 'Noise 1',
-  60: 'Noise 2',
-  61: 'Noise 3',
-  62: 'Noise 4',
-  63: 'Colortwinkles',
-  64: 'Lake',
-  65: 'Chase',
-  66: 'Chase Fade',
-  67: 'Chase Rnd',
-  68: 'Chase Rnd Fade',
-  69: 'Fill Chase',
-  70: 'Twinkle Fox',
-  71: 'Pride 2015',
-  72: 'Sparkle',
-  73: 'Juggle',
-  74: 'Palette',
-  75: 'Fire 2012',
-  76: 'Colorwaves',
-  77: 'Meteor',
-  78: 'Meteor Smooth',
-  79: 'Railway',
-  80: 'Ripple',
-  81: 'Twinklefox',
-  82: 'Twinklecat',
-  83: 'Halloween Eyes',
-  84: 'Solid Pattern',
-  85: 'Solid Pattern Tri',
-  86: 'Spots',
-  87: 'Spots Fade',
-  88: 'Glitter',
-  89: 'Candle',
-  90: 'Bounce',
-  91: 'Fireworks',
-  92: 'Rain',
-  93: 'Merry Christmas',
-  94: 'Fire Flicker',
-  95: 'Ripple',
-  96: 'Heartbeat',
-  97: 'Pacifica',
-  98: 'Candle Multi',
-  99: 'Solid Glitter',
-  100: 'Sunrise',
-  101: 'Phased',
-  102: 'Twinkleup',
-  103: 'Noise Pal',
-  104: 'Sine',
-  105: 'Phased Noise',
-  106: 'Flow',
-  107: 'Chunchun',
-  108: 'Dancing Shadows',
-  109: 'Washing Machine',
-  110: 'Flow',
-  111: 'Blobs',
-  112: 'Scrolling Text',
-  113: '2D Drift Rose',
-  114: '2D Distortion Waves',
-  115: '2D Soap',
-  116: '2D Octopus',
-  117: '2D Waving Cell',
-  118: 'Pulsate',
-  119: 'Sinelon',
-  120: 'Sinelon Rainbow',
-};

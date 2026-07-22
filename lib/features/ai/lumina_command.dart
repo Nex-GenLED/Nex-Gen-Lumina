@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'ephemeral_session_intent.dart';
+import 'recurring_sports_autopilot_intent.dart';
+import 'scheduling_intent.dart';
+
 /// Types of commands the Lumina voice assistant can process.
 enum LuminaCommandType {
   power,
@@ -88,6 +92,49 @@ class LuminaCommandResult {
   /// Which tier produced this result.
   final ProcessingTier tier;
 
+  /// Optional ephemeral one-shot session intent emitted by the AI when
+  /// the user combines a sports/team event with an "after"/"revert" state.
+  /// Populated by [CloudAIProcessor] from the `ephemeralSession` field of
+  /// the AI response. Raw map kept for forward-compatibility with future
+  /// schema evolutions; handlers should consume the typed accessor
+  /// [ephemeralSessionIntent] which validates the shape via fromJson.
+  final Map<String, dynamic>? ephemeralSession;
+
+  /// Typed accessor for [ephemeralSession]. Returns null when the field is
+  /// null or fails validation in [EphemeralSessionIntent.fromJson]. Handler
+  /// dispatch sites should use this rather than reading the raw map.
+  EphemeralSessionIntent? get ephemeralSessionIntent =>
+      EphemeralSessionIntent.fromJson(ephemeralSession);
+
+  /// Optional recurring sports-autopilot rule emitted by the AI when the user
+  /// asks for a team's lighting on EVERY game / all season ("Royals every
+  /// home-game night through Oct"). A COMPACT rule (team slug + optional end
+  /// bound) — NOT an enumeration of game dates — so the response stays small
+  /// and never truncates. Populated by [CloudAIProcessor] from the
+  /// `recurringSportsAutopilot` field. Handlers consume the typed accessor
+  /// [recurringSportsAutopilotIntent].
+  final Map<String, dynamic>? recurringSportsAutopilot;
+
+  /// Typed accessor for [recurringSportsAutopilot]. Returns null when the
+  /// field is null or fails validation in
+  /// [RecurringSportsAutopilotIntent.fromJson].
+  RecurringSportsAutopilotIntent? get recurringSportsAutopilotIntent =>
+      RecurringSportsAutopilotIntent.fromJson(recurringSportsAutopilot);
+
+  /// Normalized recurring weekly/daily scheduling intents (1 or N), already
+  /// typed by [CloudAIProcessor.normalizeSchedulingIntents]. This is the
+  /// CANONICAL carrier dispatch reads — set independently of [wledPayload] so
+  /// the intents survive even when the model emits a null/absent top-level
+  /// `wled` (the prompt's EPHEMERAL Example C shape, #58b). The same list is
+  /// also redundantly mirrored inside `wledPayload['schedulingIntents']` when a
+  /// `wled` is present (harmless legacy copy; do not read it for dispatch).
+  /// Null when the response carried no scheduling intent.
+  final List<SchedulingIntent>? schedulingIntents;
+
+  /// True when at least one scheduling intent is present.
+  bool get hasSchedulingIntents =>
+      schedulingIntents != null && schedulingIntents!.isNotEmpty;
+
   const LuminaCommandResult({
     this.command,
     required this.responseText,
@@ -95,5 +142,8 @@ class LuminaCommandResult {
     this.previewColors = const [],
     this.clarificationOptions = const [],
     this.tier = ProcessingTier.local,
+    this.ephemeralSession,
+    this.recurringSportsAutopilot,
+    this.schedulingIntents,
   });
 }

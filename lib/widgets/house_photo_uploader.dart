@@ -40,7 +40,6 @@ class HousePhotoUploader extends ConsumerStatefulWidget {
 
 class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
   bool _isUploading = false;
-  double _uploadProgress = 0.0;
   String? _error;
 
   Future<void> _pickAndUpload(ImageSource source) async {
@@ -53,7 +52,6 @@ class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
 
     setState(() {
       _isUploading = true;
-      _uploadProgress = 0.0;
       _error = null;
     });
 
@@ -69,7 +67,6 @@ class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
         if (mounted) {
           setState(() {
             _isUploading = false;
-            _uploadProgress = 0.0;
           });
         }
         return;
@@ -94,7 +91,6 @@ class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
       if (mounted) {
         setState(() {
           _isUploading = false;
-          _uploadProgress = 1.0;
         });
         widget.onPhotoUploaded?.call(downloadUrl);
         ScaffoldMessenger.of(context).showSnackBar(

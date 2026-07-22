@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for managing demo leads in Firestore.
 ///
@@ -35,7 +36,7 @@ class DemoLeadService {
           : _leadsCollection.doc(lead.id);
 
       final leadWithId = lead.copyWith(id: docRef.id);
-      await docRef.set(leadWithId.toJson());
+      await docRef.set(UserService.sanitizeForFirestore(leadWithId.toJson()));
 
       // Trigger email notification via Cloud Function
       // The Cloud Function listens to new documents in demo_leads
@@ -43,13 +44,13 @@ class DemoLeadService {
       await _triggerEmailNotification(leadWithId);
 
       if (kDebugMode) {
-        print('DemoLeadService: Lead submitted with ID: ${docRef.id}');
+        debugPrint('DemoLeadService: Lead submitted with ID: ${docRef.id}');
       }
 
       return docRef.id;
     } catch (e) {
       if (kDebugMode) {
-        print('DemoLeadService: Error submitting lead: $e');
+        debugPrint('DemoLeadService: Error submitting lead: $e');
       }
       rethrow;
     }
@@ -58,10 +59,10 @@ class DemoLeadService {
   /// Update an existing lead.
   Future<void> updateLead(DemoLead lead) async {
     try {
-      await _leadsCollection.doc(lead.id).update(lead.toJson());
+      await _leadsCollection.doc(lead.id).update(UserService.sanitizeForFirestore(lead.toJson()));
     } catch (e) {
       if (kDebugMode) {
-        print('DemoLeadService: Error updating lead: $e');
+        debugPrint('DemoLeadService: Error updating lead: $e');
       }
       rethrow;
     }
@@ -77,7 +78,7 @@ class DemoLeadService {
       });
     } catch (e) {
       if (kDebugMode) {
-        print('DemoLeadService: Error marking demo completed: $e');
+        debugPrint('DemoLeadService: Error marking demo completed: $e');
       }
       rethrow;
     }
@@ -97,11 +98,11 @@ class DemoLeadService {
       await _triggerContactRequestNotification(leadId, request);
 
       if (kDebugMode) {
-        print('DemoLeadService: Contact request logged for lead: $leadId');
+        debugPrint('DemoLeadService: Contact request logged for lead: $leadId');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('DemoLeadService: Error logging contact request: $e');
+        debugPrint('DemoLeadService: Error logging contact request: $e');
       }
       rethrow;
     }
@@ -115,7 +116,7 @@ class DemoLeadService {
       return DemoLead.fromJson(doc.data()!);
     } catch (e) {
       if (kDebugMode) {
-        print('DemoLeadService: Error getting lead: $e');
+        debugPrint('DemoLeadService: Error getting lead: $e');
       }
       return null;
     }
@@ -143,7 +144,7 @@ class DemoLeadService {
     } catch (e) {
       // Don't fail the lead submission if email notification fails
       if (kDebugMode) {
-        print('DemoLeadService: Error triggering email notification: $e');
+        debugPrint('DemoLeadService: Error triggering email notification: $e');
       }
     }
   }
@@ -174,7 +175,7 @@ class DemoLeadService {
     } catch (e) {
       // Don't fail the contact request if email notification fails
       if (kDebugMode) {
-        print('DemoLeadService: Error triggering contact request notification: $e');
+        debugPrint('DemoLeadService: Error triggering contact request notification: $e');
       }
     }
   }
@@ -199,7 +200,7 @@ class DemoLeadService {
     } catch (e) {
       // Don't fail on analytics errors
       if (kDebugMode) {
-        print('DemoLeadService: Error logging analytics: $e');
+        debugPrint('DemoLeadService: Error logging analytics: $e');
       }
     }
   }
@@ -256,6 +257,24 @@ class DemoLeadService {
       event: 'account_created',
       leadId: leadId,
       data: {'userId': userId},
+    );
+  }
+
+  /// Log when prospect starts browsing the full app in demo mode.
+  Future<void> logAppExploreStarted(String leadId) async {
+    await logAnalyticsEvent(
+      event: 'app_explore_started',
+      leadId: leadId,
+    );
+  }
+
+  /// Log when prospect taps an exit option from the demo banner.
+  /// [exitPath] is one of 'consultation', 'signup', or 'keep_exploring'.
+  Future<void> logExitDemoTapped(String leadId, String exitPath) async {
+    await logAnalyticsEvent(
+      event: 'exit_demo_tapped',
+      leadId: leadId,
+      data: {'exitPath': exitPath},
     );
   }
 }

@@ -21,6 +21,7 @@ class DemoCodeService {
   /// Returns the [DealerDemoCode] if valid and active, null if invalid/expired.
   Future<DealerDemoCode?> validateCode(String code) async {
     final normalized = code.trim().toUpperCase();
+
     final snap = await FirebaseFirestore.instance
         .collection('dealer_demo_codes')
         .where('code', isEqualTo: normalized)
@@ -28,9 +29,12 @@ class DemoCodeService {
         .limit(1)
         .get();
 
-    if (snap.docs.isEmpty) return null;
+    if (snap.docs.isEmpty) {
+      return null;
+    }
 
-    final demoCode = DealerDemoCode.fromJson(snap.docs.first.data());
+    final data = snap.docs.first.data();
+    final demoCode = DealerDemoCode.fromJson(data);
 
     // Check expiry
     if (demoCode.expiresAt != null &&

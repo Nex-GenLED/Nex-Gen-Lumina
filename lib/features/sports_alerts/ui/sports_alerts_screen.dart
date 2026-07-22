@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../../widgets/glass_app_bar.dart';
 import '../../../widgets/premium_card.dart';
@@ -20,20 +22,29 @@ import 'team_picker_screen.dart';
 // ---------------------------------------------------------------------------
 
 String _sportEmoji(SportType sport) => switch (sport) {
-      SportType.nfl => '\u{1F3C8}',
-      SportType.nba => '\u{1F3C0}',
+      SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
+      SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
       SportType.mlb => '\u26BE',
       SportType.nhl => '\u{1F3D2}',
-      SportType.mls => '\u26BD',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        '\u26BD',
     };
 
 /// Default test event type per sport.
 AlertEventType _testEventType(SportType sport) => switch (sport) {
-      SportType.nfl => AlertEventType.touchdown,
-      SportType.nba => AlertEventType.clutchBasket,
+      SportType.nfl || SportType.ncaaFB => AlertEventType.touchdown,
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        AlertEventType.clutchBasket,
       SportType.mlb => AlertEventType.run,
       SportType.nhl => AlertEventType.goal,
-      SportType.mls => AlertEventType.goal,
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        AlertEventType.soccerGoal,
     };
 
 // ---------------------------------------------------------------------------
@@ -55,7 +66,26 @@ class SportsAlertsScreen extends ConsumerWidget {
           SliverPersistentHeader(
             pinned: true,
             delegate: _GlassAppBarDelegate(
+              topInset: MediaQuery.of(context).padding.top,
               child: GlassAppBar(
+                // Back button — without this the screen had no way out.
+                // Combined with the route-migration to /settings/sports-alerts
+                // (a proper system-shell child route) so context.pop()
+                // returns to the Settings page rather than dead-ending
+                // when the system bottom-nav branch is restored.
+                leading: BackButton(
+                  color: NexGenPalette.cyan,
+                  onPressed: () {
+                    if (context.canPop()) {
+                      context.pop();
+                    } else {
+                      // Fallback when launched without a route stack
+                      // (e.g. tests, deep-links). Send the user to the
+                      // settings root.
+                      context.go('/settings');
+                    }
+                  },
+                ),
                 title: const Text('Sports Alerts'),
                 actions: [
                   // Pulsing service indicator
@@ -85,7 +115,9 @@ class SportsAlertsScreen extends ConsumerWidget {
           ),
 
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+            // Bottom padding clears the GlassDockNavBar so the last
+            // team card / "Add Team" button isn't hidden behind it.
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 // ── Master toggle card ──
@@ -991,21 +1023,29 @@ class _InfoPill extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
-  _GlassAppBarDelegate({required this.child});
+  _GlassAppBarDelegate({required this.child, required this.topInset});
   final PreferredSizeWidget child;
 
+  /// Status-bar height for the current device. Hardcoding +24 was wrong for
+  /// notched / Dynamic Island iPhones (47–59 px) and gesture-nav Android,
+  /// which pushed the back arrow and title up under the status bar.
+  final double topInset;
+
   @override
-  double get minExtent => kToolbarHeight + 24; // toolbar + status bar approx
+  double get minExtent => child.preferredSize.height + topInset;
   @override
-  double get maxExtent => kToolbarHeight + 24;
+  double get maxExtent => child.preferredSize.height + topInset;
 
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
+    return Padding(
+      padding: EdgeInsets.only(top: topInset),
+      child: child,
+    );
   }
 
   @override
   bool shouldRebuild(covariant _GlassAppBarDelegate oldDelegate) =>
-      child != oldDelegate.child;
+      child != oldDelegate.child || topInset != oldDelegate.topInset;
 }

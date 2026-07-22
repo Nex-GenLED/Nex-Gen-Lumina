@@ -10,8 +10,9 @@
 /// user's chosen color palette with their own colors (e.g., rainbow effects).
 /// These should ONLY be recommended when the user explicitly requests
 /// rainbow/multicolor effects, NOT for themed patterns.
+library;
 
-import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 /// Motion types for categorizing how effects animate
 enum MotionType {
@@ -214,6 +215,28 @@ class EffectMetadata {
 
   /// Get an intensity value within the recommended range
   int clampIntensity(int intensity) => intensity.clamp(minIntensity, maxIntensity);
+
+  /// Return a copy of this metadata with a different effect [id].
+  /// Used to re-key legacy entries onto their real fw 0.15.1 catalog ID.
+  EffectMetadata withId(int newId) => EffectMetadata(
+        id: newId,
+        name: name,
+        description: description,
+        respectsColors: respectsColors,
+        inherentColorDescription: inherentColorDescription,
+        moods: moods,
+        vibes: vibes,
+        motionType: motionType,
+        energyLevel: energyLevel,
+        minSpeed: minSpeed,
+        maxSpeed: maxSpeed,
+        defaultSpeed: defaultSpeed,
+        minIntensity: minIntensity,
+        maxIntensity: maxIntensity,
+        defaultIntensity: defaultIntensity,
+        bestForOccasions: bestForOccasions,
+        avoidForOccasions: avoidForOccasions,
+      );
 }
 
 /// The comprehensive WLED effect database
@@ -227,8 +250,16 @@ class EffectMetadata {
 class EffectDatabase {
   EffectDatabase._();
 
-  /// All effects indexed by ID
-  static const Map<int, EffectMetadata> effects = {
+  /// LEGACY effect metadata, authored against a pre-0.14 WLED effect ordering.
+  /// The map KEYS and the inner `id:` fields here are NO LONGER the source of
+  /// truth — many drifted (e.g. old 37 "Candle" actually plays Chase 2 on fw
+  /// 0.15.1). Do NOT read this directly; read [effects], which re-keys every
+  /// entry onto its real 0.15.1 ID by resolving the entry NAME through
+  /// [WledEffectsCatalog]. Entries whose name has no 0.15.1 equivalent
+  /// (Tricolor Chase/Wipe/Fade, Running Tri, Halloween, Chase Rainbow White,
+  /// Fire→merged into Fire 2012) are dropped; audio-reactive effects are
+  /// excluded from normal selection (see [_buildEffects]).
+  static const Map<int, EffectMetadata> _legacyEntries = {
     // ═══════════════════════════════════════════════════════════════════════
     // STATIC / SOLID EFFECTS (respect colors)
     // ═══════════════════════════════════════════════════════════════════════
@@ -1814,6 +1845,44 @@ class EffectDatabase {
     // pending re-engineering for improved reliability
   };
 
+  /// Spelling differences between legacy entry names and catalog names, and the
+  /// one product decision (Rainbow Cycle → Rainbow Runner). Everything not
+  /// listed resolves by its own name; names with no catalog match are dropped.
+  static const Map<String, String> _nameAliases = {
+    'rainbow cycle': 'Rainbow Runner', // "Rainbow Cycle" no longer exists on 0.15.1
+    'dissolve random': 'Dissolve Rnd',
+    'chase flash random': 'Chase Flash Rnd',
+    'fairy twinkle': 'Fairytwinkle',
+  };
+
+  /// Effect metadata keyed by the REAL fw 0.15.1 effect ID (source of truth).
+  /// Built from [_legacyEntries] by routing each entry's NAME through
+  /// [WledEffectsCatalog] so IDs can never drift from the firmware again.
+  ///
+  /// - A name with no 0.15.1 equivalent (e.g. "Tricolor Chase", "Fire") yields
+  ///   null and is OMITTED — never substituted. "Fire" has no standalone 0.15.1
+  ///   effect, so it merges away in favor of the existing "Fire 2012" entry.
+  /// - Audio-reactive effects (catalog `requiresAudio`) are EXCLUDED so the AI /
+  ///   mood / recommendation paths never silently select an effect that needs a
+  ///   mic. Audio effects reach the device only through the intentional audio
+  ///   surface (AudioReactiveCapability + useAudioReactive). Wiring a proper
+  ///   audio gate into this DB is tracked as separate post-submission work.
+  static final Map<int, EffectMetadata> effects = _buildEffects();
+
+  static Map<int, EffectMetadata> _buildEffects() {
+    final result = <int, EffectMetadata>{};
+    for (final meta in _legacyEntries.values) {
+      final resolvedName = _nameAliases[meta.name.toLowerCase()] ?? meta.name;
+      final id = WledEffectsCatalog.idForName(resolvedName);
+      if (id == null) continue; // dropped: no real 0.15.1 effect by this name
+      if (WledEffectsCatalog.getById(id)?.requiresAudio ?? false) {
+        continue; // excluded: audio-reactive, never auto-selected
+      }
+      result.putIfAbsent(id, () => meta.withId(id)); // first writer wins (de-dup)
+    }
+    return result;
+  }
+
   /// Get effect by ID
   static EffectMetadata? getEffect(int id) => effects[id];
 
@@ -1918,81 +1987,79 @@ class EffectDatabase {
     return effect?.respectsColors ?? true;
   }
 
-  /// Get recommended effects for common scenarios
+  /// Get recommended effects for common scenarios.
+  ///
+  /// Effects are named by their CATALOG name and resolved to real fw 0.15.1 IDs
+  /// (drift-proof). Names with no 0.15.1 equivalent are silently dropped by
+  /// [WledEffectsCatalog.idsForNames] (e.g. the old "Tricolor Chase" patriotic
+  /// pick, the disabled custom "1005" wedding pick).
   static List<int> getRecommendedEffectIds({
     required String scenario,
     bool colorRespectRequired = true,
   }) {
+    List<String> names;
     switch (scenario.toLowerCase()) {
       case 'christmas':
       case 'holiday':
-        return [13, 17, 80, 43, 49].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Theater', 'Twinkle', 'Twinklefox', 'Fairy'];
+        break;
 
       case 'halloween':
       case 'spooky':
-        return [17, 42, 37, 82, 46].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Twinkle', 'Candle', 'Halloween Eyes', 'Lightning'];
+        break;
 
       case 'party':
       case 'celebration':
-        return [39, 28, 15, 20, 87].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Fireworks', 'Chase', 'Running', 'Sparkle', 'Glitter'];
+        break;
 
       case '4th-of-july':
       case 'independence-day':
       case 'patriotic':
-        return [39, 52, 43, 84].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Fireworks', 'Fireworks Starburst', 'Solid Pattern Tri'];
+        break;
 
       case 'romantic':
       case 'date-night':
-        return [2, 37, 49, 17, 12].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Breathe', 'Candle', 'Fairy', 'Twinkle', 'Fade'];
+        break;
 
       case 'relaxation':
       case 'calm':
-        return [0, 2, 95, 75, 79].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Solid', 'Breathe', 'Flow', 'Lake', 'Ripple'];
+        break;
 
       case 'sports':
       case 'game-day':
-        return [28, 15, 41, 39, 20].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Chase', 'Running', 'Running Dual', 'Fireworks', 'Sparkle'];
+        break;
 
       case 'wedding':
       case 'elegant':
-        return [2, 17, 49, 87, 1005].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Breathe', 'Twinkle', 'Fairy', 'Glitter'];
+        break;
 
       case 'rainbow':
       case 'pride':
       case 'multicolor':
-        // These can include non-color-respecting effects
-        return [9, 10, 63, 30, 14];
+        // These intentionally include non-color-respecting effects.
+        return WledEffectsCatalog.idsForNames(const [
+          'Rainbow',
+          'Rainbow Runner', // was "Rainbow Cycle" (no longer exists on 0.15.1)
+          'Pride 2015',
+          'Chase Rainbow',
+          'Theater Rainbow',
+        ]);
 
       default:
         // Default to safe, color-respecting effects
-        return [0, 2, 17, 13, 28].where((id) {
-          if (!colorRespectRequired) return true;
-          return effects[id]?.respectsColors ?? false;
-        }).toList();
+        names = ['Solid', 'Breathe', 'Twinkle', 'Theater', 'Chase'];
+        break;
     }
+
+    final ids = WledEffectsCatalog.idsForNames(names);
+    if (!colorRespectRequired) return ids;
+    return ids.where((id) => effects[id]?.respectsColors ?? false).toList();
   }
 }

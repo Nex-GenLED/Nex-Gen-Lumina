@@ -3,8 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/led_channel_config.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
@@ -124,18 +124,24 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
         updatedAt: DateTime.now(),
       );
 
-      // Save via provider - need user ID
-      final userId = ref.read(authStateProvider).maybeWhen(
-        data: (user) => user?.uid,
-        orElse: () => null,
-      );
-
+      // Save to the active controller's per-channel pixelMap (Slice 1). Use
+      // effectiveUserUid so an installer-impersonation session writes into the
+      // customer's subtree (same uid as the controller doc). Falls back to the
+      // legacy per-user doc when no controller is selected yet — the lazy
+      // migration folds it into the pixelMap on the first per-controller read.
+      final userId = ref.read(effectiveUserUidProvider);
       if (userId == null) {
         throw Exception('User not logged in');
       }
 
+      final controllerId = ref.read(activePixelMapControllerIdProvider);
       final service = ref.read(rooflineConfigServiceProvider);
-      await service.saveConfiguration(userId, config);
+      if (controllerId != null) {
+        await service.savePixelMap(userId, controllerId, config,
+            createdBy: userId);
+      } else {
+        await service.saveConfiguration(userId, config);
+      }
 
       // Log AI-relevant segments for debugging
       final aiSegments = _segments.where((s) => s.isAiRelevantSegment).toList();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app_colors.dart';
 import '../../../theme.dart';
 import '../../../widgets/glass_app_bar.dart';
 import '../../../widgets/premium_card.dart';
@@ -37,7 +38,7 @@ List<_SensitivityOption> _sensitivityOptions(SportType sport) => switch (sport) 
             description: 'Only touchdowns trigger lights',
           ),
         ],
-      SportType.nba => [
+      SportType.nba || SportType.wnba => [
           const _SensitivityOption(
             value: AlertSensitivity.allEvents,
             label: 'Quarter Wins + Clutch',
@@ -61,11 +62,45 @@ List<_SensitivityOption> _sensitivityOptions(SportType sport) => switch (sport) 
             description: 'Multi-run innings and big moments',
           ),
         ],
-      SportType.nhl || SportType.mls => [
+      SportType.nhl ||
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        [
           const _SensitivityOption(
             value: AlertSensitivity.allEvents,
             label: 'Every Goal',
             description: 'Light show on every goal',
+          ),
+        ],
+      SportType.ncaaFB => [
+          const _SensitivityOption(
+            value: AlertSensitivity.allEvents,
+            label: 'All Events',
+            description: 'Touchdowns, field goals, safeties',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.majorOnly,
+            label: 'Scores Only',
+            description: 'All scoring plays',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.clutchOnly,
+            label: 'Touchdowns Only',
+            description: 'Only touchdowns trigger lights',
+          ),
+        ],
+      SportType.ncaaMB => [
+          const _SensitivityOption(
+            value: AlertSensitivity.allEvents,
+            label: 'Quarter Wins + Clutch',
+            description: 'Quarter-end leads and clutch baskets',
+          ),
+          const _SensitivityOption(
+            value: AlertSensitivity.clutchOnly,
+            label: 'Clutch Time Only',
+            description: 'Only during close, late-game moments',
           ),
         ],
     };
@@ -83,19 +118,29 @@ class _SensitivityOption {
 
 /// Default preview event type per sport.
 AlertEventType _previewEventType(SportType sport) => switch (sport) {
-      SportType.nfl => AlertEventType.touchdown,
-      SportType.nba => AlertEventType.clutchBasket,
+      SportType.nfl || SportType.ncaaFB => AlertEventType.touchdown,
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        AlertEventType.clutchBasket,
       SportType.mlb => AlertEventType.run,
       SportType.nhl => AlertEventType.goal,
-      SportType.mls => AlertEventType.goal,
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        AlertEventType.soccerGoal,
     };
 
 String _previewLabel(SportType sport) => switch (sport) {
-      SportType.nfl => 'Preview Touchdown Animation',
-      SportType.nba => 'Preview Clutch Basket Animation',
+      SportType.nfl || SportType.ncaaFB => 'Preview Touchdown Animation',
+      SportType.nba || SportType.wnba || SportType.ncaaMB =>
+        'Preview Clutch Basket Animation',
       SportType.mlb => 'Preview Run Animation',
       SportType.nhl => 'Preview Goal Animation',
-      SportType.mls => 'Preview Goal Animation',
+      SportType.mls ||
+      SportType.nwsl ||
+      SportType.fifa ||
+      SportType.championsLeague =>
+        'Preview Soccer Goal Animation',
     };
 
 // ---------------------------------------------------------------------------
@@ -140,7 +185,10 @@ class _ZoneAssignmentScreenState extends ConsumerState<ZoneAssignmentScreen> {
     return Scaffold(
       appBar: GlassAppBar(title: Text('Set Up ${team.teamName}')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        // Bottom padding clears the GlassDockNavBar overlay so the
+        // "Save Alert" button at the end of this list isn't hidden
+        // behind the dock on devices with a home indicator.
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
         children: [
           // ── Color preview bar ──
           _ColorPreviewBar(team: team),

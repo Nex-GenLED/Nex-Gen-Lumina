@@ -1,12 +1,31 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/data/legacy_array_schedule_repository.dart';
+import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/services/debug_capture.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 
 /// Service for managing user data in Firestore
 class UserService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  /// Backing store for the user's schedules. Defaults to the legacy
+  /// array-on-user-doc implementation so behaviour is unchanged; the
+  /// `userServiceProvider` injects the feature-flag-selected repository so the
+  /// storage backend can be swapped without touching any caller of the
+  /// schedule methods below.
+  final ScheduleRepository _scheduleRepository;
+
+  UserService({ScheduleRepository? scheduleRepository})
+      : _scheduleRepository =
+            scheduleRepository ?? LegacyArrayScheduleRepository();
 
   /// Create a new user profile
   Future<void> createUser(UserModel user) async {
@@ -58,50 +77,196 @@ class UserService {
         cleanedData,
         SetOptions(merge: true),
       );
-    } catch (e) {
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      await captureBug84(
+        marker: 'BUG84-userdoc-write',
+        step: 'write-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      );
       debugPrint('Error updating user: $e');
       rethrow;
     }
   }
 
-  /// Recursively remove null values from a map to prevent Firestore errors
-  Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) {
-    final result = <String, dynamic>{};
-    for (final entry in data.entries) {
-      final value = entry.value;
-      if (value != null) {
-        if (value is Map<String, dynamic>) {
-          result[entry.key] = _removeNullValues(value);
-        } else if (value is List) {
-          result[entry.key] = _cleanList(value);
-        } else {
-          result[entry.key] = value;
+  /// Recursively sanitize a map for Firestore compatibility.
+  ///
+  /// Removes null values AND converts any non-Firestore-safe types:
+  /// - [DateTime] → [Timestamp]
+  /// - [Color] → [int] (ARGB value)
+  /// - [Map] with non-String keys → [Map<String, dynamic>]
+  /// - Typed lists (Uint8List etc.) are already Firestore Blob-compatible.
+  ///
+  /// This prevents the native iOS Firestore SDK (FSTUserDataReader) from
+  /// crashing with SIGABRT when encountering unsupported types.
+  ///
+  /// Static so all write paths (update, set, add) can use it.
+  static Map<String, dynamic> sanitizeForFirestore(Map<String, dynamic> data) {
+    try {
+      final result = <String, dynamic>{};
+      for (final entry in data.entries) {
+        final sanitized = _sanitizeValue(entry.value, entry.key);
+        if (sanitized != null) {
+          result[entry.key] = sanitized;
         }
       }
+      return result;
+    } catch (e, st) {
+      // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+      // Fire-and-forget from sync context; the outer awaited capture in
+      // updateUser/addFavorite catches is the reliable flush point.
+      unawaited(captureBug84(
+        marker: 'BUG84-sanitize',
+        step: 'top-level-catch',
+        errorType: e.runtimeType.toString(),
+        errorMessage: e.toString(),
+        stackTrace: st.toString(),
+      ));
+      rethrow;
     }
-    return result;
   }
 
-  /// Recursively clean a list by removing nulls and processing nested structures
-  List<dynamic> _cleanList(List<dynamic> list) {
-    return list
-        .where((item) => item != null)
-        .map((item) {
-          if (item is Map<String, dynamic>) {
-            return _removeNullValues(item);
-          } else if (item is List) {
-            return _cleanList(item);
-          }
-          return item;
-        })
-        .toList();
+  // Keep the old name as a forwarding alias for internal callers.
+  Map<String, dynamic> _removeNullValues(Map<String, dynamic> data) =>
+      sanitizeForFirestore(data);
+
+  /// Sanitize a single value for Firestore. Returns null if the value is null.
+  ///
+  /// [path] is the dotted/indexed key path from the root map (e.g.
+  /// `wledPayload.seg[0].col[0][3]`) — included in any thrown
+  /// [FirestoreSerializationError] so a non-encodable leaf can be located
+  /// from the snackbar / `/debug_errors/` doc without a stack trace.
+  static dynamic _sanitizeValue(dynamic value, [String path = '']) {
+    if (value == null) return null;
+
+    // Already Firestore-safe primitives
+    if (value is String || value is bool || value is int) {
+      return value;
+    }
+
+    // Doubles: NaN and Infinity crash Firestore on iOS
+    if (value is double) {
+      if (value.isNaN || value.isInfinite) return null;
+      return value;
+    }
+
+    // Firestore-native types
+    if (value is Timestamp ||
+        value is GeoPoint ||
+        value is FieldValue ||
+        value is DocumentReference) {
+      return value;
+    }
+
+    // Convert DateTime → Timestamp (common serialization mistake)
+    if (value is DateTime) {
+      return Timestamp.fromDate(value);
+    }
+
+    // Convert Color → ARGB int (prevents SIGABRT on iOS)
+    if (value is Color) {
+      // ignore: deprecated_member_use
+      return value.value;
+    }
+
+    // Recursively sanitize maps
+    if (value is Map) {
+      final result = <String, dynamic>{};
+      for (final entry in value.entries) {
+        final keyStr = entry.key.toString();
+        final childPath = path.isEmpty ? keyStr : '$path.$keyStr';
+        final sanitized = _sanitizeValue(entry.value, childPath);
+        if (sanitized != null) {
+          result[keyStr] = sanitized;
+        }
+      }
+      return result;
+    }
+
+    // Recursively sanitize lists.
+    //
+    // Firestore's native iOS codec (FSTUserDataReader) rejects directly-
+    // nested arrays — `[[…]]` raises NSInvalidArgumentException → objc_terminate
+    // → uncatchable SIGABRT, the #84 native-abort signature. Throw a Dart
+    // exception when we see a list element that is itself a list, so the
+    // caller's try/catch (and the BUG84-sanitize captureBug84 hook above)
+    // sees a clean error instead of a silent platform-channel crash.
+    //
+    // Upstream fix is to jsonEncode the offending field. See
+    // user_service.dart:298-300 (logPatternUsage), favorites_providers.dart
+    // (addFavorite), scenes/schedules/autopilot/remote_command models —
+    // all eight other WLED-payload write paths already do this.
+    if (value is List) {
+      final result = <dynamic>[];
+      for (var i = 0; i < value.length; i++) {
+        final item = value[i];
+        if (item == null) continue;
+        final childPath = '$path[$i]';
+        if (item is List) {
+          throw FirestoreSerializationError(
+            path: childPath,
+            valueType: item.runtimeType,
+            valuePreview:
+                'nested list (arrays-of-arrays not Firestore-safe); '
+                'jsonEncode this field upstream',
+          );
+        }
+        final sanitized = _sanitizeValue(item, childPath);
+        if (sanitized != null) result.add(sanitized);
+      }
+      return result;
+    }
+
+    // Unknown type — throw with the offending key path and runtime type so
+    // the next save attempt fails CLEANLY (caught by the writer's try/catch
+    // and surfaced via snackbar / global error sink) instead of slipping
+    // through to the iOS platform-channel codec, which throws a native
+    // NSException → SIGABRT (#84 native-abort symptom signature).
+    //
+    // The previous toString() fallback masked the leak — a `value.toString()`
+    // is a valid String at the Dart level, but if value's `toString` itself
+    // returns something the codec doesn't like, or if a downstream consumer
+    // expected the original type, we'd still crash without diagnostic. A
+    // hard fail with the path is strictly more useful: snackbar tells Tyler
+    // exactly which field broke, and we add an explicit branch above for
+    // that type the next iteration.
+    // #84 INSTRUMENTATION — TEMPORARY, strip before public release.
+    // Tells us the guard IS firing and on which field+type. Fire-and-forget
+    // from sync context; the outer awaited capture is the reliable flush.
+    unawaited(captureBug84(
+      marker: 'BUG84-unencodable',
+      step: 'before-throw',
+      path: path,
+      valueType: value.runtimeType.toString(),
+    ));
+    throw FirestoreSerializationError(
+      path: path,
+      valueType: value.runtimeType,
+      valuePreview: _safePreview(value),
+    );
+  }
+
+  /// Best-effort string preview of a value for error diagnostics. Never
+  /// throws — falls back to the runtime type name if `toString()` itself
+  /// blows up.
+  static String _safePreview(dynamic value) {
+    try {
+      final s = value.toString();
+      return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+    } catch (_) {
+      return '<${value.runtimeType}: toString failed>';
+    }
   }
 
   /// Update specific fields in user profile by ID
   Future<void> updateUserProfile(String userId, Map<String, dynamic> fields) async {
     try {
       fields['updated_at'] = FieldValue.serverTimestamp();
-      await _firestore.collection('users').doc(userId).update(fields);
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore(fields),
+      );
     } catch (e) {
       debugPrint('Error updating user profile: $e');
       rethrow;
@@ -164,13 +329,15 @@ class UserService {
         if (effectId != null) 'effect_id': effectId,
         if (effectName != null) 'effect_name': effectName,
         if (paletteId != null) 'palette_id': paletteId,
-        if (wled != null) 'wled': wled,
+        // Serialize WLED payload as JSON string to avoid nested arrays
+        // (iOS Firestore SDK crashes on arrays of arrays)
+        if (wled != null) 'wled': jsonEncode(wled),
         if (patternName != null) 'pattern_name': patternName,
         if (brightness != null) 'brightness': brightness,
         if (speed != null) 'speed': speed,
         if (intensity != null) 'intensity': intensity,
       };
-      await _firestore.collection('users').doc(userId).collection('pattern_usage').add(data);
+      await _firestore.collection('users').doc(userId).collection('pattern_usage').add(sanitizeForFirestore(data));
     } catch (e) {
       debugPrint('logPatternUsage failed: $e');
     }
@@ -271,12 +438,12 @@ class UserService {
     try {
       final favorites = _firestore.collection('users').doc(userId).collection('favorites');
 
-      await favorites.add({
+      await favorites.add(sanitizeForFirestore({
         ...patternData,
         'added_at': FieldValue.serverTimestamp(),
         'usage_count': 0,
         'auto_added': patternData['auto_added'] ?? false,
-      });
+      }));
 
       debugPrint('✅ Added pattern to favorites: ${patternData['pattern_name']}');
     } catch (e) {
@@ -366,11 +533,11 @@ class UserService {
           .collection('users')
           .doc(userId)
           .collection('suggestions')
-          .add({
+          .add(sanitizeForFirestore({
         ...suggestion,
         'created_at': FieldValue.serverTimestamp(),
         'dismissed': false,
-      });
+      }));
 
       debugPrint('✅ Created suggestion: ${suggestion['title']}');
     } catch (e) {
@@ -426,10 +593,10 @@ class UserService {
           .collection('users')
           .doc(userId)
           .collection('detected_habits')
-          .add({
+          .add(sanitizeForFirestore({
         ...habit,
         'detected_at': FieldValue.serverTimestamp(),
-      });
+      }));
 
       debugPrint('✅ Saved detected habit: ${habit['description']}');
     } catch (e) {
@@ -527,6 +694,34 @@ class UserService {
     }
   }
 
+  /// Save the bridge IP and mark the bridge as paired.
+  /// Also auto-enables remote access.
+  /// [bridgeEmail] is the Firebase email the bridge authenticates with —
+  /// stored so Firestore rules can grant the bridge read/write access to
+  /// the user's `commands` and `bridge_status` subcollections. Required
+  /// because a wrong default silently locks the bridge out of Firestore.
+  Future<void> saveBridgeConfig(
+    String userId, {
+    required String bridgeIp,
+    required String bridgeEmail,
+  }) async {
+    try {
+      await _firestore.collection('users').doc(userId).update(
+        sanitizeForFirestore({
+          'bridge_ip': bridgeIp,
+          'bridge_email': bridgeEmail,
+          'bridge_paired': true,
+          'remote_access_enabled': true,
+          'updated_at': FieldValue.serverTimestamp(),
+        }),
+      );
+      debugPrint('Bridge config saved: ip=$bridgeIp, email=$bridgeEmail');
+    } catch (e) {
+      debugPrint('saveBridgeConfig failed: $e');
+      rethrow;
+    }
+  }
+
   /// Clear all remote access configuration (webhook URL, home SSID, disable).
   Future<void> clearRemoteAccessConfig(String userId) async {
     try {
@@ -538,6 +733,10 @@ class UserService {
         // Also clean up legacy plain-text fields if they exist
         'webhook_url': FieldValue.delete(),
         'home_ssid': FieldValue.delete(),
+        // Clear bridge config
+        'bridge_ip': FieldValue.delete(),
+        'bridge_email': FieldValue.delete(),
+        'bridge_paired': false,
         'remote_access_enabled': false,
         'updated_at': FieldValue.serverTimestamp(),
       });
@@ -550,95 +749,182 @@ class UserService {
 
   // ==================== Schedule Management ====================
 
+  /// Retry delays for transient failures: 2s, then 5s.
+  static const _retryDelays = [Duration(seconds: 2), Duration(seconds: 5)];
+
+  /// Attempts a Firestore write with automatic retry on transient failure.
+  /// Throws the LAST exception if all attempts fail — callers (and the
+  /// schedule notifier) need the real cause to show users a meaningful
+  /// error instead of a generic "check connection" snackbar.
+  Future<void> _writeWithRetry(Future<void> Function() writeOp) async {
+    Object? lastError;
+    StackTrace? lastStack;
+
+    try {
+      await writeOp();
+      return;
+    } catch (e, stack) {
+      lastError = e;
+      lastStack = stack;
+      debugPrint('❌ Schedule write failed (attempt 1): $e\n$stack');
+    }
+
+    for (int i = 0; i < _retryDelays.length; i++) {
+      await Future.delayed(_retryDelays[i]);
+      try {
+        await writeOp();
+        debugPrint('✅ Schedule write succeeded on retry ${i + 2}');
+        return;
+      } catch (e, stack) {
+        lastError = e;
+        lastStack = stack;
+        debugPrint('❌ Schedule write failed (attempt ${i + 2}): $e\n$stack');
+      }
+    }
+
+    Error.throwWithStackTrace(lastError!, lastStack!);
+  }
+
+  /// Verifies a schedule write reached the Firestore server by reading
+  /// back with [Source.server] (bypasses local cache).
+  Future<bool> verifyServerWrite(String userId, int expectedCount) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .get(const GetOptions(source: Source.server));
+      final serverSchedules = doc.data()?['schedules'] as List?;
+      return serverSchedules != null && serverSchedules.length == expectedCount;
+    } catch (e) {
+      debugPrint('⚠️ Server verification failed (offline?): $e');
+      return false;
+    }
+  }
+
+  /// Fetches schedules directly from the Firestore server, bypassing cache.
+  ///
+  /// Delegates to the active [ScheduleRepository]; the legacy backend is
+  /// byte-identical to the previous inline implementation.
+  Future<List<ScheduleItem>> fetchSchedulesFromServer(String userId) =>
+      _scheduleRepository.fetchSchedules(userId);
+
   /// Save all schedules for a user (replaces existing schedules).
-  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) async {
-    try {
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      debugPrint('✅ Schedules saved: ${schedules.length} items');
-    } catch (e) {
-      debugPrint('❌ saveSchedules failed: $e');
-      rethrow;
-    }
-  }
+  /// Throws on persistent write failure — callers can inspect the
+  /// FirebaseException for permission-denied / not-found / unavailable.
+  /// Server-side verification is best-effort: a verification miss does
+  /// NOT mark the write as failed (the write itself succeeded).
+  Future<void> saveSchedules(String userId, List<ScheduleItem> schedules) =>
+      _scheduleRepository.saveAll(userId, schedules);
 
-  /// Add a single schedule item.
-  Future<void> addSchedule(String userId, ScheduleItem schedule) async {
-    try {
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': FieldValue.arrayUnion([schedule.toJson()]),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      debugPrint('✅ Schedule added: ${schedule.id}');
-    } catch (e) {
-      debugPrint('❌ addSchedule failed: $e');
-      rethrow;
-    }
-  }
+  /// Add a single schedule item. Throws on persistent write failure.
+  Future<void> addSchedule(String userId, ScheduleItem schedule) =>
+      _scheduleRepository.add(userId, schedule);
 
-  /// Remove a schedule item by ID.
-  /// Note: arrayRemove requires exact match, so we fetch and resave.
-  Future<void> removeSchedule(String userId, String scheduleId) async {
-    try {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
+  /// Add multiple schedule items in a single Firestore write. Throws on
+  /// persistent write failure.
+  ///
+  /// All N items either persist together or none do (atomic at the
+  /// Firestore-write layer). Used by the compound-schedule batch path
+  /// where a single Lumina prompt produces multiple ScheduleItems and
+  /// partial success would leave the user with an incoherent schedule.
+  Future<void> addSchedules(String userId, List<ScheduleItem> items) =>
+      _scheduleRepository.addAll(userId, items);
 
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .where((s) => s.id != scheduleId)
-              .toList() ??
-          [];
+  /// Remove a schedule item by ID. Throws on persistent write failure.
+  Future<void> removeSchedule(String userId, String scheduleId) =>
+      _scheduleRepository.remove(userId, scheduleId);
 
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      debugPrint('✅ Schedule removed: $scheduleId');
-    } catch (e) {
-      debugPrint('❌ removeSchedule failed: $e');
-      rethrow;
-    }
-  }
-
-  /// Update a single schedule item.
-  Future<void> updateSchedule(String userId, ScheduleItem schedule) async {
-    try {
-      final doc = await _firestore.collection('users').doc(userId).get();
-      if (!doc.exists) return;
-
-      final data = doc.data()!;
-      final schedules = (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .map((s) => s.id == schedule.id ? schedule : s)
-              .toList() ??
-          [];
-
-      await _firestore.collection('users').doc(userId).update({
-        'schedules': schedules.map((e) => e.toJson()).toList(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      debugPrint('✅ Schedule updated: ${schedule.id}');
-    } catch (e) {
-      debugPrint('❌ updateSchedule failed: $e');
-      rethrow;
-    }
-  }
+  /// Update a single schedule item. Throws on persistent write failure.
+  Future<void> updateSchedule(String userId, ScheduleItem schedule) =>
+      _scheduleRepository.update(userId, schedule);
 
   /// Stream user's schedules.
-  Stream<List<ScheduleItem>> streamSchedules(String userId) {
-    return _firestore.collection('users').doc(userId).snapshots().map((doc) {
-      if (!doc.exists) return [];
-      final data = doc.data()!;
-      return (data['schedules'] as List?)
-              ?.whereType<Map<String, dynamic>>()
-              .map((e) => ScheduleItem.fromJson(e))
-              .toList() ??
-          [];
-    });
+  Stream<List<ScheduleItem>> streamSchedules(String userId) =>
+      _scheduleRepository.streamSchedules(userId);
+
+  // ==================== Calendar Entry Management ====================
+
+  /// Save calendar entries for a user.
+  /// Writes to `users/{userId}` field `calendar_entries` (map keyed by date).
+  /// Returns true if the write was confirmed on the server.
+  Future<bool> saveCalendarEntries(
+      String userId, Map<String, CalendarEntry> entries) async {
+    try {
+      await _writeWithRetry(() async {
+        final map = <String, dynamic>{};
+        for (final e in entries.entries) {
+          map[e.key] = sanitizeForFirestore(e.value.toJson());
+        }
+        await _firestore.collection('users').doc(userId).update(
+          sanitizeForFirestore({
+            'calendar_entries': map,
+            'updated_at': FieldValue.serverTimestamp(),
+          }),
+        );
+      });
+    } catch (e) {
+      debugPrint('❌ saveCalendarEntries failed after all retries: $e');
+      return false;
+    }
+    debugPrint('✅ Calendar entries saved: ${entries.length} items');
+    return true;
+  }
+
+  /// Load calendar entries from the Firestore server (bypasses cache).
+  /// Reads from `users/{userId}` field `calendar_entries`.
+  Future<Map<String, CalendarEntry>> loadCalendarEntries(
+      String userId) async {
+    final doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .get(const GetOptions(source: Source.server));
+    if (!doc.exists) return {};
+    final data = doc.data()!;
+    final raw = data['calendar_entries'] as Map<String, dynamic>? ?? {};
+    final result = <String, CalendarEntry>{};
+    for (final entry in raw.entries) {
+      if (entry.value is Map<String, dynamic>) {
+        try {
+          result[entry.key] =
+              CalendarEntry.fromJson(entry.value as Map<String, dynamic>);
+        } catch (e) {
+          debugPrint('⚠️ Skipping corrupt calendar entry ${entry.key}: $e');
+        }
+      }
+    }
+    return result;
+  }
+}
+
+/// Thrown when [UserService.sanitizeForFirestore] encounters a value with
+/// no encodable representation (not a primitive, not a Firestore-native
+/// type, not a Map/List/Color/DateTime).
+///
+/// The [path] locates the offending leaf from the root of the sanitized map
+/// (e.g. `channels[0].color_groups[0].color[3]`). [valueType] names the
+/// Dart class so a future sanitizer iteration can add explicit handling.
+/// [valuePreview] is a truncated `toString()` for context.
+///
+/// Caught by the existing try/catch in every write path that wraps
+/// `sanitizeForFirestore` (favorites_providers `addFavorite`,
+/// design_service `createDesign`/`updateDesign`, etc.). Re-thrown to the
+/// outer handler so the user sees a snackbar instead of a SIGABRT. #84.
+class FirestoreSerializationError implements Exception {
+  final String path;
+  final Type valueType;
+  final String valuePreview;
+
+  const FirestoreSerializationError({
+    required this.path,
+    required this.valueType,
+    required this.valuePreview,
+  });
+
+  @override
+  String toString() {
+    final loc = path.isEmpty ? '<root>' : path;
+    return 'FirestoreSerializationError: non-encodable value at "$loc" '
+        '(type: $valueType, preview: $valuePreview). '
+        'Add explicit handling in UserService._sanitizeValue.';
   }
 }

@@ -170,7 +170,6 @@ class SemanticPatternMatcher {
   static void cachePattern(String query, Map<String, dynamic> pattern) {
     final hash = createQueryHash(query);
     _patternCache[hash] = pattern;
-    debugPrint('📌 Cached pattern for hash $hash (theme: ${extractTheme(query)}, context: ${extractContext(query)})');
   }
 
   /// Gets the cache size (for debugging/monitoring).
@@ -179,7 +178,6 @@ class SemanticPatternMatcher {
   /// Clears the pattern cache (useful for testing or memory management).
   static void clearCache() {
     _patternCache.clear();
-    debugPrint('🗑️ Pattern cache cleared');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

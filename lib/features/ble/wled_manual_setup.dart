@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -122,6 +123,24 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
       debugPrint('📝 Controller name: $deviceName');
 
+      // Determine WiFi status from /json/info wifi object.
+      // A controller is WiFi-configured when signal > 0, rssi is negative,
+      // or ap == false (connected to a network vs. broadcasting its own AP).
+      // Ethernet-primary controllers may also report wifi.signal > 0 if their
+      // WiFi radio is active, which is fine — the flag just means the device
+      // is reachable on a network, not that it must be WiFi-only.
+      final wifiObj = info['wifi'];
+      bool wifiIsConfigured = false;
+      if (wifiObj is Map) {
+        final signal = wifiObj['signal'];
+        final rssi = wifiObj['rssi'];
+        final ap = wifiObj['ap'];
+        wifiIsConfigured = (signal is num && signal > 0) ||
+            (rssi is num && rssi < 0) ||
+            (ap is bool && ap == false);
+      }
+      debugPrint('📶 WiFi configured (from /json/info): $wifiIsConfigured');
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         throw Exception('No user logged in');
@@ -135,6 +154,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
         serial: ip.replaceAll('.', '_'),
         ip: ip,
         name: deviceName,
+        wifiConfigured: wifiIsConfigured,
       );
 
       debugPrint('✅ Controller saved successfully!');
@@ -209,7 +229,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           const Icon(Icons.settings_remote, size: 64, color: NexGenPalette.cyan),
           const SizedBox(height: 24),
           Text(
-            'Setup WLED Controller',
+            'Setup Lumina Controller',
             style: Theme.of(context).textTheme.headlineMedium,
             textAlign: TextAlign.center,
           ),
@@ -217,14 +237,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
           _buildInstructionCard(
             '1',
-            'Connect to WLED-AP',
-            'Power on your controller and connect to the "WLED-AP" or "ESP_xxxxxx" WiFi network from your device settings.',
+            'Connect to Controller AP',
+            'Power on your controller and connect to the "Lumina-XXXX" WiFi network from your device settings.',
           ),
           const SizedBox(height: 16),
 
           _buildInstructionCard(
             '2',
-            'Open WLED Web Interface',
+            'Open Controller Web Interface',
             'Open your browser and go to:\nhttp://4.3.2.1',
           ),
           const SizedBox(height: 16),
@@ -232,14 +252,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           _buildInstructionCard(
             '3',
             'Configure WiFi',
-            'In WLED\'s web interface:\n• Tap "Config" → "WiFi Setup"\n• Enter your home WiFi credentials\n• Tap "Save & Connect"',
+            'In the controller\'s web interface:\n• Tap "Config" → "WiFi Setup"\n• Enter your home WiFi credentials\n• Tap "Save & Connect"',
           ),
           const SizedBox(height: 16),
 
           _buildInstructionCard(
             '4',
             'Reconnect to Home WiFi',
-            'After WLED reboots:\n• Disconnect from WLED-AP\n• Reconnect to your home WiFi network\n• Return to this app',
+            'After the controller reboots:\n• Disconnect from the controller AP\n• Reconnect to your home WiFi network\n• Return to this app',
           ),
 
           const SizedBox(height: 32),
@@ -282,9 +302,9 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexGenPalette.cyan.withOpacity(0.2)),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -328,7 +348,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
               description,
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.white.withOpacity(0.8),
+                color: Colors.white.withValues(alpha: 0.8),
                 height: 1.5,
               ),
             ),
@@ -353,7 +373,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Scanning your network for WLED controllers...',
+              'Scanning your network for Lumina controllers...',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70),
             ),
@@ -379,7 +399,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
           const SizedBox(height: 16),
           const Text(
             'Controller not found automatically.\n\n'
-            'Check your router\'s connected devices list for your WLED controller and enter its IP address below.',
+            'Check your router\'s connected devices list for your Lumina controller and enter its IP address below.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70),
           ),
@@ -392,7 +412,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
               hintText: '192.168.1.100',
               prefixIcon: Icon(Icons.router),
             ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: false,
+            ),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+              LengthLimitingTextInputFormatter(15),
+            ],
           ),
 
           if (_errorMessage != null) ...[
@@ -400,7 +427,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.2),
+                color: Colors.orange.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange),
               ),

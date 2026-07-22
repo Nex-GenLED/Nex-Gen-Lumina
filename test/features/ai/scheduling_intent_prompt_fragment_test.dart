@@ -1,0 +1,115 @@
+// test/features/ai/scheduling_intent_prompt_fragment_test.dart
+//
+// #58 Commit 2 — fragment-equivalence + action-removal guard.
+//
+// Asserts the scheduling schema description the model is held to is now
+// SOURCED from the single static SchedulingIntent.schemaPromptFragment (so the
+// producer prompt and the typed parser can never drift), and that the dead
+// `action` field was removed from the assembled Smart prompt in every place it
+// appeared (the inline master-schema stubs, the schema block, and the worked
+// example). Locks both invariants against accidental future drift.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
+import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart';
+
+void main() {
+  group('SchedulingIntent.schemaPromptFragment', () {
+    const fragment = SchedulingIntent.schemaPromptFragment;
+
+    test('carries the full scheduling schema description, semantically intact',
+        () {
+      // Section anchors + every modeled field + the compound example survive.
+      expect(fragment, contains('═══ SCHEDULING INTENT ═══'));
+      expect(fragment, contains('`schedulingIntent` schema:'));
+      expect(fragment, contains('"timeLabel": "HH:MM" | "Sunset" | "Sunrise"'));
+      expect(fragment,
+          contains('"offTimeLabel": "HH:MM" | "Sunset" | "Sunrise" | null'));
+      expect(fragment, contains('"repeatDays":'));
+      expect(fragment, contains('"patternName": string'));
+      expect(fragment, contains('─── COMPOUND SCHEDULES ───'));
+      expect(fragment, contains('schedulingIntents'));
+      // Worked example, action-free.
+      expect(fragment,
+          contains('{"timeLabel":"Sunset","offTimeLabel":"Sunrise"'));
+      expect(fragment, contains('"patternName":"Friday Red"'));
+    });
+
+    test('teaches the RECURRING sequential-chain handoff shape (#51 step 1)',
+        () {
+      expect(fragment,
+          contains('─── SEQUENTIAL CHAINS (each segment hands off to the next) ───'));
+      // The load-bearing handoff rule: intermediate offTimeLabel must be null.
+      expect(fragment,
+          contains('Set `offTimeLabel` to null on EVERY segment EXCEPT the last'));
+      expect(fragment,
+          contains('arms a competing OFF that races the next'));
+      expect(fragment,
+          contains('The LAST segment\'s `offTimeLabel` is the "then off"'));
+      expect(fragment, contains('SEQUENTIAL CHAINS ARE RECURRING-ONLY'));
+      expect(fragment, contains('N segments + the final off = N+1 device timers'));
+      // The verbatim 2-segment worked example (intermediate null, terminal off).
+      expect(fragment,
+          contains('"patternName":"Red",  "wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[255,0,0,0]]}]}}'));
+      expect(fragment,
+          contains('"patternName":"Blue", "wled":{"on":true,"bri":255,"seg":[{"fx":0,"col":[[0,0,255,0]]}]}}'));
+    });
+
+    test('teaches ONE-SHOT honesty — fail loud, never silently drop (#51 step 2)',
+        () {
+      expect(fragment,
+          contains('─── ONE-SHOT TIMED SEQUENCES (not yet schedulable) ───'));
+      expect(fragment,
+          contains('CANNOT be scheduled yet'));
+      expect(fragment,
+          contains('Do NOT silently apply only the first color'));
+      // Must explicitly forbid the two wrong fallbacks the audit flagged.
+      expect(fragment, contains('`repeatDays:[]` (it would never fire)'));
+      expect(fragment,
+          contains('do '
+              'NOT emit a weekly recurring schedule for a one-time request'));
+      expect(fragment, contains('offer the recurring alternative'));
+    });
+
+    test('does NOT mention the removed `action` field (dead contract)', () {
+      expect(fragment.contains('"action"'), isFalse,
+          reason: 'action field removed from the schema in #58 Commit 2');
+      expect(fragment.contains('add" | "replace'), isFalse,
+          reason: 'add/replace semantics text removed with the action field');
+    });
+  });
+
+  group('Smart system prompt assembly', () {
+    final smart = LuminaAI.debugSmartSystemPrompt;
+
+    test('embeds the scheduling fragment verbatim (single source of truth)',
+        () {
+      expect(smart.contains(SchedulingIntent.schemaPromptFragment), isTrue,
+          reason:
+              'the Smart prompt must be assembled from the fragment so the '
+              'producer and the typed parser derive from one source');
+    });
+
+    test('contains no `action` token anywhere in the scheduling contract', () {
+      // Covers BOTH the dedicated section (via the fragment) AND the inline
+      // master-schema stubs (Block A), which were edited in place.
+      expect(smart.contains('"action":string'), isFalse,
+          reason: 'inline schedulingIntent/schedulingIntents stubs (Block A) '
+              'must no longer declare action');
+      expect(smart.contains('"action": "add"'), isFalse);
+      expect(smart.contains('"action":"add"'), isFalse);
+    });
+
+    test('inline master-schema still declares the scheduling keys (action '
+        'removal did not drop the keys themselves)', () {
+      expect(
+          smart.contains(
+              '"schedulingIntent":{"timeLabel":string,"offTimeLabel":string|null,'),
+          isTrue);
+      expect(
+          smart.contains(
+              '"schedulingIntents":[{"timeLabel":string,"offTimeLabel":string|null,'),
+          isTrue);
+    });
+  });
+}

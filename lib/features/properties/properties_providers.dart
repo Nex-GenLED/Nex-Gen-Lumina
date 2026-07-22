@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/properties/property_models.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Stream of all properties for the current user
 final userPropertiesProvider = StreamProvider<List<Property>>((ref) {
@@ -168,7 +169,7 @@ class PropertyManager {
       }
 
       await _propertiesCollection.doc(property.id).update(
-        property.copyWith(updatedAt: DateTime.now()).toFirestore(),
+        UserService.sanitizeForFirestore(property.copyWith(updatedAt: DateTime.now()).toFirestore()),
       );
 
       debugPrint('PropertyManager: Updated property "${property.name}"');

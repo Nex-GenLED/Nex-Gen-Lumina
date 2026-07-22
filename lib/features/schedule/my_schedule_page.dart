@@ -14,18 +14,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/eviction_picker_dialog.dart';
+import 'package:nexgen_command/features/schedule/eviction_request.dart';
+import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
-import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
-import 'package:nexgen_command/features/wled/pattern_providers.dart';
-import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/features/wled/clock_health_providers.dart';
+import 'package:nexgen_command/features/wled/clock_health_ui.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
+    show LibraryDesignSelection;
+import 'package:nexgen_command/features/wled/pattern_theme_selection.dart'
+    show LibraryBrowserScreen;
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
+import 'package:nexgen_command/features/ai/light_effect_animator.dart';
+import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/widgets/schedule_type_badge.dart';
 import 'package:nexgen_command/widgets/section_header.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -80,22 +95,30 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
   late DateTime _weekStart;
   late DateTime _calStart; // first day of the calendar zoom range
 
+  // Last successful schedule sync timestamp — drives the "Synced Xm ago"
+  // label on the AppBar Sync button so users can tell at a glance whether
+  // a recent edit landed on the controller. Updated by manual Sync taps;
+  // background auto-syncs (driven by SchedulesNotifier) refresh
+  // lastScheduleSyncResultProvider, which _SyncStatusRow surfaces below.
+  DateTime? _lastSyncTime;
+
+  // BUG-CLOCK-1: dismissal is mount-scoped so the controller clock-health
+  // banner reappears the next time this screen opens (dismissible-but-recurring).
+  bool _clockBannerDismissed = false;
+
   @override
   void initState() {
     super.initState();
     final today = DateTime.now();
     _weekStart = _startOfWeek(today);
     _calStart = DateTime(today.year, today.month, 1);
+    // Refresh controller clock health on screen open (cached, no polling loop).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.invalidate(clockHealthProvider);
+    });
   }
 
   // ── View mode toggle ──
-  static const _viewModes = [
-    ('week', 'Week'),
-    ('month', '1 Mo'),
-    ('3month', '3 Mo'),
-    ('6month', '6 Mo'),
-    ('year', 'Year'),
-  ];
 
   void _setViewMode(String mode) {
     ref.read(calendarViewModeProvider.notifier).state = mode;
@@ -131,6 +154,19 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     });
   }
 
+  // Auto-sync now lives in SchedulesNotifier — every mutation method
+  // triggers a debounced WLED push, so this widget-scoped listener is
+  // no longer needed. The manual Sync button below remains for
+  // user-driven re-sync.
+
+  String _formatSyncAge(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
   // ── Week range label ──
   String get _weekLabel {
     final end = _weekStart.add(const Duration(days: 6));
@@ -160,6 +196,41 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
     final calEntries = ref.watch(calendarScheduleProvider);
     final pending    = ref.watch(pendingCalendarProvider);
 
+    // Item #61 Workstream B — Option-C eviction picker bridge.
+    // CalendarScheduleNotifier.applyEntries pushes an EvictionRequest
+    // here when an incoming entry has no free WLED slot. We show the
+    // picker, complete the request's completer with the user's pick
+    // (or null), and clear the provider so subsequent requests fire.
+    ref.listen<EvictionRequest?>(pendingEvictionRequestProvider,
+        (previous, next) async {
+      if (next == null) return;
+      if (next.completer.isCompleted) return;
+      ScheduleItem? choice;
+      try {
+        choice = await showEvictionPicker(
+          context: context,
+          incomingEntry: next.entry,
+          leaseUntil: next.leaseUntil,
+        );
+      } catch (e) {
+        debugPrint('EvictionPicker: dialog threw — $e');
+        choice = null;
+      }
+      if (!next.completer.isCompleted) {
+        next.completer.complete(choice);
+      }
+      // Clear after resolving so subsequent noFreeSlots requests can
+      // re-trigger the listener.
+      if (ref.read(pendingEvictionRequestProvider) == next) {
+        ref.read(pendingEvictionRequestProvider.notifier).state = null;
+      }
+    });
+
+    // Auto-sync now lives in SchedulesNotifier — every mutation triggers
+    // a debounced WLED push from the notifier, regardless of which screen
+    // is mounted. The manual Sync button below remains as the user's
+    // escape hatch for forcing an immediate re-push.
+
     final userAsync  = ref.watch(currentUserProfileProvider);
     final user       = userAsync.maybeWhen(data: (u) => u, orElse: () => null);
     final hasCoords  = user?.latitude != null && user?.longitude != null;
@@ -180,22 +251,61 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
         actions: [
           TextButton.icon(
             onPressed: () async {
+              // Route through SchedulesNotifier so the manual sync uses
+              // the same path as the debounced auto-sync — bypassing the
+              // debounce for an immediate /json/cfg push.
               final result = await ref
-                  .read(scheduleSyncServiceProvider)
-                  .syncAll(ref, schedules);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(result.success
-                      ? 'Schedules synced to controller'
-                      : 'Could not sync (schedules saved to cloud)'),
-                  backgroundColor: result.success
-                      ? Colors.green.shade700
-                      : Colors.orange.shade700,
+                  .read(schedulesProvider.notifier)
+                  .runSyncNow();
+              if (!context.mounted) return;
+              final messenger = ScaffoldMessenger.of(context);
+              if (result.verifying) {
+                // A sync is already in flight (verifying through the controller
+                // stall) and this re-press was dropped — do NOT start a second
+                // cfg write. Reassure, don't alarm; the in-flight one owns the
+                // status row.
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.summaryMessage),
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+                  duration: const Duration(seconds: 3),
                 ));
+              } else if (result.deferredOffLan) {
+                // Off-LAN: the schedule saved fine, it just can't reach the
+                // controller's timer table from here. Informational, not red.
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.summaryMessage),
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+                  duration: const Duration(seconds: 4),
+                ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
+              } else if (!result.success) {
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.error ?? 'Schedule sync failed'),
+                  backgroundColor: Colors.red.shade700,
+                  duration: const Duration(seconds: 4),
+                ));
+              } else if (result.hasPresetErrors) {
+                messenger.showSnackBar(SnackBar(
+                  content: const Text('Schedule saved with warnings'),
+                  backgroundColor: Colors.orange.shade700,
+                  duration: const Duration(seconds: 3),
+                ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
+              } else {
+                messenger.showSnackBar(SnackBar(
+                  content: const Text('Schedules synced to controller'),
+                  backgroundColor: Colors.green.shade700,
+                  duration: const Duration(seconds: 2),
+                ));
+                if (mounted) setState(() => _lastSyncTime = DateTime.now());
               }
             },
             icon: const Icon(Icons.cloud_upload_rounded, size: 18, color: Colors.white),
-            label: const Text('Sync'),
+            label: Text(
+              _lastSyncTime == null
+                  ? 'Sync'
+                  : 'Synced ${_formatSyncAge(_lastSyncTime!)}',
+            ),
           ),
         ],
       ),
@@ -206,10 +316,31 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           if (pending != null)
             _PendingChangesBanner(pending: pending),
 
+          // ── Last sync status ────────────────────────────────────────────
+          const _SyncStatusRow(),
+
+          // ── Schedule overload warning ──────────────────────────────────
+          const ScheduleOverloadBanner(),
+
+          // ── Controller clock health (BUG-CLOCK-1) ──────────────────────
+          // LOCATION_UNSET only surfaces when the user actually has solar
+          // (sunrise/sunset) schedules — a location-less controller is
+          // harmless until a solar timer depends on it.
+          ClockHealthBanner(
+            solarRelevant: schedules.any((s) =>
+                isSolarTimeLabel(s.timeLabel) ||
+                isSolarTimeLabel(s.offTimeLabel)),
+            dismissed: _clockBannerDismissed,
+            onDismiss: () => setState(() => _clockBannerDismissed = true),
+          ),
+
           // ── Main scroll area ────────────────────────────────────────────
+          // Bottom padding is intentionally small here — the manual
+          // _GenerateThisWeekButton sits below this Expanded and provides its
+          // own SafeArea + nav-bar offset.
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(14, 16, 14, 100),
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
               children: [
                 // ── Lumina AI card (with fixed schedule creation) ──
                 const _LuminaAICard(),
@@ -234,7 +365,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   selectedKey: selectedKey,
                   calEntries: calEntries,
                   scheduleItems: schedules,
-                  pendingKeys: pending?.changes.map((c) => c.dateKey).toSet() ?? {},
+                  pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
                   onDayTap: (k) =>
                       ref.read(selectedCalendarDateProvider.notifier).state = k,
                   onPrevWeek: () => _shiftWeek(-1),
@@ -251,7 +382,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                     calStart: _calStart,
                     selectedKey: selectedKey,
                     calEntries: calEntries,
-                    pendingKeys: pending?.changes.map((c) => c.dateKey).toSet() ?? {},
+                    pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
                     onDayTap: (k) =>
                         ref.read(selectedCalendarDateProvider.notifier).state = k,
                     onPrev: () => _shiftCal(-1),
@@ -260,7 +391,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   ),
                 ],
 
-                // ── All recurring schedules list ──
+                // ── All recurring schedules list (or empty state) ──
                 if (schedules.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   Row(children: [
@@ -311,18 +442,39 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: _ScheduleCard(item: s),
                       )),
+                ] else ...[
+                  const SizedBox(height: 24),
+                  if (ref.watch(autopilotEnabledProvider))
+                    const _AutopilotGeneratingState()
+                  else
+                    const _AutopilotOffInvitation(),
                 ],
               ],
             ),
           ),
+
+          // ── Manual generate button ──────────────────────────────────────
+          // Sits above the bottom nav so it's always reachable. Tapping it
+          // forces a fresh schedule generation regardless of the weekly
+          // refresh gate.
+          const _GenerateThisWeekButton(),
         ],
       ),
 
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: NexGenPalette.cyan,
-        foregroundColor: Colors.black,
-        onPressed: () => showScheduleEditor(context, ref),
-        child: const Icon(CupertinoIcons.add),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. The parent shell's Scaffold uses extendBody:true
+        // and overlays the dock via a Stack (it's not a bottomNavigationBar),
+        // so default FAB positioning would otherwise sit underneath the dock.
+        // Use navBarTotalHeight() so the offset also includes the device
+        // bottom safe-area inset (e.g. iPhone home indicator).
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton(
+          backgroundColor: NexGenPalette.cyan,
+          foregroundColor: Colors.black,
+          onPressed: () => showScheduleEditor(context, ref),
+          child: const Icon(CupertinoIcons.add),
+        ),
       ),
     );
   }
@@ -394,54 +546,455 @@ class _PendingChangesBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      color: NexGenPalette.amber.withValues(alpha: 0.12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        children: [
-          Icon(Icons.pending_actions_rounded,
-              color: NexGenPalette.amber, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${pending.changes.length} pending change${pending.changes.length == 1 ? '' : 's'} — ${pending.message}',
-              style: TextStyle(
+    final count = pending.changes.length;
+    final firstNames = pending.changes
+        .take(2)
+        .map((e) => e.patternName)
+        .join(', ');
+    final summary = count <= 2
+        ? firstNames
+        : '$firstNames +${count - 2} more';
+
+    return GestureDetector(
+      onTap: () => _showPendingPreviewSheet(context, ref, pending),
+      child: Container(
+        decoration: BoxDecoration(
+          color: NexGenPalette.amber.withValues(alpha: 0.10),
+          border: Border(
+            bottom: BorderSide(
+                color: NexGenPalette.amber.withValues(alpha: 0.3)),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome,
+                color: NexGenPalette.amber, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$count design${count == 1 ? '' : 's'} across $count night${count == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      color: NexGenPalette.amber,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    summary,
+                    style: TextStyle(
+                      color: NexGenPalette.textMedium,
+                      fontSize: 11,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: NexGenPalette.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: NexGenPalette.amber.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                'Review',
+                style: TextStyle(
                   color: NexGenPalette.amber,
                   fontSize: 12,
-                  fontWeight: FontWeight.w500),
-              maxLines: 2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () =>
+                  ref.read(pendingCalendarProvider.notifier).state = null,
+              child: Icon(Icons.close,
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.6),
+                  size: 18),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Pending Preview Bottom Sheet ─────────────────────────────────────────────
+
+/// Shows a preview bottom sheet summarizing Lumina's proposed changes.
+/// "Lumina wants to schedule X designs across Y nights."
+/// Previews the first 3 entries, then Confirm or Cancel.
+Future<void> _showPendingPreviewSheet(
+  BuildContext context,
+  WidgetRef ref,
+  PendingCalendarChanges pending,
+) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _PendingPreviewSheet(pending: pending),
+  );
+
+  if (result == true) {
+    // Confirm — check for recurring schedule conflicts, then apply
+    final conflicts = ref
+        .read(calendarScheduleProvider.notifier)
+        .checkConflictsForEntries(pending.changes);
+    ConflictResolution? resolution;
+    if (conflicts.hasConflicts && context.mounted) {
+      resolution =
+          await showScheduleConflictDialog(context, conflicts);
+      if (resolution == ConflictResolution.cancel) return;
+    }
+
+    final ok = await ref
+        .read(calendarScheduleProvider.notifier)
+        .applyEntries(
+          pending.changes,
+          resolution: resolution,
+          recurringIntent: pending.recurringIntent,
+        );
+    if (pending.changes.isNotEmpty) {
+      ref.read(selectedCalendarDateProvider.notifier).state =
+          pending.changes.first.dateKey;
+    }
+    ref.read(pendingCalendarProvider.notifier).state = null;
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Schedule saved'
+            : 'Schedule could not be saved. Please try again.'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+  // null or false → user cancelled, keep pending state for banner
+}
+
+/// Compact status strip shown beneath the AppBar reflecting the most
+/// recent schedule sync attempt. Renders nothing until the user has
+/// triggered at least one sync this session.
+class _SyncStatusRow extends ConsumerWidget {
+  const _SyncStatusRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final last = ref.watch(lastScheduleSyncResultProvider);
+    if (last == null) return const SizedBox.shrink();
+
+    final IconData icon;
+    final Color color;
+    final String label;
+    if (last.verifying) {
+      // Interim: the write committed and we're verifying through the
+      // controller's post-commit stall (can take minutes). Not an error —
+      // neutral/cyan so it never flashes red while the controller recovers.
+      icon = Icons.sync_rounded;
+      color = NexGenPalette.cyan;
+      label = last.summaryMessage;
+    } else if (last.deferredOffLan) {
+      // Saved, just not armed yet — the user is away from home. Nothing failed,
+      // so this must NOT read like an error: neutral icon, neutral colour.
+      icon = Icons.home_outlined;
+      color = NexGenPalette.cyan;
+      label = last.summaryMessage;
+    } else if (!last.success) {
+      icon = Icons.cloud_off_rounded;
+      color = Colors.red.shade400;
+      label = last.error ?? 'Not synced — controller offline';
+    } else if (last.hasPresetErrors) {
+      icon = Icons.warning_amber_rounded;
+      color = Colors.orange.shade400;
+      label =
+          'Synced with ${last.presetErrors.length} warning${last.presetErrors.length == 1 ? '' : 's'} '
+          '· ${_formatRelative(last.syncedAt)}';
+    } else {
+      icon = Icons.check_circle_rounded;
+      color = Colors.green.shade400;
+      label = 'Synced · ${_formatRelative(last.syncedAt)}';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: color),
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 8),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.green,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            ),
-            onPressed: () {
-              ref
-                  .read(calendarScheduleProvider.notifier)
-                  .applyEntries(pending.changes);
-              // Jump to first changed date so user sees it immediately
-              if (pending.changes.isNotEmpty) {
-                ref.read(selectedCalendarDateProvider.notifier).state =
-                    pending.changes.first.dateKey;
-              }
-              ref.read(pendingCalendarProvider.notifier).state = null;
-            },
-            child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  static String _formatRelative(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}
+
+class _PendingPreviewSheet extends StatelessWidget {
+  final PendingCalendarChanges pending;
+  const _PendingPreviewSheet({required this.pending});
+
+  @override
+  Widget build(BuildContext context) {
+    final count = pending.changes.length;
+    final preview = pending.changes.take(3).toList();
+    final remaining = count - preview.length;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: NexGenPalette.gunmetal,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 14),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.textMedium.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome,
+                      color: NexGenPalette.cyan, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Lumina wants to schedule $count design${count == 1 ? '' : 's'} '
+                      'across $count night${count == 1 ? '' : 's'}',
+                      style:
+                          Theme.of(context).textTheme.titleMedium?.copyWith(
+                                color: NexGenPalette.textHigh,
+                                fontWeight: FontWeight.w700,
+                              ),
+                    ),
+                  ),
+                ],
+              ),
+
+              if (pending.message.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  pending.message,
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 13,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+
+              const SizedBox(height: 14),
+
+              // Preview tiles (first 3)
+              ...preview.map((entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _PendingEntryTile(entry: entry),
+                  )),
+
+              // "and N more" indicator
+              if (remaining > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Center(
+                    child: Text(
+                      '+ $remaining more night${remaining == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        color: NexGenPalette.textMedium,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 8),
+
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: TextButton.styleFrom(
+                        foregroundColor: NexGenPalette.textMedium,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      icon:
+                          const Icon(Icons.check_rounded, size: 18),
+                      label: Text(
+                          'Confirm ${count == 1 ? '' : 'All '}$count'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: NexGenPalette.cyan,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Trailing space clears the glass dock nav bar overlay so
+              // the Confirm/Cancel buttons aren't hidden behind the dock.
+              const SizedBox(height: 16 + kBottomNavBarPadding),
+            ],
           ),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red.shade400,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single preview tile for a pending calendar entry.
+class _PendingEntryTile extends ConsumerWidget {
+  final CalendarEntry entry;
+  const _PendingEntryTile({required this.entry});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final date = DateTime.tryParse(entry.dateKey);
+    final dayLabel = date != null
+        ? '${_kDayFull[date.weekday % 7]}, ${_kMonthShort[date.month]} ${date.day}'
+        : entry.dateKey;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: entry.color?.withValues(alpha: 0.35) ??
+              NexGenPalette.line,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Color swatch
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: entry.color ?? NexGenPalette.gunmetal90,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: entry.color != null
+                  ? [
+                      BoxShadow(
+                        color: entry.color!.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                      )
+                    ]
+                  : null,
             ),
-            onPressed: () =>
-                ref.read(pendingCalendarProvider.notifier).state = null,
-            child: const Text('Discard'),
+            child: entry.color == null
+                ? Icon(Icons.power_off_outlined,
+                    color: NexGenPalette.textMedium, size: 16)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          // Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.displayName,
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dayLabel,
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Time + brightness
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (entry.onTime != null)
+                Text(
+                  entry.offTime != null
+                      ? '${formatTimeLabel(entry.onTime, timeFormat: timeFormat)} → '
+                          '${formatTimeLabel(entry.offTime, timeFormat: timeFormat)}'
+                      : formatTimeLabel(entry.onTime, timeFormat: timeFormat),
+                  style: TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              if (entry.brightness > 0)
+                Text(
+                  '${entry.brightness}%',
+                  style: TextStyle(
+                    color: NexGenPalette.amber,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -451,7 +1004,7 @@ class _PendingChangesBanner extends ConsumerWidget {
 
 // ─── Day Hero Card ─────────────────────────────────────────────────────────────
 
-class _DayHeroCard extends StatelessWidget {
+class _DayHeroCard extends ConsumerWidget {
   final String dateKey;
   final CalendarEntry? calEntry;
   final List<ScheduleItem> scheduleItems;
@@ -465,7 +1018,8 @@ class _DayHeroCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final today = DateTime.now();
     final selDate = DateTime.parse(dateKey);
     final isToday = _fmt(today) == dateKey;
@@ -476,7 +1030,7 @@ class _DayHeroCard extends StatelessWidget {
     final recurringItems = _itemsForWeekday(scheduleItems, wd);
     final recurringFirst = recurringItems.isNotEmpty ? recurringItems.first : null;
 
-    final patternName = calEntry?.patternName ??
+    final patternName = calEntry?.displayName ??
         (recurringFirst != null ? _labelFromAction(recurringFirst.actionLabel) : null);
     final color = calEntry?.color;
     final onTime = calEntry?.onTime ??
@@ -488,21 +1042,69 @@ class _DayHeroCard extends StatelessWidget {
         ? '🎉 Holiday'
         : calEntry?.type == CalendarEntryType.user
             ? '👤 User Set'
-            : recurringFirst != null
-                ? '🔁 Recurring'
-                : isPast
-                    ? '—'
-                    : '⚡ Auto-Pilot';
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? '⚡ Game Day'
+                : recurringFirst != null
+                    ? '🔁 Recurring'
+                    : isPast
+                        ? '—'
+                        : '⚡ Auto-Pilot';
 
     final typeColor = calEntry?.type == CalendarEntryType.holiday
         ? NexGenPalette.amber
         : calEntry?.type == CalendarEntryType.user
             ? NexGenPalette.cyan
-            : recurringFirst != null
-                ? NexGenPalette.violet
-                : NexGenPalette.textMedium;
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? NexGenPalette.cyan
+                : recurringFirst != null
+                    ? NexGenPalette.violet
+                    : NexGenPalette.textMedium;
 
-    return ClipRRect(
+    // Extract WLED effect info for the pixel strip
+    final wledPayload = calEntry != null ? null : recurringFirst?.wledPayload;
+    final stripColors = _extractStripColors(color, wledPayload);
+    final effectId = _extractEffectId(wledPayload);
+    final effectType = effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid;
+    final speed = _extractNormalized(wledPayload, 'sx');
+    final bri = brightness != null ? brightness / 100.0 : 1.0;
+
+    // Source label for detail sheet
+    final sourceLabel = calEntry?.type == CalendarEntryType.holiday
+        ? 'Holiday'
+        : calEntry?.type == CalendarEntryType.user
+            ? calEntry!.autopilot ? 'AI-Generated' : 'Manual'
+            : calEntry?.type == CalendarEntryType.autopilot
+                ? 'Game Day Autopilot'
+                : recurringFirst != null
+                    ? 'Recurring Schedule'
+                    : 'Autopilot';
+
+    final effectLabel = effectId != null
+        ? _wledEffectName(effectId)
+        : patternName ?? 'Solid';
+
+    return GestureDetector(
+      onTap: (patternName != null || color != null)
+          ? () => _showScheduleDetailSheet(
+                context,
+                colors: stripColors,
+                effectType: effectType,
+                speed: speed,
+                brightness: bri,
+                patternName: patternName ?? 'No Schedule',
+                effectName: effectLabel,
+                onTime: onTime,
+                offTime: offTime,
+                brightnessPercent: brightness,
+                source: sourceLabel,
+                timeFormat: timeFormat,
+                ref: ref,
+                calEntry: calEntry,
+                recurringItem: calEntry == null ? recurringFirst : null,
+                dateKey: dateKey,
+              )
+          : null,
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -528,15 +1130,20 @@ class _DayHeroCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Color strip at top
-              if (color != null)
-                Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: color,
-                    boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 8)],
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(14)),
+              // Animated pixel strip at top
+              if (stripColors.isNotEmpty)
+                ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(14)),
+                  child: PixelStripPreview(
+                    colors: stripColors,
+                    effectType: effectType,
+                    speed: speed,
+                    brightness: bri,
+                    pixelCount: 24,
+                    height: 28,
+                    borderRadius: 0,
+                    backgroundColor: const Color(0xFF0A0E14),
                   ),
                 ),
 
@@ -709,14 +1316,18 @@ class _DayHeroCard extends StatelessWidget {
                         _StatChip(
                           icon: Icons.wb_sunny_rounded,
                           label: 'On',
-                          value: onTime ?? '—',
+                          value: onTime != null
+                              ? formatTimeLabel(onTime, timeFormat: timeFormat)
+                              : '—',
                           color: NexGenPalette.cyan,
                         ),
                         const SizedBox(width: 8),
                         _StatChip(
                           icon: Icons.nightlight_round,
                           label: 'Off',
-                          value: offTime ?? '—',
+                          value: offTime != null
+                              ? formatTimeLabel(offTime, timeFormat: timeFormat)
+                              : '—',
                           color: NexGenPalette.violet,
                         ),
                         const SizedBox(width: 8),
@@ -735,6 +1346,7 @@ class _DayHeroCard extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -751,7 +1363,8 @@ class _DayHeroCard extends StatelessWidget {
     final lower = a.trim().toLowerCase();
     if (lower.startsWith('pattern')) {
       final idx = a.indexOf(':');
-      return idx != -1 ? a.substring(idx + 1).trim() : a;
+      final name = idx != -1 ? a.substring(idx + 1).trim() : a;
+      return displayNameFor(name);
     }
     return a.trim();
   }
@@ -808,6 +1421,374 @@ class _StatChip extends StatelessWidget {
   }
 }
 
+// ─── Shared helpers for PixelStripPreview in schedule cards ──────────────────
+
+/// Extract preview colors from a CalendarEntry color and/or WLED payload.
+List<Color> _extractStripColors(Color? entryColor, Map<String, dynamic>? wledPayload) {
+  // Try extracting from WLED payload first (multi-color)
+  if (wledPayload != null) {
+    final seg = wledPayload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final col = seg[0] is Map ? (seg[0] as Map)['col'] : null;
+      if (col is List) {
+        final colors = col
+            .whereType<List>()
+            .where((c) => c.length >= 3)
+            .map((c) => Color.fromARGB(
+                  255,
+                  (c[0] as num).toInt().clamp(0, 255),
+                  (c[1] as num).toInt().clamp(0, 255),
+                  (c[2] as num).toInt().clamp(0, 255),
+                ))
+            .toList();
+        if (colors.isNotEmpty) return colors;
+      }
+    }
+  }
+  // Fall back to single entry color
+  if (entryColor != null) return [entryColor];
+  return const [];
+}
+
+/// Extract effect ID from WLED payload.
+int? _extractEffectId(Map<String, dynamic>? payload) {
+  if (payload == null) return null;
+  final seg = payload['seg'];
+  if (seg is List && seg.isNotEmpty && seg[0] is Map) {
+    final fx = (seg[0] as Map)['fx'];
+    if (fx is num) return fx.toInt();
+  }
+  return null;
+}
+
+/// Extract and normalize a 0-255 WLED field to 0.0-1.0.
+double _extractNormalized(Map<String, dynamic>? payload, String key) {
+  if (payload == null) return 0.5;
+  final seg = payload['seg'];
+  if (seg is List && seg.isNotEmpty && seg[0] is Map) {
+    final val = (seg[0] as Map)[key];
+    if (val is num) return (val / 255.0).clamp(0.0, 1.0);
+  }
+  return 0.5;
+}
+
+/// Map a WLED effect ID to its human-readable name.
+String _wledEffectName(int id) {
+  const names = {
+    0: 'Solid', 2: 'Breathe', 12: 'Fade', 13: 'Theater Chase',
+    15: 'Running', 17: 'Twinkle', 20: 'Sparkle', 28: 'Chase',
+    37: 'Candle', 38: 'Fire', 39: 'Fireworks', 41: 'Running Dual',
+    43: 'Tricolor Chase', 46: 'Lightning', 49: 'Fairy',
+    52: 'Fireworks Starburst', 76: 'Meteor', 79: 'Ripple',
+    80: 'Twinklefox', 87: 'Glitter', 95: 'Flow',
+    9: 'Rainbow', 10: 'Rainbow Cycle',
+  };
+  return names[id] ?? 'Effect $id';
+}
+
+/// Bottom sheet showing full schedule detail for a card.
+void _showScheduleDetailSheet(
+  BuildContext context, {
+  required List<Color> colors,
+  required EffectType effectType,
+  required double speed,
+  required double brightness,
+  required String patternName,
+  required String effectName,
+  required String? onTime,
+  required String? offTime,
+  required int? brightnessPercent,
+  required String source,
+  String timeFormat = '12h',
+  WidgetRef? ref,
+  CalendarEntry? calEntry,
+  ScheduleItem? recurringItem,
+  String? dateKey,
+}) {
+  // The delete affordance is only meaningful when we have both a ref to
+  // mutate state through and an actual entry to remove. The recurring
+  // card surfaces its own delete button on the schedule list, so we only
+  // wire delete here for the calendar day-detail path that's missing it.
+  final canDelete =
+      ref != null && (calEntry != null || recurringItem != null);
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => Container(
+      // Bottom padding clears the glass dock nav bar overlay so the
+      // last detail row isn't hidden behind the dock.
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32 + kBottomNavBarPadding),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: NexGenPalette.textMedium.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // Full-width pixel strip
+          if (colors.isNotEmpty)
+            PixelStripPreview(
+              colors: colors,
+              effectType: effectType,
+              speed: speed,
+              brightness: brightness,
+              pixelCount: 32,
+              height: 48,
+              borderRadius: 10,
+            ),
+
+          const SizedBox(height: 16),
+
+          // Pattern name
+          Text(
+            patternName,
+            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                  color: NexGenPalette.textHigh,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+
+          // Effect name
+          Text(
+            effectName,
+            style: TextStyle(
+              color: NexGenPalette.cyan,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Detail rows
+          _DetailRow(
+            icon: Icons.wb_sunny_rounded,
+            label: 'On',
+            value: onTime != null
+                ? formatTimeLabel(onTime, timeFormat: timeFormat)
+                : '—',
+            color: NexGenPalette.cyan,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.nightlight_round,
+            label: 'Off',
+            value: offTime != null
+                ? formatTimeLabel(offTime, timeFormat: timeFormat)
+                : '—',
+            color: NexGenPalette.violet,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.brightness_6_rounded,
+            label: 'Brightness',
+            value: brightnessPercent != null ? '$brightnessPercent%' : '—',
+            color: NexGenPalette.amber,
+          ),
+          const SizedBox(height: 8),
+          _DetailRow(
+            icon: Icons.source_rounded,
+            label: 'Source',
+            value: source,
+            color: NexGenPalette.textMedium,
+          ),
+          if (canDelete) ...[
+            const SizedBox(height: 16),
+            Divider(color: NexGenPalette.line, height: 1),
+            const SizedBox(height: 8),
+            _DeleteEntryButton(
+              ref: ref,
+              calEntry: calEntry,
+              recurringItem: recurringItem,
+              dateKey: dateKey,
+              sheetContext: ctx,
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+class _DeleteEntryButton extends StatelessWidget {
+  final WidgetRef ref;
+  final CalendarEntry? calEntry;
+  final ScheduleItem? recurringItem;
+  final String? dateKey;
+  final BuildContext sheetContext;
+
+  const _DeleteEntryButton({
+    required this.ref,
+    required this.calEntry,
+    required this.recurringItem,
+    required this.dateKey,
+    required this.sheetContext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // calEntry takes precedence: removing the one-off override reveals
+    // the recurring fallback (if any) on the next render.
+    final isCalEntry = calEntry != null;
+    final label = isCalEntry ? 'Delete This Day' : 'Delete Recurring Schedule';
+
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.red.shade300,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+        label: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        onPressed: () => _confirmAndDelete(sheetContext),
+      ),
+    );
+  }
+
+  Future<void> _confirmAndDelete(BuildContext ctx) async {
+    final String title;
+    final String body;
+    if (calEntry != null) {
+      title = 'Delete this day?';
+      final friendlyDate = _friendlyDate(dateKey);
+      body = friendlyDate != null
+          ? 'Delete the entry for $friendlyDate? '
+              "The lights won't change on this day."
+          : "Delete this day's entry? The lights won't change on this day.";
+    } else {
+      final otherDays = (recurringItem?.repeatDays.length ?? 1) - 1;
+      title = 'Delete recurring schedule?';
+      body = otherDays > 0
+          ? 'This will delete the recurring schedule and affect $otherDays '
+              'other ${otherDays == 1 ? 'day' : 'days'}. Continue?'
+          : 'This will delete the recurring schedule. Continue?';
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              foregroundColor: Colors.red.shade300,
+            ),
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!ctx.mounted) return;
+
+    final messenger = ScaffoldMessenger.maybeOf(ctx);
+    bool ok = false;
+    if (calEntry != null && dateKey != null) {
+      ok = await ref
+          .read(calendarScheduleProvider.notifier)
+          .removeEntry(dateKey!);
+    } else if (recurringItem != null) {
+      ref.read(schedulesProvider.notifier).remove(recurringItem!.id);
+      ok = true;
+    }
+
+    if (ctx.mounted) {
+      Navigator.of(ctx).pop();
+    }
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Entry deleted' : 'Could not delete entry'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  String? _friendlyDate(String? key) {
+    if (key == null) return null;
+    try {
+      final d = DateTime.parse(key);
+      const weekdays = [
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+        'Friday', 'Saturday', 'Sunday',
+      ];
+      const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December',
+      ];
+      return '${weekdays[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            color: NexGenPalette.textMedium,
+            fontSize: 12,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(
+            color: NexGenPalette.textHigh,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ─── Week Strip ───────────────────────────────────────────────────────────────
 
 class _WeekStripSection extends StatelessWidget {
@@ -815,7 +1796,7 @@ class _WeekStripSection extends StatelessWidget {
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
   final List<ScheduleItem> scheduleItems;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
   final VoidCallback onPrevWeek;
   final VoidCallback onNextWeek;
@@ -827,7 +1808,7 @@ class _WeekStripSection extends StatelessWidget {
     required this.selectedKey,
     required this.calEntries,
     required this.scheduleItems,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.onDayTap,
     required this.onPrevWeek,
     required this.onNextWeek,
@@ -925,7 +1906,7 @@ class _WeekStripSection extends StatelessWidget {
                   children: List.generate(7, (i) {
                     final key = days[i];
                     final d = DateTime.parse(key);
-                    final calEntry = calEntries[key];
+                    final calEntry = pendingEntries[key] ?? calEntries[key];
                     final wd = d.weekday % 7;
                     final recurringItems = _itemsForWeekday(scheduleItems, wd);
                     return Expanded(
@@ -936,7 +1917,7 @@ class _WeekStripSection extends StatelessWidget {
                           calEntry: calEntry,
                           recurringItems: recurringItems,
                           isSelected: key == selectedKey,
-                          isPending: pendingKeys.contains(key),
+                          isPending: pendingEntries.containsKey(key),
                           onTap: () => onDayTap(key),
                         ),
                       ),
@@ -952,7 +1933,7 @@ class _WeekStripSection extends StatelessWidget {
   }
 }
 
-class _WeekDayCell extends StatelessWidget {
+class _WeekDayCell extends ConsumerWidget {
   final String dateKey;
   final CalendarEntry? calEntry;
   final List<ScheduleItem> recurringItems;
@@ -970,7 +1951,7 @@ class _WeekDayCell extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final today = DateTime.now();
     final d = DateTime.parse(dateKey);
     final isToday = _fmt(today) == dateKey;
@@ -981,13 +1962,25 @@ class _WeekDayCell extends StatelessWidget {
     final color = calEntry?.color ??
         (recurringItems.isNotEmpty ? null : null); // Recurring has no color
 
-    final patternName = calEntry?.patternName ??
+    final patternName = calEntry?.displayName ??
         (recurringItems.isNotEmpty
             ? _labelFromAction(recurringItems.first.actionLabel)
             : null);
 
-    final onTime = calEntry?.onTime ?? recurringItems.firstOrNull?.timeLabel;
-    final offTime = calEntry?.offTime ?? recurringItems.firstOrNull?.offTimeLabel;
+    // Mixed formats: CalendarEntry stores 'HH:mm' 24-hour; ScheduleItem stores
+    // 'h:mm AM/PM' (or 'Sunset'/'Sunrise'). formatTimeLabel normalises both
+    // into the user's preferred display format (12-hour by default).
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    final rawOnTime =
+        calEntry?.onTime ?? recurringItems.firstOrNull?.timeLabel;
+    final rawOffTime =
+        calEntry?.offTime ?? recurringItems.firstOrNull?.offTimeLabel;
+    final onTime = rawOnTime == null
+        ? null
+        : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
+    final offTime = rawOffTime == null
+        ? null
+        : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
 
     final borderColor = isSelected
         ? NexGenPalette.cyan
@@ -1038,21 +2031,38 @@ class _WeekDayCell extends StatelessWidget {
                   ),
                   const SizedBox(height: 5),
 
-                  // Color bar
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(2),
-                      color: color ?? NexGenPalette.line,
-                      boxShadow: color != null
-                          ? [
-                              BoxShadow(
-                                  color: color.withValues(alpha: 0.6),
-                                  blurRadius: 4)
-                            ]
-                          : null,
+                  // Color bar or Off pill
+                  if (calEntry?.brightness == 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.textMedium.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.nightlight_round, size: 9, color: NexGenPalette.textMedium),
+                          const SizedBox(width: 2),
+                          Text('Off', style: TextStyle(fontSize: 8, color: NexGenPalette.textMedium, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        color: color ?? NexGenPalette.line,
+                        boxShadow: color != null
+                            ? [
+                                BoxShadow(
+                                    color: color.withValues(alpha: 0.6),
+                                    blurRadius: 4)
+                              ]
+                            : null,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 5),
 
                   // Pattern name
@@ -1113,6 +2123,10 @@ class _WeekDayCell extends StatelessWidget {
         ),
       );
     }
+    if (entry?.type == CalendarEntryType.autopilot) {
+      return Icon(Icons.auto_awesome,
+          size: 8, color: NexGenPalette.cyan);
+    }
     if (entry?.autopilot == true) {
       return Container(
         width: 6,
@@ -1129,7 +2143,8 @@ class _WeekDayCell extends StatelessWidget {
 
   String _labelFromAction(String a) {
     final idx = a.indexOf(':');
-    return idx != -1 ? a.substring(idx + 1).trim() : a.trim();
+    final name = idx != -1 ? a.substring(idx + 1).trim() : a.trim();
+    return displayNameFor(name);
   }
 }
 
@@ -1140,7 +2155,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
   final DateTime calStart;
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
   final VoidCallback onPrev;
   final VoidCallback onNext;
@@ -1151,7 +2166,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
     required this.calStart,
     required this.selectedKey,
     required this.calEntries,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.onDayTap,
     required this.onPrev,
     required this.onNext,
@@ -1210,7 +2225,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
                   firstDay: monthList[i],
                   selectedKey: selectedKey,
                   calEntries: calEntries,
-                  pendingKeys: pendingKeys,
+                  pendingEntries: pendingEntries,
                   size: size,
                   onDayTap: onDayTap,
                 ),
@@ -1229,7 +2244,7 @@ class _CalendarMonthBlock extends StatelessWidget {
   final DateTime firstDay;
   final String selectedKey;
   final Map<String, CalendarEntry> calEntries;
-  final Set<String> pendingKeys;
+  final Map<String, CalendarEntry> pendingEntries;
   final _CalDaySize size;
   final ValueChanged<String> onDayTap;
 
@@ -1237,7 +2252,7 @@ class _CalendarMonthBlock extends StatelessWidget {
     required this.firstDay,
     required this.selectedKey,
     required this.calEntries,
-    required this.pendingKeys,
+    required this.pendingEntries,
     required this.size,
     required this.onDayTap,
   });
@@ -1297,8 +2312,8 @@ class _CalendarMonthBlock extends StatelessWidget {
             if (key == null) return const SizedBox.shrink();
             return _CalDayCell(
               dateKey: key,
-              calEntry: calEntries[key],
-              isPending: pendingKeys.contains(key),
+              calEntry: pendingEntries[key] ?? calEntries[key],
+              isPending: pendingEntries.containsKey(key),
               isSelected: key == selectedKey,
               size: cellSize,
               fontSize: fontSize,
@@ -1373,15 +2388,20 @@ class _CalDayCell extends StatelessWidget {
                         : NexGenPalette.textHigh,
               ),
             ),
-            if (color != null && size >= 24)
+            if (calEntry?.brightness == 0 && size >= 24)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(Icons.nightlight_round, size: 8, color: NexGenPalette.textMedium),
+              )
+            else if (color != null && size >= 24)
               Container(
                 width: 4,
                 height: 4,
-                margin: const EdgeInsets.only(top: 2),
+                margin: const EdgeInsets.only(top: 3),
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 3)],
+                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 1.5)],
                 ),
               ),
           ],
@@ -1400,7 +2420,8 @@ class _LuminaAICard extends ConsumerStatefulWidget {
   ConsumerState<_LuminaAICard> createState() => _LuminaAICardState();
 }
 
-class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
+class _LuminaAICardState extends ConsumerState<_LuminaAICard>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _ctrl = TextEditingController();
   bool _loading = false;
   String? _lastResponse;
@@ -1408,12 +2429,11 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
   late final stt.SpeechToText _speech;
   bool _listening = false;
 
+  late final AnimationController _glowController;
+  late final Animation<double> _glowAnim;
+
   static const _quickActions = [
-    'Every Friday in April → Ember Glow',
     'July 4th → Independence Blue 100%',
-    'Turn off all of October',
-    'Weekends in June → Ocean Pulse',
-    'Halloween week → orange 9pm–midnight',
     'Christmas week → red and green',
   ];
 
@@ -1421,10 +2441,18 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _glowAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
+    _glowController.dispose();
     _speech.stop();
     _ctrl.dispose();
     super.dispose();
@@ -1480,17 +2508,19 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
       if (result == null || result.changes.isEmpty) {
         setState(() {
-          _lastResponse =
+          _lastResponse = result?.message ??
               "Lumina couldn't find specific dates to update. Try something like "
               '"every Friday in April" or "turn off December 1st".';
         });
         return;
       }
 
-      // Store pending changes — user must tap Apply to commit them
+      // Show preview sheet — user confirms before committing
       ref.read(pendingCalendarProvider.notifier).state = result;
-      setState(() => _lastResponse = result.message);
       _ctrl.clear();
+      if (!context.mounted) return;
+      await _showPendingPreviewSheet(context, ref, result);
+      if (mounted) setState(() => _lastResponse = result.message);
     } catch (e) {
       debugPrint('LuminaCalendarService error: $e');
       if (mounted) setState(() => _lastResponse = 'Error: $e');
@@ -1501,10 +2531,34 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
   @override
   Widget build(BuildContext context) {
-    final autopilotEnabled = ref.watch(autopilotEnabledProvider);
+    final autopilotOn = ref.watch(autopilotEnabledProvider);
+    final schedules = ref.watch(schedulesProvider);
     final pending = ref.watch(pendingCalendarProvider);
 
-    return ClipRRect(
+    // Highlight the AI bar when schedule is empty and autopilot is off
+    final bool showHighlight = schedules.isEmpty && !autopilotOn;
+
+    return AnimatedBuilder(
+      animation: _glowAnim,
+      builder: (context, child) {
+        final glowAlpha = showHighlight ? 0.25 + (_glowAnim.value * 0.35) : 0.0;
+        return Container(
+          decoration: showHighlight
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: NexGenPalette.cyan.withValues(alpha: glowAlpha),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                )
+              : null,
+          child: child!,
+        );
+      },
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -1514,13 +2568,13 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                NexGenPalette.cyan.withValues(alpha: 0.12),
-                NexGenPalette.violet.withValues(alpha: 0.08),
+                NexGenPalette.cyan.withValues(alpha: showHighlight ? 0.18 : 0.12),
+                NexGenPalette.violet.withValues(alpha: showHighlight ? 0.12 : 0.08),
               ],
             ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-                color: NexGenPalette.cyan.withValues(alpha: 0.35)),
+                color: NexGenPalette.cyan.withValues(alpha: showHighlight ? 0.55 : 0.35)),
           ),
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -1721,6 +2775,75 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard> {
 
               // Autopilot toggle (unchanged from original)
               _AutopilotRow(),
+              // Consent-gated daily warm-white baseline (pre-checked). Self-
+              // hides when autopilot is off. Unchecking persists so a future
+              // regeneration never re-adds the baseline.
+              const _BaselineConsentTile(),
+            ],
+          ),
+        ),
+      ),
+    ), // end AnimatedBuilder child (ClipRRect)
+    ); // end AnimatedBuilder
+  }
+}
+
+// ─── Baseline consent (daily warm-white) ──────────────────────────────────────
+//
+// Pre-checked option surfaced under the Autopilot toggle. Discloses that
+// autopilot seeds a daily "warm white from sunset, off at sunrise" baseline —
+// the schedule that silently turned users' lights off at sunrise. Unchecking
+// persists (autopilotBaselineEnabled=false) so regeneration never re-adds it.
+// It does NOT touch existing baseline schedules — those stay visible and
+// deletable in the list. Self-hides when autopilot is off.
+class _BaselineConsentTile extends ConsumerWidget {
+  const _BaselineConsentTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(autopilotEnabledProvider)) return const SizedBox.shrink();
+    final enabled = ref.watch(baselineWarmWhiteEnabledProvider);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        onTap: () => ref
+            .read(autopilotSettingsServiceProvider)
+            .setBaselineWarmWhite(!enabled),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                enabled
+                    ? Icons.check_box_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                size: 20,
+                color: enabled ? NexGenPalette.cyan : NexGenPalette.textMedium,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Daily evening lighting',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: NexGenPalette.textHigh,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Warm white from sunset, off at sunrise',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: NexGenPalette.textMedium),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -1770,7 +2893,7 @@ class _AutopilotRow extends ConsumerWidget {
             _AutopilotModeChip(
               label: 'Suggest',
               selected: autonomyLevel == 1,
-              onTap: () => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1),
+              onTap: () async => ref.read(autopilotSettingsServiceProvider).setAutonomyLevel(1),
             ),
             const SizedBox(width: 6),
             _AutopilotModeChip(
@@ -1789,11 +2912,512 @@ class _AutopilotRow extends ConsumerWidget {
             child: CupertinoSwitch(
               value: autopilotEnabled,
               activeColor: NexGenPalette.cyan,
-              onChanged: (v) =>
-                  ref.read(autopilotSettingsServiceProvider).setEnabled(v),
+              onChanged: (v) async {
+                await ref.read(autopilotSettingsServiceProvider).setEnabled(v);
+              },
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Empty States ─────────────────────────────────────────────────────────────
+
+/// State 1: Autopilot OFF, no schedules — invite user to use Lumina AI.
+class _AutopilotOffInvitation extends StatelessWidget {
+  const _AutopilotOffInvitation();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                NexGenPalette.cyan.withValues(alpha: 0.06),
+                NexGenPalette.violet.withValues(alpha: 0.04),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: NexGenPalette.cyan.withValues(alpha: 0.2),
+              width: 1,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            children: [
+              // Icon with gradient background
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      NexGenPalette.violet.withValues(alpha: 0.25),
+                      NexGenPalette.cyan.withValues(alpha: 0.25),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.auto_awesome_rounded,
+                    color: NexGenPalette.cyan, size: 24),
+              ),
+              const SizedBox(height: 16),
+
+              // Headline
+              Text(
+                'Your week is wide open',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 6),
+
+              // CTA pointing to Lumina AI bar
+              ShaderMask(
+                shaderCallback: (bounds) => LinearGradient(
+                  colors: [NexGenPalette.cyan, NexGenPalette.violet],
+                ).createShader(bounds),
+                child: Text(
+                  'Ask Lumina to fill your week',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.arrow_upward_rounded,
+                      size: 14, color: NexGenPalette.cyan.withValues(alpha: 0.6)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Use the Lumina AI bar above',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Example prompts
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: const [
+                  _ExampleChip('"Warm white every night at sunset"'),
+                  _ExampleChip('"Christmas week — red & green chase"'),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // Divider with "or"
+              Row(
+                children: [
+                  Expanded(child: Divider(color: NexGenPalette.line, height: 1)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('or',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: NexGenPalette.textMedium)),
+                  ),
+                  Expanded(child: Divider(color: NexGenPalette.line, height: 1)),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              // Autopilot nudge
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.smart_toy_rounded,
+                      size: 16, color: NexGenPalette.textMedium),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Turn on Autopilot and let Lumina handle it',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// State 2: Autopilot ON, schedule generation pending, in progress, or failed.
+///
+/// Drives off [autopilotGenerationStateProvider] for the *real* loading state
+/// (loading / error / idle) and falls back to a "ready to generate" prompt
+/// when idle. Auto-triggers a generation on first build if autopilot is on,
+/// no schedules exist, no generation is in flight, and no error is set.
+class _AutopilotGeneratingState extends ConsumerStatefulWidget {
+  const _AutopilotGeneratingState();
+
+  @override
+  ConsumerState<_AutopilotGeneratingState> createState() =>
+      _AutopilotGeneratingStateState();
+}
+
+class _AutopilotGeneratingStateState
+    extends ConsumerState<_AutopilotGeneratingState> {
+  bool _autoTriggered = false;
+
+  void _maybeAutoTrigger() {
+    if (_autoTriggered) return;
+    final genState = ref.read(autopilotGenerationStateProvider);
+    if (genState.status != AutopilotGenerationStatus.idle) return;
+
+    // Only auto-trigger if schedule is actually empty. Skipping when items
+    // already exist eliminates the duplicate-generation race where this
+    // force:true auto-trigger ran on top of a successful boot-time regen.
+    final schedules = ref.read(schedulesProvider);
+    if (schedules.isNotEmpty) return;
+
+    _autoTriggered = true;
+    // Defer past the current build frame so we don't mutate provider state
+    // while widgets are still building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref
+          .read(autopilotSettingsServiceProvider)
+          .generateAndPopulateSchedules(force: true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final genState = ref.watch(autopilotGenerationStateProvider);
+    final lastGenerated = ref.watch(autopilotLastGeneratedProvider);
+    final bool isFirstRun = lastGenerated == null;
+
+    // Compute next expected generation time (7 days after last successful run)
+    final DateTime? nextFire = lastGenerated?.add(const Duration(days: 7));
+
+    // Auto-kick a generation if we're idle and there are still no schedules.
+    // Skip if there's an active error so the user has a chance to read it.
+    if (genState.status == AutopilotGenerationStatus.idle) {
+      _maybeAutoTrigger();
+    }
+
+    final isError = genState.hasError;
+    final isLoading = genState.isLoading;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isError
+                  ? [
+                      Colors.red.withValues(alpha: 0.10),
+                      Colors.orange.withValues(alpha: 0.06),
+                    ]
+                  : [
+                      NexGenPalette.cyan.withValues(alpha: 0.10),
+                      NexGenPalette.violet.withValues(alpha: 0.06),
+                    ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isError
+                  ? Colors.red.withValues(alpha: 0.4)
+                  : NexGenPalette.cyan.withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            children: [
+              // ── Status icon / progress ring ──
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (isLoading)
+                      SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          valueColor: AlwaysStoppedAnimation(
+                            NexGenPalette.cyan.withValues(alpha: 0.7),
+                          ),
+                          backgroundColor: NexGenPalette.line,
+                        ),
+                      ),
+                    Icon(
+                      isError
+                          ? Icons.error_outline_rounded
+                          : Icons.smart_toy_rounded,
+                      color:
+                          isError ? Colors.red.shade300 : NexGenPalette.cyan,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── Headline ──
+              Text(
+                isError
+                    ? 'Couldn\u2019t generate schedule'
+                    : (isLoading
+                        ? 'Generating your schedule\u2026'
+                        : 'Ready to generate your schedule'),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: NexGenPalette.textHigh,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 8),
+
+              // ── Subtext ──
+              Text(
+                isError
+                    ? (genState.errorMessage ??
+                        'Schedule generation failed. Please try again.')
+                    : isFirstRun
+                        ? 'Lumina is crafting your first lighting plan based on '
+                            'your holidays, teams, and preferences.'
+                        : 'Lumina is refreshing your weekly lighting plan.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: NexGenPalette.textMedium,
+                      height: 1.5,
+                    ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── Retry button (error state only) ──
+              if (isError) ...[
+                FilledButton.icon(
+                  onPressed: () {
+                    ref
+                        .read(autopilotSettingsServiceProvider)
+                        .generateAndPopulateSchedules(force: true);
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Try Again'),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // ── Last generated / next refresh chip ──
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (lastGenerated != null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.history_rounded,
+                              size: 14, color: NexGenPalette.cyan),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Last generated: ${_formatLastGenerated(lastGenerated)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: NexGenPalette.cyan,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    if (lastGenerated != null) const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.update_rounded,
+                            size: 14, color: NexGenPalette.cyan),
+                        const SizedBox(width: 6),
+                        Text(
+                          nextFire != null
+                              ? 'Next refresh: ${_kMonthShort[nextFire.month]} ${nextFire.day}, ${nextFire.year}'
+                              : 'Building your first week\u2026',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                color: NexGenPalette.cyan,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Format a last-generated timestamp as "Today" / "Yesterday" / "Apr 7, 2026".
+String _formatLastGenerated(DateTime when) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final whenDay = DateTime(when.year, when.month, when.day);
+  final diff = today.difference(whenDay).inDays;
+  if (diff == 0) return 'Today';
+  if (diff == 1) return 'Yesterday';
+  return '${_kMonthShort[when.month]} ${when.day}, ${when.year}';
+}
+
+// ─── Manual Generate Button ──────────────────────────────────────────────────
+
+/// Full-width primary CTA at the bottom of My Schedule. Forces a fresh
+/// autopilot schedule generation, bypassing the weekly refresh gate. Reflects
+/// the live state of [autopilotGenerationStateProvider] (idle / loading /
+/// error) and surfaces success or failure via SnackBar.
+class _GenerateThisWeekButton extends ConsumerWidget {
+  const _GenerateThisWeekButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final genState = ref.watch(autopilotGenerationStateProvider);
+    final isLoading = genState.isLoading;
+
+    Future<void> handleTap() async {
+      if (isLoading) return;
+      final messenger = ScaffoldMessenger.of(context);
+      final beforeStatus =
+          ref.read(autopilotGenerationStateProvider).status;
+      await ref
+          .read(autopilotSettingsServiceProvider)
+          .generateAndPopulateSchedules(force: true);
+      if (!context.mounted) return;
+      final afterState = ref.read(autopilotGenerationStateProvider);
+      // Skipped because already in progress — no toast needed.
+      if (beforeStatus == AutopilotGenerationStatus.loading) return;
+      if (afterState.hasError) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(
+            afterState.errorMessage ??
+                'Couldn\u2019t generate schedule. Try again.',
+          ),
+          backgroundColor: Colors.red.shade700,
+        ));
+      } else {
+        messenger.showSnackBar(SnackBar(
+          content: const Text('Schedule generated for this week.'),
+          backgroundColor: Colors.green.shade700,
+        ));
+      }
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding:
+            EdgeInsets.fromLTRB(16, 8, 16, navBarTotalHeight(context) + 8),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: FilledButton.icon(
+            onPressed: isLoading ? null : handleTap,
+            style: FilledButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+              foregroundColor: Colors.black,
+              disabledBackgroundColor:
+                  NexGenPalette.cyan.withValues(alpha: 0.4),
+              disabledForegroundColor: Colors.black54,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
+            ),
+            icon: isLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(Colors.black),
+                    ),
+                  )
+                : const Icon(Icons.auto_awesome_rounded, size: 20),
+            label: Text(
+              isLoading
+                  ? 'Generating\u2026'
+                  : 'Generate This Week\u2019s Schedule',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExampleChip extends StatelessWidget {
+  final String text;
+  const _ExampleChip(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: NexGenPalette.textMedium,
+              fontStyle: FontStyle.italic,
+              fontSize: 11,
+            ),
       ),
     );
   }
@@ -1846,12 +3470,13 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-// ─── All original widgets kept exactly as-is below ────────────────────────────
+// ─── Schedule widgets ─────────────────────────────────────────────────────────
 // _AutopilotModeChip, _AutopilotSetupSheet, _ScheduleCard, _ScheduleEditor,
 // _DayChip, _DayCircleChip, _TimeWheel, _SolarEventPicker,
-// PatternSelection, _PatternPickerRow, _PatternPickerSheet,
-// _AggregatedPatternGrid, showScheduleEditor
-// (copy these verbatim from the original my_schedule_page.dart)
+// PatternSelection, _PatternPickerRow, showScheduleEditor.
+// The legacy _PatternPickerSheet / _AggregatedPatternGrid / _PatternTile grid
+// was retired — "Choose a pattern" now opens the Explore library
+// (LibraryBrowserScreen) in selection mode; see _PatternPickerRow.onPick.
 
 class _AutopilotModeChip extends StatelessWidget {
   final String label;
@@ -1887,6 +3512,51 @@ class _AutopilotModeChip extends StatelessWidget {
   }
 }
 
+/// Builds the [ScheduleItem] a Save/Update produces from the editor's resolved
+/// fields. Pure and public so the write path is unit-testable in isolation.
+///
+/// The two load-bearing invariants live here:
+///  • EDIT is in-place — [id] is the existing schedule's id (the caller passes
+///    `editing?.id ?? <new id>`), so an update replaces the same doc and never
+///    creates a duplicate.
+///  • Design fidelity — a runPattern edit that did NOT re-pick a pattern keeps
+///    the schedule's existing [ScheduleItem.wledPayload]; a re-pick uses the
+///    freshly-picked payload; audio-reactive / brightness / power-off never
+///    leak a stale design payload (they carry the existing one for round-trip
+///    stability and let syncAll's branches own the applied state).
+ScheduleItem composeEditedSchedule({
+  required String id,
+  required ScheduleItem? editing,
+  required String timeLabel,
+  required String? offTimeLabel,
+  required List<String> days,
+  required String actionLabel,
+  required bool enabled,
+  required bool isRunPattern,
+  required bool useAudioReactive,
+  required Map<String, dynamic>? pickedPayload,
+}) {
+  final wledPayload = (isRunPattern && !useAudioReactive)
+      ? (pickedPayload ?? editing?.wledPayload)
+      : editing?.wledPayload;
+  return ScheduleItem(
+    id: id,
+    timeLabel: timeLabel,
+    offTimeLabel: offTimeLabel,
+    repeatDays: days,
+    actionLabel: actionLabel,
+    enabled: enabled,
+    wledPayload: wledPayload,
+    presetId: editing?.presetId,
+    useAudioReactive: useAudioReactive ? true : null,
+  );
+}
+
+/// Root-navigator route name for the schedule pattern picker (the Explore
+/// library opened in selection mode). Used to pop the whole picker stack back
+/// to the editor once a design is chosen.
+const String _kSchedulePatternPickerRoute = 'schedule-pattern-picker';
+
 /// Opens the Schedule Editor bottom sheet.
 void showScheduleEditor(
   BuildContext context,
@@ -1919,72 +3589,114 @@ class _ScheduleCard extends ConsumerWidget {
   const _ScheduleCard({required this.item});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notifier = ref.read(schedulesProvider.notifier);
-    // Build time display string
-    final timeDisplay = item.hasOffTime
-        ? '${item.timeLabel} → ${item.offTimeLabel}'
-        : item.timeLabel;
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
+    // Build time display string. Any schedule with an off boundary shows BOTH
+    // boundaries explicitly ("<on> → off at <off>") so the sunrise/evening OFF
+    // that turns the lights off is never silent.
+    final timeDisplay = formatScheduleWindow(
+      item.timeLabel,
+      item.hasOffTime ? item.offTimeLabel : null,
+      timeFormat: timeFormat,
+    );
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.line, width: 1),
+    // Extract preview colors from WLED payload
+    final previewColors = _extractStripColors(null, item.wledPayload);
+    final effectId = _extractEffectId(item.wledPayload);
+    final effectType = effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid;
+    final speed = _extractNormalized(item.wledPayload, 'sx');
+
+    // Extract brightness from payload (top-level bri, 0-255)
+    final payloadBri = item.wledPayload?['bri'];
+    final briFraction = payloadBri is num ? (payloadBri / 255.0).clamp(0.0, 1.0) : 1.0;
+
+    // Extract effect name from action label
+    final effectName = item.actionLabel.startsWith('Pattern: ')
+        ? item.actionLabel.substring(9)
+        : null;
+
+    // Build recurrence label
+    final recurrence = item.repeatDays.length == 7
+        ? 'Daily'
+        : item.repeatDays.length == 5 &&
+                item.repeatDays.every((d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].contains(d))
+            ? 'Weekdays'
+            : item.repeatDays.join(', ');
+
+    return GestureDetector(
+      // Tap the card to EDIT — opens the same create-editor pre-filled with
+      // this schedule's values (single write path; the pencil icon does the
+      // same). Previously this opened a read-only detail sheet, so users had
+      // "no way to change" a schedule without finding the small pencil.
+      onTap: () => showScheduleEditor(context, ref, editing: item),
+      child: Column(
+        children: [
+          // Pixel strip above the identity card
+          if (previewColors.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 0),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                child: PixelStripPreview(
+                  colors: previewColors,
+                  effectType: effectType,
+                  speed: speed,
+                  brightness: briFraction,
+                  pixelCount: 20,
+                  height: 24,
+                  borderRadius: 0,
+                  backgroundColor: const Color(0xFF0A0E14),
+                ),
+              ),
+            ),
+          ScheduleIdentityCard(
+            type: ScheduleEntryType.personalAutopilot,
+            patternName: effectName ?? item.actionLabel,
+            previewColors: previewColors,
+            effectName: effectName != null ? item.actionLabel : null,
+            timeLabel: timeDisplay,
+            recurrenceLabel: recurrence,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Edit',
+                  onPressed: () => showScheduleEditor(context, ref, editing: item),
+                  icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 18),
+                  constraints: const BoxConstraints(minWidth: 32),
+                  padding: EdgeInsets.zero,
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Delete schedule?'),
+                        content: const Text('This action cannot be undone.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                          FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                        ],
+                      ),
+                    );
+                    if (ok == true) {
+                      ref.read(schedulesProvider.notifier).remove(item.id);
+                    }
+                  },
+                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 18),
+                  constraints: const BoxConstraints(minWidth: 32),
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(width: 4),
+                CupertinoSwitch(
+                  value: item.enabled,
+                  activeColor: NexGenPalette.cyan,
+                  onChanged: (v) => ref.read(schedulesProvider.notifier).toggle(item.id, v),
+                ),
+              ],
+            ),
           ),
-          padding: const EdgeInsets.all(14),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            // Left: Time + Days
-            SizedBox(
-              width: 130,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(timeDisplay, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh)),
-                const SizedBox(height: 4),
-                Text(item.repeatDays.join(', '), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.textMedium)),
-              ]),
-            ),
-            const SizedBox(width: 12),
-            // Middle: Action
-            Expanded(child: Text(item.actionLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium)),
-            const SizedBox(width: 12),
-            // Edit / Delete actions
-            IconButton(
-              tooltip: 'Edit',
-              onPressed: () => showScheduleEditor(context, ref, editing: item),
-              icon: const Icon(Icons.edit_rounded, color: Colors.white70, size: 20),
-            ),
-            IconButton(
-              tooltip: 'Delete',
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Delete schedule?'),
-                    content: const Text('This action cannot be undone.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                      FilledButton.tonal(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
-                    ],
-                  ),
-                );
-                if (ok == true) {
-                  notifier.remove(item.id);
-                }
-              },
-              icon: const Icon(Icons.delete_outline_rounded, color: Colors.white70, size: 20),
-            ),
-            const SizedBox(width: 6),
-            // Right: Toggle
-            CupertinoSwitch(
-              value: item.enabled,
-              activeColor: NexGenPalette.cyan,
-              onChanged: (v) => notifier.toggle(item.id, v),
-            ),
-          ]),
-        ),
+        ],
       ),
     );
   }
@@ -2017,6 +3729,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   _ActionType _action = _ActionType.runPattern;
   double _brightness = 70; // percentage 0..100
   PatternSelection? _selectedPattern;
+  bool _useAudioReactive = false;
 
   // Day selection represented as indices 0..6 => S M T W T F S
   final List<String> _dayLabelsShort = const ['S','M','T','W','T','F','S'];
@@ -2090,7 +3803,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       // Action
       final a = editing.actionLabel.trim();
       final lower = a.toLowerCase();
-      if (lower.startsWith('pattern')) {
+      if (lower == 'react to music' || (editing.useAudioReactive == true)) {
+        _action = _ActionType.runPattern;
+        _useAudioReactive = true;
+      } else if (lower.startsWith('pattern')) {
         _action = _ActionType.runPattern;
         final idx = a.indexOf(':');
         final name = (idx != -1 && idx + 1 < a.length) ? a.substring(idx + 1).trim() : a.replaceFirst(RegExp(r'^pattern', caseSensitive: false), '').trim();
@@ -2107,6 +3823,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
         _action = _ActionType.brightness;
         _brightness = 100;
       }
+      // Hydrate audio reactive state
+      _useAudioReactive = editing.useAudioReactive ?? false;
     } else if (widget.preselectedDayIndex != null && widget.preselectedDayIndex! >= 0 && widget.preselectedDayIndex! <= 6) {
       _selectedDays = {widget.preselectedDayIndex!};
     }
@@ -2128,9 +3846,29 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
             top: false,
             child: ListView(
               controller: widget.scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
+              // Bottom padding clears the glass dock nav bar overlay.
+              // The dock sits in the parent Stack and is NOT pushed aside
+              // by modal sheets opened from the inner navigator, so the
+              // last action button (Save/Delete) would otherwise sit
+              // behind the dock when the sheet is fully expanded.
+              // Use navBarTotalHeight(context) so devices with a home
+              // indicator / gesture nav also clear their safe area —
+              // kBottomNavBarPadding alone misses the bottom inset.
+              padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
               children: [
                 Row(children: [
+                  // Close affordance — DraggableScrollableSheet at 92% height
+                  // makes drag-to-dismiss / tap-outside hard to discover, so
+                  // give the user an explicit way back to the schedule list.
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
+                  const SizedBox(width: 8),
                   Text(widget.editing == null ? 'New Schedule' : 'Edit Schedule', style: Theme.of(context).textTheme.titleLarge),
                   const Spacer(),
                   CupertinoSwitch(value: _enabled, activeColor: NexGenPalette.cyan, onChanged: (v) => setState(() => _enabled = v)),
@@ -2270,18 +4008,103 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   onChanged: (v) => setState(() => _action = v ?? _action),
                 ),
                 const SizedBox(height: 12),
+                // React to Music toggle — only shown when audio reactivity is
+                // available on the connected controller and action is runPattern
                 if (_action == _ActionType.runPattern)
+                  Builder(builder: (context) {
+                    final ip = ref.watch(selectedDeviceIpProvider);
+                    if (ip == null) return const SizedBox.shrink();
+                    final capAsync = ref.watch(audioCapabilityProvider(ip));
+                    return capAsync.maybeWhen(
+                      data: (cap) {
+                        if (!cap.isSupported) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _useAudioReactive
+                                  ? NexGenPalette.cyan.withValues(alpha: 0.08)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _useAudioReactive
+                                    ? NexGenPalette.cyan.withValues(alpha: 0.3)
+                                    : NexGenPalette.line,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.mic, size: 20, color: _useAudioReactive ? NexGenPalette.cyan : NexGenPalette.textMedium),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'React to Music',
+                                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                          color: _useAudioReactive ? NexGenPalette.cyan : NexGenPalette.textHigh,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Use a random audio-reactive effect',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: NexGenPalette.textMedium,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                CupertinoSwitch(
+                                  value: _useAudioReactive,
+                                  activeColor: NexGenPalette.cyan,
+                                  onChanged: (v) => setState(() => _useAudioReactive = v),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                      orElse: () => const SizedBox.shrink(),
+                    );
+                  }),
+                if (_action == _ActionType.runPattern && !_useAudioReactive)
                   _PatternPickerRow(
                     selection: _selectedPattern,
                     onPick: () async {
-                      final picked = await showModalBottomSheet<PatternSelection>(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const _PatternPickerSheet(),
-                      );
+                      // Open the CURRENT Explore Designs library (top-level
+                      // catalog + My Designs) in SELECTION mode, replacing the
+                      // retired _PatternPickerSheet. Pushed on the root navigator
+                      // (above this editor sheet, self-contained drill-down —
+                      // same mechanism Game Day uses). onDesignSelected returns
+                      // the chosen design; we dismiss the whole picker stack and
+                      // store it exactly as the old sheet did.
+                      final rootNav = Navigator.of(context, rootNavigator: true);
+                      LibraryDesignSelection? sel;
+                      await rootNav.push(MaterialPageRoute(
+                        settings:
+                            const RouteSettings(name: _kSchedulePatternPickerRoute),
+                        builder: (_) => LibraryBrowserScreen(
+                          nodeId: null,
+                          onDesignSelected: (s) {
+                            sel = s;
+                            rootNav.popUntil((r) =>
+                                r.settings.name == _kSchedulePatternPickerRoute);
+                            rootNav.pop();
+                          },
+                        ),
+                      ));
                       if (!mounted) return;
-                      setState(() => _selectedPattern = picked ?? _selectedPattern);
+                      if (sel != null) {
+                        setState(() => _selectedPattern = PatternSelection(
+                              id: sel!.id,
+                              name: sel!.name,
+                              imageUrl: sel!.imageUrl,
+                              wledPayload: sel!.wledPayload,
+                            ));
+                      }
                     },
                   ),
                 if (_action == _ActionType.brightness)
@@ -2359,40 +4182,66 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select at least one day')));
                       return;
                     }
-                    if (_action == _ActionType.runPattern && _selectedPattern == null) {
+                    if (_action == _ActionType.runPattern && !_useAudioReactive && _selectedPattern == null) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose a pattern to run')));
                       return;
                     }
 
                     // Use the original ID when editing, or generate a new one
                     final id = widget.editing?.id ?? 'sch-${DateTime.now().millisecondsSinceEpoch}';
-                    final timeLabel = _onTrigger == _TriggerType.specificTime ? _formatTime(_onTime) : _onSolar;
+                    final timeFormat = ref.read(timeFormatPreferenceProvider);
+                    final timeLabel = _onTrigger == _TriggerType.specificTime
+                        ? formatTimeOfDay(_onTime, timeFormat: timeFormat)
+                        : _onSolar;
                     final offTimeLabel = _hasOffTime
-                        ? (_offTrigger == _TriggerType.specificTime ? _formatTime(_offTime) : _offSolar)
+                        ? (_offTrigger == _TriggerType.specificTime
+                            ? formatTimeOfDay(_offTime, timeFormat: timeFormat)
+                            : _offSolar)
                         : null;
                     final days = _selectedDays.map((i) => _dayAbbr[i]).toList(growable: false);
+
+                    // BUG-CLOCK-1: non-blocking clock-health warning before
+                    // save. Uses the cached health (no fetch); a solar schedule
+                    // (sunrise/sunset) additionally surfaces LOCATION_UNSET.
+                    final creatingSolar = isSolarTimeLabel(timeLabel) ||
+                        isSolarTimeLabel(offTimeLabel);
+                    final clockOk = await maybeWarnClockBeforeSave(
+                      context,
+                      ref.read(clockHealthProvider).valueOrNull,
+                      creatingSolar: creatingSolar,
+                    );
+                    if (!clockOk) return;
+                    if (!context.mounted) return;
+
                     String actionLabel;
                     switch (_action) {
                       case _ActionType.powerOff:
                         actionLabel = 'Turn Off';
                         break;
                       case _ActionType.runPattern:
-                        actionLabel = 'Pattern: ${_selectedPattern!.name}';
+                        actionLabel = _useAudioReactive
+                            ? 'React to Music'
+                            : 'Pattern: ${_selectedPattern!.name}';
                         break;
                       case _ActionType.brightness:
                         actionLabel = 'Brightness: ${_brightness.round()}%';
                         break;
                     }
 
-                    final item = ScheduleItem(
-                      id: id, // Use ID as-is to match existing schedule
+                    // Single write-path construction (pure + unit-tested):
+                    // preserves the id for in-place edit (no duplicate) and the
+                    // design-payload fallback rules. See composeEditedSchedule.
+                    final item = composeEditedSchedule(
+                      id: id, // widget.editing?.id when editing → same doc
+                      editing: widget.editing,
                       timeLabel: timeLabel,
                       offTimeLabel: offTimeLabel,
-                      repeatDays: days,
+                      days: days,
                       actionLabel: actionLabel,
                       enabled: _enabled,
-                      wledPayload: widget.editing?.wledPayload,
-                      presetId: widget.editing?.presetId,
+                      isRunPattern: _action == _ActionType.runPattern,
+                      useAudioReactive: _useAudioReactive,
+                      pickedPayload: _selectedPattern?.wledPayload,
                     );
 
                     try {
@@ -2423,34 +4272,6 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     );
   }
 
-  String _formatTime(TimeOfDay t) {
-    final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
-    final m = t.minute.toString().padLeft(2, '0');
-    final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$h:$m $ampm';
-  }
-}
-
-class _DayChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _DayChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = selected ? NexGenPalette.cyan.withValues(alpha: 0.18) : Colors.transparent;
-    final border = selected ? NexGenPalette.cyan : NexGenPalette.line;
-    final color = selected ? NexGenPalette.cyan : NexGenPalette.textMedium;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border, width: 1.2)),
-        child: Text(label, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: color)),
-      ),
-    );
-  }
 }
 
 // Circular single-letter day chip used in editor
@@ -2539,7 +4360,24 @@ class PatternSelection {
   final String id;
   final String name;
   final String imageUrl;
-  const PatternSelection({required this.id, required this.name, required this.imageUrl});
+
+  /// Full WLED state to apply when this pattern fires as a schedule — the raw
+  /// design payload returned by the Explore library in selection mode
+  /// ([LibraryDesignSelection.wledPayload], already on:true + bri + seg) at the
+  /// moment the user picks it. Carrying this through the
+  /// selection boundary is what lets [ScheduleSyncService.syncAll] psave a
+  /// real preset instead of arming a timer macro that points at nothing.
+  /// Null only for the legacy "existing" hydration case (editing a schedule
+  /// without re-picking), where the editor falls back to the schedule's
+  /// already-saved payload.
+  final Map<String, dynamic>? wledPayload;
+
+  const PatternSelection({
+    required this.id,
+    required this.name,
+    required this.imageUrl,
+    this.wledPayload,
+  });
 }
 
 class _PatternPickerRow extends StatelessWidget {
@@ -2579,95 +4417,3 @@ class _PatternPickerRow extends StatelessWidget {
   }
 }
 
-// Full-screen bottom sheet pattern picker
-class _PatternPickerSheet extends ConsumerWidget {
-  const _PatternPickerSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.85,
-          decoration: BoxDecoration(color: NexGenPalette.gunmetal90, border: Border(top: BorderSide(color: NexGenPalette.line))),
-          child: Column(children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(children: [
-                Text('Select Pattern', style: Theme.of(context).textTheme.titleLarge),
-                const Spacer(),
-                IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close_rounded)),
-              ]),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _AggregatedPatternGrid(onSelect: (sel) => Navigator.of(context).pop(sel)),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-// Aggregated grid showing all predefined patterns (Architectural + Holidays + Sports)
-class _AggregatedPatternGrid extends ConsumerWidget {
-  final ValueChanged<PatternSelection> onSelect;
-  const _AggregatedPatternGrid({required this.onSelect});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final lib = ref.watch(publicPatternLibraryProvider);
-    final all = lib.all;
-    if (all.isEmpty) return const Center(child: Text('No patterns'));
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.9),
-      itemCount: all.length,
-      itemBuilder: (_, i) {
-        final p = all[i];
-        return InkWell(
-          onTap: () => onSelect(PatternSelection(id: p.name.toLowerCase().replaceAll(' ', '_'), name: p.name, imageUrl: '')),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            child: Stack(children: [
-              // Gradient preview background using the pattern's colors
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: p.colors),
-                  ),
-                ),
-              ),
-              // Readability overlay + border
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        NexGenPalette.matteBlack.withValues(alpha: 0.06),
-                        NexGenPalette.matteBlack.withValues(alpha: 0.60),
-                      ],
-                    ),
-                    border: Border.all(color: NexGenPalette.line),
-                  ),
-                ),
-              ),
-              Align(
-                alignment: Alignment.bottomLeft,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(p.name, style: Theme.of(context).textTheme.labelLarge),
-                ),
-              ),
-            ]),
-          ),
-        );
-      },
-    );
-  }
-}

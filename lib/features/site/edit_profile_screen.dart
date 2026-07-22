@@ -1,22 +1,26 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
+import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/widgets/team_autocomplete.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/data/metro_builders.dart';
+import 'package:nexgen_command/app_router.dart';
+import 'package:go_router/go_router.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -67,6 +71,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   List<CustomHoliday> _customHolidays = [];
   List<String> _sportsTeamPriority = [];
   bool _weeklySchedulePreviewEnabled = true;
+
+  // Display preferences
+  String _timeFormat = '12h'; // '12h' or '24h'
 
   @override
   void dispose() {
@@ -121,6 +128,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         _sportsTeamPriority = List.from(m.sportsTeams);
       }
       _weeklySchedulePreviewEnabled = m.weeklySchedulePreviewEnabled;
+      _timeFormat = m.timeFormat;
     }
   }
 
@@ -174,6 +182,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         customHolidays: _customHolidays,
         sportsTeamPriority: _sportsTeamPriority,
         weeklySchedulePreviewEnabled: _weeklySchedulePreviewEnabled,
+        timeFormat: _timeFormat,
       );
 
       if (existing == null) {
@@ -191,13 +200,26 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           final withGeo = base.copyWith(latitude: result.lat, longitude: result.lon, updatedAt: DateTime.now());
           await svc.updateUser(withGeo);
 
-          // Push to WLED config so solar timers use the new location
+          // Push to WLED config so solar timers use the new location.
+          //
+          // FIXME(coords): `loc` is NOT a WLED cfg key — WLED stores latitude/
+          // longitude at if.ntp.lt / if.ntp.ln (grep the firmware's cfg.cpp:
+          // no "loc"). So this push has always been a no-op, on LAN too; it is
+          // the on-connect healer's coordHealPayload() that actually sets
+          // coordinates. Left as-is rather than silently rewired here: changing
+          // the key makes this screen start writing cfg for the first time,
+          // which deserves its own change and its own verification.
           final repo = ref.read(wledRepositoryProvider);
-          if (repo != null) {
+          if (repo == null) {
+            debugPrint('EditProfile: No WLED device selected; skipped location push');
+          } else if (!repoCanWriteCfg(repo)) {
+            // Off-LAN the bridge cannot carry a cfg write; skip rather than
+            // throw. Nothing to tell the user — the healer sets coordinates on
+            // the next on-LAN connect, and this push does nothing regardless.
+            debugPrint('EditProfile: off-LAN — skipped WLED location push');
+          } else {
             final ok = await repo.applyConfig({'loc': {'lat': result.lat, 'lon': result.lon}});
             if (!ok) debugPrint('EditProfile: WLED location push failed');
-          } else {
-            debugPrint('EditProfile: No WLED device selected; skipped location push');
           }
 
           // Background compute of today's sunset and tomorrow's sunrise
@@ -233,8 +255,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   String _formatTimeOfDay(TimeOfDay t) {
     final now = DateTime.now();
     final dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-    final local = TimeOfDay.fromDateTime(dt);
-    return local.format(context);
+    return formatTime(dt, timeFormat: _timeFormat);
   }
 
   void _onAddressChanged(String value) {
@@ -265,9 +286,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   void _updateSunInfo(double lat, double lon) {
     final sunset = SunUtils.sunsetLocal(lat, lon, DateTime.now());
     final sunrise = SunUtils.sunriseLocal(lat, lon, DateTime.now().add(const Duration(days: 1)));
+    final timeFormat = ref.read(timeFormatPreferenceProvider);
     String info = '';
-    if (sunset != null) info += 'Sunset: ${TimeOfDay.fromDateTime(sunset).format(context)}';
-    if (sunrise != null) info += (info.isEmpty ? '' : '  •  ') + 'Sunrise: ${TimeOfDay.fromDateTime(sunrise).format(context)}';
+    if (sunset != null) {
+      info += 'Sunset: ${formatTime(sunset, timeFormat: timeFormat)}';
+    }
+    if (sunrise != null) {
+      final sep = info.isEmpty ? '' : '  •  ';
+      info += '${sep}Sunrise: ${formatTime(sunrise, timeFormat: timeFormat)}';
+    }
     if (mounted) setState(() => _sunInfo = info.isEmpty ? null : info);
   }
 
@@ -423,7 +450,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           final model = profile.valueOrNull;
           _hydrate(model, user.displayName);
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
             children: [
               // House Photo Section for AR Preview
               _HousePhotoCard(),
@@ -436,6 +463,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 onAddressChanged: _onAddressChanged,
                 onAddressSelected: _onAddressSelected,
                 sunInfo: _sunInfo,
+              ),
+              const SizedBox(height: 16),
+              _DisplayPreferencesCard(
+                timeFormat: _timeFormat,
+                onTimeFormatChanged: (v) => setState(() => _timeFormat = v),
               ),
               const SizedBox(height: 16),
               _ArchitectureCard(
@@ -463,6 +495,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 }),
                 vibeLevel: _vibeLevel,
                 onVibeChanged: (v) => setState(() => _vibeLevel = v),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.lightbulb_outline, color: Colors.amber[200]),
+                  title: const Text('My Whites'),
+                  subtitle: const Text('Set your go-to white lighting for everyday use.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push(AppRoutes.myWhites),
+                ),
               ),
               const SizedBox(height: 16),
               _HoaGuardianCard(
@@ -516,10 +558,63 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         error: (e, st) => Center(child: Text('Auth error: $e')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _saving ? null : _onSave,
-        icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-        label: Text(_saving ? 'Saving…' : 'Update Profile'),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. The parent shell uses extendBody:true with the
+        // dock overlaid via Stack (not bottomNavigationBar), so default FAB
+        // positioning sits underneath the dock and the user can't see/tap
+        // the Update Profile button. Matches my_schedule_page.dart pattern.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton.extended(
+          onPressed: _saving ? null : _onSave,
+          icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
+          label: Text(_saving ? 'Saving…' : 'Update Profile'),
+        ),
+      ),
+    );
+  }
+}
+
+class _DisplayPreferencesCard extends StatelessWidget {
+  final String timeFormat;
+  final ValueChanged<String> onTimeFormatChanged;
+
+  const _DisplayPreferencesCard({
+    required this.timeFormat,
+    required this.onTimeFormatChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Display Preferences',
+      leading: const Icon(Icons.schedule_outlined, color: NexGenPalette.cyan),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Time Format', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'How times appear across schedules, game days, and summaries.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
+          ),
+          const SizedBox(height: 12),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment<String>(
+                value: '12h',
+                label: Text('12-hour (7:05 PM)'),
+              ),
+              ButtonSegment<String>(
+                value: '24h',
+                label: Text('24-hour (19:05)'),
+              ),
+            ],
+            selected: {timeFormat},
+            onSelectionChanged: (s) => onTimeFormatChanged(s.first),
+            showSelectedIcon: false,
+          ),
+        ],
       ),
     );
   }
@@ -528,16 +623,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 class _SectionCard extends StatelessWidget {
   final String title;
   final Widget child;
-  final bool initiallyExpanded;
   final String? subtitle;
   final Widget? leading;
-  const _SectionCard({required this.title, required this.child, this.initiallyExpanded = true, this.subtitle, this.leading});
+  const _SectionCard({required this.title, required this.child, this.subtitle, this.leading});
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.zero,
       child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded,
+        initiallyExpanded: true,
         leading: leading,
         title: Text(title, style: Theme.of(context).textTheme.titleLarge),
         subtitle: subtitle == null ? null : Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
@@ -612,7 +706,7 @@ class _InterestsCard extends StatelessWidget {
   final void Function(String) onToggleHoliday;
   final double vibeLevel;
   final ValueChanged<double> onVibeChanged;
-  const _InterestsCard({super.key, required this.teamInputCtrl, required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
+  const _InterestsCard({required this.teamInputCtrl, required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
 
   static const _holidays = <String>[
     'Christmas','Halloween','Hanukkah','July 4th','Valentine\'s','New Year\'s','Easter','Thanksgiving','Diwali'
@@ -696,7 +790,7 @@ class _HoaGuardianCard extends StatelessWidget {
   final VoidCallback onAddWindow;
   final void Function(int index) onRemoveWindow;
   final String Function(SeasonalColorWindow) windowFormatter;
-  const _HoaGuardianCard({super.key, required this.hoaCompliance, required this.onHoaChanged, required this.quietStart, required this.quietEnd, required this.onPickStart, required this.onPickEnd, required this.timeFormatter, required this.seasonalWindows, required this.onAddWindow, required this.onRemoveWindow, required this.windowFormatter});
+  const _HoaGuardianCard({required this.hoaCompliance, required this.onHoaChanged, required this.quietStart, required this.quietEnd, required this.onPickStart, required this.onPickEnd, required this.timeFormatter, required this.seasonalWindows, required this.onAddWindow, required this.onRemoveWindow, required this.windowFormatter});
 
   @override
   Widget build(BuildContext context) {
@@ -774,7 +868,7 @@ class _HoaGuardianCard extends StatelessWidget {
 }
 
 class _PrivacyIntelligenceCard extends StatelessWidget {
-  const _PrivacyIntelligenceCard({super.key, required this.autonomyLevel, required this.onAutonomyChanged, required this.communityPatternSharing, required this.onCommunityChanged, required this.allowPersonalization, required this.onAllowPersonalizationChanged});
+  const _PrivacyIntelligenceCard({required this.autonomyLevel, required this.onAutonomyChanged, required this.communityPatternSharing, required this.onCommunityChanged, required this.allowPersonalization, required this.onAllowPersonalizationChanged});
   final int autonomyLevel; // 0..2
   final ValueChanged<int> onAutonomyChanged;
   final bool communityPatternSharing;
@@ -856,7 +950,6 @@ class _PrivacyIntelligenceCard extends StatelessWidget {
 
 class _ArchitectureCard extends StatelessWidget {
   const _ArchitectureCard({
-    super.key,
     required this.builderValue,
     required this.onBuilderChanged,
     required this.floorPlanValue,
@@ -930,9 +1023,9 @@ class _ArchitectureCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withOpacity(0.1),
+                color: NexGenPalette.cyan.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -1104,9 +1197,9 @@ class _AutopilotCard extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: NexGenPalette.cyan.withOpacity(0.1),
+                  color: NexGenPalette.cyan.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+                  border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
                 ),
                 child: Text(
                   '${tolerance.label}: ${tolerance.description}',
@@ -1407,7 +1500,14 @@ class _AddHolidaySheetState extends State<_AddHolidaySheet> {
   }
 }
 
-/// Reorderable list for team priority
+/// Reorderable list for team priority. Each row shows the team's gradient
+/// color avatar + full display name (matching the chip styling used in the
+/// Interests card) plus a numbered priority circle and drag handle.
+///
+/// The single styling means users see one consistent representation of each
+/// team across the profile screen — but the priority list keeps the
+/// drag-to-reorder behavior that autopilot/game-day rely on for tie-breaking
+/// when multiple teams play on the same day.
 class _TeamPriorityList extends StatelessWidget {
   final List<String> teams;
   final ValueChanged<List<String>> onReorder;
@@ -1428,20 +1528,29 @@ class _TeamPriorityList extends StatelessWidget {
         onReorder(reordered);
       },
       itemBuilder: (context, index) {
-        final team = teams[index];
+        final teamName = teams[index];
+        final team = SportsTeamsDatabase.getByName(teamName);
+        final colors = team?.colors ?? const [Colors.grey, Colors.grey];
+        final displayName = team?.displayName ?? teamName;
+
         return ListTile(
-          key: ValueKey(team),
+          key: ValueKey(teamName),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
           leading: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.drag_handle, color: Colors.grey),
               const SizedBox(width: 8),
+              // Numbered priority circle — keeps the order index visible
+              // and highlights the primary team in cyan.
               Container(
                 width: 24,
                 height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: index == 0 ? NexGenPalette.cyan : Colors.grey.withOpacity(0.3),
+                  color: index == 0
+                      ? NexGenPalette.cyan
+                      : Colors.grey.withValues(alpha: 0.3),
                   shape: BoxShape.circle,
                 ),
                 child: Text(
@@ -1453,24 +1562,91 @@ class _TeamPriorityList extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: 10),
+              // Team color gradient avatar — matches the TeamChip styling
+              // used in the Interests card so the user sees one consistent
+              // visual representation of the team.
+              _TeamGradientAvatar(colors: colors),
             ],
           ),
-          title: Text(team),
+          title: Text(
+            displayName,
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          subtitle: team?.league != null
+              ? Text(
+                  team!.league,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: NexGenPalette.textMedium,
+                  ),
+                )
+              : null,
           trailing: index == 0
               ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: NexGenPalette.cyan.withOpacity(0.2),
+                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     'Primary',
-                    style: TextStyle(fontSize: 11, color: NexGenPalette.cyan),
+                    style: TextStyle(
+                        fontSize: 11, color: NexGenPalette.cyan),
                   ),
                 )
               : null,
         );
       },
+    );
+  }
+}
+
+/// Small circular gradient avatar showing a team's primary/secondary colors —
+/// inline duplicate of `_TeamColorIcon` from team_autocomplete.dart so the
+/// priority list row renders the same visual without exporting the private
+/// widget.
+class _TeamGradientAvatar extends StatelessWidget {
+  static const double _size = 24;
+  final List<Color> colors;
+
+  const _TeamGradientAvatar({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    if (colors.isEmpty) {
+      return Container(
+        width: _size,
+        height: _size,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.grey,
+        ),
+      );
+    }
+    if (colors.length == 1) {
+      return Container(
+        width: _size,
+        height: _size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: colors.first,
+        ),
+      );
+    }
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: colors.take(2).toList(),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.white24, width: 1),
+      ),
     );
   }
 }

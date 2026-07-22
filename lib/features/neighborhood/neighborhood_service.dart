@@ -1,10 +1,63 @@
+import 'dart:convert';
 import 'dart:math' show Random, cos, sin, sqrt, atan2, pi;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
+
+/// Outcome of a server-side ad-hoc fanout POST (Slice 1 Commit 2).
+///
+/// [rateLimited] is the ONLY state that suppresses the app-open broadcast
+/// (reject = nothing fires). A plain failure ([ok] false, not rate-limited —
+/// network/500/no-auth) lets the broadcast proceed so app-open members aren't
+/// left dark.
+class FanoutResult {
+  final bool ok;
+  final bool rateLimited;
+  final int retryAfterMs;
+
+  const FanoutResult({
+    this.ok = false,
+    this.rateLimited = false,
+    this.retryAfterMs = 0,
+  });
+
+  const FanoutResult.failed()
+      : ok = false,
+        rateLimited = false,
+        retryAfterMs = 0;
+
+  /// PURE parser over the HTTP status + body from applySyncPattern. Exposed
+  /// for testing. 200 + {ok:true} → ok; 200 + {reason:'rate_limited',
+  /// retryAfterMs} → rateLimited; anything else → a plain (non-rate-limited)
+  /// failure so the caller still broadcasts.
+  factory FanoutResult.parse(int statusCode, String body) {
+    if (statusCode != 200) return const FanoutResult(ok: false);
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        if (decoded['ok'] == true) return const FanoutResult(ok: true);
+        if (decoded['reason'] == 'rate_limited') {
+          final ra = decoded['retryAfterMs'];
+          return FanoutResult(
+            ok: false,
+            rateLimited: true,
+            retryAfterMs: ra is num ? ra.toInt() : 0,
+          );
+        }
+      }
+    } catch (_) {
+      // Malformed body → treat as a plain failure (broadcast proceeds).
+    }
+    return const FanoutResult(ok: false);
+  }
+}
 
 /// Service for managing neighborhood sync groups in Firestore.
 class NeighborhoodService {
@@ -22,6 +75,31 @@ class NeighborhoodService {
 
   String? get _currentUid => _auth.currentUser?.uid;
 
+  /// Cloud Functions base URL (matches sync_event_background_worker.dart).
+  static const String _functionsBaseUrl =
+      'https://us-central1-icrt6menwsv2d8all8oijs021b06s5.cloudfunctions.net';
+
+  /// Read the current user's own controller doc ids from
+  /// users/{uid}/controllers, for denormalizing onto the member doc
+  /// (NeighborhoodMember.controllerId, Slice 1). Best-effort: returns an
+  /// empty list on any failure — the server fanout then falls back to a live
+  /// controllers read, so an empty list never breaks delivery.
+  Future<List<String>> _ownControllerIds() async {
+    final uid = _currentUid;
+    if (uid == null) return const [];
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('controllers')
+          .get();
+      return snap.docs.map((d) => d.id).toList();
+    } catch (e) {
+      debugPrint('NeighborhoodService: _ownControllerIds failed: $e');
+      return const [];
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Group Management
   // ─────────────────────────────────────────────────────────────────────────────
@@ -37,13 +115,21 @@ class NeighborhoodService {
     double? latitude,
     double? longitude,
   }) async {
+    debugPrint('🏘️ [NeighborhoodService] createGroup START');
     final uid = _currentUid;
-    if (uid == null) throw Exception('User not authenticated');
+    debugPrint('🏘️ [NeighborhoodService] uid=$uid');
+    if (uid == null) {
+      debugPrint('🏘️ [NeighborhoodService] ABORT: not authenticated');
+      throw Exception('User not authenticated');
+    }
 
     final inviteCode = _generateInviteCode();
     final now = DateTime.now();
 
     final docRef = _neighborhoodsRef.doc();
+    debugPrint('🏘️ [NeighborhoodService] Writing to: neighborhoods/${docRef.id}');
+    debugPrint('🏘️ [NeighborhoodService] inviteCode=$inviteCode');
+
     final group = NeighborhoodGroup(
       id: docRef.id,
       name: name,
@@ -60,19 +146,46 @@ class NeighborhoodService {
       longitude: longitude,
     );
 
-    await docRef.set(group.toFirestore());
+    final groupPayload = UserService.sanitizeForFirestore(group.toFirestore());
+    debugPrint('🏘️ [NeighborhoodService] Group doc payload keys: ${groupPayload.keys.toList()}');
+    debugPrint('🏘️ [NeighborhoodService] creatorUid in payload: ${groupPayload['creatorUid']}');
+    debugPrint('🏘️ [NeighborhoodService] memberUids in payload: ${groupPayload['memberUids']}');
 
-    // Add creator as first member
+    try {
+      await docRef.set(groupPayload);
+      debugPrint('🏘️ [NeighborhoodService] Group doc write SUCCESS');
+    } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodService] Group doc write FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodService] Stack: $st');
+      rethrow;
+    }
+
+    // Add creator as first member. Denormalize the creator's own controller
+    // ids onto the member doc (Slice 1) so the server fanout can resolve
+    // targets without a per-member cross-collection read.
     final member = NeighborhoodMember(
       oderId: uid,
       displayName: displayName ?? 'My Home',
       positionIndex: 0,
       lastSeen: now,
       isOnline: true,
+      controllerId: await _ownControllerIds(),
     );
-    await docRef.collection('members').doc(uid).set(member.toFirestore());
+    try {
+      await docRef.collection('members').doc(uid).set(UserService.sanitizeForFirestore(member.toFirestore()));
+      debugPrint('🏘️ [NeighborhoodService] Member doc write SUCCESS');
+    } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodService] Member doc write FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodService] Stack: $st');
+      // Roll back the group doc so we don't leave a half-created group
+      try {
+        await docRef.delete();
+        debugPrint('🏘️ [NeighborhoodService] Rolled back group doc');
+      } catch (_) {}
+      rethrow;
+    }
 
-    debugPrint('Created neighborhood group: ${group.name} (${group.inviteCode})');
+    debugPrint('🏘️ Created neighborhood group: ${group.name} (${group.inviteCode})');
     return group;
   }
 
@@ -110,13 +223,15 @@ class NeighborhoodService {
     final membersSnapshot = await doc.reference.collection('members').get();
     final positionIndex = membersSnapshot.docs.length;
 
-    // Add member document
+    // Add member document. Denormalize the joiner's own controller ids onto
+    // the member doc (Slice 1) for server-fanout target resolution.
     final member = NeighborhoodMember(
       oderId: uid,
       displayName: displayName ?? 'Home #${positionIndex + 1}',
       positionIndex: positionIndex,
       lastSeen: DateTime.now(),
       isOnline: true,
+      controllerId: await _ownControllerIds(),
     );
     await doc.reference.collection('members').doc(uid).set(member.toFirestore());
 
@@ -125,6 +240,11 @@ class NeighborhoodService {
   }
 
   /// Leaves a neighborhood group.
+  ///
+  /// If a sync session is active, the user is gracefully disconnected
+  /// (their lights hold their last state rather than turning off).
+  /// If the leaving user is the host and no ownership transfer was done,
+  /// the group is dissolved for all members.
   Future<void> leaveGroup(String groupId) async {
     final uid = _currentUid;
     if (uid == null) throw Exception('User not authenticated');
@@ -135,6 +255,19 @@ class NeighborhoodService {
     if (!doc.exists) return;
 
     final group = NeighborhoodGroup.fromFirestore(doc);
+
+    // If sync is active, mark this member offline so the engine
+    // stops sending commands — lights hold their last state.
+    if (group.isActive) {
+      try {
+        await docRef.collection('members').doc(uid).update({
+          'isOnline': false,
+          'participationStatus': MemberParticipationStatus.optedOut.name,
+        });
+      } catch (_) {
+        // Member doc may already be gone — that's fine.
+      }
+    }
 
     // Remove from member list
     await docRef.update({
@@ -149,7 +282,90 @@ class NeighborhoodService {
       await deleteGroup(groupId);
     }
 
+    // Clear any handoff state for this user. Finding 5.1 from sync
+    // audit — leaving a group mid-handoff would otherwise leave orphaned
+    // state that causes silent resume failures.
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('handoff')
+          .doc('current')
+          .delete();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('sync_handoff_state');
+    } catch (e) {
+      debugPrint('Failed to clear handoff state on leave: $e');
+      // Non-fatal — continue with leave-group completion.
+    }
+
     debugPrint('Left neighborhood group: ${group.name}');
+  }
+
+  /// Dissolves a group entirely (host leaving without transferring ownership).
+  ///
+  /// Removes all members, commands, schedules, and the group document.
+  /// Returns the list of member UIDs that were in the group (excluding the host)
+  /// so the caller can send notifications.
+  Future<List<String>> dissolveGroup(String groupId) async {
+    final uid = _currentUid;
+    if (uid == null) throw Exception('User not authenticated');
+
+    final docRef = _neighborhoodsRef.doc(groupId);
+    final doc = await docRef.get();
+    if (!doc.exists) return [];
+
+    final group = NeighborhoodGroup.fromFirestore(doc);
+    final otherMembers = group.memberUids.where((id) => id != uid).toList();
+
+    // Stop any active sync first
+    if (group.isActive) {
+      await stopSync(groupId);
+    }
+
+    // Delete all sub-collections
+    final membersSnapshot = await docRef.collection('members').get();
+    for (final memberDoc in membersSnapshot.docs) {
+      await memberDoc.reference.delete();
+    }
+
+    final commandsSnapshot = await docRef.collection('commands').get();
+    for (final commandDoc in commandsSnapshot.docs) {
+      await commandDoc.reference.delete();
+    }
+
+    final schedulesSnapshot = await docRef.collection('schedules').get();
+    for (final scheduleDoc in schedulesSnapshot.docs) {
+      await scheduleDoc.reference.delete();
+    }
+
+    // Delete group document
+    await docRef.delete();
+
+    debugPrint('Dissolved neighborhood group: ${group.name}');
+    return otherMembers;
+  }
+
+  /// Transfers group ownership to another member.
+  Future<void> transferOwnership(String groupId, String newOwnerUid) async {
+    final uid = _currentUid;
+    if (uid == null) throw Exception('User not authenticated');
+
+    final docRef = _neighborhoodsRef.doc(groupId);
+    final doc = await docRef.get();
+    if (!doc.exists) throw Exception('Group not found');
+
+    final group = NeighborhoodGroup.fromFirestore(doc);
+    if (group.creatorUid != uid) {
+      throw Exception('Only the current host can transfer ownership');
+    }
+
+    if (!group.memberUids.contains(newOwnerUid)) {
+      throw Exception('New owner must be a member of the group');
+    }
+
+    await docRef.update({'creatorUid': newOwnerUid});
+    debugPrint('Transferred ownership of ${group.name} to $newOwnerUid');
   }
 
   /// Deletes a neighborhood group (creator only).
@@ -213,13 +429,74 @@ class NeighborhoodService {
   // Member Management
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /// Updates a member's configuration.
+  /// Updates a member's configuration. When updating the CURRENT user's own
+  /// member doc, refresh the denormalized controllerId[] from their controllers
+  /// (Slice 1). For another member's doc (creator moderation), leave
+  /// controllerId as-passed — a client can't read another user's controllers,
+  /// and the server fanout falls back to a live read anyway.
   Future<void> updateMember(String groupId, NeighborhoodMember member) async {
+    var toWrite = member;
+    if (member.oderId == _currentUid) {
+      toWrite = member.copyWith(controllerId: await _ownControllerIds());
+    }
     await _neighborhoodsRef
         .doc(groupId)
         .collection('members')
-        .doc(member.oderId)
-        .update(member.toFirestore());
+        .doc(toWrite.oderId)
+        .update(toWrite.toFirestore());
+  }
+
+  /// Slice 1 (flag-gated, default OFF): server-side ad-hoc fanout. POSTs the
+  /// shared WLED [payload] to the applySyncPattern Cloud Function, which fans
+  /// it out to every consenting crew member's own command queue so members
+  /// whose app is closed get it via their bridge. Returns a [FanoutResult]:
+  /// the caller suppresses its own broadcast ONLY on [FanoutResult.rateLimited]
+  /// (reject = nothing fires); a plain failure (network/500/no-auth) returns a
+  /// non-rate-limited result so the broadcast still proceeds.
+  Future<FanoutResult> fanoutAdHocSync({
+    required String groupId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final uid = _currentUid;
+    if (uid == null) return const FanoutResult.failed();
+    String? token;
+    try {
+      token = await _auth.currentUser?.getIdToken();
+    } catch (e) {
+      debugPrint('NeighborhoodService.fanoutAdHocSync: idToken failed: $e');
+    }
+    if (token == null) return const FanoutResult.failed();
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$_functionsBaseUrl/applySyncPattern'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'data': {
+                'groupId': groupId,
+                'payload': payload,
+                'initiatorUid': uid,
+                'source': 'sync_fanout',
+                // ONLY the ad-hoc caller sets this — gates server fanout so the
+                // background self-apply callers (which omit it) stay self-only.
+                'fanout': true,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      final result = FanoutResult.parse(resp.statusCode, resp.body);
+      if (!result.ok) {
+        debugPrint('NeighborhoodService.fanoutAdHocSync: '
+            'HTTP ${resp.statusCode} ${resp.body}');
+      }
+      return result;
+    } catch (e) {
+      debugPrint('NeighborhoodService.fanoutAdHocSync error: $e');
+      return const FanoutResult.failed();
+    }
   }
 
   /// Updates the position index for a member.
@@ -320,6 +597,11 @@ class NeighborhoodService {
   }
 
   /// Stops the current sync (clears active pattern).
+  ///
+  /// Legacy single-flag stop — preserved for autopilot session-manager
+  /// teardown (sync_session_manager.dart:331). The user-driven two-tier
+  /// stop now routes through [selfLeaveSync] (member) or [endGroupSync]
+  /// (owner).
   Future<void> stopSync(String groupId) async {
     await _neighborhoodsRef.doc(groupId).update({
       'isActive': false,
@@ -330,7 +612,142 @@ class NeighborhoodService {
     debugPrint('Stopped sync for group: $groupId');
   }
 
+  /// Member self-leave — flips ONLY the caller's own
+  /// `/neighborhoods/{groupId}/members/{uid}.isParticipating` to false.
+  /// Does NOT touch `g.isActive` or any other member's doc. The
+  /// asymmetric trigger (syncEngineControllerProvider) sees own flag
+  /// false → this member tears down only; other members are unaffected.
+  ///
+  /// Scoped self-write — permitted by the existing rule at
+  /// firestore.rules:1252 (request.auth.uid == memberUid).
+  Future<void> selfLeaveSync(String groupId) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+    await _neighborhoodsRef
+        .doc(groupId)
+        .collection('members')
+        .doc(uid)
+        .update({'isParticipating': false});
+    // Broadcast a SELF-targeted teardown command on the same /commands channel
+    // propagation uses, so this member's listener reliably reverts (the
+    // flag-trigger was unreliable — its `|| hasActiveGroup` term kept the
+    // leaver mounted while the group stayed active). targetMemberUid scopes it
+    // to the leaver so the rest of the group keeps running. NOT deleting the
+    // design command here — other members still need it.
+    await writeTeardownCommand(groupId, targetMemberUid: uid);
+    debugPrint('Self-left sync for group: $groupId (uid=$uid)');
+  }
+
+  /// Writes an explicit teardown ("revert now") command to
+  /// `/neighborhoods/{groupId}/commands`. This is the positive signal the
+  /// member's command listener acts on — replacing reliance on the
+  /// unreliable local flag-trigger. [targetMemberUid] null = all members
+  /// revert (owner End Group); non-null = only that member (self-leave).
+  ///
+  /// startTimestamp is `now`, so the orderBy-desc `watchLatestCommand` query
+  /// returns THIS command as the latest — superseding any lingering design
+  /// command so a fireImmediately/resume replay re-applies the TEARDOWN, not
+  /// the ended pattern (the defect-#2 re-arm loop).
+  @visibleForTesting
+  Future<void> writeTeardownCommand(
+    String groupId, {
+    String? targetMemberUid,
+  }) async {
+    final docRef =
+        _neighborhoodsRef.doc(groupId).collection('commands').doc();
+    final command = SyncCommand.teardown(
+      groupId: groupId,
+      startTimestamp: DateTime.now(),
+      targetMemberUid: targetMemberUid,
+    );
+    await docRef.set({
+      ...command.toFirestore(),
+      'id': docRef.id,
+    });
+  }
+
+  /// Deletes all command docs for a group. Used by [endGroupSync] to purge
+  /// lingering design commands so they can never be replayed to re-light a
+  /// member after the group ends (defect #2). Owner-permitted (same access
+  /// the dissolve/delete paths already exercise).
+  Future<void> _clearGroupCommands(String groupId) async {
+    final commands =
+        await _neighborhoodsRef.doc(groupId).collection('commands').get();
+    await Future.wait(commands.docs.map((d) => d.reference.delete()));
+  }
+
+  /// Owner-only end-of-group. Fans the per-member `isParticipating=false`
+  /// clear across every member, then (only on full per-member success)
+  /// clears the group doc's `isActive`/`activePatternId`/`activePatternName`.
+  ///
+  /// Per-member writes are PER-MEMBER (not a single atomic batch) so a
+  /// single failed write is captured rather than rolling back all member
+  /// writes. If ANY member write fails, the method throws
+  /// [EndGroupSyncPartialFailure] with the failing UIDs and the group
+  /// doc is LEFT untouched — so the session stays "active" and the owner
+  /// is prompted to retry. Owner cross-member writes are permitted by the
+  /// existing rule at firestore.rules:1253 (creatorUid == request.auth.uid).
+  ///
+  /// Caller MUST handle [EndGroupSyncPartialFailure] and surface it.
+  Future<void> endGroupSync(
+    String groupId,
+    List<String> memberUids,
+  ) async {
+    final failures = <String, Object>{};
+
+    await Future.wait(memberUids.map((uid) async {
+      try {
+        await writeMemberStopFlag(groupId, uid);
+      } catch (e) {
+        failures[uid] = e;
+      }
+    }));
+
+    if (failures.isNotEmpty) {
+      debugPrint(
+        'endGroupSync partial failure for group $groupId: '
+        '${failures.length}/${memberUids.length} member writes failed',
+      );
+      throw EndGroupSyncPartialFailure(groupId: groupId, failures: failures);
+    }
+
+    // Purge lingering design commands, then broadcast a single GLOBAL teardown
+    // command (targetMemberUid: null → every member reverts). This is the
+    // positive "revert now" signal on the proven command channel; the purge +
+    // teardown-as-latest closes the defect-#2 replay loop (a resuming member
+    // replays the TEARDOWN, never the ended pattern).
+    await _clearGroupCommands(groupId);
+    await writeTeardownCommand(groupId);
+
+    await _neighborhoodsRef.doc(groupId).update({
+      'isActive': false,
+      'activePatternId': null,
+      'activePatternName': null,
+    });
+    debugPrint(
+        'endGroupSync complete for group $groupId (cleared ${memberUids.length} member flags)');
+  }
+
+  /// Per-member stop-flag write. Extracted for test override — subclass
+  /// and override to inject a failure on a specific UID without standing
+  /// up a custom Firestore mock that fails one path.
+  @visibleForTesting
+  Future<void> writeMemberStopFlag(String groupId, String memberUid) async {
+    await _neighborhoodsRef
+        .doc(groupId)
+        .collection('members')
+        .doc(memberUid)
+        .update({'isParticipating': false});
+  }
+
   /// Stream of the latest sync command for a group.
+  ///
+  /// The parse is guarded: a single unparseable command doc is mapped to
+  /// `null` (treated as "no command") rather than throwing out of `.map`,
+  /// which would error-terminate the whole stream and permanently kill the
+  /// listener until an app relaunch (#52 dead-listener class). A genuine
+  /// Firestore stream error (permission / disconnect) is still allowed to
+  /// surface so the engine can detect it and re-subscribe.
   Stream<SyncCommand?> watchLatestCommand(String groupId) {
     return _neighborhoodsRef
         .doc(groupId)
@@ -340,7 +757,16 @@ class NeighborhoodService {
         .snapshots()
         .map((snapshot) {
       if (snapshot.docs.isEmpty) return null;
-      return SyncCommand.fromFirestore(snapshot.docs.first);
+      final doc = snapshot.docs.first;
+      try {
+        return SyncCommand.fromFirestore(doc);
+      } catch (e) {
+        debugPrint(
+          'watchLatestCommand: skipping unparseable command doc '
+          '${doc.id} in group $groupId (stream kept alive): $e',
+        );
+        return null;
+      }
     });
   }
 
@@ -364,7 +790,7 @@ class NeighborhoodService {
       createdAt: DateTime.now(),
     );
 
-    await docRef.set(newSchedule.toFirestore());
+    await docRef.set(UserService.sanitizeForFirestore(newSchedule.toFirestore()));
     debugPrint('Created schedule: ${newSchedule.patternName}');
     return newSchedule;
   }
@@ -375,7 +801,7 @@ class NeighborhoodService {
         .doc(schedule.groupId)
         .collection('schedules')
         .doc(schedule.id)
-        .update(schedule.toFirestore());
+        .update(UserService.sanitizeForFirestore(schedule.toFirestore()));
     debugPrint('Updated schedule: ${schedule.patternName}');
   }
 
@@ -607,4 +1033,26 @@ class NeighborhoodService {
         .get();
     return snapshot.docs.map((doc) => NeighborhoodMember.fromFirestore(doc)).toList();
   }
+}
+
+/// Thrown when [NeighborhoodService.endGroupSync] could not clear every
+/// member's `isParticipating` flag. The group doc is LEFT untouched so
+/// the session stays "active" — the owner can retry. UI must surface
+/// this rather than swallow.
+class EndGroupSyncPartialFailure implements Exception {
+  EndGroupSyncPartialFailure({
+    required this.groupId,
+    required this.failures,
+  });
+
+  final String groupId;
+
+  /// memberUid → underlying error.
+  final Map<String, Object> failures;
+
+  @override
+  String toString() =>
+      'EndGroupSyncPartialFailure(groupId=$groupId, '
+      'failedMemberCount=${failures.length}, '
+      'failedUids=${failures.keys.toList()})';
 }

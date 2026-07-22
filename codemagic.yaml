@@ -3,63 +3,130 @@ workflows:
     name: iOS Release
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: NexGen
     environment:
       flutter: stable
-      xcode: 16.2
+      xcode: latest
       cocoapods: default
+      groups:
+        - ios-workflow
+      vars:
+        BUNDLE_ID: com.nexgenled.command
     scripts:
-      - name: Clean previous build artifacts
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch signing files
         script: |
-          flutter clean
-      - name: Get Flutter packages
+          app-store-connect fetch-signing-files $BUNDLE_ID \
+            --type IOS_APP_STORE \
+            --strict-match-identifier \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+      - name: Set up code signing settings
+        script: xcode-project use-profiles
+      - name: Set build number
         script: |
-          flutter pub get
+          BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
+          echo "Version: $(grep '^version:' pubspec.yaml)"
       - name: Install CocoaPods
         script: |
-          cd ios && pod install
-      - name: Build Unsigned IPA
+          # Belt-and-suspenders clean state: even though Codemagic builds
+          # from a fresh git clone with no cache: block, wipe every layer
+          # that has ever shipped a "trailing bug" symptom. Cheap insurance
+          # against stale Pods, stale plugin symlinks, or stale CocoaPods
+          # download cache silently masking a Podfile change.
+          flutter clean
+          flutter pub get
+          cd ios
+          rm -rf Pods Podfile.lock .symlinks
+          pod cache clean --all
+          pod install --repo-update
+      - name: Build IPA
+        # `--split-debug-info=<dir>` emits the Dart AOT symbol file
+        # (`app.ios-arm64.symbols`) to <dir> instead of leaving Dart
+        # symbols only in the embedded App.framework. The release binary
+        # is still stripped (no behavior change, no signing change, no
+        # entitlements change), but now we have a portable symbols file
+        # we can artifact and pass to `flutter symbolize` from any
+        # platform — no Mac/atos and no ASC dSYM round-trip needed.
+        #
+        # CLAUDE.md's "build/debug-info/ — Keep these files — never
+        # commit … never delete after a release" note assumed builds
+        # were producing this directory; this commit makes the CI
+        # actually do so.
+        #
+        # Usage post-build:
+        #   flutter symbolize -i app.ios-arm64.symbols -d stack.txt
+        # The .symbols file is small (~MB), versioned per build, and
+        # only matches stack traces from THIS exact build. Keep one
+        # copy per shipped build.
+        #
+        # No --obfuscate: that would rename Dart symbols in the binary
+        # so the symbols file is the ONLY way to read frames, which is
+        # a heavier change than this diagnostic-only intent warrants.
+        script: flutter build ipa --release --split-debug-info=build/debug-info/ios
+      - name: Dump signed entitlements
+        # Read-only diagnostic for #61 SSID layer disambiguation.
+        #
+        # Why the exported IPA, not the archive: build 187's dump showed
+        # "code object is not signed at all" — the archive's Runner.app is
+        # the PRE-EXPORT, unsigned binary. xcodebuild -exportArchive does
+        # the actual re-sign with the pinned profile, and the entitlements
+        # blob the device enforces is whatever made it into THAT binary.
+        # Inspecting the archive can't catch an export-stage strip.
+        #
+        # Two outputs:
+        #   1. codesign -d --entitlements :- on Payload/Runner.app —
+        #      entitlements compiled into the SHIPPED binary (what iOS
+        #      enforces at runtime).
+        #   2. embedded.mobileprovision's Entitlements dict — what the
+        #      pinned profile grants (the upper bound any export re-sign
+        #      intersects against).
+        #
+        # If `com.apple.developer.networking.wifi-info` is in the profile
+        # but NOT in the shipped binary, manual export is stripping it
+        # (Item #61 layer 1 confirmed → revert signing mode or fix
+        # ExportOptions). If it's missing from the profile too, the App
+        # ID capability is not enabled — fix in Apple Developer portal
+        # and regenerate the profile.
         script: |
-          # 1. Build iOS app with Flutter (no code signing)
-          flutter build ios --release --no-codesign
-
-          # 2. Locate the .app bundle
-          APP_PATH="build/ios/iphoneos/Runner.app"
-          if [ ! -d "$APP_PATH" ]; then
-            APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -1)
+          if [ -z "$IPA" ]; then
+            echo "(no .ipa found under build/ios/ipa — skipping dump)"
+            exit 0
           fi
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found"
-            find build -name "*.app" -type d 2>/dev/null
-            exit 1
+          echo "=== exported ipa ==="
+          echo "$IPA"
+          DUMP_DIR=$(mktemp -d)
+          unzip -q "$IPA" -d "$DUMP_DIR" || true
+          APP="$DUMP_DIR/Payload/Runner.app"
+          if [ ! -d "$APP" ]; then
+            echo "(no Payload/Runner.app inside $IPA — unexpected layout)"
+            exit 0
           fi
-
-          # 3. Verify the executable exists
-          if [ ! -f "$APP_PATH/Runner" ]; then
-            echo "ERROR: Runner executable not found inside app bundle"
-            ls -la "$APP_PATH"
-            exit 1
+          echo "=== codesign entitlements (what the shipped binary carries) ==="
+          codesign -d --entitlements :- "$APP" 2>&1 || true
+          echo "=== embedded provisioning profile entitlements (what the profile grants) ==="
+          if [ -f "$APP/embedded.mobileprovision" ]; then
+            security cms -D -i "$APP/embedded.mobileprovision" 2>&1 | \
+              plutil -extract Entitlements xml1 -o - - 2>&1 || true
+          else
+            echo "(no embedded.mobileprovision at $APP)"
           fi
-
-          echo "App bundle OK:"
-          ls -la "$APP_PATH/Runner"
-
-          # 4. Ad-hoc sign for AltStore/Sideloadly compatibility
-          echo "Ad-hoc signing..."
-          find "$APP_PATH/Frameworks" -name "*.framework" -type d | while read framework; do
-            /usr/bin/codesign --force --deep --sign - "$framework"
-          done
-          /usr/bin/codesign --force --deep --sign - "$APP_PATH"
-          echo "Ad-hoc signing complete"
-
-          # 5. Package into IPA
-          rm -rf Payload
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -r -y Runner.ipa Payload
-
-          echo "IPA contents:"
-          unzip -l Runner.ipa | head -20
-
-          mv Runner.ipa $CM_BUILD_DIR/Runner.ipa
     artifacts:
-      - Runner.ipa
+      - build/ios/ipa/*.ipa
+      # Dart AOT symbol file from --split-debug-info. Per-build artifact;
+      # download from the Codemagic build page and feed to:
+      #   flutter symbolize -i app.ios-arm64.symbols -d <crash_stack>.txt
+      # to resolve App.framework offsets to Dart function names. Runs on
+      # any platform with the Flutter SDK installed (no Mac required).
+      - build/debug-info/ios/*.symbols
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        expire_build_submitted_for_review: true

@@ -1,9 +1,11 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Listenable that notifies when Firebase Auth state changes.
 /// Used to trigger GoRouter redirect checks.
@@ -17,18 +19,26 @@ class AuthStateListenable extends ChangeNotifier {
 
 /// Creates an unlinked user profile for new Firebase Auth users.
 Future<void> createUnlinkedUserProfile(User user) async {
+  // Reviewer account never gets an unlinked skeleton — it gets its full
+  // demo profile written by ReviewerSeedService.seedForUser(). Gating
+  // here closes the race even if a future call site forgets to gate at
+  // the appRedirect layer. Defense in depth.
+  if (ReviewerSeedService.isReviewer(user)) return;
   try {
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-      'id': user.uid,
-      'email': user.email ?? '',
-      'display_name': user.displayName ?? user.email?.split('@').first ?? 'User',
-      'photo_url': user.photoURL,
-      'owner_id': user.uid,
-      'created_at': FieldValue.serverTimestamp(),
-      'updated_at': FieldValue.serverTimestamp(),
-      'installation_role': 'unlinked',
-      'welcome_completed': false,
-    }, SetOptions(merge: true));
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      UserService.sanitizeForFirestore({
+        'id': user.uid,
+        'email': user.email ?? '',
+        'display_name': user.displayName ?? user.email?.split('@').first ?? 'User',
+        if (user.photoURL != null) 'photo_url': user.photoURL,
+        'owner_id': user.uid,
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+        'installation_role': 'unlinked',
+        'welcome_completed': false,
+      }),
+      SetOptions(merge: true),
+    );
     debugPrint('Created unlinked user profile for ${user.uid}');
   } catch (e) {
     debugPrint('Error creating unlinked user profile: $e');
@@ -38,6 +48,15 @@ Future<void> createUnlinkedUserProfile(User user) async {
 /// Global redirect function for GoRouter.
 /// Handles auth checks, role-based access, and installation validation.
 Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
+  // Gate restricted routes during demo browsing
+  if (isDemoBrowsingFlag) {
+    final location = state.matchedLocation;
+    const restricted = ['/installer', '/sales', '/admin', '/dealer'];
+    if (restricted.any((r) => location.startsWith(r))) {
+      return AppRoutes.dashboard;
+    }
+  }
+
   final user = FirebaseAuth.instance.currentUser;
   final isLoggedIn = user != null;
 
@@ -52,19 +71,109 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   final isInstallerRoute = state.matchedLocation.startsWith('/installer') ||
       state.matchedLocation.startsWith('/admin');
 
+  final isSalesRoute = state.matchedLocation.startsWith('/sales');
+
   // Check if this is a demo route (allowed without auth)
   final isDemoRoute = state.matchedLocation.startsWith('/demo');
 
+  // The unified staff PIN screen is reachable from the hidden 5-tap
+  // gesture on the login page and does its own PIN validation against
+  // Firestore — no Firebase Auth session required. It must be allowed
+  // through the auth gate for both unauthenticated and authenticated
+  // users so the login screen's hidden gesture actually opens it.
+  final isStaffPinRoute = state.matchedLocation == AppRoutes.staffPin;
+
   // If user is not logged in
   if (!isLoggedIn) {
-    // Allow auth routes, welcome wizard, and demo routes
-    if (isAuthRoute || state.matchedLocation == AppRoutes.welcome || isDemoRoute) {
+    // Allow auth routes, welcome wizard, demo routes, demo browsing,
+    // and the unified staff PIN screen.
+    if (isAuthRoute ||
+        state.matchedLocation == AppRoutes.welcome ||
+        isDemoRoute ||
+        isDemoBrowsingFlag ||
+        isStaffPinRoute) {
       return null;
     }
     return AppRoutes.login;
   }
 
   // User is logged in
+
+  // Anonymous users are only allowed on installer/sales routes and
+  // the unified staff PIN screen. The staff PIN flow itself
+  // establishes an anonymous session in StaffPinScreen.initState so
+  // it can read PIN hashes from Firestore (which require auth), so
+  // any subsequent visit to /staff/pin from an anonymous session
+  // must also be allowed — otherwise the second tap-five gesture
+  // (e.g. after the user backs out of installer mode) silently
+  // bounces back to /login.
+  // /device-setup is the BLE provisioning screen used by the installer
+  // wizard's "Add Controller" button. It lives outside the /installer/*
+  // prefix but must be reachable during an anonymous installer session.
+  final isDeviceSetupRoute =
+      state.matchedLocation == AppRoutes.deviceSetup;
+
+  if (user.isAnonymous) {
+    if (isInstallerRoute || isSalesRoute || isStaffPinRoute || isDeviceSetupRoute) return null;
+    return AppRoutes.login; // Block everything else for anonymous users
+  }
+
+  // Staff sessions (sales/installer/admin/owner custom tokens) self-
+  // route via Riverpod state. Skip all customer guard logic — they're
+  // not in onboarding flow and shouldn't trigger
+  // createUnlinkedUserProfile() (line 309-310) or any /users/{uid}
+  // doc reads.
+  //
+  // Rules at firestore.rules honor the staff claim via hasStaffClaim
+  // (sales/installer) and hasAdminOrOwnerClaim (admin/owner). This
+  // short-circuit keeps the router in sync with the rule layer for
+  // all four staff roles.
+  if (!user.isAnonymous) {
+    try {
+      final tokenResult = await user.getIdTokenResult();
+      final role = tokenResult.claims?['role'] as String?;
+      if (role == 'salesperson' ||
+          role == 'installer' ||
+          role == 'admin' ||
+          role == 'owner') {
+        return null;
+      }
+    } catch (e) {
+      debugPrint('appRedirect: failed to read claims, continuing: $e');
+    }
+  }
+
+  // Forced password reset gate. The installer wizard sets
+  // `must_reset_password: true` on the customer's user doc when issuing a
+  // temp password during handoff. The customer must clear it before any
+  // other screen becomes reachable. This check runs before every other
+  // post-auth redirect (welcome, role, commercial mode) so it cannot be
+  // bypassed by deep-linking.
+  final isForcedResetRoute =
+      state.matchedLocation == AppRoutes.forcedPasswordReset;
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (userDoc.exists) {
+      final mustReset =
+          userDoc.data()?['must_reset_password'] as bool? ?? false;
+      if (mustReset && !isForcedResetRoute) {
+        return AppRoutes.forcedPasswordReset;
+      }
+      if (!mustReset && isForcedResetRoute) {
+        // Flag is already cleared — don't strand the user on the reset page.
+        return AppRoutes.dashboard;
+      }
+    } else if (isForcedResetRoute) {
+      // No user doc yet — nothing to reset, send them through normal flow.
+      return AppRoutes.dashboard;
+    }
+  } catch (e) {
+    debugPrint('Redirect: Error checking must_reset_password: $e');
+  }
+
   // If trying to access auth routes, redirect to dashboard (or link-account if unlinked)
   if (isAuthRoute) {
     // Check if user has installation access
@@ -77,26 +186,21 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
       if (userDoc.exists) {
         final data = userDoc.data()!;
         final role = data['installation_role'] as String?;
-        final installationId = data['installation_id'] as String?;
-
-        // Unlinked users go to link-account
-        // DEV BYPASS: Skip link-account for testing (remove before production)
-        const devBypassLinkAccount = true;
-        if (!devBypassLinkAccount && (role == null || role == 'unlinked')) {
-          return AppRoutes.linkAccount;
-        }
 
         // Installers and admins don't need an installation
         if (role == 'installer' || role == 'admin') {
           return AppRoutes.dashboard;
         }
-
-        // Primary and subUser need an installation
-        // DEV BYPASS: Skip installation check for testing
-        if (!devBypassLinkAccount && installationId == null) {
-          return AppRoutes.linkAccount;
-        }
       } else {
+        // Reviewer account: skip skeleton creation entirely.
+        // ReviewerSeedService.seedForUser() (awaited from _handleSignIn)
+        // is the sole writer for the reviewer's user doc. Creating a
+        // skeleton here races the seed and overwrites installation_role
+        // with 'unlinked', sending the reviewer to /link-account instead
+        // of the populated demo home. See REVIEWER_GATE_DIAGNOSIS.md.
+        if (ReviewerSeedService.isReviewer(user)) {
+          return null; // stay on /login; _handleSignIn will navigate
+        }
         // User exists in Auth but not Firestore - create unlinked profile
         await createUnlinkedUserProfile(user);
         return AppRoutes.linkAccount;
@@ -107,9 +211,11 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     return AppRoutes.dashboard;
   }
 
-  // Allow link routes, installer routes, and first-run without further checks
+  // Allow link routes, installer/sales routes, first-run, welcome,
+  // and the unified staff PIN screen without further checks.
   final isFirstRunRoute = state.matchedLocation == AppRoutes.firstRun;
-  if (isLinkRoute || isInstallerRoute || isFirstRunRoute ||
+  if (isLinkRoute || isInstallerRoute || isSalesRoute || isFirstRunRoute ||
+      isStaffPinRoute ||
       state.matchedLocation == AppRoutes.welcome) {
     return null;
   }
@@ -136,58 +242,69 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     debugPrint('Redirect: Error checking welcome_completed: $e');
   }
 
-  // For protected routes (dashboard, settings, etc.), verify installation access
-  // DEV BYPASS: Skip all installation checks for testing
-  const devBypassInstallation = true;
-  if (devBypassInstallation) {
-    return null; // Allow access to all routes
-  }
+  // Phase 3a (commit pending) removed the commercial-mode redirect that
+  // forked customers with profile_type == 'commercial' off to /commercial
+  // (the parallel CommercialHomeScreen shell). Both residential and
+  // commercial customers now land on /dashboard. Commercial-only features
+  // remain reachable via direct URL to /commercial during the transition;
+  // Phase 4 migrates them to additive surfaces on residential home; Phase
+  // 6 deletes the parallel shell. See docs/commercial_ux_audit.md and
+  // memory Item #37 for the retirement timeline.
 
+  // For protected routes (dashboard, settings, etc.), verify installation access
   try {
     final userDoc = await FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .get();
 
-    if (!userDoc.exists) {
+    if (userDoc.exists) {
+      final data = userDoc.data()!;
+      final role = data['installation_role'] as String?;
+
+      // Admin: unrestricted access to all routes
+      if (role == 'admin') {
+        return null;
+      }
+
+      // Installer: allow access to all routes (they need to see/configure
+      // the residential dashboard and system settings)
+      if (role == 'installer') {
+        return null;
+      }
+
+      // Unlinked: redirect to link-account for any protected route
+      if (role == null || role == 'unlinked') {
+        // Safety net: if the reviewer somehow lands on a protected
+        // route before seedForUser() commits (rare — _handleSignIn
+        // awaits the seed before navigating — but defensive for any
+        // future code path that navigates to protected routes from
+        // elsewhere), allow through. The seed will land within
+        // milliseconds and the protected page's own stream/provider
+        // queries will re-fetch with correct data.
+        if (ReviewerSeedService.isReviewer(user)) {
+          return null;
+        }
+        return AppRoutes.linkAccount;
+      }
+
+      // primary / subUser with a valid installation: allow access
+      return null;
+    } else {
+      // Reviewer: skip skeleton write and /link-account redirect — see
+      // auth-route branch and createUnlinkedUserProfile for rationale.
+      // The awaited seedForUser() from _handleSignIn should already have
+      // committed, but this is defensive for any race window.
+      if (ReviewerSeedService.isReviewer(user)) {
+        return null;
+      }
+      // User exists in Auth but not Firestore - create unlinked profile
       await createUnlinkedUserProfile(user);
       return AppRoutes.linkAccount;
     }
-
-    final data = userDoc.data()!;
-    final role = data['installation_role'] as String?;
-    final installationId = data['installation_id'] as String?;
-
-    // Unlinked users must go to link-account
-    if (role == null || role == 'unlinked') {
-      return AppRoutes.linkAccount;
-    }
-
-    // Installers and admins have unrestricted access
-    if (role == 'installer' || role == 'admin') {
-      return null;
-    }
-
-    // Primary and subUser need a valid installation
-    if (installationId == null) {
-      return AppRoutes.linkAccount;
-    }
-
-    // Check if installation is still active
-    final installDoc = await FirebaseFirestore.instance
-        .collection('installations')
-        .doc(installationId)
-        .get();
-
-    if (installDoc.exists && installDoc.data()?['is_active'] == false) {
-      // Installation deactivated - show error (for now, redirect to link-account)
-      return AppRoutes.linkAccount;
-    }
   } catch (e) {
-    debugPrint('Redirect: Error checking installation access: $e');
-    // On error, allow access (fail open for better UX, security handled by Firestore rules)
+    debugPrint('Redirect: Error verifying installation access: $e');
+    // On error, allow access rather than blocking (network issues, etc.)
+    return null;
   }
-
-  // No redirect needed
-  return null;
 }

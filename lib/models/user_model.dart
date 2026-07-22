@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/models/sub_user_permissions.dart';
+import 'package:nexgen_command/models/commercial/business_profile.dart';
+import 'package:nexgen_command/models/commercial/channel_role.dart';
+import 'package:nexgen_command/models/commercial/day_part.dart';
+import 'package:nexgen_command/models/commercial/commercial_team.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/utils/input_validation.dart';
 
@@ -89,6 +93,9 @@ class UserModel {
   // Profile enrichment for personalization and suggestions
   final String? location; // freeform city/region/country
   final String? timeZone; // e.g., America/Chicago
+  /// Preferred time format for display: '12h' (e.g. 7:05 PM) or '24h' (19:05).
+  /// Defaults to '12h'.
+  final String timeFormat;
   final List<String> preferredCategoryIds; // aligns with PatternCategory ids
   final List<String> interestTags; // freeform: teams, holidays, keywords
   final bool allowSuggestions; // enable seasonal/event suggestions
@@ -127,19 +134,36 @@ class UserModel {
   /// Preferred dealer contact for sales requests and quotes
   final String? dealerEmail;
 
+  /// 2-digit dealer code identifying which dealer "owns" this customer.
+  /// Set by the installer wizard at install time (from
+  /// session.dealer.dealerCode) and recovered by backfillUserDealerCodes
+  /// for installer-onboarded customers that pre-date the field. Drives
+  /// per-dealer scoping in the installer customer-search rule on
+  /// /users/{userId}. Null for self-registered users and any account
+  /// not affiliated with a dealer — those are intentionally invisible
+  /// to installer PIN sessions.
+  final String? dealerCode;
+
   // Remote Access configuration
   /// URL for cloud relay webhook (Dynamic DNS pointing to home network)
   final String? webhookUrl;
-  /// WiFi SSID of the user's home network (decrypted, for display)
+  /// WiFi SSID of the user's home network (decrypted, for display).
+  /// Legacy — kept for backward compatibility with older profiles. New
+  /// writes go to [homeSsidEncrypted] instead.
   final String? homeSsid;
+  /// Encrypted home SSID (AES via EncryptionService). Source of truth for
+  /// display — decrypt at display time only. Never used for comparison.
+  final String? homeSsidEncrypted;
   /// SHA-256 hash of the home SSID (for comparison in ConnectivityService)
   final String? homeSsidHash;
   /// Whether remote access via cloud relay is enabled
   final bool remoteAccessEnabled;
-  /// Whether to use MQTT relay via Lumina Backend (vs Firestore/webhook)
-  final bool mqttRelayEnabled;
-  /// Lumina Backend URL (for MQTT relay)
-  final String? luminaBackendUrl;
+
+  // Bridge configuration
+  /// Local IP (or mDNS hostname) of the paired Lumina Bridge
+  final String? bridgeIp;
+  /// Whether a Lumina Bridge has been set up and paired
+  final bool bridgePaired;
 
   /// Whether the user has completed the welcome wizard/tutorial
   final bool welcomeCompleted;
@@ -164,6 +188,10 @@ class UserModel {
   final List<String> preferredEffectStyles;
   /// When the autopilot schedule was last generated
   final DateTime? autopilotLastGenerated;
+  /// When the Game Day autopilot calendar was last regenerated. Tracks its
+  /// own weekly cadence separately from [autopilotLastGenerated] so general
+  /// schedule generation and Game Day population don't gate each other.
+  final DateTime? gameDayLastGenerated;
   /// User-added custom holidays (birthdays, anniversaries, etc.)
   final List<CustomHoliday> customHolidays;
   /// Ordered list of sports teams by preference (first = highest priority)
@@ -176,6 +204,17 @@ class UserModel {
   final bool preGameLighting;
   /// Whether score celebrations (LED animations) are enabled via autopilot
   final bool scoreCelebrations;
+
+  /// Whether autopilot seeds the daily "Warm White (Daily evening lighting)"
+  /// baseline (sunset-on, sunrise-off). Presented as a pre-checked option in
+  /// autopilot setup; unchecking it persists here so regeneration never
+  /// re-adds the baseline. Defaults to true so existing users (field absent in
+  /// Firestore) keep their current baseline untouched.
+  final bool autopilotBaselineEnabled;
+
+  /// How autopilot resolves conflicts with user-set calendar entries.
+  /// 'ask' = prompt every time, 'keep_mine' = always keep manual, 'trust_autopilot' = always overwrite.
+  final String autopilotConflictPolicy;
 
   /// Patterns the user has rejected via autopilot suggestions.
   /// Each entry: { 'pattern_name': String, 'count': int, 'last_rejected_at': Timestamp }
@@ -219,6 +258,34 @@ class UserModel {
   /// Invitation token used to link this account (for audit trail).
   final String? invitationToken;
 
+  // ========== White Preferences ==========
+
+  /// User's preferred primary white (RGBW map from WhitePreset.toJson())
+  final Map<String, dynamic>? preferredWhitePrimary;
+
+  /// User's preferred complement white (RGBW map from WhitePreset.toJson())
+  final Map<String, dynamic>? preferredWhiteComplement;
+
+  // ========== Commercial Profile ==========
+
+  /// Full commercial business profile (null for residential users).
+  final BusinessProfile? commercialProfile;
+
+  /// Channel-to-venue-role mappings for commercial venues.
+  final List<ChannelRole> channelRoles;
+
+  /// Named time windows within a business day (e.g. "Happy Hour").
+  final List<DayPart> dayParts;
+
+  /// Sports teams configured for commercial game-day automation.
+  final List<CommercialTeam> commercialTeams;
+
+  /// Permission level: 'store_staff' | 'store_manager' | 'corporate_admin'
+  final String commercialPermissionLevel;
+
+  /// Organization ID for multi-location commercial users (null for single-location).
+  final String? organizationId;
+
   UserModel({
     required this.id,
     required String email,
@@ -230,6 +297,7 @@ class UserModel {
     this.userRole = UserRole.residential,
     String? location,
     this.timeZone,
+    this.timeFormat = '12h',
     List<String>? preferredCategoryIds,
     List<String>? interestTags,
     this.allowSuggestions = true,
@@ -252,12 +320,14 @@ class UserModel {
     this.communityPatternSharing = false,
     this.analyticsEnabled = true,
     String? dealerEmail,
+    this.dealerCode,
     String? webhookUrl,
     String? homeSsid,
+    this.homeSsidEncrypted,
     this.homeSsidHash,
     this.remoteAccessEnabled = false,
-    this.mqttRelayEnabled = false,
-    String? luminaBackendUrl,
+    this.bridgeIp,
+    this.bridgePaired = false,
     this.welcomeCompleted = false,
     this.featureTourCompleted = false,
     this.rooflineMask,
@@ -267,12 +337,15 @@ class UserModel {
     int changeToleranceLevel = 2,
     List<String>? preferredEffectStyles,
     this.autopilotLastGenerated,
+    this.gameDayLastGenerated,
     this.customHolidays = const [],
     List<String>? sportsTeamPriority,
     this.weeklySchedulePreviewEnabled = true,
     this.autoDetectGameDays = true,
     this.preGameLighting = true,
     this.scoreCelebrations = true,
+    this.autopilotBaselineEnabled = true,
+    this.autopilotConflictPolicy = 'ask',
     this.rejectedPatterns = const [],
     this.deprioritizedPatterns = const [],
     this.profileType = 'residential',
@@ -286,6 +359,16 @@ class UserModel {
     this.linkedAt,
     this.subUserPermissions,
     this.invitationToken,
+    // White preferences
+    this.preferredWhitePrimary,
+    this.preferredWhiteComplement,
+    // Commercial profile
+    this.commercialProfile,
+    this.channelRoles = const [],
+    this.dayParts = const [],
+    this.commercialTeams = const [],
+    this.commercialPermissionLevel = 'store_manager',
+    this.organizationId,
   })  :
         // SECURITY: Validate and sanitize all user inputs
         email = InputValidation.validateEmail(email) ?? email,
@@ -305,7 +388,6 @@ class UserModel {
         dealerEmail = InputValidation.validateDealerEmail(dealerEmail),
         webhookUrl = InputValidation.validateWebhookUrl(webhookUrl),
         homeSsid = InputValidation.validateSsid(homeSsid),
-        luminaBackendUrl = InputValidation.validateWebhookUrl(luminaBackendUrl),
         changeToleranceLevel = InputValidation.validateChangeTolerance(changeToleranceLevel) ?? 2,
         preferredCategoryIds = InputValidation.validateStringList(preferredCategoryIds),
         interestTags = InputValidation.validateStringList(interestTags),
@@ -329,6 +411,7 @@ class UserModel {
       userRole: _parseUserRole(json['user_role'] as String?),
       location: json['location'] as String?,
       timeZone: json['time_zone'] as String?,
+      timeFormat: _parseTimeFormat(json['time_format'] as String?),
       preferredCategoryIds: (json['preferred_category_ids'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       interestTags: (json['interest_tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       allowSuggestions: (json['allow_suggestions'] as bool?) ?? true,
@@ -355,12 +438,14 @@ class UserModel {
       communityPatternSharing: (json['community_pattern_sharing'] as bool?) ?? false,
       analyticsEnabled: (json['analytics_enabled'] as bool?) ?? true,
       dealerEmail: json['dealer_email'] as String?,
+      dealerCode: json['dealer_code'] as String?,
       webhookUrl: json['webhook_url'] as String?,
       homeSsid: json['home_ssid'] as String?,
+      homeSsidEncrypted: json['home_ssid_encrypted'] as String?,
       homeSsidHash: json['home_ssid_hash'] as String?,
       remoteAccessEnabled: (json['remote_access_enabled'] as bool?) ?? false,
-      mqttRelayEnabled: (json['mqtt_relay_enabled'] as bool?) ?? false,
-      luminaBackendUrl: json['lumina_backend_url'] as String?,
+      bridgeIp: json['bridge_ip'] as String?,
+      bridgePaired: (json['bridge_paired'] as bool?) ?? false,
       welcomeCompleted: (json['welcome_completed'] as bool?) ?? false,
       featureTourCompleted: (json['feature_tour_completed'] as bool?) ?? false,
       rooflineMask: json['roofline_mask'] as Map<String, dynamic>?,
@@ -375,6 +460,9 @@ class UserModel {
       autopilotLastGenerated: json['autopilot_last_generated'] != null
           ? (json['autopilot_last_generated'] as Timestamp).toDate()
           : null,
+      gameDayLastGenerated: json['game_day_last_generated'] != null
+          ? (json['game_day_last_generated'] as Timestamp).toDate()
+          : null,
       customHolidays: (json['custom_holidays'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map((e) => CustomHoliday.fromJson(e))
@@ -388,6 +476,8 @@ class UserModel {
       autoDetectGameDays: (json['auto_detect_game_days'] as bool?) ?? true,
       preGameLighting: (json['pre_game_lighting'] as bool?) ?? true,
       scoreCelebrations: (json['score_celebrations'] as bool?) ?? true,
+      autopilotBaselineEnabled: (json['autopilot_baseline_enabled'] as bool?) ?? true,
+      autopilotConflictPolicy: (json['autopilot_conflict_policy'] as String?) ?? 'ask',
       rejectedPatterns: (json['rejected_patterns'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .toList() ??
@@ -418,7 +508,37 @@ class UserModel {
           ? SubUserPermissions.fromJson(json['sub_user_permissions'] as Map<String, dynamic>)
           : null,
       invitationToken: json['invitation_token'] as String?,
+      // White preferences
+      preferredWhitePrimary: json['preferred_white_primary'] as Map<String, dynamic>?,
+      preferredWhiteComplement: json['preferred_white_complement'] as Map<String, dynamic>?,
+      // Commercial profile
+      commercialProfile: json['commercial_profile'] != null
+          ? BusinessProfile.fromJson(json['commercial_profile'] as Map<String, dynamic>)
+          : null,
+      channelRoles: (json['channel_roles'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => ChannelRole.fromJson(e))
+              .toList() ??
+          const [],
+      dayParts: (json['day_parts'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => DayPart.fromJson(e))
+              .toList() ??
+          const [],
+      commercialTeams: (json['commercial_teams'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map((e) => CommercialTeam.fromJson(e))
+              .toList() ??
+          const [],
+      commercialPermissionLevel:
+          (json['commercial_permission_level'] as String?) ?? 'store_manager',
+      organizationId: json['organization_id'] as String?,
     );
+  }
+
+  /// Parse time format from string, defaulting to 12-hour.
+  static String _parseTimeFormat(String? value) {
+    return value == '24h' ? '24h' : '12h';
   }
 
   /// Parse user role from string, defaulting to residential
@@ -449,6 +569,7 @@ class UserModel {
       'user_role': userRole.name,
       'location': location,
       'time_zone': timeZone,
+      'time_format': timeFormat,
       'preferred_category_ids': preferredCategoryIds,
       'interest_tags': interestTags,
       'allow_suggestions': allowSuggestions,
@@ -471,12 +592,14 @@ class UserModel {
       'community_pattern_sharing': communityPatternSharing,
       'analytics_enabled': analyticsEnabled,
       'dealer_email': dealerEmail,
+      if (dealerCode != null) 'dealer_code': dealerCode,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
+      'home_ssid_encrypted': homeSsidEncrypted,
       'home_ssid_hash': homeSsidHash,
       'remote_access_enabled': remoteAccessEnabled,
-      'mqtt_relay_enabled': mqttRelayEnabled,
-      'lumina_backend_url': luminaBackendUrl,
+      if (bridgeIp != null) 'bridge_ip': bridgeIp,
+      'bridge_paired': bridgePaired,
       'welcome_completed': welcomeCompleted,
       'feature_tour_completed': featureTourCompleted,
       'roofline_mask': rooflineMask,
@@ -487,17 +610,28 @@ class UserModel {
       'preferred_effect_styles': preferredEffectStyles,
       if (autopilotLastGenerated != null)
         'autopilot_last_generated': Timestamp.fromDate(autopilotLastGenerated!),
+      if (gameDayLastGenerated != null)
+        'game_day_last_generated': Timestamp.fromDate(gameDayLastGenerated!),
       'custom_holidays': customHolidays.map((e) => e.toJson()).toList(),
       'sports_team_priority': sportsTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
       'auto_detect_game_days': autoDetectGameDays,
       'pre_game_lighting': preGameLighting,
       'score_celebrations': scoreCelebrations,
+      'autopilot_baseline_enabled': autopilotBaselineEnabled,
+      'autopilot_conflict_policy': autopilotConflictPolicy,
       'rejected_patterns': rejectedPatterns,
       'deprioritized_patterns': deprioritizedPatterns,
       'profile_type': profileType,
       if (managerEmail != null) 'manager_email': managerEmail,
       'happy_hour_locks': happyHourLocks,
+      // A-5 coherence pin: the schedules ARRAY is still serialized on the user
+      // doc even under the subcollection backend. During the array↔subcollection
+      // dual-write window it stays current (every subcollection write mirrors
+      // back to this array), so it remains a valid fallback / rollback source.
+      // Do NOT drop it until dual-write is retired. Note: SchedulesNotifier owns
+      // schedule writes — profile-sync must never clobber this array (see the
+      // 'schedules' skip in AutopilotNotifier._updateProfile / its pin test).
       'schedules': schedules.map((e) => e.toJson()).toList(),
       // Installation access control
       if (installationId != null) 'installation_id': installationId,
@@ -506,6 +640,16 @@ class UserModel {
       if (linkedAt != null) 'linked_at': Timestamp.fromDate(linkedAt!),
       if (subUserPermissions != null) 'sub_user_permissions': subUserPermissions!.toJson(),
       if (invitationToken != null) 'invitation_token': invitationToken,
+      // White preferences
+      if (preferredWhitePrimary != null) 'preferred_white_primary': preferredWhitePrimary,
+      if (preferredWhiteComplement != null) 'preferred_white_complement': preferredWhiteComplement,
+      // Commercial profile
+      if (commercialProfile != null) 'commercial_profile': commercialProfile!.toJson(),
+      if (channelRoles.isNotEmpty) 'channel_roles': channelRoles.map((e) => e.toJson()).toList(),
+      if (dayParts.isNotEmpty) 'day_parts': dayParts.map((e) => e.toJson()).toList(),
+      if (commercialTeams.isNotEmpty) 'commercial_teams': commercialTeams.map((e) => e.toJson()).toList(),
+      'commercial_permission_level': commercialPermissionLevel,
+      if (organizationId != null) 'organization_id': organizationId,
     };
   }
 
@@ -520,6 +664,7 @@ class UserModel {
     UserRole? userRole,
     String? location,
     String? timeZone,
+    String? timeFormat,
     List<String>? preferredCategoryIds,
     List<String>? interestTags,
     bool? allowSuggestions,
@@ -542,12 +687,14 @@ class UserModel {
     bool? communityPatternSharing,
     bool? analyticsEnabled,
     String? dealerEmail,
+    String? dealerCode,
     String? webhookUrl,
     String? homeSsid,
+    String? homeSsidEncrypted,
     String? homeSsidHash,
     bool? remoteAccessEnabled,
-    bool? mqttRelayEnabled,
-    String? luminaBackendUrl,
+    String? bridgeIp,
+    bool? bridgePaired,
     bool? welcomeCompleted,
     bool? featureTourCompleted,
     Map<String, dynamic>? rooflineMask,
@@ -557,12 +704,15 @@ class UserModel {
     int? changeToleranceLevel,
     List<String>? preferredEffectStyles,
     DateTime? autopilotLastGenerated,
+    DateTime? gameDayLastGenerated,
     List<CustomHoliday>? customHolidays,
     List<String>? sportsTeamPriority,
     bool? weeklySchedulePreviewEnabled,
     bool? autoDetectGameDays,
     bool? preGameLighting,
     bool? scoreCelebrations,
+    bool? autopilotBaselineEnabled,
+    String? autopilotConflictPolicy,
     List<Map<String, dynamic>>? rejectedPatterns,
     List<String>? deprioritizedPatterns,
     String? profileType,
@@ -576,6 +726,16 @@ class UserModel {
     DateTime? linkedAt,
     SubUserPermissions? subUserPermissions,
     String? invitationToken,
+    // White preferences
+    Map<String, dynamic>? preferredWhitePrimary,
+    Map<String, dynamic>? preferredWhiteComplement,
+    // Commercial profile
+    BusinessProfile? commercialProfile,
+    List<ChannelRole>? channelRoles,
+    List<DayPart>? dayParts,
+    List<CommercialTeam>? commercialTeams,
+    String? commercialPermissionLevel,
+    String? organizationId,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -588,6 +748,7 @@ class UserModel {
       userRole: userRole ?? this.userRole,
       location: location ?? this.location,
       timeZone: timeZone ?? this.timeZone,
+      timeFormat: timeFormat ?? this.timeFormat,
       preferredCategoryIds: preferredCategoryIds ?? this.preferredCategoryIds,
       interestTags: interestTags ?? this.interestTags,
       allowSuggestions: allowSuggestions ?? this.allowSuggestions,
@@ -610,27 +771,32 @@ class UserModel {
       communityPatternSharing: communityPatternSharing ?? this.communityPatternSharing,
       analyticsEnabled: analyticsEnabled ?? this.analyticsEnabled,
       dealerEmail: dealerEmail ?? this.dealerEmail,
+      dealerCode: dealerCode ?? this.dealerCode,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       homeSsid: homeSsid ?? this.homeSsid,
+      homeSsidEncrypted: homeSsidEncrypted ?? this.homeSsidEncrypted,
       homeSsidHash: homeSsidHash ?? this.homeSsidHash,
       remoteAccessEnabled: remoteAccessEnabled ?? this.remoteAccessEnabled,
-      mqttRelayEnabled: mqttRelayEnabled ?? this.mqttRelayEnabled,
-      luminaBackendUrl: luminaBackendUrl ?? this.luminaBackendUrl,
+      bridgeIp: bridgeIp ?? this.bridgeIp,
+      bridgePaired: bridgePaired ?? this.bridgePaired,
       welcomeCompleted: welcomeCompleted ?? this.welcomeCompleted,
       featureTourCompleted: featureTourCompleted ?? this.featureTourCompleted,
       rooflineMask: rooflineMask ?? this.rooflineMask,
       useStockHouseImage: useStockHouseImage ?? this.useStockHouseImage,
       housePhotoUrl: housePhotoUrl ?? this.housePhotoUrl,
       autopilotEnabled: autopilotEnabled ?? this.autopilotEnabled,
+      autopilotBaselineEnabled: autopilotBaselineEnabled ?? this.autopilotBaselineEnabled,
       changeToleranceLevel: changeToleranceLevel ?? this.changeToleranceLevel,
       preferredEffectStyles: preferredEffectStyles ?? this.preferredEffectStyles,
       autopilotLastGenerated: autopilotLastGenerated ?? this.autopilotLastGenerated,
+      gameDayLastGenerated: gameDayLastGenerated ?? this.gameDayLastGenerated,
       customHolidays: customHolidays ?? this.customHolidays,
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,
       autoDetectGameDays: autoDetectGameDays ?? this.autoDetectGameDays,
       preGameLighting: preGameLighting ?? this.preGameLighting,
       scoreCelebrations: scoreCelebrations ?? this.scoreCelebrations,
+      autopilotConflictPolicy: autopilotConflictPolicy ?? this.autopilotConflictPolicy,
       rejectedPatterns: rejectedPatterns ?? this.rejectedPatterns,
       deprioritizedPatterns: deprioritizedPatterns ?? this.deprioritizedPatterns,
       profileType: profileType ?? this.profileType,
@@ -644,6 +810,16 @@ class UserModel {
       linkedAt: linkedAt ?? this.linkedAt,
       subUserPermissions: subUserPermissions ?? this.subUserPermissions,
       invitationToken: invitationToken ?? this.invitationToken,
+      // White preferences
+      preferredWhitePrimary: preferredWhitePrimary ?? this.preferredWhitePrimary,
+      preferredWhiteComplement: preferredWhiteComplement ?? this.preferredWhiteComplement,
+      // Commercial profile
+      commercialProfile: commercialProfile ?? this.commercialProfile,
+      channelRoles: channelRoles ?? this.channelRoles,
+      dayParts: dayParts ?? this.dayParts,
+      commercialTeams: commercialTeams ?? this.commercialTeams,
+      commercialPermissionLevel: commercialPermissionLevel ?? this.commercialPermissionLevel,
+      organizationId: organizationId ?? this.organizationId,
     );
   }
 

@@ -1,17 +1,17 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -20,36 +20,48 @@ import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/participation_reconciler.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
-import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/smart_presets/smart_presets_section.dart';
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
+import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
+import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
+import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
+    show showScheduleEditor;
+import 'package:nexgen_command/features/dashboard/tonight_label.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry.dart';
-import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
-import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/services/reviewer_seed_service.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
-import 'package:nexgen_command/widgets/connection_status_indicator.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
-import 'package:nexgen_command/features/autopilot/learning_providers.dart' show favoritePatternsProvider;
-import 'package:nexgen_command/models/usage_analytics_models.dart' show FavoritePattern;
+import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart';
+import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session_providers.dart';
+import 'package:nexgen_command/features/game_day/ephemeral_session/active_session_sheet.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
-({List<Color> colors, int effectId, int speed, int intensity}) _extractPreviewFromPayload(
+({List<Color> colors, int effectId, int speed, int intensity, int colorGroupSize, int spacing}) _extractPreviewFromPayload(
     Map<String, dynamic> payload) {
   var effectId = 0;
   var speed = 128;
   var intensity = 128;
+  var colorGroupSize = 1;
+  var spacing = 0;
   final colors = <Color>[];
 
   try {
@@ -60,6 +72,8 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
         effectId = (first['fx'] as int?) ?? 0;
         speed = (first['sx'] as int?) ?? 128;
         intensity = (first['ix'] as int?) ?? 128;
+        colorGroupSize = (first['grp'] as int?) ?? 1;
+        spacing = (first['spc'] as int?) ?? 0;
         final cols = first['col'];
         if (cols is List) {
           for (final col in cols) {
@@ -75,13 +89,17 @@ import 'package:nexgen_command/models/usage_analytics_models.dart' show Favorite
         }
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    debugPrint('Error in _extractPreviewFromPayload: $e');
+  }
 
   return (
     colors: colors.isNotEmpty ? colors : [Colors.white],
     effectId: effectId,
     speed: speed,
     intensity: intensity,
+    colorGroupSize: colorGroupSize,
+    spacing: spacing,
   );
 }
 
@@ -96,50 +114,84 @@ class WledDashboardPage extends ConsumerStatefulWidget {
 class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   bool _checkedFirstRun = false;
   bool _pushedSetup = false;
-  double? _heroAspectRatio;
+  // Set to true when the user has no controllers registered. Drives the
+  // top-of-screen MaterialBanner instead of the previous force-redirect.
+  bool _showControllerBanner = false;
+  bool _bannerDismissed = false;
   ImageProvider? _heroImageProvider;
   String? _heroImageId;
   bool _adjustmentPanelExpanded = false;
-  bool _syncWarningAcknowledged = false;
   Timer? _skyRefreshTimer;
-  final TextEditingController _luminaCtrl = TextEditingController();
-  bool _luminaLoading = false;
-  bool _luminaListening = false;
-  late final stt.SpeechToText _luminaSpeech;
 
   _SkyTheme get _currentSkyTheme => _getSkyTheme(DateTime.now());
+
+  Future<void> _showSaveCustomDialog(BuildContext context, WidgetRef ref) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const SaveCustomPatternDialog(),
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+
+    // #84 guards: try/catch around the await (mirrors _showSavePatternDialog
+    // — without this an uncaught async exception SIGABRTs on iOS release);
+    // post-save block fully gated on `mounted` (the notifier read used to
+    // run before the mounted check → "Notifier after dispose" crash mode
+    // per CLAUDE.md).
+    String? designId;
+    try {
+      designId = await ref.read(saveCurrentAsDesignProvider)(name);
+    } catch (e) {
+      debugPrint('saveCurrentAsDesignProvider threw: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save "$name": $e')),
+        );
+      }
+      return;
+    }
+    if (designId != null && mounted) {
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(name, ref.read(wledStateProvider));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved "$name" to My Designs')),
+      );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _luminaSpeech = stt.SpeechToText();
     _skyRefreshTimer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => setState(() {}),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
+
+    // Stale participation-cache reconciliation. See
+    // docs/audits/CHANNEL_MAPPING_AUDIT_2026-05.md + Addendum 1. The
+    // helper self-gates: returns early until BOTH deviceChannels and
+    // currentRooflineConfig have emitted ready values, then clears the
+    // cache exactly once per app session if it disagrees with what the
+    // resolver would produce today. ref.listenManual on a ConsumerState
+    // auto-disposes with the state — no manual cleanup needed.
+    ref.listenManual(deviceChannelsProvider, (prev, next) {
+      runParticipationReconciliationIfReady(ref);
+    }, fireImmediately: true);
+    ref.listenManual(currentRooflineConfigProvider, (prev, next) {
+      runParticipationReconciliationIfReady(ref);
+    }, fireImmediately: true);
   }
 
   @override
   void dispose() {
-    _luminaCtrl.dispose();
-    _luminaSpeech.stop();
     _skyRefreshTimer?.cancel();
     super.dispose();
   }
 
   Future<bool> _checkSyncWarning() async {
-    if (_syncWarningAcknowledged) return true;
-    final syncStatus = ref.read(userSyncStatusProvider);
-    if (!syncStatus.isInActiveSync || syncStatus.isPaused) return true;
-    final result = await SyncWarningDialog.showIfNeeded(context, ref);
-    if (result == null) return true;
-    if (result == SyncWarningResult.cancel) return false;
-    _syncWarningAcknowledged = true;
-    if (result == SyncWarningResult.pauseAndContinue) {
-      await ref.read(neighborhoodNotifierProvider.notifier).pauseMySync();
-    }
-    return true;
+    // Auto-pause sync silently — user actions always take priority.
+    // The WledNotifier._postUpdate also handles this, but this catches
+    // dashboard-specific actions that may not route through _postUpdate.
+    return SyncWarningDialog.checkAndProceed(context, ref);
   }
 
   Future<void> _checkControllersAndMaybeLaunchWizard() async {
@@ -150,15 +202,30 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       if (!current.startsWith(AppRoutes.dashboard)) return;
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
+
+      // Reviewer account uses DemoWledRepository (see wled_providers.dart);
+      // its users/{uid}/controllers subcollection is intentionally empty
+      // and must NOT trigger the first-run wifi-connect flow.
+      if (ReviewerSeedService.isReviewer(user)) return;
+
       final col = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('controllers');
       final snap = await col.limit(1).get();
-      if (snap.docs.isEmpty && mounted) {
-        _pushedSetup = true;
-        context.push(AppRoutes.wifiConnect);
+      if (snap.docs.isEmpty && mounted && !_bannerDismissed) {
+        // Non-blocking banner — replaces the previous force-navigate to
+        // /wifi-connect, which trapped users on a setup screen even when
+        // their controllers were temporarily unreachable for other reasons.
+        setState(() => _showControllerBanner = true);
+      } else if (snap.docs.isNotEmpty && mounted && _showControllerBanner) {
+        setState(() => _showControllerBanner = false);
       }
     } catch (e) {
       debugPrint('First-run controller check failed: $e');
     }
+  }
+
+  Future<void> _retryControllerCheck() async {
+    _checkedFirstRun = false;
+    await _checkControllersAndMaybeLaunchWizard();
   }
 
   void _updateHeroImage(String? url, {String? rooflineMaskVersion}) {
@@ -183,11 +250,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       final stream = provider.resolve(createLocalImageConfiguration(context));
       late final ImageStreamListener listener;
       listener = ImageStreamListener((info, _) {
-        final w = info.image.width.toDouble();
-        final h = info.image.height.toDouble();
-        if (w > 0 && h > 0) {
-          if (mounted) setState(() => _heroAspectRatio = w / h);
-        }
         stream.removeListener(listener);
       }, onError: (error, stack) {
         debugPrint('Hero image resolve failed: $error');
@@ -266,13 +328,40 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Activate one-shot legacy roofline migration (runs silently in background).
+    ref.watch(rooflineLegacyMigrationProvider);
+
     final state = ref.watch(wledStateProvider);
-    final ip = ref.watch(selectedDeviceIpProvider);
+    final selectedIp = ref.watch(selectedDeviceIpProvider);
     final profileAsync = ref.watch(activeUserProfileProvider);
-    final isRemoteMode = ref.watch(isRemoteModeProvider);
+    ref.watch(isRemoteModeProvider);
     final isViewingAsCustomer = ref.watch(isViewingAsCustomerProvider);
 
-    debugPrint('📊 Dashboard build: ip=$ip, connected=${state.connected}, isOn=${state.isOn}, remote=$isRemoteMode');
+    // Audio capability — drives whether Audio Mode tile is shown. Only checked
+    // when we have a selected controller; fall back to "supported = false"
+    // (hidden) until the probe completes.
+    final audioSupported = selectedIp == null
+        ? false
+        : ref.watch(audioCapabilityProvider(selectedIp)).maybeWhen(
+              data: (c) => c.isSupported,
+              orElse: () => false,
+            );
+
+    // Surface failed WLED commands as a non-blocking snackbar. Listening here
+    // (rather than inside the notifier) keeps the notifier UI-free.
+    ref.listen<WledCommandFailure?>(wledCommandFailureProvider, (prev, next) {
+      if (next == null) return;
+      if (prev?.at == next.at) return; // dedup
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(next.message),
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    });
+
     final userName = profileAsync.maybeWhen(data: (u) => u?.displayName ?? 'User', orElse: () => 'User');
 
     final profileLoaded = profileAsync.hasValue;
@@ -287,12 +376,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     return Scaffold(
       appBar: GlassAppBar(
-        title: Text(isViewingAsCustomer ? 'Viewing: $userName' : 'Hello, $userName'),
+        title: Text(
+          isViewingAsCustomer ? 'Viewing: $userName' : 'Hello, $userName',
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 8),
-            child: ConnectionStatusIndicator(showLabel: true, compact: false),
-          ),
           _buildControllerSelector(context, ref, state),
           IconButton(
             icon: const Icon(Icons.settings_suggest_outlined),
@@ -310,19 +398,101 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             child: _buildViewAsBanner(context, ref, userName),
           ),
         SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, 100),
+          padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, navBarTotalHeight(context)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (_showControllerBanner)
+              MaterialBanner(
+                backgroundColor: Colors.orange.shade900,
+                content: const Text(
+                  "We can't find your lights — check your WiFi connection",
+                  style: TextStyle(color: Colors.white),
+                ),
+                leading: const Icon(Icons.wifi_off, color: Colors.white),
+                actions: [
+                  TextButton(
+                    onPressed: _retryControllerCheck,
+                    child: const Text(
+                      'Retry',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _bannerDismissed = true;
+                        _showControllerBanner = false;
+                      });
+                      context.push(AppRoutes.wifiConnect);
+                    },
+                    child: const Text(
+                      'Set Up Controller',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Dismiss',
+                    onPressed: () => setState(() {
+                      _bannerDismissed = true;
+                      _showControllerBanner = false;
+                    }),
+                  ),
+                ],
+              ),
             _buildHeroSection(context, ref, state, profileAsync),
-            _buildLuminaBar(context, ref),
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
+            // Design Studio + Neighborhood Sync — side by side
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
                   const SizedBox(width: 12),
-                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.go(AppRoutes.neighborhoodSync)),
+                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.push(AppRoutes.neighborhoodSync)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Game Day + Audio Mode (or My Designs fallback when controller
+            // doesn't support AudioReactive — installs without the firmware
+            // shouldn't surface a button that always lands on a "not
+            // supported" screen).
+            //
+            // Item #51 Prompt 4: when an ephemeral session is in active phase
+            // (preGame/liveGame/postGame), the Game Day button paints with a
+            // team-color gradient and tapping opens the ActiveSessionSheet
+            // instead of navigating to the Game Day hub.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildGameDayButton(context, ref),
+                  const SizedBox(width: 12),
+                  // Audio Mode hidden in release builds pending v1.0.1 rework
+                  // (named effect catalog + design selector + sensitivity defaults).
+                  // The capability detector continues running so the v1.0.1 work
+                  // can use it without re-plumbing.
+                  if (kDebugMode && audioSupported)
+                    _FeatureButton(
+                      icon: Icons.graphic_eq_rounded,
+                      label: 'Audio Mode',
+                      onTap: () => context.push(AppRoutes.audioReactive),
+                    )
+                  else
+                    _FeatureButton(
+                      icon: Icons.palette_outlined,
+                      label: 'My Designs',
+                      // Routes to the synthetic Explore "My Designs"
+                      // category (#62 unification) — saved designs render
+                      // as standard catalog cards there, applied via the
+                      // canonical 6-step path. Previously pushed to
+                      // designStudio which is a creation surface, not a
+                      // browse surface.
+                      onTap: () =>
+                          context.push('/explore/library/my_designs',
+                              extra: const {'name': 'My Designs'}),
+                    ),
                 ],
               ),
             ),
@@ -331,10 +501,49 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             const SizedBox(height: 16),
             _buildFavoritesSection(context, ref),
             const SizedBox(height: 16),
+            const SmartPresetsSection(),
+            const SizedBox(height: 16),
             _buildTonightCard(context, ref),
           ]),
         ),
       ]),
+    );
+  }
+
+  /// Item #51 Prompt 4 — builds the Game Day feature button with active-
+  /// phase awareness. When a session is in preGame/liveGame/postGame phase,
+  /// the button paints with the team's primary→secondary gradient and tap
+  /// opens [ActiveSessionSheet]. Otherwise renders the default cyan button
+  /// that navigates to the Game Day hub.
+  Widget _buildGameDayButton(BuildContext context, WidgetRef ref) {
+    final activeSession = ref.watch(activePhaseSessionProvider);
+    final teamInfo = activeSession != null
+        ? kTeamColors[activeSession.teamSlug]
+        : null;
+    final gradient = (activeSession != null && teamInfo != null)
+        ? LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [teamInfo.primary, teamInfo.secondary],
+          )
+        : null;
+
+    return _FeatureButton(
+      icon: Icons.stadium_rounded,
+      label: 'Game Day',
+      onTap: activeSession != null
+          ? () => _showActiveSessionSheet(activeSession)
+          : () => context.push(AppRoutes.gameDay),
+      gradient: gradient,
+    );
+  }
+
+  void _showActiveSessionSheet(EphemeralGameSession session) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => ActiveSessionSheet(session: session),
     );
   }
 
@@ -345,58 +554,23 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
     final selectedIp = ref.watch(selectedDeviceIpProvider);
 
-    ControllerInfo? selectedController;
-    if (selectedIp != null && controllers.isNotEmpty) {
-      selectedController = controllers.cast<ControllerInfo?>().firstWhere(
-        (c) => c?.ip == selectedIp,
-        orElse: () => null,
-      );
-    }
-
     if (controllers.isEmpty) return const SizedBox.shrink();
-
-    final displayName = selectedController?.name ??
-        selectedController?.ip ??
-        (selectedIp ?? 'Select Controller');
 
     return Padding(
       padding: const EdgeInsets.only(right: 4),
       child: PopupMenuButton<String>(
-        tooltip: 'Select Controller',
+        tooltip: state.connected ? 'Controller online' : 'Controller offline',
         offset: const Offset(0, 40),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         color: NexGenPalette.gunmetal90,
-        child: Container(
+        child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal90.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.5)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.lightbulb_outline,
-                size: 14,
-                color: state.connected ? NexGenPalette.cyan : Colors.grey,
-              ),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 120),
-                child: Text(
-                  displayName,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: state.connected ? Colors.white : Colors.grey,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (controllers.length > 1) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white70),
-              ],
-            ],
+          child: Icon(
+            Icons.router_rounded,
+            size: 22,
+            color: state.connected
+                ? NexGenPalette.cyan
+                : NexGenPalette.textMedium,
           ),
         ),
         itemBuilder: (context) => controllers.map((controller) {
@@ -443,147 +617,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
-  void _toggleLuminaVoice() {
-    if (_luminaListening) {
-      _luminaSpeech.stop();
-      setState(() => _luminaListening = false);
-      return;
-    }
-    _luminaSpeech.initialize().then((available) {
-      if (!available || !mounted) return;
-      setState(() => _luminaListening = true);
-      _luminaSpeech.listen(
-        onResult: (result) {
-          setState(() {
-            _luminaCtrl.text = result.recognizedWords;
-            if (result.finalResult) _luminaListening = false;
-          });
-        },
-        listenMode: stt.ListenMode.confirmation,
-        pauseFor: const Duration(seconds: 2),
-        partialResults: true,
-      );
-    });
-  }
-
-  Future<void> _submitLuminaCommand() async {
-    final text = _luminaCtrl.text.trim();
-    if (text.isEmpty || _luminaLoading) return;
-    setState(() => _luminaLoading = true);
-    try {
-      final result = await LuminaBrain.chat(ref, text);
-      if (mounted && result.isNotEmpty) {
-        // If the result looks like a pattern name (short, no markdown), set as active preset
-        if (result.length < 60 && !result.contains('\n') && !result.startsWith('{')) {
-          ref.read(activePresetLabelProvider.notifier).state = result;
-        }
-      }
-    } catch (e) {
-      debugPrint('Lumina command error: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _luminaLoading = false);
-        _luminaCtrl.clear();
-      }
-    }
-  }
-
-  Widget _buildLuminaBar(BuildContext context, WidgetRef ref) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            NexGenPalette.cyan.withValues(alpha: 0.08),
-            NexGenPalette.violet.withValues(alpha: 0.06),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3), width: 1),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [NexGenPalette.violet, NexGenPalette.cyan]),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.4), blurRadius: 8),
-              ],
-            ),
-            child: const Icon(Icons.auto_awesome_rounded, color: Colors.black, size: 14),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _luminaCtrl,
-              minLines: 1,
-              maxLines: 2,
-              style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 14),
-              decoration: const InputDecoration(
-                hintText: 'Tell Lumina what to do\u2026',
-                hintStyle: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 4),
-              ),
-              onSubmitted: (_) => _submitLuminaCommand(),
-            ),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: _toggleLuminaVoice,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _luminaListening
-                    ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.06),
-                border: Border.all(
-                  color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.line,
-                ),
-              ),
-              child: Icon(
-                _luminaListening ? Icons.mic : Icons.mic_none,
-                size: 16,
-                color: _luminaListening ? NexGenPalette.cyan : NexGenPalette.violet,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          _luminaLoading
-              ? const SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: Padding(
-                    padding: EdgeInsets.all(6),
-                    child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
-                  ),
-                )
-              : GestureDetector(
-                  onTap: _submitLuminaCommand,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      color: NexGenPalette.cyan,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.black),
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildHeroSection(BuildContext context, WidgetRef ref, WledStateModel state, AsyncValue profileAsync) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -593,44 +626,72 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
-        child: SizedBox(
-          height: 275,
-          child: Stack(fit: StackFit.expand, children: [
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // The 994:492 ratio matches the Demohomephoto.jpg asset and is
+            // the preferred widescreen framing on tablets. On narrow phones
+            // that ratio collapses the card to ~190px tall — the frosted
+            // Now Playing bar (~90px + 10px offset) then eats half the card
+            // and only a sliver of photo shows. Clamp to a minimum height so
+            // the photo stays ≥ 70% of the card on any device width while
+            // preserving the original ratio wherever width allows it.
+            const double minCardHeight = 300.0;
+            final double naturalHeight = constraints.maxWidth * (492 / 994);
+            final double height =
+                naturalHeight < minCardHeight ? minCardHeight : naturalHeight;
+            return SizedBox(
+              height: height,
+              child: Stack(fit: StackFit.expand, children: [
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
-              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: const Alignment(0, 0.3))
+              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: Alignment.center)
             else if (!profileAsync.isLoading)
-              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: const Alignment(0, 0.3)),
+              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: Alignment.center),
             // Sky color overlay — sits above photo, below controls
             Positioned.fill(
               child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
             ),
             if (state.isOn)
               Positioned.fill(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
-                    return AnimatedRooflineOverlay(
-                      previewColors: state.displayColors,
-                      previewEffectId: state.effectId,
-                      previewSpeed: state.speed,
-                      brightness: state.brightness,
-                      forceOn: state.isOn,
-                      targetAspectRatio: targetAspectRatio,
-                      imageAlignment: const Offset(0, 0.3),
-                      useBoxFitCover: true,
-                    );
-                  },
-                ),
+                child: Consumer(builder: (context, ref, _) {
+                  final isFresh = ref.watch(wledStateFreshProvider);
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final targetAspectRatio = constraints.maxWidth / constraints.maxHeight;
+                      return AnimatedOpacity(
+                        opacity: isFresh ? 1.0 : 0.5,
+                        duration: const Duration(milliseconds: 400),
+                        child: AnimatedRooflineOverlay(
+                          previewColors: state.displayColors,
+                          previewEffectId: state.effectId,
+                          previewSpeed: state.speed,
+                          brightness: state.brightness,
+                          forceOn: state.isOn,
+                          targetAspectRatio: targetAspectRatio,
+                          imageAlignment: Offset.zero,
+                          useBoxFitCover: true,
+                          colorGroupSize: state.colorGroupSize,
+                          spacing: state.spacing,
+                        ),
+                      );
+                    },
+                  );
+                }),
               ),
-            // Gradient overlay for legibility
-            Positioned.fill(
+            // Gradient overlay for legibility — anchored above the lifted
+            // Now Playing bar so the newly exposed bottom strip of photo
+            // isn't darkened.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              height: 130,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
-                    colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
+                    colors: [Colors.black.withValues(alpha: 0.45), Colors.transparent],
                   ),
                 ),
               ),
@@ -647,85 +708,39 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       : const Color(0xFF00D4FF),
                 ),
               ),
-            _buildPresetChips(context, ref),
+            // "Last Known State" indicator when stale data is showing
+            Consumer(builder: (context, ref, _) {
+              final isFresh = ref.watch(wledStateFreshProvider);
+              final isConnected = state.connected;
+              if (isFresh || !state.isOn) return const SizedBox.shrink();
+              return Positioned(
+                top: 12,
+                left: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isConnected ? 'Syncing...' : 'Last Known State',
+                    style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              );
+            }),
             _buildAddPhotoButton(context, ref),
             // Now Playing bar — owns the full bottom chrome including brightness + tune
             _buildNowPlayingBar(context, ref, state),
-          ]),
+              ]),
+            );
+          },
         ),
       ),
     );
   }
 
   
-  Widget _buildPresetChips(BuildContext context, WidgetRef ref) {
-    return Positioned(
-      top: 68,
-      right: 12,
-      child: Consumer(builder: (context, ref, _) {
-        final favoritesAsync = ref.watch(favoritePatternsProvider);
-        final activePreset = ref.watch(activePresetLabelProvider);
-        return favoritesAsync.when(
-          data: (favorites) {
-            if (favorites.isEmpty) return const SizedBox.shrink();
-            final chips = favorites.take(4).toList();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (int i = 0; i < chips.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 5),
-                  _PresetChip(
-                    favorite: chips[i],
-                    isActive: activePreset == chips[i].patternName,
-                    onTap: () => _applyPresetChip(context, ref, chips[i]),
-                  ),
-                ],
-              ],
-            );
-          },
-          loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
-        );
-      }),
-    );
-  }
-
-  Future<void> _applyPresetChip(BuildContext context, WidgetRef ref, FavoritePattern favorite) async {
-    try {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
-      var payload = favorite.patternData;
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) {
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      }
-      final success = await repo.applyJson(payload);
-      if (!mounted) return;
-      if (success) {
-        try {
-          final preview = _extractPreviewFromPayload(payload);
-          ref.read(wledStateProvider.notifier).applyLocalPreview(
-            colors: preview.colors,
-            effectId: preview.effectId,
-            speed: preview.speed,
-            intensity: preview.intensity,
-            effectName: favorite.patternName,
-          );
-        } catch (_) {}
-        try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (_) {}
-        try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (_) {}
-        try {
-          if (mounted) {
-            ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
-          }
-        } catch (_) {}
-      }
-    } catch (e) {
-      debugPrint('Preset chip apply error: $e');
-    }
-  }
-
   Widget _buildAddPhotoButton(BuildContext context, WidgetRef ref) {
     return Consumer(builder: (context, ref, _) {
       final hasCustomImage = ref.watch(hasCustomHouseImageProvider);
@@ -775,32 +790,21 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   /// Unified Now Playing bar — owns pattern name, brightness slider, tune toggle, and power.
   Widget _buildNowPlayingBar(BuildContext context, WidgetRef ref, WledStateModel state) {
     return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
+      left: 10,
+      right: 10,
+      bottom: 10,
       child: Consumer(builder: (context, ref, _) {
         final wledState = ref.watch(wledStateProvider);
-        final activePreset = ref.watch(activePresetLabelProvider);
         final isOn = wledState.isOn;
-
-        String effectName;
-        if (activePreset != null) {
-          effectName = activePreset;
-        } else if (wledState.supportsRgbw && wledState.warmWhite > 0) {
-          effectName = 'Warm White';
-        } else {
-          effectName = wledState.effectName;
-        }
+        final effectName = ref.watch(displayPatternNameProvider);
+        final isUnsaved = ref.watch(isUnsavedCustomConfigProvider);
 
         return ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
+          borderRadius: BorderRadius.circular(16),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 10, 12),
+              padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -841,14 +845,32 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   Row(
                                     children: [
                                       Flexible(
-                                        child: Text(
-                                          effectName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700,
+                                        child: GestureDetector(
+                                          onTap: isUnsaved ? () => _showSaveCustomDialog(context, ref) : null,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  effectName,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (isUnsaved) ...[
+                                                const SizedBox(width: 4),
+                                                Icon(
+                                                  Icons.bookmark_add_outlined,
+                                                  size: 13,
+                                                  color: Colors.white.withValues(alpha: 0.45),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                         ),
                                       ),
@@ -884,7 +906,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 ],
                               )
                             : Text(
-                                'System Off',
+                                'Lights Off',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.35),
                                   fontSize: 13,
@@ -898,8 +920,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       GestureDetector(
                         onTap: () => setState(() => _adjustmentPanelExpanded = !_adjustmentPanelExpanded),
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: 28,
+                          height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: _adjustmentPanelExpanded
@@ -914,7 +936,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           ),
                           child: Icon(
                             _adjustmentPanelExpanded ? Icons.tune : Icons.tune_outlined,
-                            size: 17,
+                            size: 15,
                             color: _adjustmentPanelExpanded
                                 ? NexGenPalette.cyan
                                 : Colors.white.withValues(alpha: 0.75),
@@ -949,8 +971,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                               }
                             : null,
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: 28,
+                          height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: Colors.white.withValues(alpha: 0.06),
@@ -963,7 +985,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                           ),
                           child: Icon(
                             Icons.power_settings_new,
-                            size: 17,
+                            size: 15,
                             color: isOn
                                 ? Colors.white.withValues(alpha: 0.85)
                                 : Colors.red.withValues(alpha: 0.65),
@@ -974,50 +996,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   ),
 
                   // ── Row 2: Brightness slider ──
-                  const SizedBox(height: 6),
-                  Consumer(builder: (context, ref, _) {
-                    final st = ref.watch(wledStateProvider);
-                    final notifier = ref.read(wledStateProvider.notifier);
-                    return Row(
-                      children: [
-                        Icon(
-                          Icons.brightness_low,
-                          size: 13,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                        Expanded(
-                          child: SliderTheme(
-                            data: Theme.of(context).sliderTheme.copyWith(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                            ),
-                            child: Slider(
-                              value: st.brightness.toDouble(),
-                              min: 0,
-                              max: 255,
-                              onChangeStart: st.connected
-                                  ? (v) async {
-                                      final canProceed = await _checkSyncWarning();
-                                      if (!canProceed && mounted) setState(() {});
-                                    }
-                                  : null,
-                              onChanged: st.connected
-                                  ? (v) => notifier.setBrightness(v.round())
-                                  : null,
-                              activeColor: NexGenPalette.cyan,
-                              inactiveColor: Colors.white.withValues(alpha: 0.15),
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          Icons.brightness_high,
-                          size: 13,
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
-                      ],
-                    );
-                  }),
+                  const SizedBox(height: 4),
+                  _BrightnessSlider(onCheckSyncWarning: _checkSyncWarning),
                 ],
               ),
             ),
@@ -1142,7 +1122,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 showPixelLayout: false,
                                 onCustomized: () {
                                   ref.read(wledStateProvider.notifier).clearLuminaPatternMetadata();
-                                  ref.read(activePresetLabelProvider.notifier).state = 'Custom';
+                                  ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Custom', ref.read(wledStateProvider));
                                 },
                               ),
                               const Divider(height: 24),
@@ -1154,7 +1134,15 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
-                                  onPressed: () => _showSavePatternDialog(context, ref, state),
+                                  // #85 W3 fix: routes to _showSaveCustomDialog (W1 path) →
+                                  // saveCurrentAsDesignProvider → /designs/. The legacy
+                                  // _showSavePatternDialog wrote to /favorites/ which has no
+                                  // My Designs reader; the SnackBar lied "saved" while the
+                                  // design vanished. Both dialogs capture the same
+                                  // wledStateProvider snapshot, so this redirect preserves the
+                                  // user-tweaked state (slider tweaks are device-applied and
+                                  // round-trip through wledStateProvider).
+                                  onPressed: () => _showSaveCustomDialog(context, ref),
                                   icon: const Icon(Icons.save_alt_rounded),
                                   label: const Text('Save As Custom Pattern'),
                                   style: OutlinedButton.styleFrom(
@@ -1177,6 +1165,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
+
   Widget _buildSmartSuggestions(BuildContext context, WidgetRef ref) {
     return SmartSuggestionsList(
       maxSuggestions: 3,
@@ -1189,32 +1178,48 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               final patternName = suggestion.actionData['pattern_name'] as String?;
               if (patternName != null) {
                 final library = ref.read(publicPatternLibraryProvider);
+                if (library.all.isEmpty) return;
                 final pattern = library.all.firstWhere(
                   (p) => p.name.toLowerCase() == patternName.toLowerCase(),
                   orElse: () => library.all.first,
                 );
                 var payload = pattern.toWledPayload();
                 final channels = ref.read(effectiveChannelIdsProvider);
-                if (channels.isNotEmpty) {
-                  payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+                if (channels.isEmpty) {
+                  debugPrint('Suggestion applyPattern: skip (U1 gate)');
+                  return;
                 }
+                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
                 final success = await repo.applyJson(payload);
                 if (success) {
                   try {
                     final preview = _extractPreviewFromPayload(payload);
-                    ref.read(wledStateProvider.notifier).applyLocalPreview(
+                    ref.read(wledStateProvider.notifier).applyPreviewSync(
                       colors: preview.colors,
                       effectId: preview.effectId,
                       speed: preview.speed,
                       intensity: preview.intensity,
                       effectName: patternName,
+                      colorGroupSize: preview.colorGroupSize,
+                      spacing: preview.spacing,
                     );
-                    ref.read(activePresetLabelProvider.notifier).state = patternName;
-                  } catch (_) {}
-                }
-                ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
+                    ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
+                  } catch (e) {
+                    debugPrint('Error in AI suggestion applyPreviewSync: $e');
+                  }
+                  // Only record usage + claim success when the write landed
+                  // (Audit-2 S14 — toast was outside the if(success) block).
+                  ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
+                  }
+                  maybeShowManualApplyOffWarning(ref);
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+                    );
+                  }
                 }
               }
               break;
@@ -1246,8 +1251,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             const SizedBox(height: 10),
           ]),
         ),
-        FavoritesGrid(
-          onPatternTap: (favorite) async {
+        Center(
+          child: FavoritesGrid(
+            onPatternTap: (favorite) async {
             try {
               if (!mounted) return;
               final repo = ref.read(wledRepositoryProvider);
@@ -1255,36 +1261,47 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller connected')));
                 return;
               }
-              debugPrint('Applying favorite: ${favorite.patternName}');
-              debugPrint('Pattern data: ${favorite.patternData}');
               var payload = favorite.patternData;
               final channels = ref.read(effectiveChannelIdsProvider);
-              if (channels.isNotEmpty) {
-                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+              if (channels.isEmpty) {
+                debugPrint('Favorites apply: skip (U1 gate)');
+                return;
               }
+              payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
               final success = await repo.applyJson(payload);
               if (!mounted) return;
               if (success) {
                 try {
                   final preview = _extractPreviewFromPayload(payload);
-                  ref.read(wledStateProvider.notifier).applyLocalPreview(
+                  ref.read(wledStateProvider.notifier).applyPreviewSync(
                     colors: preview.colors,
                     effectId: preview.effectId,
                     speed: preview.speed,
                     intensity: preview.intensity,
                     effectName: favorite.patternName,
+                    colorGroupSize: preview.colorGroupSize,
+                    spacing: preview.spacing,
                   );
-                } catch (_) {}
-                try { ref.read(activePresetLabelProvider.notifier).state = favorite.patternName; } catch (_) {}
-                try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (_) {}
+                } catch (e) {
+                  debugPrint('Error in favorite grid applyPreviewSync: $e');
+                }
+                try { ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(favorite.patternName, ref.read(wledStateProvider)); } catch (e) {
+                  debugPrint('Error in favorite grid set active label: $e');
+                }
+                try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {
+                  debugPrint('Error in favorite grid recordFavoriteUsage: $e');
+                }
                 try {
                   if (mounted) ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
-                } catch (_) {}
+                } catch (e) {
+                  debugPrint('Error in favorite grid trackWledPayload: $e');
+                }
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Applied: ${favorite.patternName}'), backgroundColor: Colors.green.shade700),
+                    SnackBar(content: Text('Applied: ${favorite.displayName}'), backgroundColor: Colors.green.shade700),
                   );
                 }
+                maybeShowManualApplyOffWarning(ref);
               } else {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1301,6 +1318,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               }
             }
           },
+          ),
         ),
       ],
     );
@@ -1331,12 +1349,30 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       }).toList();
       final first = recurring.isNotEmpty ? recurring.first : null;
 
-      final patternName = calEntry?.patternName ??
+      // Route through the slug resolver so snake_case pattern slugs
+      // (e.g. KC_Royals_Game_Day) render as display names, matching every
+      // other surface. calEntry.displayName already calls displayNameFor;
+      // the actionLabel-extracted fallback is wrapped explicitly.
+      final patternName = calEntry?.displayName ??
           (first != null
-              ? (first.actionLabel.contains(':') ? first.actionLabel.split(':').last.trim() : first.actionLabel)
+              ? displayNameFor(first.actionLabel.contains(':')
+                  ? first.actionLabel.split(':').last.trim()
+                  : first.actionLabel)
               : null);
-      final onTime = calEntry?.onTime ?? first?.timeLabel;
-      final offTime = calEntry?.offTime ?? first?.offTimeLabel;
+      // CalendarEntry stores onTime/offTime as 24-hour 'HH:mm' wall-clock
+      // strings; ScheduleItem.timeLabel is already 12-hour 'h:mm AM/PM' or a
+      // 'Sunset'/'Sunrise' token. formatTimeLabel normalises both into the
+      // user's preferred display format (defaults to 12-hour AM/PM) so the
+      // Tonight card no longer surfaces raw "23:10" strings.
+      final timeFormat = ref.watch(timeFormatPreferenceProvider);
+      final rawOnTime = calEntry?.onTime ?? first?.timeLabel;
+      final rawOffTime = calEntry?.offTime ?? first?.offTimeLabel;
+      final onTime = rawOnTime == null
+          ? null
+          : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
+      final offTime = rawOffTime == null
+          ? null
+          : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
       final accentColor = calEntry?.color ?? NexGenPalette.cyan;
 
       final bool hasSchedule = patternName != null || onTime != null;
@@ -1344,7 +1380,14 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: GestureDetector(
-          onTap: () => context.go(AppRoutes.schedule),
+          // Tap → edit the recurring schedule shown here, pre-filled in the
+          // same editor as My Schedules (one write path). When there's no
+          // recurring schedule to edit (empty, or only a one-shot calendar /
+          // Game Day entry, which isn't a ScheduleItem), fall back to the
+          // schedule page to add one.
+          onTap: () => first != null
+              ? showScheduleEditor(context, ref, editing: first)
+              : context.go(AppRoutes.schedule),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -1375,7 +1418,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'TONIGHT',
+                        // Time-aware: morning/afternoon event → TODAY,
+                        // evening/night → TONIGHT (BUG-SCHED-UX-3). Follows the
+                        // shown event's ON time, falling back to now when none.
+                        upcomingScheduleHeaderLabel(rawOnTime, today),
                         style: TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
@@ -1386,7 +1432,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                       const SizedBox(height: 2),
                       Text(
                         hasSchedule
-                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → $offTime' : ''}'
+                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → off at $offTime' : ''}'
                             : 'No schedule — tap to add one',
                         style: TextStyle(
                           fontSize: 13,
@@ -1408,123 +1454,20 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     });
   }
 
-  Future<void> _showSavePatternDialog(BuildContext context, WidgetRef ref, WledStateModel state) async {
-    final nameController = TextEditingController();
-
-    final patternName = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        title: const Text('Save Custom Pattern'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Save the current settings as a new custom pattern that you can apply anytime.',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: nameController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Pattern Name',
-                hintText: 'e.g., My Evening Glow',
-                filled: true,
-                fillColor: Colors.black26,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexGenPalette.line),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: NexGenPalette.cyan),
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final name = nameController.text.trim();
-              if (name.isNotEmpty) Navigator.pop(ctx, name);
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: NexGenPalette.cyan,
-              foregroundColor: Colors.black,
-            ),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (patternName == null || patternName.isEmpty) return;
-
-    final c = state.color;
-    final payload = {
-      'on': true,
-      'bri': state.brightness,
-      'seg': [
-        {
-          'fx': state.effectId,
-          'sx': state.speed,
-          'ix': state.intensity,
-          'pal': 0,
-          'col': [[
-            (c.r * 255.0).round().clamp(0, 255),
-            (c.g * 255.0).round().clamp(0, 255),
-            (c.b * 255.0).round().clamp(0, 255),
-            state.warmWhite,
-          ]],
-        }
-      ],
-    };
-
-    try {
-      final patternId = 'custom_${DateTime.now().millisecondsSinceEpoch}';
-      await ref.read(favoritesNotifierProvider.notifier).addFavorite(
-        patternId: patternId,
-        patternName: patternName,
-        patternData: payload,
-        autoAdded: false,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Pattern "$patternName" saved to favorites'), backgroundColor: Colors.green.shade700),
-        );
-        setState(() => _adjustmentPanelExpanded = false);
-      }
-    } catch (e) {
-      debugPrint('Failed to save pattern: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save pattern: $e'), backgroundColor: Colors.red.shade700),
-        );
-      }
-    }
-  }
-
   static _SkyTheme _getSkyTheme(DateTime now) {
     final hour = now.hour;
     final minuteFraction = now.minute / 59.0;
 
     // Define time slot boundaries and their themes
     final slots = <_SkySlot>[
-      _SkySlot(0, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
-      _SkySlot(5, [const Color(0xFF1A0533), const Color(0xFF8B3A62), const Color(0xFFE8855A)], 0.75, 'Dawn'),
-      _SkySlot(7, [const Color(0xFF1A6BAD), const Color(0xFF7EC8E3), const Color(0xFFFFD89B)], 0.55, 'Morning'),
-      _SkySlot(10, [const Color(0xFF2980B9), const Color(0xFF87CEEB)], 0.35, 'Midday'),
-      _SkySlot(15, [const Color(0xFF1A6BAD), const Color(0xFFFFB347)], 0.50, 'Afternoon'),
-      _SkySlot(18, [const Color(0xFFFF6B35), const Color(0xFFFF4500), const Color(0xFF8B1A8B)], 0.72, 'Sunset'),
-      _SkySlot(20, [const Color(0xFF2C1654), const Color(0xFF0D0D2B)], 0.85, 'Dusk'),
-      _SkySlot(22, [const Color(0xFF000000), const Color(0xFF020818)], 0.92, 'Night'),
+      _SkySlot(0, [const Color(0xFF000000), const Color(0xFF020818)], 0.22, 'Night'),
+      _SkySlot(5, [const Color(0xFF1A0533), const Color(0xFF8B3A62), const Color(0xFFE8855A)], 0.18, 'Dawn'),
+      _SkySlot(7, [const Color(0xFF1A6BAD), const Color(0xFF7EC8E3), const Color(0xFFFFD89B)], 0.10, 'Morning'),
+      _SkySlot(10, [const Color(0xFF2980B9), const Color(0xFF87CEEB)], 0.00, 'Midday'),
+      _SkySlot(15, [const Color(0xFF1A6BAD), const Color(0xFFFFB347)], 0.08, 'Afternoon'),
+      _SkySlot(18, [const Color(0xFFFF6B35), const Color(0xFFFF4500), const Color(0xFF8B1A8B)], 0.18, 'Sunset'),
+      _SkySlot(20, [const Color(0xFF2C1654), const Color(0xFF0D0D2B)], 0.20, 'Dusk'),
+      _SkySlot(22, [const Color(0xFF000000), const Color(0xFF020818)], 0.22, 'Night'),
     ];
 
     // Find current and next slot
@@ -1567,95 +1510,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   }
 }
 
-/// A single frosted preset chip for the hero overlay.
-class _PresetChip extends StatelessWidget {
-  final FavoritePattern favorite;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _PresetChip({
-    required this.favorite,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primaryColor = _extractPrimaryColor();
-
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF080C18).withValues(alpha: 0.60),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isActive
-                    ? Colors.white.withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: 0.12),
-                width: 0.5,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: primaryColor,
-                    boxShadow: [
-                      BoxShadow(color: primaryColor.withValues(alpha: 0.6), blurRadius: 5),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 7),
-                Text(
-                  favorite.patternName,
-                  style: TextStyle(
-                    color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.75),
-                    fontSize: 11,
-                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _extractPrimaryColor() {
-    try {
-      final seg = favorite.patternData['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final col = (seg[0] as Map)['col'];
-        if (col is List && col.isNotEmpty) {
-          final c = col[0];
-          if (c is List && c.length >= 3) {
-            return Color.fromARGB(
-              255,
-              (c[0] as num).toInt().clamp(0, 255),
-              (c[1] as num).toInt().clamp(0, 255),
-              (c[2] as num).toInt().clamp(0, 255),
-            );
-          }
-        }
-      }
-    } catch (_) {}
-    return NexGenPalette.cyan;
-  }
-}
-
-/// Animated sky gradient overlay that fades from top to vertical midpoint.
-/// Uses AnimatedContainer with a 90-second duration so transitions are very gradual.
+/// Flat uniform color wash representing the sky tint for the current
+/// time of day. No gradient — a single color with low opacity is applied
+/// evenly across the image, so the tint reads as ambient atmosphere
+/// rather than a vignette.
+///
+/// Transitions between time slots use AnimatedContainer's 90-second
+/// tween so the sky shift is gradual and imperceptible during use.
 class _SkyGradientOverlay extends StatelessWidget {
   final _SkyTheme skyTheme;
 
@@ -1663,29 +1524,17 @@ class _SkyGradientOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final overlayColors = skyTheme.skyColors
-        .map((c) => c.withValues(alpha: skyTheme.overlayOpacity))
-        .toList();
-
-    // Build stops: evenly distribute sky colors, then end with transparent at 1.0
-    final totalStops = overlayColors.length + 1;
-    final stops = <double>[
-      for (int i = 0; i < overlayColors.length; i++)
-        i / (totalStops - 1),
-      1.0,
-    ];
+    // Use the dominant (first) sky color at the slot's opacity.
+    // If a slot ever has zero colors, fall back to transparent.
+    final baseColor = skyTheme.skyColors.isNotEmpty
+        ? skyTheme.skyColors.first
+        : Colors.transparent;
+    final washColor = baseColor.withValues(alpha: skyTheme.overlayOpacity);
 
     return AnimatedContainer(
       duration: const Duration(seconds: 90),
       curve: Curves.linear,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.center,
-          colors: [...overlayColors, Colors.transparent],
-          stops: stops,
-        ),
-      ),
+      color: washColor,
     );
   }
 }
@@ -1781,10 +1630,21 @@ class _FeatureButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _FeatureButton({required this.icon, required this.label, required this.onTap});
+  /// When non-null, replaces the default solid background with a gradient
+  /// fill. Used by the Game Day button to surface active ephemeral session
+  /// state with the team's primary→secondary colors (Item #51 Prompt 4).
+  final Gradient? gradient;
+
+  const _FeatureButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.gradient,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasGradient = gradient != null;
     return Expanded(
       child: Material(
         color: Colors.transparent,
@@ -1794,22 +1654,35 @@ class _FeatureButton extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
             decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              color: hasGradient
+                  ? null
+                  : NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+              gradient: gradient,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
+              border: Border.all(
+                color: hasGradient
+                    ? Colors.white.withValues(alpha: 0.25)
+                    : NexGenPalette.cyan.withValues(alpha: 0.25),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 20, color: NexGenPalette.cyan),
+                Icon(
+                  icon,
+                  size: 20,
+                  color: hasGradient ? Colors.white : NexGenPalette.cyan,
+                ),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: NexGenPalette.textPrimary,
+                      color: hasGradient
+                          ? Colors.white
+                          : NexGenPalette.textPrimary,
                       letterSpacing: 0.3,
                     ),
                     maxLines: 1,
@@ -1821,6 +1694,107 @@ class _FeatureButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Brightness slider with a 200ms debounce on the network publish.
+///
+/// Mirrors widgets/pattern_adjustment_panel.dart:182,217-221,256-258
+/// (same `Timer? _debounce` field, same cancel-on-dispose discipline,
+/// same 200ms window) so rapid drag ticks coalesce to a single
+/// setBrightness call once the user pauses or releases.
+///
+/// In-drag tracking: a local `_pendingBrightness` holds the gesture's
+/// current value so the slider thumb visually follows the finger without
+/// each tick triggering a network write. `onChangeEnd` cancels the
+/// debounce and publishes immediately so the final value lands the
+/// instant the user lifts. Falls back to the notifier's `st.brightness`
+/// when no drag is in flight.
+class _BrightnessSlider extends ConsumerStatefulWidget {
+  const _BrightnessSlider({required this.onCheckSyncWarning});
+
+  final Future<bool> Function() onCheckSyncWarning;
+
+  @override
+  ConsumerState<_BrightnessSlider> createState() => _BrightnessSliderState();
+}
+
+class _BrightnessSliderState extends ConsumerState<_BrightnessSlider> {
+  Timer? _debounce;
+  int? _pendingBrightness;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _publish(int value) {
+    _debounce?.cancel();
+    ref.read(wledStateProvider.notifier).setBrightness(value);
+    if (mounted) setState(() => _pendingBrightness = null);
+  }
+
+  void _scheduleDebouncedPublish(int value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      _publish(value);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = ref.watch(wledStateProvider);
+    final displayValue = (_pendingBrightness ?? st.brightness)
+        .toDouble()
+        .clamp(0.0, 255.0);
+    return Row(
+      children: [
+        Icon(
+          Icons.brightness_low,
+          size: 13,
+          color: Colors.white.withValues(alpha: 0.35),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: Theme.of(context).sliderTheme.copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                ),
+            child: Slider(
+              value: displayValue,
+              min: 0,
+              max: 255,
+              onChangeStart: st.connected
+                  ? (v) async {
+                      final canProceed = await widget.onCheckSyncWarning();
+                      if (!canProceed && mounted) setState(() {});
+                    }
+                  : null,
+              onChanged: st.connected
+                  ? (v) {
+                      final rounded = v.round();
+                      setState(() => _pendingBrightness = rounded);
+                      _scheduleDebouncedPublish(rounded);
+                    }
+                  : null,
+              onChangeEnd: st.connected
+                  ? (v) => _publish(v.round())
+                  : null,
+              activeColor: NexGenPalette.cyan,
+              inactiveColor: Colors.white.withValues(alpha: 0.15),
+            ),
+          ),
+        ),
+        Icon(
+          Icons.brightness_high,
+          size: 13,
+          color: Colors.white.withValues(alpha: 0.35),
+        ),
+      ],
     );
   }
 }

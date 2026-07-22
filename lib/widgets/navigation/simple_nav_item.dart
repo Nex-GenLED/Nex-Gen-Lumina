@@ -26,7 +26,7 @@ class SimpleNavItem extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         decoration: BoxDecoration(
-          color: active ? selected.withOpacity(0.15) : Colors.transparent,
+          color: active ? selected.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(

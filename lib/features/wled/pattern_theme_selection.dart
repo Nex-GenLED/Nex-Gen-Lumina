@@ -1,12 +1,15 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
-import 'package:nexgen_command/features/patterns/canonical_palettes.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
@@ -21,6 +24,10 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/design/apply_saved_design.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets
@@ -128,7 +135,7 @@ class ThemeSelectionScreen extends ConsumerWidget {
                             const SizedBox(height: 12),
                             Expanded(
                               child: GridView.builder(
-                                padding: EdgeInsets.only(bottom: kBottomNavBarPadding),
+                                padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
                                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: 3,
                                   crossAxisSpacing: 10,
@@ -165,122 +172,6 @@ class ThemeSelectionScreen extends ConsumerWidget {
   }
 }
 
-class _PaletteTile extends StatelessWidget {
-  final Color color;
-  final VoidCallback onTap;
-  const _PaletteTile({required this.color, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      child: Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: NexGenPalette.line),
-        ),
-      ),
-    );
-  }
-}
-
-class _StyleVariationChips extends StatelessWidget {
-  final ThemeStyle currentStyle;
-  final ValueChanged<ThemeStyle> onStyleSelected;
-  const _StyleVariationChips({required this.currentStyle, required this.onStyleSelected});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.tune, color: NexGenPalette.cyan, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              'Style Variations',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(color: NexGenPalette.textMedium),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: ThemeStyle.values.map((style) => _StyleChip(
-            style: style,
-            isSelected: style == currentStyle,
-            onTap: () => onStyleSelected(style),
-          )).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _StyleChip extends StatelessWidget {
-  final ThemeStyle style;
-  final bool isSelected;
-  final VoidCallback onTap;
-  const _StyleChip({required this.style, required this.isSelected, required this.onTap});
-
-  IconData _iconForStyle(ThemeStyle style) {
-    switch (style) {
-      case ThemeStyle.classic:  return Icons.auto_awesome;
-      case ThemeStyle.subtle:   return Icons.contrast;
-      case ThemeStyle.bold:     return Icons.wb_sunny;
-      case ThemeStyle.vintage:  return Icons.filter_vintage;
-      case ThemeStyle.modern:   return Icons.architecture;
-      case ThemeStyle.playful:  return Icons.celebration;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          constraints: const BoxConstraints(minHeight: 36),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? NexGenPalette.cyan.withValues(alpha: 0.2) : NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
-              width: isSelected ? 1.5 : 1,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_iconForStyle(style), size: 16, color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium),
-              const SizedBox(width: 6),
-              Text(
-                style.displayName,
-                style: TextStyle(
-                  color: isSelected ? NexGenPalette.textHigh : NexGenPalette.textMedium,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ============================================================================
 // LIBRARY BROWSER SCREEN
 // ============================================================================
@@ -291,7 +182,23 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
   final Color? parentAccent;
   final List<Color>? parentGradient;
 
-  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient});
+  /// When non-null, the picker is operating in Game Day mode. Tapping
+  /// a design will both apply it via WLED and persist it to the
+  /// GameDayAutopilotConfig for [teamSlug] via the saveDesign method
+  /// on gameDayAutopilotNotifierProvider. When null, the picker is
+  /// operating as a general library browser (Explore mount) and design
+  /// taps only apply to lights without persisting to any Game Day
+  /// config.
+  final String? teamSlug;
+
+  /// When non-null, the browser is in SELECTION mode (e.g. the schedule
+  /// pattern picker): tapping a saved design or committing a catalog design
+  /// RETURNS it via this callback instead of applying to lights / Game Day.
+  /// Threaded to the leaf ([ColorwayEffectSelectorPage]) and, for drill-down,
+  /// to [LibraryNodeGrid] exactly like [teamSlug]. Null == normal browse.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
 
   @override
   ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
@@ -299,16 +206,98 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
 
 class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   bool _isPaletteView = false;
-  double _scrollOffset = 0.0;
+
+  /// One-shot guard so the saved-design intercept fires its post-frame apply
+  /// + pop exactly once per mount. Without this, rebuilds during the async
+  /// apply would re-schedule the callback and stack snackbars / double-pop.
+  bool _savedDesignApplyKicked = false;
 
   @override
   void dispose() {
     if (_isPaletteView) {
+      // Reset mood filter when leaving a palette view. The microtask
+      // defers the state mutation past dispose() to avoid modifying
+      // providers during the dispose tree (downstream rebuilds mid-
+      // teardown). But the microtask body must NOT touch `ref` — by the
+      // time it runs the widget is gone and `ref` is dead, throwing
+      // "Cannot use ref after the widget was disposed" (StateError —
+      // observed as #84 save-design crash, /debug_errors/ doc
+      // NxZSc4Xlo5iAalrPYMuf). Capture the notifier here (while `ref`
+      // is valid); the notifier itself is owned by Riverpod's
+      // ProviderContainer, independent of this widget's lifecycle, so
+      // mutating it from the microtask is safe.
+      final notifier = ref.read(selectedMoodFilterProvider.notifier);
       Future.microtask(() {
-        ref.read(selectedMoodFilterProvider.notifier).state = null;
+        notifier.state = null;
       });
     }
     super.dispose();
+  }
+
+  /// Helper invoked from the saved-design intercept's post-frame callback.
+  /// Resolves the saved design from the designs stream, runs the canonical
+  /// apply, and pops back to the My Designs grid. Pops even on resolve
+  /// failure so the user isn't stranded on the spinner screen.
+  Future<void> _applySavedDesignAndPop(String? designId) async {
+    if (!mounted) return;
+    if (designId == null || designId.isEmpty) {
+      if (mounted && context.canPop()) context.pop();
+      return;
+    }
+    final designs = ref.read(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    if (match == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Design not found')),
+        );
+        if (context.canPop()) context.pop();
+      }
+      return;
+    }
+    await applySavedDesign(context, ref, match);
+    if (mounted && context.canPop()) context.pop();
+  }
+
+  /// Selection-mode counterpart of [_applySavedDesignAndPop]: resolve the saved
+  /// design and hand it back via [LibraryBrowserScreen.onDesignSelected] (its
+  /// RAW payload) WITHOUT applying it. The callback owns dismissing the picker.
+  void _returnSavedDesignSelection(String? designId) {
+    if (!mounted) return;
+    final cb = widget.onDesignSelected;
+    if (cb == null) return;
+    if (designId == null || designId.isEmpty) {
+      if (context.canPop()) context.pop();
+      return;
+    }
+    final designs =
+        ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    if (match == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Design not found')),
+      );
+      if (context.canPop()) context.pop();
+      return;
+    }
+    cb(LibraryDesignSelection(
+      id: match.id,
+      name: match.name,
+      wledPayload: match.toWledPayload(),
+    ));
   }
 
   @override
@@ -382,26 +371,73 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                 data: (children) {
                   return nodeAsync.when(
                     data: (node) {
+                      // Saved-design intercept (#62): when the resolved
+                      // node carries the `isSavedDesign` metadata flag, do
+                      // NOT route through ColorwayEffectSelectorPage —
+                      // saved designs are already fully-configured payloads
+                      // and don't need a palette/effect tuner. Apply the
+                      // design directly via the canonical 6-step routine,
+                      // then pop back to the My Designs grid.
+                      if (node != null &&
+                          node.metadata?['isSavedDesign'] == true) {
+                        if (!_savedDesignApplyKicked) {
+                          _savedDesignApplyKicked = true;
+                          final designId =
+                              node.metadata?['sourceDesignId'] as String?;
+                          WidgetsBinding.instance.addPostFrameCallback((_) async {
+                            // Selection mode: RETURN the saved design instead of
+                            // applying it. Same raw-payload contract as catalog.
+                            if (widget.onDesignSelected != null) {
+                              _returnSavedDesignSelection(designId);
+                            } else {
+                              await _applySavedDesignAndPop(designId);
+                            }
+                          });
+                        }
+                        return const Center(
+                            child: CircularProgressIndicator());
+                      }
                       if (node != null && node.isPalette) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && !_isPaletteView) {
                             setState(() => _isPaletteView = true);
                           }
                         });
-                        return ColorwayEffectSelectorPage(paletteNode: node);
+                        return ColorwayEffectSelectorPage(
+                          paletteNode: node,
+                          teamSlug: widget.teamSlug,
+                          onDesignSelected: widget.onDesignSelected,
+                        );
                       }
                       if (widget.nodeId == LibraryCategoryIds.architectural) {
                         return Column(
                           children: [
                             const _KelvinReferenceChart(),
-                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient)),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected)),
                           ],
                         );
                       }
-                      return LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient);
+                      return LibraryNodeGrid(
+                        children: children,
+                        parentAccent: widget.parentAccent,
+                        parentGradient: widget.parentGradient,
+                        teamSlug: widget.teamSlug,
+                        onDesignSelected: widget.onDesignSelected,
+                        // #85 companion: meaningful empty-state when the My
+                        // Designs surface is reached but no designs exist yet.
+                        // The surface is always rendered (no longer gated on
+                        // designs.isNotEmpty) so the user sees the category
+                        // and the next-step guidance, not a missing folder.
+                        emptyMessage: widget.nodeId == kMyDesignsCategoryId
+                            ? 'No saved designs yet.\n\nFrom the dashboard, '
+                                'tap Now Playing → "Save Custom" or use '
+                                '"Save As Custom Pattern" on the adjustment '
+                                'panel to save a design.'
+                            : null,
+                      );
                     },
                     loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient),
+                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected),
                   );
                 },
                 loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
@@ -526,17 +562,15 @@ class _KelvinReferenceChart extends StatelessWidget {
 class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
-  const _CompactPatternItemCard({required this.item, required this.themeColors});
-
-  static int _getColorSlotsForEffect(int effectId) {
-    const autoColorEffects = {
-      4, 5, 7, 8, 9, 14, 19, 24, 26, 29, 30, 32, 33, 34, 35, 36, 38, 45, 63, 66, 88,
-      94, 99, 101, 104, 116, 117, 39, 42, 43, 61, 64, 65, 67, 68, 69, 70, 71, 72, 73,
-      74, 75, 79, 80, 81, 89, 90, 92, 93, 97, 105, 106, 107, 108, 109, 110, 115, 128,
-    };
-    if (autoColorEffects.contains(effectId)) return 0;
-    return 3;
-  }
+  /// Defensive Game Day plumbing. Currently unreachable in Game Day —
+  /// _CompactPatternItemCard is private and only constructed by
+  /// ThemeSelectionScreen, which is itself Explore-only. The parameter
+  /// is kept in place so if a future Game Day flow routes through this
+  /// card (e.g. a team-themed sub-category surface), saveDesign already
+  /// fires from _handleTap / _applyWithColor without further changes.
+  final String? teamSlug;
+  // ignore: unused_element_parameter
+  const _CompactPatternItemCard({required this.item, required this.themeColors, this.teamSlug});
 
   static String _effectDisplayName(int effectId) {
     const names = {
@@ -559,7 +593,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
           if (sx is num) return sx.toDouble();
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in ThemePatternCard _speedFromPayload: $e');
+    }
     return 128;
   }
 
@@ -586,7 +622,9 @@ class _CompactPatternItemCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in ThemePatternCard _colorsFromPayload: $e');
+    }
     return const [Colors.white];
   }
 
@@ -700,13 +738,65 @@ class _CompactPatternItemCard extends ConsumerWidget {
     try {
       var payload = Map<String, dynamic>.from(item.wledPayload);
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      if (channels.isEmpty) {
+        debugPrint('PatternThemeSelection apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      // applyJson returns false (does NOT throw) on a device-write failure.
+      // Gate EVERYTHING downstream on it — label, local state, AND the Game
+      // Day persist — so we never persist/label a design the lights aren't
+      // actually showing (Audit-2 S9, the worst case: persist-on-failure).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern')),
+          );
+        }
+        return;
+      }
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       _updateLocalState(ref);
+
+      // Game Day persistence — when teamSlug is set, this picker is
+      // operating as a Game Day design picker, so persist the choice
+      // to the team's GameDayAutopilotConfig via the existing
+      // saveDesign provider method. The Firestore write triggers a
+      // stream emission on gameDayAutopilotConfigsProvider which
+      // rebuilds gameDayTeamsProvider and refreshes the Game Day card.
+      if (teamSlug != null) {
+        try {
+          final seg = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
+              ? (payload['seg'] as List).first as Map
+              : <String, dynamic>{};
+          final effectId = (seg['fx'] as num?)?.toInt() ?? 0;
+          final speed = (seg['sx'] as num?)?.toInt() ?? 128;
+          final intensity = (seg['ix'] as num?)?.toInt() ?? 128;
+          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
+
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: teamSlug!,
+                designName: item.name,
+                wledPayload: payload,
+                effectId: effectId,
+                speed: speed,
+                intensity: intensity,
+                brightness: brightness,
+              );
+        } catch (e, st) {
+          debugPrint('[GameDayPicker] saveDesign failed: $e\n$st');
+          // Non-fatal — the lights are already showing the design.
+          // The card label just won't refresh until next pick.
+        }
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply pattern failed: $e');
       if (context.mounted) {
@@ -716,19 +806,18 @@ class _CompactPatternItemCard extends ConsumerWidget {
   }
 
   void _updateLocalState(WidgetRef ref) {
-    final notifier = ref.read(wledStateProvider.notifier);
     final bri = item.wledPayload['bri'];
-    if (bri is int) notifier.setBrightness(bri);
+    if (bri is int) ref.read(wledStateProvider.notifier).setBrightness(bri);
     final seg = item.wledPayload['seg'];
     if (seg is List && seg.isNotEmpty && seg.first is Map) {
       final s0 = seg.first as Map;
       final sx = s0['sx'];
-      if (sx is int) notifier.setSpeed(sx);
+      if (sx is int) ref.read(wledStateProvider.notifier).setSpeed(sx);
       final col = s0['col'];
       if (col is List && col.isNotEmpty && col.first is List) {
         final c = col.first as List;
         if (c.length >= 3) {
-          notifier.setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
+          ref.read(wledStateProvider.notifier).setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
         }
       }
     }
@@ -752,12 +841,55 @@ class _CompactPatternItemCard extends ConsumerWidget {
         payload['seg'] = [s0];
       }
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
+      if (channels.isEmpty) {
+        debugPrint('PatternThemeSelection color apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      // Gate label AND Game Day persist on the write result — don't persist a
+      // design the device rejected (Audit-2 S9, solid-color variant).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern')),
+          );
+        }
+        return;
+      }
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
+
+      // Game Day persistence — see _handleTap for full rationale.
+      if (teamSlug != null) {
+        try {
+          final segPersist = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
+              ? (payload['seg'] as List).first as Map
+              : <String, dynamic>{};
+          final effectId = (segPersist['fx'] as num?)?.toInt() ?? 0;
+          final speed = (segPersist['sx'] as num?)?.toInt() ?? 128;
+          final intensity = (segPersist['ix'] as num?)?.toInt() ?? 128;
+          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
+
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: teamSlug!,
+                designName: item.name,
+                wledPayload: payload,
+                effectId: effectId,
+                speed: speed,
+                intensity: intensity,
+                brightness: brightness,
+              );
+        } catch (e, st) {
+          debugPrint('[GameDayPicker] saveDesign failed (with color): $e\n$st');
+        }
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply with color failed: $e');
       if (context.mounted) {
@@ -774,7 +906,7 @@ class _SolidColorPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + navBarTotalHeight(context)),
       decoration: BoxDecoration(
         color: NexGenPalette.gunmetal90,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -998,22 +1130,54 @@ class _EffectPainter extends CustomPainter {
     }
   }
 
+  // Render category derived from the single authoritative effect-id → category
+  // map ([WledEffectsCatalog]) shared by every preview surface (#6). The old
+  // hardcoded id switch disagreed with canonical WLED — e.g. it mislabeled id
+  // 54 ("Chase 3") as fire and id 37 ("Chase 2") as twinkle — so the same
+  // effect previewed differently here than on the roofline / tile.
   _ET get _effectType {
-    switch (effectId) {
-      case 0: return _ET.solid;
-      case 1: case 2: return _ET.breathing;
-      case 3: case 4: return _ET.wipe;
-      case 6: case 10: case 11: case 13: case 14: return _ET.scan;
-      case 12: case 18: return _ET.fade;
-      case 22: case 23: case 24: case 25: case 41: case 42: return _ET.running;
-      case 43: case 44: return _ET.theater;
-      case 37: case 46: case 47: return _ET.twinkle;
-      case 51: case 63: case 65: return _ET.gradient;
-      case 49: case 54: case 74: case 75: return _ET.fire;
-      case 78: case 108: case 109: return _ET.meteor;
-      case 52: case 67: case 70: case 73: return _ET.wave;
-      case 76: case 77: case 120: case 121: return _ET.sparkle;
-      default: return _ET.chase;
+    final effect = WledEffectsCatalog.getById(effectId);
+    if (effect == null) return _ET.chase;
+    switch (effect.category) {
+      case 'Basic':
+        if (effectId == 2 ||
+            effectId == 56 ||
+            effectId == 86 ||
+            effectId == 100) {
+          return _ET.breathing;
+        }
+        if (effectId == 12 || effectId == 18) return _ET.fade;
+        return _ET.solid;
+      case 'Wipe':
+        return _ET.wipe;
+      case 'Chase':
+        return _ET.chase;
+      case 'Meteor':
+        return _ET.meteor;
+      case 'Scanner':
+        return _ET.scan;
+      case 'Sparkle':
+        return _ET.sparkle;
+      case 'Holiday':
+        return _ET.twinkle;
+      case 'Fire':
+        return _ET.fire;
+      case 'Fireworks':
+        return _ET.sparkle;
+      case 'Ripple':
+      case 'Ambient':
+      case 'Noise':
+        return _ET.wave;
+      case 'Rainbow':
+        return _ET.gradient;
+      case 'Strobe':
+        return _ET.breathing;
+      case 'Game':
+        return _ET.running;
+      case '2D':
+      case 'Audio':
+      default:
+        return _ET.chase;
     }
   }
 

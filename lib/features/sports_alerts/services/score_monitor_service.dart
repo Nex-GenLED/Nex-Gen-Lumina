@@ -7,12 +7,27 @@ import '../models/score_alert_event.dart';
 import '../models/sport_type.dart';
 import 'espn_api_service.dart';
 
+/// The consumed surface of the score diff engine — the parts the foreground
+/// celebration coordinator depends on. Extracted so the coordinator can be
+/// unit-tested with a fake monitor (no ESPN, no network).
+abstract interface class ScoreMonitor {
+  /// Emits a [ScoreAlertEvent] each time a tracked team scores (post-baseline).
+  Stream<ScoreAlertEvent> get alertStream;
+
+  /// Run one polling cycle for [activeConfigs]. The first observation of a game
+  /// baselines silently (no emit); only subsequent deltas emit.
+  Future<void> checkScores(List<ScoreAlertConfig> activeConfigs);
+
+  /// Clear all cached baselines/dedup state (logout / teardown).
+  void reset();
+}
+
 /// Core diff engine that detects scoring events by comparing consecutive
 /// ESPN polling snapshots.
 ///
 /// Maintains an internal cache of last-known [GameState] per game and emits
 /// [ScoreAlertEvent]s on [alertStream] when a user's team scores.
-class ScoreMonitorService {
+class ScoreMonitorService implements ScoreMonitor {
   ScoreMonitorService({EspnApiService? espnApi})
       : _espnApi = espnApi ?? EspnApiService();
 
@@ -23,6 +38,19 @@ class ScoreMonitorService {
 
   /// De-duplication keys: "gameId|homeScore|awayScore|eventType".
   final Set<String> _emittedKeys = {};
+
+  /// Last celebration timestamp keyed by "teamSlug|gameId". Used to enforce
+  /// per-sport cooldowns for high-frequency scoring leagues (basketball).
+  final Map<String, DateTime> _lastCelebrationAt = {};
+
+  /// Minimum gap between celebration emissions for a single team in a
+  /// single game. Basketball sports fire frequently so we throttle them;
+  /// other sports are rare enough that the dedup key alone is sufficient.
+  static Duration _celebrationCooldown(SportType sport) => switch (sport) {
+        SportType.nba || SportType.wnba || SportType.ncaaMB =>
+          const Duration(seconds: 30),
+        _ => Duration.zero,
+      };
 
   final StreamController<ScoreAlertEvent> _alertController =
       StreamController<ScoreAlertEvent>.broadcast();
@@ -58,6 +86,23 @@ class ScoreMonitorService {
   void reset() {
     _gameStateCache.clear();
     _emittedKeys.clear();
+    _lastCelebrationAt.clear();
+  }
+
+  /// True when this team+game has emitted a celebration within the sport's
+  /// cooldown window. Zero-duration cooldowns always return false.
+  bool _isOnCooldown(ScoreAlertEvent event, GameState game) {
+    final cooldown = _celebrationCooldown(event.sport);
+    if (cooldown == Duration.zero) return false;
+    final key = '${event.teamSlug}|${game.gameId}';
+    final last = _lastCelebrationAt[key];
+    if (last == null) return false;
+    return event.timestamp.difference(last) < cooldown;
+  }
+
+  void _markEmitted(ScoreAlertEvent event, GameState game) {
+    if (_celebrationCooldown(event.sport) == Duration.zero) return;
+    _lastCelebrationAt['${event.teamSlug}|${game.gameId}'] = event.timestamp;
   }
 
   /// Release resources.
@@ -95,7 +140,9 @@ class ScoreMonitorService {
         for (final event in events) {
           final dedupKey = _dedupKey(event, game);
           if (_emittedKeys.contains(dedupKey)) continue;
+          if (_isOnCooldown(event, game)) continue;
           _emittedKeys.add(dedupKey);
+          _markEmitted(event, game);
           _alertController.add(event);
         }
       }
@@ -107,6 +154,8 @@ class ScoreMonitorService {
       if (game.status == GameStatus.final_) {
         _gameStateCache.remove(game.gameId);
         _emittedKeys.removeWhere((k) => k.startsWith('${game.gameId}|'));
+        _lastCelebrationAt
+            .removeWhere((k, _) => k.endsWith('|${game.gameId}'));
       }
     }
   }
@@ -168,6 +217,7 @@ class ScoreMonitorService {
         events.addAll(_diffNfl(delta, config, current, now));
 
       case SportType.nba:
+      case SportType.wnba:
         events.addAll(
           _diffNba(delta, config, current, now, previous),
         );
@@ -182,14 +232,37 @@ class ScoreMonitorService {
           timestamp: now,
         ));
 
+      case SportType.ncaaFB:
+        events.addAll(_diffNcaaFB(delta, config, current, now));
+
+      case SportType.ncaaMB:
+        events.addAll(
+          _diffNcaaMB(delta, config, current, now, previous),
+        );
+
       case SportType.nhl:
-      case SportType.mls:
-        // Goals come in +1 increments; emit one event per goal.
+        // Hockey goals: +1 increments, use goal event (15s animation).
         for (var i = 0; i < delta; i++) {
           events.add(ScoreAlertEvent(
             teamSlug: config.teamSlug,
             sport: config.sport,
             eventType: AlertEventType.goal,
+            pointsScored: 1,
+            gameId: current.gameId,
+            timestamp: now,
+          ));
+        }
+
+      case SportType.mls:
+      case SportType.nwsl:
+      case SportType.fifa:
+      case SportType.championsLeague:
+        // Soccer goals: +1 increments, use soccerGoal event (20s animation).
+        for (var i = 0; i < delta; i++) {
+          events.add(ScoreAlertEvent(
+            teamSlug: config.teamSlug,
+            sport: config.sport,
+            eventType: AlertEventType.soccerGoal,
             pointsScored: 1,
             gameId: current.gameId,
             timestamp: now,
@@ -260,6 +333,62 @@ class ScoreMonitorService {
     ];
   }
 
+  /// NCAA FBS Football: reuse NFL scoring logic (same TD/FG/safety patterns).
+  List<ScoreAlertEvent> _diffNcaaFB(
+    int delta,
+    ScoreAlertConfig config,
+    GameState current,
+    DateTime now,
+  ) {
+    final AlertEventType type;
+    switch (delta) {
+      case 3:
+        type = AlertEventType.fieldGoal;
+      case 2:
+        type = AlertEventType.safety;
+      case 6:
+      case 8: // TD + 2-pt conversion
+      case 7: // TD + extra point (rare single-poll jump)
+        type = AlertEventType.touchdown;
+      default:
+        type = AlertEventType.touchdown;
+    }
+
+    return [
+      ScoreAlertEvent(
+        teamSlug: config.teamSlug,
+        sport: config.sport,
+        eventType: type,
+        pointsScored: delta,
+        gameId: current.gameId,
+        timestamp: now,
+      ),
+    ];
+  }
+
+  /// NCAA D1 Men's Basketball: emit only during clutch time
+  /// (last 5 min of 2nd half or OT, margin ≤8).
+  List<ScoreAlertEvent> _diffNcaaMB(
+    int delta,
+    ScoreAlertConfig config,
+    GameState current,
+    DateTime now,
+    GameState previous,
+  ) {
+    if (!current.isCollegeBasketballClutchTime) return const [];
+
+    return [
+      ScoreAlertEvent(
+        teamSlug: config.teamSlug,
+        sport: config.sport,
+        eventType: AlertEventType.clutchBasket,
+        pointsScored: delta,
+        gameId: current.gameId,
+        timestamp: now,
+      ),
+    ];
+  }
+
   // ---------------------------------------------------------------------------
   // Sensitivity filter
   // ---------------------------------------------------------------------------
@@ -279,13 +408,16 @@ class ScoreMonitorService {
           // in non-clutch contexts, but we keep them as they're still notable).
           return e.eventType == AlertEventType.touchdown ||
               e.eventType == AlertEventType.goal ||
+              e.eventType == AlertEventType.soccerGoal ||
               e.eventType == AlertEventType.run ||
               e.eventType == AlertEventType.clutchBasket ||
               e.eventType == AlertEventType.quarterEndWinning;
 
         case AlertSensitivity.clutchOnly:
           // Only emit if the game is in a clutch situation.
+          // Supports both NBA and NCAA basketball clutch time.
           return current.isClutchTime ||
+              current.isCollegeBasketballClutchTime ||
               e.eventType == AlertEventType.quarterEndWinning;
 
         case AlertSensitivity.allEvents:

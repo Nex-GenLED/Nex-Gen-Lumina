@@ -298,10 +298,9 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
     );
 
     if (confirm == true) {
-      final notifier = ref.read(rooflineConfigEditorProvider.notifier);
-      notifier.removeSegment(segment.id);
+      ref.read(rooflineConfigEditorProvider.notifier).removeSegment(segment.id);
       // Auto-save deletion to Firestore so it persists across reinstalls.
-      final ok = await notifier.save();
+      final ok = await ref.read(rooflineConfigEditorProvider.notifier).save();
       if (mounted && !ok) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

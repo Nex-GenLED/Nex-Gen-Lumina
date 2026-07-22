@@ -2,12 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
-import 'package:nexgen_command/features/installer/admin/dealer_management_screen.dart';
-import 'package:nexgen_command/features/installer/admin/installer_management_screen.dart';
 import 'package:nexgen_command/theme.dart';
 
-/// Admin PIN entry screen
+/// Admin PIN entry screen.
+///
+/// Authenticates via mintStaffToken({mode: 'admin'}) through
+/// AdminModeNotifier, then routes to the corporate dashboard. Admin
+/// sessions share the corporate dashboard with owner sessions; the
+/// privilege boundary (e.g. owner-only writes) is enforced by
+/// firestore.rules `hasOwnerClaim()` (commit 004cb9b), not by routing
+/// to a different screen.
+///
+/// This is the dedicated PIN entry point reachable from the Settings
+/// page tile. The unified staff-pin screen at /staff/pin (5-tap on
+/// the Lumina logo) is the alternate entry — both lead through the
+/// same notifier and same Cloud Function call.
 class AdminPinScreen extends ConsumerStatefulWidget {
   const AdminPinScreen({super.key});
 
@@ -18,9 +29,12 @@ class AdminPinScreen extends ConsumerStatefulWidget {
 class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
   String _enteredPin = '';
   bool _showError = false;
+  bool _isValidating = false;
+  String _errorMessage = 'Incorrect PIN';
   static const int _pinLength = 4;
 
   void _onKeyPressed(String key) {
+    if (_isValidating) return;
     if (_enteredPin.length < _pinLength) {
       HapticFeedback.lightImpact();
       setState(() {
@@ -35,6 +49,7 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
   }
 
   void _onBackspace() {
+    if (_isValidating) return;
     if (_enteredPin.isNotEmpty) {
       HapticFeedback.lightImpact();
       setState(() {
@@ -44,16 +59,30 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
     }
   }
 
-  void _submitPin() {
-    if (_enteredPin == kAdminPin) {
+  Future<void> _submitPin() async {
+    setState(() => _isValidating = true);
+
+    final ok = await ref
+        .read(adminModeProvider.notifier)
+        .authenticate(_enteredPin);
+
+    if (!mounted) return;
+
+    if (ok) {
       HapticFeedback.mediumImpact();
-      ref.read(adminAuthenticatedProvider.notifier).state = true;
-      context.go('/admin/dashboard');
+      // Admin sessions land on the corporate dashboard. Owner-only
+      // affordances inside that dashboard are gated by claim checks
+      // at the rule layer (and optionally at the UI layer for visual
+      // hiding); admins see the same screen with the rule layer
+      // enforcing what they can read/write.
+      context.go(AppRoutes.corporateDashboard);
     } else {
       HapticFeedback.heavyImpact();
       setState(() {
         _showError = true;
+        _errorMessage = 'Incorrect PIN';
         _enteredPin = '';
+        _isValidating = false;
       });
     }
   }
@@ -135,9 +164,10 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
               AnimatedOpacity(
                 opacity: _showError ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
-                child: const Text(
-                  'Incorrect PIN',
-                  style: TextStyle(color: Colors.red, fontSize: 14),
+                child: Text(
+                  _errorMessage,
+                  style: const TextStyle(color: Colors.red, fontSize: 14),
+                  textAlign: TextAlign.center,
                 ),
               ),
               const SizedBox(height: 32),
@@ -210,384 +240,6 @@ class _AdminPinScreenState extends ConsumerState<AdminPinScreen> {
               border: Border.all(color: NexGenPalette.line),
             ),
             child: Center(child: child),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Admin dashboard with access to dealer and installer management
-class AdminDashboardScreen extends ConsumerWidget {
-  const AdminDashboardScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isAuthenticated = ref.watch(adminAuthenticatedProvider);
-
-    // Redirect if not authenticated
-    if (!isAuthenticated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/admin/pin');
-      });
-      return const Scaffold(
-        backgroundColor: NexGenPalette.matteBlack,
-        body: Center(child: CircularProgressIndicator(color: NexGenPalette.cyan)),
-      );
-    }
-
-    final statsAsync = ref.watch(installationStatsProvider);
-
-    return Scaffold(
-      backgroundColor: NexGenPalette.matteBlack,
-      appBar: AppBar(
-        backgroundColor: NexGenPalette.gunmetal90,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            ref.read(adminAuthenticatedProvider.notifier).state = false;
-            context.pop();
-          },
-        ),
-        title: const Text('Admin Dashboard', style: TextStyle(color: Colors.white)),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.amber.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.admin_panel_settings, color: Colors.amber, size: 16),
-                SizedBox(width: 6),
-                Text('ADMIN', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Stats cards
-            statsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator(color: NexGenPalette.cyan)),
-              error: (_, __) => const SizedBox.shrink(),
-              data: (stats) => Row(
-                children: [
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Active Dealers',
-                      value: stats['dealers']?.toString() ?? '0',
-                      icon: Icons.business,
-                      color: NexGenPalette.violet,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Active Installers',
-                      value: stats['installers']?.toString() ?? '0',
-                      icon: Icons.engineering,
-                      color: NexGenPalette.cyan,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _StatCard(
-                      label: 'Installations',
-                      value: stats['installations']?.toString() ?? '0',
-                      icon: Icons.home,
-                      color: Colors.green,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-            // Management options
-            const Text(
-              'Management',
-              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 16),
-            _ManagementTile(
-              title: 'Manage Dealers',
-              subtitle: 'Add, edit, or deactivate dealer companies',
-              icon: Icons.business_outlined,
-              color: NexGenPalette.violet,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const DealerManagementScreen()),
-              ),
-            ),
-            const SizedBox(height: 12),
-            _ManagementTile(
-              title: 'Manage Installers',
-              subtitle: 'Add, edit, or deactivate installer PINs',
-              icon: Icons.engineering_outlined,
-              color: NexGenPalette.cyan,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const InstallerManagementScreen()),
-              ),
-            ),
-            const SizedBox(height: 32),
-            // Quick actions
-            const Text(
-              'Quick Actions',
-              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _QuickActionButton(
-                    label: 'Add Dealer',
-                    icon: Icons.add_business,
-                    color: NexGenPalette.violet,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => const DealerManagementScreen()),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _QuickActionButton(
-                    label: 'Add Installer',
-                    icon: Icons.person_add,
-                    color: NexGenPalette.cyan,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => const InstallerManagementScreen()),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-            // Info section
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: NexGenPalette.gunmetal90,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: NexGenPalette.line),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.info_outline, color: NexGenPalette.textMedium, size: 20),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'PIN Format',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  RichText(
-                    text: TextSpan(
-                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13, height: 1.5),
-                      children: [
-                        const TextSpan(text: 'Installer PINs are 4 digits: '),
-                        TextSpan(
-                          text: 'DD',
-                          style: TextStyle(color: NexGenPalette.violet, fontWeight: FontWeight.w600),
-                        ),
-                        TextSpan(
-                          text: 'II',
-                          style: TextStyle(color: NexGenPalette.cyan, fontWeight: FontWeight.w600),
-                        ),
-                        const TextSpan(text: '\n\n'),
-                        TextSpan(
-                          text: 'DD',
-                          style: TextStyle(color: NexGenPalette.violet, fontWeight: FontWeight.w600),
-                        ),
-                        const TextSpan(text: ' = Dealer Code (00-99)\n'),
-                        TextSpan(
-                          text: 'II',
-                          style: TextStyle(color: NexGenPalette.cyan, fontWeight: FontWeight.w600),
-                        ),
-                        const TextSpan(text: ' = Installer Code (00-99)\n\n'),
-                        const TextSpan(
-                          text: 'Each dealer can have up to 100 installers.',
-                          style: TextStyle(fontStyle: FontStyle.italic),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ManagementTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _ManagementTile({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: NexGenPalette.gunmetal90,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: NexGenPalette.line),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: color, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: NexGenPalette.textMedium),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickActionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _QuickActionButton({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color.withValues(alpha: 0.15),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 32),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(color: color, fontWeight: FontWeight.w600),
-              ),
-            ],
           ),
         ),
       ),

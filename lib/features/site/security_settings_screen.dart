@@ -1,6 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -130,7 +129,7 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Security')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           Text('Change Password', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),

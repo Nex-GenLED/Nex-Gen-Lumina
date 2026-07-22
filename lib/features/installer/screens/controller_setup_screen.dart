@@ -1,13 +1,24 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/services/image_upload_service.dart';
+import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/ip_entry_sheet.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Step 2: Controller Setup screen for the installer wizard
 class ControllerSetupScreen extends ConsumerStatefulWidget {
@@ -27,16 +38,61 @@ class ControllerSetupScreen extends ConsumerStatefulWidget {
 class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
   final Map<String, bool> _controllerStatus = {};
   final Map<String, bool> _checkingStatus = {};
+  final Map<String, ControllerType> _controllerTypes = {};
+  final Set<String> _pushingDefaults = {};
+  final Set<String> _backgroundCheckInFlight = {};
+  // Per-controller firmware version (e.g. "0.14.0"), populated lazily after
+  // a successful /json/info fetch so each card can show what build it's on.
+  final Map<String, String> _firmwareVersions = {};
+  // Set of controllers currently running the Test Lights flash so we can
+  // disable the action button until the flash + restore round-trip completes.
+  final Set<String> _testingLights = {};
+  Timer? _statusRefreshTimer;
   bool _isUploading = false;
   String? _validationError;
 
   @override
   void initState() {
     super.initState();
-    // Check status of all controllers on load
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAllControllerStatus();
+      _loadControllerTypes();
+      _statusRefreshTimer = Timer.periodic(
+        const Duration(seconds: 15),
+        (_) {
+          if (mounted) _checkAllControllerStatusSilently();
+        },
+      );
     });
+  }
+
+  @override
+  void dispose() {
+    _statusRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Reads the `controller_type` field from each Firestore controller document
+  /// so we can show type-specific UI (e.g. "Apply NGL Defaults" for SKIKBILY).
+  Future<void> _loadControllerTypes() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('controllers')
+          .get();
+      for (final doc in snap.docs) {
+        final typeStr = doc.data()['controller_type'] as String?;
+        if (typeStr != null) {
+          _controllerTypes[doc.id] = ControllerType.fromFirestore(typeStr);
+        }
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Failed to load controller types: $e');
+    }
   }
 
   Future<void> _checkAllControllerStatus() async {
@@ -58,7 +114,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     try {
       final service = WledService('http://${controller.ip}');
       final state = await service.getState().timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 10),
         onTimeout: () => null,
       );
       if (mounted) {
@@ -74,6 +130,49 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
           _checkingStatus[controller.id] = false;
         });
       }
+    }
+  }
+
+  /// Background-safe variant of [_checkAllControllerStatus] that does NOT
+  /// show a spinner on each card. Used by the 15-second periodic refresh.
+  Future<void> _checkAllControllerStatusSilently() async {
+    final controllersAsync = ref.read(controllersStreamProvider);
+    controllersAsync.whenData((controllers) {
+      for (final controller in controllers) {
+        _checkControllerStatusSilently(controller);
+      }
+    });
+  }
+
+  /// Pings a single controller without showing a spinner. Skips if a visible
+  /// or background check is already in flight for this controller.
+  Future<void> _checkControllerStatusSilently(ControllerInfo controller) async {
+    if (_checkingStatus[controller.id] == true) return;
+    if (_backgroundCheckInFlight.contains(controller.id)) return;
+    _backgroundCheckInFlight.add(controller.id);
+
+    try {
+      final service = WledService('http://${controller.ip}');
+      final state = await service.getState().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => null,
+      );
+      if (mounted) {
+        final isOnline = state != null;
+        if (_controllerStatus[controller.id] != isOnline) {
+          setState(() {
+            _controllerStatus[controller.id] = isOnline;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted && _controllerStatus[controller.id] != false) {
+        setState(() {
+          _controllerStatus[controller.id] = false;
+        });
+      }
+    } finally {
+      _backgroundCheckInFlight.remove(controller.id);
     }
   }
 
@@ -170,12 +269,501 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     }
   }
 
-  void _addController() {
-    // Navigate to BLE provisioning
-    Navigator.of(context).pushNamed('/device-setup').then((_) {
-      // Refresh status after returning
+  Future<void> _addController() async {
+    // Show option: BLE scan or manual IP entry
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Add Controller', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.bluetooth, color: NexGenPalette.cyan),
+                title: const Text('BLE Scan (New Device)', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers not yet on WiFi', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ble'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.wifi, color: NexGenPalette.green),
+                title: const Text('Enter IP Address', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('For controllers already on the network', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, 'ip'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (choice == 'ble') {
+      if (!mounted) return;
+      await context.push(AppRoutes.deviceSetup);
       _checkAllControllerStatus();
-    });
+    } else if (choice == 'ip') {
+      await _addControllerByIp();
+    }
+  }
+
+  /// Shows a bottom sheet with three tappable hardware-type cards and returns
+  /// the user's selection, or `null` if they dismiss.
+  Future<ControllerType?> _pickControllerType() async {
+    var selected = ControllerType.digOcta;
+
+    return showModalBottomSheet<ControllerType>(
+      context: context,
+      backgroundColor: NexGenPalette.matteBlack,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select controller hardware',
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: ControllerType.values.map((type) {
+                    final isSelected = type == selected;
+                    return Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          right: type != ControllerType.values.last ? 10 : 0,
+                        ),
+                        child: GestureDetector(
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setSheetState(() => selected = type);
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: NexGenPalette.gunmetal,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? NexGenPalette.cyan
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                SvgPicture.asset(
+                                  type.iconAsset,
+                                  width: 48,
+                                  height: 48,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  type.fullName,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: NexGenPalette.textHigh,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  type.defaultChannelCount != null
+                                      ? '${type.defaultChannelCount} channels'
+                                      : 'Variable',
+                                  style: TextStyle(
+                                    color: NexGenPalette.textHigh
+                                        .withValues(alpha: 0.6),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, selected),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: NexGenPalette.cyan,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Continue',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addControllerByIp() async {
+    // Step 1: Pick controller hardware type
+    final controllerType = await _pickControllerType();
+    if (controllerType == null || !mounted) return;
+
+    // Step 2: IP entry — bottom sheet that lifts above the iOS keyboard
+    // via viewInsets.bottom padding at the widget root (the legacy
+    // AlertDialog pattern was unreliable on iOS regardless of inset
+    // strategy). Static-IP reminder previously shown as an in-dialog
+    // banner is now surfaced as a SnackBar before the sheet opens, so
+    // installers still see the cue without breaking the keyboard fix.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set a static IP in WLED first '
+            '(Config → WiFi Setup → Static IP). DHCP IPs will drift.',
+            style: TextStyle(fontSize: 12),
+          ),
+          backgroundColor: Colors.amber,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+    if (!mounted) return;
+    final ip = await showIpEntrySheet(
+      context,
+      title: 'Enter Controller IP',
+      hintText: '192.168.50.200',
+    );
+
+    if (ip == null || ip.isEmpty) return;
+
+    // Step 3: Validate controller type against live device info. The
+    // validation call also returns the parsed /json/info so we can enrich
+    // the Firestore doc without a second network round-trip.
+    WledInfoResponse? info;
+    if (mounted) {
+      final validation = await _validateControllerType(ip, controllerType);
+      if (!validation.proceed || !mounted) return;
+      info = validation.info;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No auth session — please re-enter your PIN')),
+        );
+      }
+      return;
+    }
+
+    // Pull enrichment fields from /json/info. Any of these may be null if
+    // the device is unreachable or running older firmware — we include
+    // them in the doc only when present.
+    final rawMac = (info?.raw['mac'] as String?)?.trim();
+    final mac =
+        (rawMac == null || rawMac.isEmpty) ? null : rawMac.toLowerCase();
+    final firmwareVersion =
+        (info == null || info.ver.isEmpty) ? null : info.ver;
+    final arch = (info == null || info.arch.isEmpty) ? null : info.arch;
+    final ledsRaw = info?.raw['leds'];
+    final ledCount = (ledsRaw is Map && ledsRaw['count'] is num)
+        ? (ledsRaw['count'] as num).toInt()
+        : null;
+    final ethRaw = info?.raw['ethernet'];
+    final hasEthernet = ethRaw == true ||
+        (ethRaw is Map && ethRaw.isNotEmpty) ||
+        (ethRaw is num && ethRaw != 0);
+    // Symmetric WiFi-active heuristic: WLED reports the wifi object on every
+    // build, but signal == 0 (or absent bssid) means the station isn't
+    // associated. Same shape as wled_manual_setup.dart's check.
+    final wifiRaw = info?.raw['wifi'];
+    bool hasWifi = false;
+    if (wifiRaw is Map) {
+      final signal = wifiRaw['signal'];
+      final rssi = wifiRaw['rssi'];
+      final bssid = wifiRaw['bssid'];
+      hasWifi = (signal is num && signal > 0) ||
+          (rssi is num && rssi < 0) ||
+          (bssid is String && bssid.isNotEmpty);
+    }
+    final ConnectionMethod connectionMethod;
+    if (info == null) {
+      connectionMethod = ConnectionMethod.unknown;
+    } else if (hasEthernet && hasWifi) {
+      connectionMethod = ConnectionMethod.ethernetWifiActive;
+    } else if (hasEthernet) {
+      connectionMethod = ConnectionMethod.ethernet;
+    } else if (hasWifi) {
+      connectionMethod = ConnectionMethod.wifi;
+    } else {
+      connectionMethod = ConnectionMethod.unknown;
+    }
+    // Legacy field — kept for one release cycle so any downstream consumer
+    // that still reads `connectionType` doesn't regress while we roll out
+    // the migration. Drop once telemetry confirms 100% adoption of
+    // `connectionMethod`.
+    // TODO: remove after migration confirms 100% adoption
+    final connectionType = hasEthernet ? 'ethernet_wifi' : 'wifi';
+
+    // Name field was dropped when the IP entry dialog became a single-
+    // input bottom sheet (Bug-1 keyboard occlusion fix). Default name
+    // uses the IP — installer can rename from the controllers list
+    // afterward.
+    final name = 'Controller ($ip)';
+
+    final controllersRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('controllers');
+
+    try {
+      // Duplicate check by MAC: if this physical controller is already
+      // registered under this user, update the existing doc's IP instead
+      // of creating a second record. MAC survives IP changes and router
+      // swaps, so it's the stable identity.
+      if (mac != null) {
+        final dup = await controllersRef
+            .where('mac', isEqualTo: mac)
+            .limit(1)
+            .get();
+        if (dup.docs.isNotEmpty) {
+          final existing = dup.docs.first;
+          await existing.reference.update({
+            'ip': ip,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          _controllerTypes[existing.id] = controllerType;
+          ref.invalidate(controllersStreamProvider);
+          _checkAllControllerStatus();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Controller already registered — updated IP address.'),
+              ),
+            );
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  '✓ Controller added. If the red dot persists, open '
+                  'WLED in a browser at this IP → Config → WiFi Setup '
+                  '→ set a Static IP → Save & Reboot.',
+                ),
+                duration: const Duration(seconds: 8),
+                backgroundColor: Colors.amber.shade800,
+                action: SnackBarAction(
+                  label: 'Got it',
+                  textColor: Colors.white,
+                  onPressed: () {},
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      final docData = <String, dynamic>{
+        'ip': ip,
+        'name': name,
+        'wifiConfigured': true,
+        'controller_type': controllerType.toFirestore(),
+        // TODO: remove after migration confirms 100% adoption
+        'connectionType': connectionType,
+        'connectionMethod': connectionMethodToJson(connectionMethod),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (mac != null) 'mac': mac,
+        if (firmwareVersion != null) 'firmwareVersion': firmwareVersion,
+        if (ledCount != null) 'ledCount': ledCount,
+        if (arch != null) 'arch': arch,
+      };
+
+      // Use the MAC as the document ID so records are stable across IP
+      // changes and router swaps. Fall back to an auto-generated ID only
+      // when the device didn't report a MAC (unreachable / old firmware).
+      final String newDocId;
+      if (mac != null) {
+        newDocId = _macToDocId(mac);
+        await controllersRef.doc(newDocId).set(docData);
+      } else {
+        final added = await controllersRef.add(docData);
+        newDocId = added.id;
+      }
+
+      _controllerTypes[newDocId] = controllerType;
+      ref.invalidate(controllersStreamProvider);
+      _checkAllControllerStatus();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              '✓ Controller added. If the red dot persists, open '
+              'WLED in a browser at this IP → Config → WiFi Setup '
+              '→ set a Static IP → Save & Reboot.',
+            ),
+            duration: const Duration(seconds: 8),
+            backgroundColor: Colors.amber.shade800,
+            action: SnackBarAction(
+              label: 'Got it',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add controller: $e')),
+        );
+      }
+    }
+  }
+
+  /// Formats a MAC address for use as a Firestore document ID: lowercase
+  /// hex with underscores between each octet (e.g. `80_f3_da_b3_95_4c`).
+  /// Tolerates input with or without colon separators — WLED firmware
+  /// varies by version.
+  String _macToDocId(String mac) {
+    final clean =
+        mac.toLowerCase().replaceAll(RegExp(r'[^0-9a-f]'), '');
+    if (clean.length != 12) {
+      // Not a standard 48-bit MAC — fall back to a sanitized form so we
+      // still produce a legal doc ID.
+      return clean.isEmpty ? mac.replaceAll(':', '_') : clean;
+    }
+    final buf = StringBuffer();
+    for (int i = 0; i < 12; i += 2) {
+      if (i > 0) buf.write('_');
+      buf.write(clean.substring(i, i + 2));
+    }
+    return buf.toString();
+  }
+
+  /// Fetches /json/info from [ip], validates against [expected], and shows a
+  /// warning dialog if the channel count doesn't match. Returns a record with
+  /// `proceed` (true if the caller should continue with saving) and `info`
+  /// (the parsed response, when the device was reachable — so the caller can
+  /// enrich the Firestore doc without a second fetch).
+  Future<({bool proceed, WledInfoResponse? info})> _validateControllerType(
+    String ip,
+    ControllerType expected,
+  ) async {
+    final service = WledService('http://$ip');
+    final info = await service.getInfo().timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => null,
+    );
+
+    // If we can't reach the device at all, let the existing status-check
+    // flow surface the problem — don't block the add.
+    if (info == null) return (proceed: true, info: null);
+
+    final result = validateControllerMatch(info, expected);
+    if (result.isMatch || result.warningMessage == null) {
+      return (proceed: true, info: info);
+    }
+
+    if (!mounted) return (proceed: false, info: info);
+
+    final continueAnyway = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: NexGenPalette.violet, width: 2),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: NexGenPalette.violet, size: 24),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Hardware Mismatch',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              result.warningMessage!,
+              style: const TextStyle(
+                color: NexGenPalette.textHigh,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'WLED ${info.ver}  •  ${info.arch}',
+              style: TextStyle(
+                color: NexGenPalette.textHigh.withValues(alpha: 0.6),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Go Back',
+                style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.violet,
+            ),
+            child: const Text('Continue Anyway',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    return (proceed: continueAnyway == true, info: info);
   }
 
   Future<void> _capturePhoto(ImageSource source) async {
@@ -197,14 +785,14 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         return;
       }
 
-      // Use a temporary ID for installer uploads
-      final tempId = 'installer_${DateTime.now().millisecondsSinceEpoch}';
+      // Use the current auth user's ID for Storage path (matches security rules)
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final uploadId = currentUser?.uid ?? 'installer_${DateTime.now().millisecondsSinceEpoch}';
       final service = ImageUploadService();
 
-      final url = await service.pickAndUploadHousePhoto(
-        tempId,
-        source: source,
-      );
+      // Upload the already-picked image bytes directly (don't re-pick)
+      final bytes = await image.readAsBytes();
+      final url = await service.uploadImage(uploadId, bytes);
 
       if (url != null && mounted) {
         ref.read(installerPhotoUrlProvider.notifier).state = url;
@@ -388,6 +976,22 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
     bool? isOnline,
     required bool isChecking,
   }) {
+    // Show "Apply NGL Defaults" for any online controller — generic WLED and
+    // Dig-Octa now also accept the SK6812 RGBW / GRBW profile and preserve
+    // existing GPIO assignments via pushDefaultsForControllerType.
+    final showApplyDefaults = isOnline == true && !isChecking;
+    final isPushing = _pushingDefaults.contains(controller.id);
+    final isTesting = _testingLights.contains(controller.id);
+    final firmware = _firmwareVersions[controller.id];
+
+    // Lazy-fetch firmware version once the card knows the controller is up.
+    if (isOnline == true && firmware == null && !isChecking) {
+      // Schedule outside the build pass to avoid setState-during-build.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _fetchFirmwareVersion(controller),
+      );
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -398,136 +1002,433 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
           width: isSelected ? 2 : 1,
         ),
       ),
-      child: InkWell(
-        onTap: () => _toggleControllerSelection(controller.id),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              // Selection checkbox
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isSelected ? NexGenPalette.cyan : Colors.transparent,
-                  border: Border.all(
-                    color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                    width: 2,
-                  ),
-                ),
-                child: isSelected
-                    ? const Icon(Icons.check, color: Colors.black, size: 16)
-                    : null,
-              ),
-              const SizedBox(width: 16),
-
-              // Controller info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      controller.name ?? 'Unnamed Controller',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () => _toggleControllerSelection(controller.id),
+            borderRadius: showApplyDefaults
+                ? const BorderRadius.vertical(top: Radius.circular(12))
+                : BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  // Selection checkbox
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? NexGenPalette.cyan : Colors.transparent,
+                      border: Border.all(
+                        color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                        width: 2,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      controller.ip,
-                      style: const TextStyle(
+                    child: isSelected
+                        ? const Icon(Icons.check, color: Colors.black, size: 16)
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+
+                  // Controller info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          controller.name ?? 'Unnamed Controller',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          controller.ip,
+                          style: const TextStyle(
+                            color: NexGenPalette.textMedium,
+                            fontSize: 14,
+                          ),
+                        ),
+                        if (firmware != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'WLED v$firmware',
+                            style: const TextStyle(
+                              color: NexGenPalette.textMedium,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  // Test Lights button — flashes white for 3s then restores.
+                  if (isOnline == true && !isChecking)
+                    IconButton(
+                      icon: isTesting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: NexGenPalette.cyan,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.lightbulb_outline,
+                              color: NexGenPalette.cyan,
+                            ),
+                      tooltip: 'Test Lights',
+                      onPressed:
+                          isTesting ? null : () => _testLights(controller),
+                    ),
+
+                  // Open the controller's WLED web UI in the browser.
+                  if (isOnline == true && !isChecking)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.open_in_new,
                         color: NexGenPalette.textMedium,
-                        fontSize: 14,
+                      ),
+                      tooltip: 'Open WLED',
+                      onPressed: () => _openWledWeb(controller),
+                    ),
+
+                  // Status indicator
+                  if (isChecking)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: NexGenPalette.cyan,
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isOnline == null
+                            ? NexGenPalette.textMedium
+                            : isOnline
+                                ? Colors.green
+                                : Colors.red,
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  const SizedBox(width: 12),
 
-              // Status indicator
-              if (isChecking)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: NexGenPalette.cyan,
-                  ),
-                )
-              else
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isOnline == null
-                        ? NexGenPalette.textMedium
-                        : isOnline
-                            ? Colors.green
-                            : Colors.red,
-                  ),
-                ),
-              const SizedBox(width: 12),
-
-              // Actions menu
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: NexGenPalette.textMedium),
-                color: NexGenPalette.gunmetal90,
-                onSelected: (value) {
-                  switch (value) {
-                    case 'rename':
-                      _renameController(controller);
-                      break;
-                    case 'refresh':
-                      _checkControllerStatus(controller);
-                      break;
-                    case 'delete':
-                      _deleteController(controller);
-                      break;
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'rename',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit, color: Colors.white, size: 20),
-                        SizedBox(width: 12),
-                        Text('Rename', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'refresh',
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh, color: Colors.white, size: 20),
-                        SizedBox(width: 12),
-                        Text('Check Status', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                        SizedBox(width: 12),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
+                  // Actions menu
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: NexGenPalette.textMedium),
+                    color: NexGenPalette.gunmetal90,
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'rename':
+                          _renameController(controller);
+                          break;
+                        case 'refresh':
+                          _checkControllerStatus(controller);
+                          break;
+                        case 'delete':
+                          _deleteController(controller);
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, color: Colors.white, size: 20),
+                            SizedBox(width: 12),
+                            Text('Rename', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'refresh',
+                        child: Row(
+                          children: [
+                            Icon(Icons.refresh, color: Colors.white, size: 20),
+                            SizedBox(width: 12),
+                            Text('Check Status', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            SizedBox(width: 12),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+
+          // "Apply NGL Defaults" — only for SKIKBILY controllers that are online
+          if (showApplyDefaults)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: isPushing
+                      ? null
+                      : () => _applyNglDefaults(controller),
+                  icon: isPushing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: NexGenPalette.green,
+                          ),
+                        )
+                      : const Icon(Icons.tune, color: NexGenPalette.green, size: 18),
+                  label: Text(
+                    isPushing ? 'Applying...' : 'Apply NGL Defaults',
+                    style: TextStyle(
+                      color: isPushing ? NexGenPalette.textMedium : NexGenPalette.green,
+                      fontSize: 13,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    side: BorderSide(
+                      color: isPushing
+                          ? NexGenPalette.line
+                          : NexGenPalette.green.withValues(alpha: 0.5),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  Future<void> _testLights(ControllerInfo controller) async {
+    if (_testingLights.contains(controller.id)) return;
+    setState(() => _testingLights.add(controller.id));
+    final svc = WledService('http://${controller.ip}');
+
+    Map<String, dynamic>? saved;
+    try {
+      saved = await svc.getState();
+      await svc.applyJson({
+        'on': true,
+        'bri': 255,
+        'seg': [
+          {
+            'fx': 0,
+            'col': [
+              [255, 255, 255, 255],
+            ],
+          }
+        ],
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Testing lights — flashing white for 3 seconds'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (saved != null) {
+        await svc.applyJson(saved);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Test lights failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _testingLights.remove(controller.id));
+    }
+  }
+
+  Future<void> _openWledWeb(ControllerInfo controller) async {
+    final url = Uri.parse('http://${controller.ip}');
+    try {
+      final ok =
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't open ${controller.ip}")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Couldn't open ${controller.ip}: $e")),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchFirmwareVersion(ControllerInfo controller) async {
+    if (_firmwareVersions.containsKey(controller.id)) return;
+    try {
+      final svc = WledService('http://${controller.ip}');
+      final info = await svc.getInfo();
+      if (info != null && info.ver.isNotEmpty && mounted) {
+        setState(() => _firmwareVersions[controller.id] = info.ver);
+      }
+    } catch (_) {
+      // Silently ignore — the firmware tag is informational, not load-bearing.
+    }
+  }
+
+  Future<void> _applyNglDefaults(ControllerInfo controller) async {
+    // Confirmation dialog — this writes persistent config.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text(
+          'Apply NGL Defaults?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'This will overwrite the controller\'s current LED settings. Continue?',
+          style: TextStyle(color: NexGenPalette.textMedium),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: NexGenPalette.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.green,
+            ),
+            child:
+                const Text('Apply', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _pushingDefaults.add(controller.id));
+
+    final ctrlType = _controllerTypes[controller.id] ?? ControllerType.genericWled;
+    // During the installer-driven flow we read from installerCustomerInfoProvider
+    // — the customer's user-doc isn't created until the wizard's final step.
+    // Reading currentUserProfileProvider here would return the installer's
+    // own profile (signed in via staff-PIN custom token), which is wrong.
+    // pushDefaultsForControllerType silently skips the time/location step
+    // when any field is null.
+    final customerInfo = ref.read(installerCustomerInfoProvider);
+    final result = await pushDefaultsForControllerType(
+      controller.ip,
+      ctrlType,
+      latitude: customerInfo.latitude,
+      longitude: customerInfo.longitude,
+      ianaTimezone: customerInfo.ianaTimezone,
+    );
+
+    if (!mounted) return;
+    setState(() => _pushingDefaults.remove(controller.id));
+
+    if (result.success && result.warnings.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Controller configured with NGL defaults'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else if (result.success && result.warnings.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.amber.shade700,
+          content: Text(
+            'Configured with warnings: ${result.warnings.length} setting(s) need manual verification.',
+            style: const TextStyle(color: NexGenPalette.textHigh),
+          ),
+          action: SnackBarAction(
+            label: 'Details',
+            textColor: NexGenPalette.textHigh,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: NexGenPalette.gunmetal90,
+                  title: const Text(
+                    'Configuration Warnings',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: result.warnings
+                        .map((w) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('• ',
+                                      style: TextStyle(
+                                          color: NexGenPalette.textHigh)),
+                                  Expanded(
+                                    child: Text(w,
+                                        style: const TextStyle(
+                                            color: NexGenPalette.textHigh,
+                                            fontSize: 14)),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('OK',
+                          style: TextStyle(color: NexGenPalette.cyan)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.errorMessage ?? 'Configuration push failed'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Widget _buildEmptyState() {
@@ -717,38 +1618,40 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Replace Photo',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Replace Photo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
-              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
-              title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto(ImageSource.gallery);
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+              const SizedBox(height: 24),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: NexGenPalette.cyan),
+                title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: NexGenPalette.cyan),
+                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto(ImageSource.gallery);
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );

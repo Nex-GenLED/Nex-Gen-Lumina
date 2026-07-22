@@ -11,384 +11,12 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
+import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
-
-/// Browse Design Library section with category cards
-class DesignLibraryBrowser extends ConsumerWidget {
-  const DesignLibraryBrowser();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final categoriesAsync = ref.watch(patternCategoriesProvider);
-    final designsAsync = ref.watch(designsStreamProvider);
-
-    // Check if user has saved designs
-    final hasSavedDesigns = designsAsync.whenOrNull(
-      data: (designs) => designs.isNotEmpty,
-    ) ?? false;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Section header
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              'Browse Design Library',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFFDCF0FF),
-              ),
-            ),
-            Text(
-              'Explore all categories',
-              style: TextStyle(
-                fontSize: 12,
-                color: const Color(0xFFDCF0FF).withValues(alpha: 0.50),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        // Category grid
-        categoriesAsync.when(
-          data: (categories) {
-            // Calculate total items: add 1 for saved designs card if user has saved designs
-            final totalItems = hasSavedDesigns ? categories.length + 1 : categories.length;
-
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 1.55,
-              ),
-              itemCount: totalItems,
-              itemBuilder: (context, index) {
-                // If we have saved designs, show the saved designs card first
-                if (hasSavedDesigns && index == 0) {
-                  return const _SavedDesignsCategoryCard();
-                }
-
-                // Adjust index for regular categories if saved designs card is shown
-                final categoryIndex = hasSavedDesigns ? index - 1 : index;
-                final category = categories[categoryIndex];
-                return _DesignLibraryCategoryCard(category: category);
-              },
-            );
-          },
-          loading: () => const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
-            ),
-          ),
-          error: (_, __) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                'Unable to load categories',
-                style: TextStyle(color: NexGenPalette.textSecondary),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Special category card for "My Saved Designs" - appears first when user has saved designs
-class _SavedDesignsCategoryCard extends StatelessWidget {
-  const _SavedDesignsCategoryCard();
-
-  static const _accentColor = NexGenPalette.cyan;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          context.push('/my-designs');
-        },
-        splashColor: _accentColor.withValues(alpha: 0.10),
-        highlightColor: _accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                _accentColor.withValues(alpha: 0.12),
-                NexGenPalette.matteBlack.withValues(alpha: 0.98),
-              ],
-              stops: const [0.0, 1.0],
-            ),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _accentColor.withValues(alpha: 0.20),
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: _accentColor.withValues(alpha: 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                // Compact icon with subtle glow ring
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _accentColor.withValues(alpha: 0.12),
-                    border: Border.all(
-                      color: _accentColor.withValues(alpha: 0.25),
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.palette_outlined,
-                    size: 16,
-                    color: _accentColor,
-                    shadows: [
-                      Shadow(
-                        color: _accentColor.withValues(alpha: 0.5),
-                        blurRadius: 8,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'My Saved Designs',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: _accentColor.withValues(alpha: 0.4),
-                  size: 10,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Individual category card for the Design Library browser
-class _DesignLibraryCategoryCard extends ConsumerWidget {
-  final PatternCategory category;
-
-  const _DesignLibraryCategoryCard({required this.category});
-
-  IconData _heroIconForCategory(String categoryId) {
-    switch (categoryId) {
-      case 'cat_arch':
-        return Icons.villa;
-      case 'cat_holiday':
-        return Icons.celebration;
-      case 'cat_sports':
-        return Icons.emoji_events;
-      case 'cat_season':
-        final now = DateTime.now();
-        final m = now.month, d = now.day;
-        if ((m == 3 && d >= 20) || m == 4 || m == 5 || (m == 6 && d < 21)) return Icons.local_florist;
-        if ((m == 6 && d >= 21) || m == 7 || m == 8 || (m == 9 && d < 23)) return Icons.wb_sunny;
-        if ((m == 9 && d >= 23) || m == 10 || m == 11 || (m == 12 && d < 21)) return Icons.park;
-        return Icons.ac_unit;
-      case 'cat_party':
-        return Icons.cake;
-      case 'cat_security':
-        return Icons.shield;
-      case 'cat_movies':
-        return Icons.movie_filter;
-      case 'cat_nature':
-        return Icons.forest;
-      default:
-        return Icons.palette;
-    }
-  }
-
-  /// Accent color derived from the category name string.
-  Color _accentForName(String name) {
-    final n = name.toLowerCase();
-    if (n.contains('architectural') || n.contains('white')) return const Color(0xFFDCF0FF);
-    if (n.contains('holiday')) return const Color(0xFFFF3C3C);
-    if (n.contains('season')) return const Color(0xFFFF8C00);
-    if (n.contains('game') || n.contains('fan')) return const Color(0xFF00D4FF);
-    if (n.contains('sport') || n.contains('team') || n.contains('soccer') ||
-        n.contains('football') || n.contains('baseball')) return const Color(0xFF6E2FFF);
-    return const Color(0xFF00D4FF);
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final heroIcon = _heroIconForCategory(category.id);
-    final accent = _accentForName(category.name);
-    final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
-    final isPinned = pinnedIds.contains(category.id);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          context.push(
-            '/explore/library/${category.id}',
-            extra: {'name': category.name},
-          );
-        },
-        splashColor: accent.withValues(alpha: 0.12),
-        highlightColor: accent.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF111527),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accent.withValues(alpha: 0.25), width: 1),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            children: [
-              // Radial accent glow from bottom-center upward
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: Alignment.bottomCenter,
-                      radius: 0.9,
-                      colors: [
-                        accent.withValues(alpha: 0.0),
-                        Colors.transparent,
-                      ],
-                      stops: const [0.0, 0.6],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Centered icon
-              Center(
-                child: Icon(
-                  heroIcon,
-                  size: 36,
-                  color: accent.withValues(alpha: 0.85),
-                  shadows: [
-                    Shadow(color: accent.withValues(alpha: 0.4), blurRadius: 16),
-                  ],
-                ),
-              ),
-
-              // Category name — bottom-left
-              Positioned(
-                left: 12,
-                bottom: 14,
-                right: 30,
-                child: Text(
-                  category.name,
-                  style: const TextStyle(
-                    color: Color(0xFFDCF0FF),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-
-              // Pin button — top-right
-              Positioned(
-                right: 4,
-                top: 4,
-                child: GestureDetector(
-                  onTap: () => _togglePin(context, ref, isPinned),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                      color: isPinned ? NexGenPalette.cyan : Colors.white.withValues(alpha: 0.6),
-                      size: 13,
-                    ),
-                  ),
-                ),
-              ),
-
-              // Glowing LED strip along the bottom edge
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: accent,
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(alpha: 0.70),
-                        blurRadius: 12,
-                        offset: const Offset(0, -2),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
-    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
-    final success = isPinned
-        ? await notifier.unpinCategory(category.id)
-        : await notifier.pinCategory(category.id);
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success
-                ? (isPinned ? 'Folder unpinned' : 'Folder pinned to Explore')
-                : 'Failed to update pin status',
-          ),
-        ),
-      );
-    }
-  }
-}
 
 /// Section for displaying user's saved custom designs
 class MySavedDesignsSection extends ConsumerWidget {
@@ -424,11 +52,13 @@ class MySavedDesignsSection extends ConsumerWidget {
                 ),
                 TextButton.icon(
                   onPressed: () {
-                    // Navigate to My Designs screen for full management
-                    context.push('/my-designs');
+                    // Routes to the synthetic Explore "My Designs" category
+                    // (#62) — unified browse + apply surface.
+                    context.push('/explore/library/my_designs',
+                        extra: const {'name': 'My Designs'});
                   },
-                  icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('Manage'),
+                  icon: const Icon(Icons.grid_view_rounded, size: 16),
+                  label: const Text('See all'),
                   style: TextButton.styleFrom(
                     foregroundColor: NexGenPalette.cyan,
                   ),
@@ -462,41 +92,12 @@ class MySavedDesignsSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _applyDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
-    // Check for active neighborhood sync before changing lights
-    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-    if (!shouldProceed) return;
-
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No device connected')),
-        );
-      }
-      return;
-    }
-
-    try {
-      var payload = design.toWledPayload();
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = design.name;
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Applied: ${design.name}')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Apply design failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to apply design')),
-        );
-      }
-    }
+  Future<void> _applyDesign(
+      BuildContext context, WidgetRef ref, CustomDesign design) async {
+    // Single chokepoint — all "apply a saved design" call sites flow
+    // through [applySavedDesign] (the canonical 6-step routine). Audit
+    // 2026-05-29 / #62.
+    await applySavedDesign(context, ref, design);
   }
 
   Future<void> _confirmRemoveDesign(BuildContext context, WidgetRef ref, CustomDesign design) async {
@@ -750,17 +351,33 @@ class RecentPatternsSection extends ConsumerWidget {
         };
 
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+        if (channels.isEmpty) {
+          debugPrint('PatternLibrary pattern apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        // applyJson returns false (does NOT throw) on a device-write failure
+        // — gate the label/toast so we don't claim "Applied:" on a failed
+        // write (Audit-2 S8).
+        final success = await repo.applyJson(payload);
+        if (!success) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+            );
+          }
+          return;
+        }
       }
 
-      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(pattern.name, ref.read(wledStateProvider));
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Applied: ${pattern.name}')),
         );
       }
+      maybeShowManualApplyOffWarning(ref);
     } catch (e) {
       debugPrint('Apply recent pattern failed: $e');
       if (context.mounted) {
@@ -988,8 +605,7 @@ class _PinnedCategoryRow extends ConsumerWidget {
     );
 
     if (confirmed == true && context.mounted) {
-      final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
-      final success = await notifier.unpinCategory(pinnedData.category.id);
+      final success = await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(pinnedData.category.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

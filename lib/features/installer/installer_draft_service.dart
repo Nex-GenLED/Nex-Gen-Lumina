@@ -113,7 +113,8 @@ class DraftMetadata {
     }
   }
 
-  /// Get step name from index
+  /// Get step name from index. Index matches the InstallerWizardStep
+  /// enum order; keep these in sync when the enum changes.
   String get stepName {
     switch (stepIndex) {
       case 0:
@@ -121,8 +122,16 @@ class DraftMetadata {
       case 1:
         return 'Controller Setup';
       case 2:
-        return 'Zone Configuration';
+        return 'Connection Method';
       case 3:
+        return 'Zone Configuration';
+      case 4:
+        return 'Hardware Config';
+      case 5:
+        return 'Map Roofline';
+      case 6:
+        return 'Brand Setup';
+      case 7:
         return 'Handoff';
       default:
         return 'Step ${stepIndex + 1}';

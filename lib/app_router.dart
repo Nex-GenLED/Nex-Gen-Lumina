@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/auth/login_page.dart';
 import 'package:nexgen_command/features/auth/signup_page.dart';
 import 'package:nexgen_command/features/auth/forgot_password_page.dart';
+import 'package:nexgen_command/features/auth/forced_password_reset_screen.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
 import 'package:nexgen_command/features/users/sub_users_screen.dart';
+import 'package:nexgen_command/features/whites/preferred_white_selection_page.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/discovery/discovery_page.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart';
@@ -19,6 +21,7 @@ import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/zone_configuration_page.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/features/wled/current_colors_editor_screen.dart';
+import 'package:nexgen_command/features/audio/audio_mode_page.dart';
 import 'package:nexgen_command/features/site/settings_page.dart';
 import 'package:nexgen_command/features/site/user_profile_screen.dart';
 import 'package:nexgen_command/features/site/edit_profile_screen.dart';
@@ -29,27 +32,60 @@ import 'package:nexgen_command/features/site/lumina_studio_screen.dart';
 import 'package:nexgen_command/features/site/manage_controllers_page.dart';
 import 'package:nexgen_command/features/site/system_management_screen.dart';
 import 'package:nexgen_command/features/site/remote_access_screen.dart';
+import 'package:nexgen_command/features/site/bridge_setup_screen.dart';
+import 'package:nexgen_command/features/design/refine/refine_roofline_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/geofence/geofence_setup_screen.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.dart';
-import 'package:nexgen_command/features/design/my_designs_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
-import 'package:nexgen_command/features/scenes/my_scenes_screen.dart';
 import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart';
 import 'package:nexgen_command/features/properties/my_properties_screen.dart';
+import 'package:nexgen_command/features/auth/staff_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_landing_screen.dart';
+import 'package:nexgen_command/features/installer/screens/existing_customer_screen.dart';
 import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
 import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
+import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
+import 'package:nexgen_command/features/installer/admin/brand_library_admin_screen.dart';
+import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_pin_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_dashboard_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/dealer_detail_screen.dart';
+import 'package:nexgen_command/features/corporate/screens/corporate_job_detail_screen.dart';
 import 'package:nexgen_command/features/installer/media_dashboard_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_pin_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_landing_screen.dart';
+import 'package:nexgen_command/features/sales/screens/prospect_info_screen.dart';
+import 'package:nexgen_command/features/sales/screens/zone_builder_screen.dart';
+import 'package:nexgen_command/features/sales/screens/visit_review_screen.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_preview_screen.dart';
+import 'package:nexgen_command/features/sales/screens/customer_signature_screen.dart';
+import 'package:nexgen_command/features/sales/screens/sales_jobs_screen.dart';
+import 'package:nexgen_command/features/sales/screens/job_detail_screen.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step1_home_photo.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step2_controller.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step3_channels.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step4_injections.dart';
+import 'package:nexgen_command/features/sales/screens/estimate_wizard/wizard_step5_summary.dart';
+import 'package:nexgen_command/features/sales/screens/day1_queue_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day1_blueprint_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_queue_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_blueprint_screen.dart';
+import 'package:nexgen_command/features/sales/screens/day2_wrap_up_screen.dart';
+import 'package:nexgen_command/features/referrals/screens/payout_approval_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
+import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
+import 'package:nexgen_command/features/autopilot/screens/autopilot_calendar_screen.dart';
+import 'package:nexgen_command/features/zones/screens/zone_setup_screen.dart';
 import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 // Dashboard pages for branch wrappers
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
@@ -62,6 +98,14 @@ import 'package:nexgen_command/features/demo/demo_photo_screen.dart';
 import 'package:nexgen_command/features/demo/demo_roofline_screen.dart';
 import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
 import 'package:nexgen_command/route_guards.dart';
+// Commercial mode imports
+import 'package:nexgen_command/screens/commercial/CommercialHomeScreen.dart';
+import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_wizard.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_search_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_setup_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_correction_review_screen.dart';
+import 'package:nexgen_command/features/commercial/events/events_screen.dart';
+import 'package:nexgen_command/features/commercial/events/create_event_screen.dart';
 
 /// Slide + fade transition for Explore sub-routes.
 CustomTransitionPage<void> _exploreFadeSlide({
@@ -98,6 +142,10 @@ class AppRouter {
   // Navigator keys for StatefulShellRoute branches
   /// Root navigator key — exposed for notification deep-link navigation.
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+  /// Global scaffold messenger key — allows showing snackbars from
+  /// non-widget code (e.g., Riverpod notifiers, services).
+  static final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   static GlobalKey<NavigatorState> get _rootNavigatorKey => rootNavigatorKey;
   static final _homeNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'home');
   static final _scheduleNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'schedule');
@@ -128,6 +176,13 @@ class AppRouter {
         name: 'forgot-password',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: ForgotPasswordPage()),
+      ),
+      GoRoute(
+        path: AppRoutes.forcedPasswordReset,
+        name: 'forced-password-reset',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const NoTransitionPage(child: ForcedPasswordResetScreen()),
       ),
       // ===== INSTALLATION ACCESS CONTROL (root navigator) =====
       GoRoute(
@@ -179,6 +234,23 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(child: DemoCompletionScreen()),
       ),
+      // ===== DEMO REDIRECTS (placeholder routes → main app sections) =====
+      GoRoute(
+        path: AppRoutes.demoPatterns,
+        redirect: (context, state) => AppRoutes.explore,
+      ),
+      GoRoute(
+        path: AppRoutes.demoSchedule,
+        redirect: (context, state) => AppRoutes.schedule,
+      ),
+      GoRoute(
+        path: AppRoutes.demoExplore,
+        redirect: (context, state) => AppRoutes.explore,
+      ),
+      GoRoute(
+        path: AppRoutes.demoLumina,
+        redirect: (context, state) => AppRoutes.dashboard,
+      ),
       // ===== ONBOARDING (root navigator) =====
       GoRoute(
         path: AppRoutes.discovery,
@@ -198,6 +270,25 @@ class AppRouter {
         name: 'first-run',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: FirstRunScreen()),
+      ),
+      // ===== AUTOPILOT REVEAL + CALENDAR (root navigator) =====
+      GoRoute(
+        path: AppRoutes.firstWeekReveal,
+        name: 'first-week-reveal',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: FirstWeekRevealScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.autopilotCalendar,
+        name: 'autopilot-calendar',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: AutopilotCalendarScreen(),
+        ),
       ),
       // ===== SETUP / FULLSCREEN MODAL ROUTES (root navigator) =====
       GoRoute(
@@ -246,22 +337,18 @@ class AppRouter {
         },
       ),
       GoRoute(
-        path: AppRoutes.designStudio,
-        name: 'design-studio',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: AIDesignStudioScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.myDesigns,
-        name: 'my-designs',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: MyDesignsScreen()),
-      ),
-      GoRoute(
         path: AppRoutes.rooflineEditor,
         name: 'roofline-editor',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineEditorScreen()),
+      ),
+      // Design Studio Slice 5 — customer boundary refine.
+      GoRoute(
+        path: AppRoutes.rooflineRefine,
+        name: 'roofline-refine',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+            fullscreenDialog: true, child: RefineRooflineScreen()),
       ),
       GoRoute(
         path: AppRoutes.segmentSetup,
@@ -275,6 +362,21 @@ class AppRouter {
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
       ),
+      // ===== STAFF PIN (root navigator) =====
+      // Unified PIN entry — reachable only via the hidden 5-tap gesture
+      // on the Lumina logo on the login screen. Routes the user to
+      // Corporate / Sales / Installer mode based on which PIN store
+      // matches. The legacy single-purpose PIN routes
+      // (/installer/pin, /sales/pin, /corporate/pin) remain registered
+      // below for now, but nothing on the login screen navigates to
+      // them directly anymore.
+      GoRoute(
+        path: AppRoutes.staffPin,
+        name: 'staff-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: StaffPinScreen()),
+      ),
+
       // ===== INSTALLER / MEDIA / ADMIN (root navigator) =====
       GoRoute(
         path: AppRoutes.installerLanding,
@@ -289,11 +391,198 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
       ),
       GoRoute(
+        path: AppRoutes.zoneSetup,
+        name: 'zone-setup',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(child: ZoneSetupScreen()),
+      ),
+      GoRoute(
         path: AppRoutes.installerWizard,
         name: 'installer-wizard',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerSetupWizard()),
       ),
+      GoRoute(
+        path: AppRoutes.existingCustomer,
+        name: 'existing-customer',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: ExistingCustomerScreen()),
+      ),
+
+      // ── Sales Mode ────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.salesPin,
+        name: 'sales-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesPinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesLanding,
+        name: 'sales-landing',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesLandingScreen()),
+      ),
+      // Sales wizard screens
+      GoRoute(
+        path: AppRoutes.salesProspect,
+        name: 'sales-prospect',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: ProspectInfoScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesZones,
+        name: 'sales-zones',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: ZoneBuilderScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesReview,
+        name: 'sales-review',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: VisitReviewScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesEstimate,
+        name: 'sales-estimate',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: EstimatePreviewScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesEstimateSign,
+        name: 'sales-estimate-sign',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: CustomerSignatureScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesJobs,
+        name: 'sales-jobs',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: SalesJobsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.salesJobDetail,
+        name: 'sales-job-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: JobDetailScreen(jobId: state.pathParameters['jobId'] ?? ''),
+        ),
+      ),
+      // Estimate Wizard (5 steps) — parallel to the legacy zone builder.
+      GoRoute(
+        path: AppRoutes.salesWizardStep1,
+        name: 'sales-wizard-step1',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep1HomePhoto(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep2,
+        name: 'sales-wizard-step2',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep2Controller(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep3,
+        name: 'sales-wizard-step3',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep3Channels(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep4,
+        name: 'sales-wizard-step4',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep4Injections(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.salesWizardStep5,
+        name: 'sales-wizard-step5',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: WizardStep5Summary(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      // Day 1 dispatch — electrician queue + per-job blueprint stub.
+      // Both screens are role-gated behind installerModeActiveProvider
+      // and bounce to AppRoutes.installerPin if no session is active.
+      GoRoute(
+        path: AppRoutes.day1Queue,
+        name: 'day1-queue',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: Day1QueueScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day1JobBlueprint,
+        name: 'day1-job-blueprint',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day1BlueprintScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      // Day 2 install dispatch — queue + per-job blueprint + wrap-up.
+      // All three screens are role-gated behind installerModeActiveProvider
+      // (the queue checks; the blueprint and wrap-up trust the queue gate).
+      GoRoute(
+        path: AppRoutes.day2Queue,
+        name: 'day2-queue',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: Day2QueueScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day2JobBlueprint,
+        name: 'day2-job-blueprint',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day2BlueprintScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.day2WrapUp,
+        name: 'day2-wrap-up',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          fullscreenDialog: true,
+          child: Day2WrapUpScreen(
+            jobId: state.pathParameters['jobId'] ?? '',
+          ),
+        ),
+      ),
+
       GoRoute(
         path: AppRoutes.mediaLanding,
         name: 'media-landing',
@@ -319,10 +608,151 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminPinScreen()),
       ),
       GoRoute(
-        path: AppRoutes.adminDashboard,
-        name: 'admin-dashboard',
+        path: AppRoutes.dealerDashboard,
+        name: 'dealer-dashboard',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminDashboardScreen()),
+        pageBuilder: (context, state) {
+          final dealerCode = state.uri.queryParameters['dealerCode'];
+          return MaterialPage(
+            fullscreenDialog: true,
+            child: DealerDashboardScreen(dealerCodeOverride: dealerCode),
+          );
+        },
+      ),
+      // Corporate-admin brand library management (Part 9). Both screens
+      // gate access in-screen via isUserRoleAdminProvider — the
+      // /brand_library and /brand_library_corrections firestore rules
+      // are the security boundary; the in-screen check is UX.
+      GoRoute(
+        path: AppRoutes.adminBrandLibrary,
+        name: 'admin-brand-library',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandLibraryAdminScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.adminBrandCorrections,
+        name: 'admin-brand-corrections',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandCorrectionReviewScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.dealerPayouts,
+        name: 'dealer-payouts',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: PayoutApprovalScreen()),
+      ),
+
+      // ===== CORPORATE MODE ROUTES (root navigator) =====
+      GoRoute(
+        path: AppRoutes.corporatePin,
+        name: 'corporate-pin',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(fullscreenDialog: true, child: CorporatePinScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.corporateDashboard,
+        name: 'corporate-dashboard',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: CorporateDashboardScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.corporateDealerDetailBase}/:dealerCode',
+        name: 'corporate-dealer-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final code = state.pathParameters['dealerCode'] ?? '';
+          final name = state.extra is String ? state.extra as String : null;
+          return MaterialPage(
+            child: DealerDetailScreen(
+              dealerCode: code,
+              dealerName: name,
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.corporateJobDetailBase}/:jobId',
+        name: 'corporate-job-detail',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final id = state.pathParameters['jobId'] ?? '';
+          return MaterialPage(child: CorporateJobDetailScreen(jobId: id));
+        },
+      ),
+
+      // ===== COMMERCIAL MODE ROUTES (root navigator) =====
+      GoRoute(
+        path: AppRoutes.commercialHome,
+        name: 'commercial-home',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: CommercialHomeScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialOnboarding,
+        name: 'commercial-onboarding',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(fullscreenDialog: true, child: CommercialOnboardingWizard()),
+      ),
+      // Brand library — search, setup, and corporate correction review.
+      // Setup accepts either a BrandLibraryEntry (from search → pre-selected)
+      // or a Map {preSelected, isEditing} (from the Brand tab edit button)
+      // via state.extra. The corrections route's admin gate is enforced
+      // in-screen against user_role == 'admin' (the firestore rule on
+      // /brand_library_corrections.update enforces the same predicate).
+      GoRoute(
+        path: AppRoutes.commercialBrandSearch,
+        name: 'commercial-brand-search',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: BrandSearchScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialBrandSetup,
+        name: 'commercial-brand-setup',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => MaterialPage(
+          child: BrandSetupScreen.fromExtra(state.extra),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialBrandCorrections,
+        name: 'commercial-brand-corrections',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: BrandCorrectionReviewScreen(),
+        ),
+      ),
+      // Sales & Events. The list screen is reachable from the
+      // commercial home screen; the create screen is pushed from the
+      // FAB on the list and from the empty-state CTA.
+      GoRoute(
+        path: AppRoutes.commercialEvents,
+        name: 'commercial-events',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const MaterialPage(child: EventsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.commercialEventsCreate,
+        name: 'commercial-events-create',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(
+          fullscreenDialog: true,
+          child: CreateEventScreen(),
+        ),
       ),
 
       // ===== STATEFUL SHELL ROUTE (persistent bottom nav) =====
@@ -340,6 +770,91 @@ class AppRouter {
                 path: AppRoutes.dashboard,
                 name: 'dashboard',
                 pageBuilder: (context, state) => const NoTransitionPage(child: WledDashboardPage()),
+                routes: [
+                  // /dashboard/game-day — Game Day hub. Nested here so the
+                  // bottom nav bar stays visible and back navigation pops
+                  // to the dashboard via the home branch navigator.
+                  GoRoute(
+                    path: 'game-day',
+                    name: 'game-day',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: GameDayScreen()),
+                    routes: [
+                      // /dashboard/game-day/picker/:nodeId — Game Day pattern
+                      // picker. Same screen as /explore/library/:nodeId; this
+                      // dashboard-branch route is for callers that want a
+                      // full-screen modal-style picker without losing the
+                      // calling branch context. Used by Game Day team card's
+                      // Pattern button and Item #51 active session sheet's
+                      // Edit Design action. parentNavigatorKey: _rootNavigatorKey
+                      // so the picker pushes onto the root navigator and the
+                      // back-arrow inside LibraryBrowserScreen pops cleanly
+                      // back to /dashboard/game-day. Item #64 fix 2026-05-09.
+                      GoRoute(
+                        path: 'picker/:nodeId',
+                        name: 'game-day-picker',
+                        parentNavigatorKey: _rootNavigatorKey,
+                        pageBuilder: (context, state) {
+                          final nodeId = state.pathParameters['nodeId']!;
+                          // The path param is now the REAL catalog leaf node id
+                          // (resolved by SportsLibraryBuilder.resolveTeamNodeId),
+                          // which no longer encodes the team slug. teamSlug is
+                          // therefore passed EXPLICITLY via extra so it still
+                          // reaches GameDayAutopilotNotifier.saveDesign through
+                          // LibraryBrowserScreen → ColorwayEffectSelectorPage.
+                          // Legacy fallback: older deep links of the form
+                          // 'team_<slug>' still recover the slug by prefix strip.
+                          final extra = state.extra;
+                          String? teamSlug;
+                          if (extra is Map && extra['teamSlug'] is String) {
+                            teamSlug = extra['teamSlug'] as String;
+                          } else if (nodeId.startsWith('team_')) {
+                            teamSlug = nodeId.substring('team_'.length);
+                          }
+                          return NoTransitionPage(
+                            child: LibraryBrowserScreen(
+                              nodeId: nodeId,
+                              teamSlug: teamSlug,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  // /dashboard/audio-reactive — Audio Mode. Nested here for
+                  // the same reason as Game Day: keep the nav bar visible
+                  // and provide normal back navigation in the home branch.
+                  GoRoute(
+                    path: 'audio-reactive',
+                    name: 'audio-reactive',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: AudioModePage()),
+                  ),
+                  // /dashboard/design-studio — AI Design Studio (home variant).
+                  // Design Studio is registered under each branch so the
+                  // bottom nav bar persists no matter which tab the user
+                  // launched it from. Use designStudioPathFor(context) to
+                  // resolve the right branch path.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'home-design-studio',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
+                  ),
+                  // /dashboard/neighborhood-sync — Neighborhood Sync hub.
+                  // Pushed from the home dashboard with the nav bar visible
+                  // and a back button (added in the screen).
+                  GoRoute(
+                    path: 'neighborhood-sync',
+                    name: 'home-neighborhood-sync',
+                    parentNavigatorKey: _homeNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: NeighborhoodSyncScreen()),
+                  ),
+                ],
               ),
             ],
           ),
@@ -367,6 +882,15 @@ class AppRouter {
                 name: 'explore',
                 pageBuilder: (context, state) => const NoTransitionPage(child: ExplorePatternsScreen()),
                 routes: [
+                  // /explore/design-studio — Design Studio (explore variant).
+                  // Literal path; must come before the :categoryId wildcard.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'explore-design-studio',
+                    parentNavigatorKey: _exploreNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
+                  ),
                   // /explore/library/:nodeId — library node browser
                   GoRoute(
                     path: 'library/:nodeId',
@@ -402,13 +926,6 @@ class AppRouter {
                         ),
                       );
                     },
-                  ),
-                  // /explore/scenes — saved scenes list
-                  GoRoute(
-                    path: 'scenes',
-                    name: 'my-scenes',
-                    parentNavigatorKey: _exploreNavigatorKey,
-                    pageBuilder: (context, state) => _exploreFadeSlide(state: state, child: const MyScenesScreen()),
                   ),
                   // /explore/:categoryId — pattern category detail (wildcard LAST)
                   GoRoute(
@@ -525,6 +1042,12 @@ class AppRouter {
                     pageBuilder: (context, state) => const NoTransitionPage(child: RemoteAccessScreen()),
                   ),
                   GoRoute(
+                    path: 'bridge-setup',
+                    name: 'bridge-setup',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(child: BridgeSetupScreen()),
+                  ),
+                  GoRoute(
                     path: 'voice-assistants',
                     name: 'voice-assistants',
                     parentNavigatorKey: _systemNavigatorKey,
@@ -537,12 +1060,6 @@ class AppRouter {
                     pageBuilder: (context, state) => const NoTransitionPage(child: MyPropertiesScreen()),
                   ),
                   GoRoute(
-                    path: 'neighborhood-sync',
-                    name: 'neighborhood-sync',
-                    parentNavigatorKey: _systemNavigatorKey,
-                    pageBuilder: (context, state) => const NoTransitionPage(child: NeighborhoodSyncScreen()),
-                  ),
-                  GoRoute(
                     path: 'current-colors',
                     name: 'current-colors',
                     parentNavigatorKey: _systemNavigatorKey,
@@ -553,6 +1070,35 @@ class AppRouter {
                     name: 'sub-users',
                     parentNavigatorKey: _systemNavigatorKey,
                     pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
+                  ),
+                  GoRoute(
+                    path: 'my-whites',
+                    name: 'my-whites',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(child: PreferredWhiteSelectionPage()),
+                  ),
+                  // Sports Alerts — registered as a proper system-shell
+                  // child route (was previously pushed via raw Navigator,
+                  // which left the screen unreachable-to-back-out-of when
+                  // the user switched bottom-nav branches and came back).
+                  // The screen now also has an explicit BackButton in its
+                  // GlassAppBar — see sports_alerts_screen.dart.
+                  GoRoute(
+                    path: 'sports-alerts',
+                    name: 'sports-alerts',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) =>
+                        const NoTransitionPage(child: SportsAlertsScreen()),
+                  ),
+                  // /settings/design-studio — Design Studio (system variant).
+                  // Registered here so callers from the System branch (e.g.
+                  // zone configuration) keep the bottom nav bar visible.
+                  GoRoute(
+                    path: 'design-studio',
+                    name: 'system-design-studio',
+                    parentNavigatorKey: _systemNavigatorKey,
+                    pageBuilder: (context, state) => const NoTransitionPage(
+                        child: AIDesignStudioScreen()),
                   ),
                   // Note: roofline-editor is intentionally a root-level fullscreen route,
                   // not nested here. See the root GoRoute for /settings/roofline-editor.
@@ -578,6 +1124,7 @@ class AppRoutes {
   static const String login = '/';
   static const String signUp = '/signup';
   static const String forgotPassword = '/forgot-password';
+  static const String forcedPasswordReset = '/forced-password-reset';
   static const String discovery = '/discovery';
   static const String welcome = '/welcome';
   static const String dashboard = '/dashboard';
@@ -601,30 +1148,99 @@ class AppRoutes {
   static const String luminaStudio = '/settings/studio';
   static const String geofenceSetup = '/settings/geofence';
   static const String remoteAccess = '/settings/remote-access';
+  static const String bridgeSetup = '/settings/bridge-setup';
   static const String luminaAI = '/lumina-ai';
-  static const String designStudio = '/design-studio';
+  // Design Studio is registered as a nested route under each shell branch
+  // so the bottom nav bar persists no matter which tab launched it.
+  // Use [designStudioPathFor] to pick the right one based on current location.
+  static const String homeDesignStudio = '/dashboard/design-studio';
+  static const String exploreDesignStudio = '/explore/design-studio';
+  static const String systemDesignStudio = '/settings/design-studio';
+  // Default = home variant. Branch-aware callers should use the helper.
+  static const String designStudio = homeDesignStudio;
   static const String editPattern = '/edit-pattern';
-  static const String myDesigns = '/my-designs';
-  static const String myScenes = '/explore/scenes';
   static const String voiceAssistants = '/settings/voice-assistants';
+  static const String sportsAlerts = '/settings/sports-alerts';
   static const String myProperties = '/settings/properties';
   static const String rooflineEditor = '/settings/roofline-editor';
+  static const String rooflineRefine = '/settings/roofline-refine';
   static const String segmentSetup = '/segment-setup';
   static const String rooflineSetupWizard = '/roofline-setup-wizard';
   static const String currentColors = '/settings/current-colors';
+  // Unified staff PIN entry — reachable only via the hidden 5-tap
+  // gesture on the Lumina logo on the login screen. Routes the user to
+  // Corporate / Sales / Installer mode based on which PIN store matches
+  // (see lib/features/auth/staff_pin_screen.dart for the routing order).
+  static const String staffPin = '/staff/pin';
   // Installer mode routes
   static const String installerLanding = '/installer';
   static const String installerPin = '/installer/pin';
   static const String installerWizard = '/installer/wizard';
+  // Existing-customer search — installer impersonates the chosen customer
+  // (sets installerAccessingCustomerProvider) and lands on the main
+  // customer dashboard with an InstallerModeBanner pinned to the top.
+  static const String existingCustomer = '/installer/existing-customer';
+  // Sales mode routes
+  static const String salesPin = '/sales/pin';
+  static const String salesLanding = '/sales';
+  static const String salesProspect = '/sales/visit/prospect';
+  static const String salesZones = '/sales/visit/zones';
+  static const String salesReview = '/sales/visit/review';
+  static const String salesEstimate = '/sales/estimate';
+  static const String salesEstimateSign = '/sales/estimate/sign';
+  static const String salesJobs = '/sales/jobs';
+  static const String salesJobDetail = '/sales/jobs/:jobId';
+  // Estimate wizard — :jobId pulls the in-progress SalesJob from
+  // activeJobProvider via EstimateWizardNotifier.
+  static const String salesWizardStep1 = '/sales/jobs/:jobId/wizard/home-photo';
+  static const String salesWizardStep2 = '/sales/jobs/:jobId/wizard/controller';
+  static const String salesWizardStep3 = '/sales/jobs/:jobId/wizard/channels';
+  static const String salesWizardStep4 = '/sales/jobs/:jobId/wizard/injections';
+  static const String salesWizardStep5 = '/sales/jobs/:jobId/wizard/summary';
+  // Day 1 electrician dispatch — gated behind installerModeActiveProvider.
+  static const String day1Queue = '/day1/queue';
+  static const String day1JobBlueprint = '/day1/jobs/:jobId/blueprint';
+  // Day 2 install dispatch — gated behind installerModeActiveProvider.
+  static const String day2Queue = '/day2/queue';
+  static const String day2JobBlueprint = '/day2/jobs/:jobId/blueprint';
+  static const String day2WrapUp = '/day2/jobs/:jobId/wrap-up';
   // Media mode routes
   static const String mediaLanding = '/media';
   static const String mediaAccessCode = '/media/code';
   static const String mediaDashboard = '/media/dashboard';
   // Admin management routes
   static const String adminPin = '/admin/pin';
-  static const String adminDashboard = '/admin/dashboard';
-  // Neighborhood sync
-  static const String neighborhoodSync = '/settings/neighborhood-sync';
+  // Corporate-admin brand library management (Part 9)
+  static const String adminBrandLibrary = '/admin/brand-library';
+  static const String adminBrandCorrections = '/admin/brand-corrections';
+  // Dealer dashboard
+  static const String dealerDashboard = '/dealer/dashboard';
+
+  // ===== CORPORATE MODE =====
+  static const String corporatePin = '/corporate/pin';
+  static const String corporateDashboard = '/corporate/dashboard';
+  /// Base path for the dealer detail screen — full route is
+  /// `/corporate/dealers/:dealerCode` (declared with the path parameter
+  /// in the GoRouter config above).
+  static const String corporateDealerDetailBase = '/corporate/dealers';
+  /// Base path for the corporate read-only job detail screen — full
+  /// route is `/corporate/jobs/:jobId`.
+  static const String corporateJobDetailBase = '/corporate/jobs';
+  // Dealer payout approval
+  static const String dealerPayouts = '/dealer/payouts';
+  // Neighborhood sync — nested under /dashboard so the dashboard button
+  // can context.push() it without switching tabs and the bottom nav bar
+  // stays visible.
+  static const String neighborhoodSync = '/dashboard/neighborhood-sync';
+  // Game Day hub — nested under /dashboard so the bottom nav bar persists
+  // and back navigation pops within the home branch.
+  static const String gameDay = '/dashboard/game-day';
+  // Game Day pattern picker — same screen as libraryNode but pushed onto
+  // the root navigator so back-arrow returns to Game Day rather than the
+  // explore branch root. Item #64 fix 2026-05-09. The :nodeId parameter
+  // matches the kTeamColors slug prefixed with `team_` (e.g.
+  // `team_mlb_royals`).
+  static const String gameDayPicker = '/dashboard/game-day/picker/:nodeId';
   // Library hierarchy routes (nested under /explore for persistent nav bar)
   static const String libraryNode = '/explore/library/:nodeId';
   // Installation access control routes
@@ -632,7 +1248,10 @@ class AppRoutes {
   static const String joinWithCode = '/join-with-code';
   static const String systemDeactivated = '/system-deactivated';
   static const String subUsers = '/settings/users';
+  static const String myWhites = '/settings/my-whites';
   static const String autopilotSchedule = '/autopilot-schedule';
+  // Audio Mode — nested under /dashboard so the bottom nav bar persists.
+  static const String audioReactive = '/dashboard/audio-reactive';
   // Demo experience routes
   static const String demoCode = '/demo-code';
   static const String demoWelcome = '/demo';
@@ -646,4 +1265,32 @@ class AppRoutes {
   static const String demoComplete = '/demo/complete';
   // First-run onboarding (post-installer handoff)
   static const String firstRun = '/first-run';
+  // Autopilot generation reveal + unified calendar
+  static const String firstWeekReveal = '/autopilot/first-week';
+  static const String autopilotCalendar = '/autopilot/calendar';
+
+  static const String zoneSetup = '/installer/zone-setup';
+  // Commercial mode routes
+  static const String commercialHome = '/commercial';
+  static const String commercialOnboarding = '/commercial/onboarding';
+  // Brand library routes (admin-gated for corrections)
+  static const String commercialBrandSearch = '/commercial/brand/search';
+  static const String commercialBrandSetup = '/commercial/brand/setup';
+  static const String commercialBrandCorrections =
+      '/commercial/brand/corrections';
+  // Sales & Events routes
+  static const String commercialEvents = '/commercial/events';
+  static const String commercialEventsCreate = '/commercial/events/create';
+}
+
+/// Returns the Design Studio path nested under the current shell branch so
+/// `context.push(designStudioPathFor(context))` keeps the bottom nav bar
+/// visible no matter which tab the caller lives in. Falls back to the home
+/// branch path for callers outside any known branch (e.g. root-level routes
+/// or AI commands without a branch context).
+String designStudioPathFor(BuildContext context) {
+  final loc = GoRouterState.of(context).matchedLocation;
+  if (loc.startsWith('/explore')) return AppRoutes.exploreDesignStudio;
+  if (loc.startsWith('/settings')) return AppRoutes.systemDesignStudio;
+  return AppRoutes.homeDesignStudio;
 }

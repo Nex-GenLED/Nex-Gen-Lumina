@@ -1,8 +1,36 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
+import 'sync_fanout_feature_flag.dart';
+import 'services/sync_notification_service.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarding Completion Flag
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kOnboardingCompleteKey = 'neighborhood_sync_onboarding_complete';
+
+/// Whether the user has completed or bypassed the Neighborhood Sync onboarding.
+/// Once set, this flag is never reset — even after leaving all groups.
+final neighborhoodSyncOnboardingCompleteProvider = FutureProvider<bool>((ref) async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool(_kOnboardingCompleteKey) ?? false;
+});
+
+/// Persists the onboarding-complete flag. Fire-and-forget — safe to call
+/// without awaiting. Silently ignores errors (non-critical path).
+Future<void> markNeighborhoodSyncOnboardingComplete() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kOnboardingCompleteKey, true);
+  } catch (_) {
+    // Non-critical — worst case the user sees onboarding once more.
+  }
+}
 
 /// Provider for the NeighborhoodService singleton.
 final neighborhoodServiceProvider = Provider<NeighborhoodService>((ref) {
@@ -42,7 +70,18 @@ final latestSyncCommandProvider = StreamProvider<SyncCommand?>((ref) {
   if (groupId == null) return Stream.value(null);
 
   final service = ref.watch(neighborhoodServiceProvider);
-  return service.watchLatestCommand(groupId);
+  // Defense-in-depth: a denied read (e.g. transiently pointing at a group the
+  // rules gate) or ANY stream error must be INERT to the home screen — never
+  // surface as an AsyncError. Swallow it so the keepalive stays silent ("no
+  // active sync command") instead of throwing / driving a re-subscribe loop
+  // and blanking the dashboard. The real fixes (resolveAutoActiveGroupId never
+  // activating a non-member group + the exists()-based rule) prevent the
+  // permission-denied at the source; this is the net.
+  return service
+      .watchLatestCommand(groupId)
+      .handleError((Object e, StackTrace st) {
+    debugPrint('latestSyncCommandProvider: stream error swallowed (inert): $e');
+  });
 });
 
 /// Current sync timing configuration (user-adjustable).
@@ -59,8 +98,13 @@ final neighborhoodSchedulesProvider = StreamProvider<List<SyncSchedule>>((ref) {
   final groupId = ref.watch(activeNeighborhoodIdProvider);
   if (groupId == null) return Stream.value([]);
 
+  // Sibling gated stream (neighborhoods/{groupId}/schedules) — same
+  // defense-in-depth as latestSyncCommandProvider: a denied/errored read must
+  // be inert (fall back to "no schedules"), never an AsyncError.
   final service = ref.watch(neighborhoodServiceProvider);
-  return service.watchSchedules(groupId);
+  return service.watchSchedules(groupId).handleError((Object e, StackTrace st) {
+    debugPrint('neighborhoodSchedulesProvider: stream error swallowed (inert): $e');
+  });
 });
 
 /// Provider for nearby public groups based on user location.
@@ -93,8 +137,10 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     double? latitude,
     double? longitude,
   }) async {
+    debugPrint('🏘️ [NeighborhoodNotifier] createGroup invoked');
     state = const AsyncValue.loading();
     try {
+      debugPrint('🏘️ [NeighborhoodNotifier] Delegating to NeighborhoodService...');
       final group = await _service.createGroup(
         name,
         displayName: displayName,
@@ -105,10 +151,14 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
         latitude: latitude,
         longitude: longitude,
       );
+      debugPrint('🏘️ [NeighborhoodNotifier] Service returned group ${group.id}');
       ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+      markNeighborhoodSyncOnboardingComplete(); // auto-complete on first group created
       state = const AsyncValue.data(null);
       return group;
     } catch (e, st) {
+      debugPrint('🏘️ [NeighborhoodNotifier] createGroup FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodNotifier] Stack: $st');
       state = AsyncValue.error(e, st);
       return null;
     }
@@ -121,6 +171,7 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
       final group = await _service.joinGroup(inviteCode, displayName: displayName);
       if (group != null) {
         ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+        markNeighborhoodSyncOnboardingComplete(); // auto-complete on first group joined
       }
       state = const AsyncValue.data(null);
       return group;
@@ -131,17 +182,102 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
   }
 
   /// Leaves the currently active group.
+  ///
+  /// For non-host members, removes them from the group.
+  /// Stores the group info for the rejoin flow.
   Future<void> leaveCurrentGroup() async {
     final groupId = ref.read(activeNeighborhoodIdProvider);
     if (groupId == null) return;
 
     state = const AsyncValue.loading();
     try {
+      // Save group info for rejoin before leaving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
       await _service.leaveGroup(groupId);
       ref.read(activeNeighborhoodIdProvider.notifier).state = null;
       state = const AsyncValue.data(null);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Dissolves the group when the host leaves without transferring ownership.
+  /// Notifies all remaining members via push notification.
+  Future<void> dissolveGroupAsHost({required String hostDisplayName}) async {
+    final groupId = ref.read(activeNeighborhoodIdProvider);
+    if (groupId == null) return;
+
+    state = const AsyncValue.loading();
+    try {
+      // Save group info for rejoin before dissolving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
+      final otherMembers = await _service.dissolveGroup(groupId);
+
+      // Notify all other members that the group has been dissolved
+      if (otherMembers.isNotEmpty) {
+        try {
+          final notifService = ref.read(syncNotificationServiceProvider);
+          await notifService.notifyGroupDissolved(
+            groupId: groupId,
+            participantUids: otherMembers,
+            hostName: hostDisplayName,
+          );
+        } catch (_) {
+          // Best-effort notification — don't block the leave flow
+        }
+      }
+
+      ref.read(activeNeighborhoodIdProvider.notifier).state = null;
+      state = const AsyncValue.data(null);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Transfers ownership to another member, then leaves the group.
+  Future<void> transferOwnershipAndLeave(String newOwnerUid) async {
+    final groupId = ref.read(activeNeighborhoodIdProvider);
+    if (groupId == null) return;
+
+    state = const AsyncValue.loading();
+    try {
+      // Save group info for rejoin before leaving
+      final group = ref.read(activeNeighborhoodProvider).valueOrNull;
+      if (group != null) {
+        await _savePreviousGroup(group);
+      }
+
+      await _service.transferOwnership(groupId, newOwnerUid);
+      await _service.leaveGroup(groupId);
+      ref.read(activeNeighborhoodIdProvider.notifier).state = null;
+      state = const AsyncValue.data(null);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
+  /// Persists group info to SharedPreferences for the "Previous Groups" rejoin flow.
+  Future<void> _savePreviousGroup(NeighborhoodGroup group) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final existing = prefs.getStringList('previous_group_ids') ?? [];
+      if (!existing.contains(group.id)) {
+        existing.add(group.id);
+        await prefs.setStringList('previous_group_ids', existing);
+      }
+      // Store name and invite code for display
+      await prefs.setString('prev_group_name_${group.id}', group.name);
+      await prefs.setString('prev_group_code_${group.id}', group.inviteCode);
+    } catch (_) {
+      // Non-critical — rejoin will just require manual code entry
     }
   }
 
@@ -185,14 +321,71 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
   }
 
   /// Broadcasts a sync command to all members.
-  Future<void> broadcastSync(SyncCommand command) async {
+  ///
+  /// Returns the [FanoutResult] when the flag is on (null otherwise) so the UI
+  /// caller can surface a rate-limit "try again" message. Ordering (flag ON):
+  /// fanout FIRST (it enforces the server-side rate limit); on a rate-limited
+  /// reject, fire NOTHING — not even the app-open broadcast — so the two
+  /// delivery paths stay consistent (Commit 2). A plain fanout failure
+  /// (network/500) still falls through to the broadcast so app-open members
+  /// aren't left dark. Flag OFF ⇒ only the broadcast, exactly as today.
+  Future<FanoutResult?> broadcastSync(SyncCommand command) async {
     state = const AsyncValue.loading();
     try {
+      FanoutResult? result;
+      if (ref.read(syncFanoutEnabledSyncProvider)) {
+        result = await _service.fanoutAdHocSync(
+          groupId: command.groupId,
+          payload: _buildFanoutPayload(command),
+        );
+        if (result.rateLimited) {
+          // Reject = nothing fires: skip the broadcast entirely.
+          state = const AsyncValue.data(null);
+          return result;
+        }
+      }
+
       await _service.broadcastSyncCommand(command);
       state = const AsyncValue.data(null);
+      return result;
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      return null;
     }
+  }
+
+  /// Build the shared WLED payload for the server fanout from [command]'s base
+  /// (global) pattern. Mirrors the seg shape the receiving sync engine applies
+  /// (NeighborhoodSyncEngine._executePattern) so an app-open listener and an
+  /// app-closed bridge apply the identical state. Slice 1 sends the full
+  /// payload (no per-member channel scoping — that field is dead schema).
+  Map<String, dynamic> _buildFanoutPayload(SyncCommand command) {
+    final p = command.getPatternForMember('');
+    final colorArrays = p.colors.map((c) {
+      final r = (c >> 16) & 0xFF;
+      final g = (c >> 8) & 0xFF;
+      final b = c & 0xFF;
+      return <int>[r, g, b, 0];
+    }).toList();
+    if (colorArrays.isEmpty) colorArrays.add([255, 255, 255, 0]);
+    while (colorArrays.length < 3) {
+      colorArrays.add([0, 0, 0, 0]);
+    }
+    return {
+      'on': true,
+      'bri': p.brightness,
+      'seg': [
+        {
+          'fx': p.effectId,
+          'sx': p.speed,
+          'ix': p.intensity,
+          'pal': p.pal,
+          'grp': p.grp,
+          'spc': p.spc,
+          'col': colorArrays.take(3).toList(),
+        },
+      ],
+    };
   }
 
   /// Stops the current sync.
@@ -206,6 +399,16 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
       // Silent fail
     }
   }
+
+  /// Member self-leave — passthrough to [NeighborhoodService.selfLeaveSync].
+  /// Caller-driven (no swallowing) so the UI can surface failures.
+  Future<void> selfLeaveSync(String groupId) =>
+      _service.selfLeaveSync(groupId);
+
+  /// Owner end-group — passthrough to [NeighborhoodService.endGroupSync].
+  /// May throw [EndGroupSyncPartialFailure]; UI MUST handle.
+  Future<void> endGroupSync(String groupId, List<String> memberUids) =>
+      _service.endGroupSync(groupId, memberUids);
 
   /// Regenerates the invite code (creator only).
   Future<String?> regenerateInviteCode() async {
@@ -498,3 +701,54 @@ final activeMembersForScheduleProvider = Provider.family<List<NeighborhoodMember
   }).toList()
     ..sort((a, b) => a.positionIndex.compareTo(b.positionIndex));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Previous Groups (Rejoin Flow)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A previously-joined group stored locally for one-tap rejoin.
+class PreviousGroup {
+  final String id;
+  final String name;
+  final String inviteCode;
+
+  const PreviousGroup({
+    required this.id,
+    required this.name,
+    required this.inviteCode,
+  });
+}
+
+/// Loads previously-left groups from local storage.
+/// Filters out groups the user is currently a member of.
+final previousGroupsProvider = FutureProvider<List<PreviousGroup>>((ref) async {
+  final prefs = await SharedPreferences.getInstance();
+  final ids = prefs.getStringList('previous_group_ids') ?? [];
+  if (ids.isEmpty) return [];
+
+  // Get current group IDs to exclude
+  final currentGroups = ref.watch(userNeighborhoodsProvider).valueOrNull ?? [];
+  final currentIds = currentGroups.map((g) => g.id).toSet();
+
+  final results = <PreviousGroup>[];
+  for (final id in ids) {
+    if (currentIds.contains(id)) continue;
+
+    final name = prefs.getString('prev_group_name_$id');
+    final code = prefs.getString('prev_group_code_$id');
+    if (name != null && code != null) {
+      results.add(PreviousGroup(id: id, name: name, inviteCode: code));
+    }
+  }
+  return results;
+});
+
+/// Removes a previous group from the rejoin list.
+Future<void> removePreviousGroup(String groupId) async {
+  final prefs = await SharedPreferences.getInstance();
+  final ids = prefs.getStringList('previous_group_ids') ?? [];
+  ids.remove(groupId);
+  await prefs.setStringList('previous_group_ids', ids);
+  await prefs.remove('prev_group_name_$groupId');
+  await prefs.remove('prev_group_code_$groupId');
+}

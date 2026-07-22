@@ -1,16 +1,41 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.nexgenled.command">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.nexgenled.lumina">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-  <!-- Background location for geofence monitoring -->
-  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- ACCESS_BACKGROUND_LOCATION intentionally NOT declared. The geofence
+       ("Welcome Home") runs in the main app isolate and starts no location
+       foreground service (no AndroidSettings.foregroundNotificationConfig), so
+       it only functions while the app is active — there is no genuine
+       app-closed background-location capability to justify the permission.
+       Geofencing uses foreground (whileInUse) location only. A true app-closed
+       geofence is a later workstream. -->
+  <!-- Foreground services are DISABLED for this release. The only FGS was the
+       sports/sync background watch (flutter_background_service, dataSync type),
+       now gated off in Dart (kSportsBackgroundServiceEnabled=false). Strip BOTH
+       our declarations AND the plugin-injected copies from the merged manifest
+       via tools:node="remove" so the app declares no foreground-service
+       permission and Play requires no FGS declaration / demo video.
+       FOREGROUND_SERVICE_LOCATION was likewise never declared (geolocator uses
+       whileInUse location only). Re-add FOREGROUND_SERVICE +
+       FOREGROUND_SERVICE_DATA_SYNC (and the BackgroundService <service> below)
+       when the background watch is re-enabled. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+      tools:node="remove" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+      tools:node="remove" />
+  <!-- RECEIVE_BOOT_COMPLETED is inert: flutter_background_service is configured
+       autoStart:false / autoStartOnBoot:false, so its BootReceiver never
+       restarts the service. Strip BOTH our declaration AND the plugin-injected
+       one (flutter_background_service_android) from the merged manifest via
+       tools:node="remove" (same mechanism as AD_ID below) so the Play
+       permission declaration matches actual behavior. -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"
+      tools:node="remove" />
     <!-- Android 13+ nearby Wi‑Fi devices (for discovery without location) -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <!-- Bluetooth permissions for BLE provisioning (Improv) -->
@@ -20,14 +45,27 @@
     <!-- Android 12+ precise BLE permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Camera marked optional — only used for the house-photo upload and
+         AR roofline preview, both of which gracefully no-op on devices
+         without a camera. Tells Google Play the camera is not a hard
+         requirement and unblocks the privacy-policy review. -->
+    <uses-permission android:name="android.permission.CAMERA"
+        android:required="false" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Android 13+ runtime notification permission (FCM + local notifications) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Advertising ID: Lumina does not use ads or ad-tracking. Explicitly
+         remove the implicit AD_ID permission so Google Play's data-safety
+         declaration matches reality. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
     <application
         android:label="Lumina"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
-            android:name="com.nexgenled.command.MainActivity"
+            android:name="com.nexgenled.lumina.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -63,16 +101,25 @@
                 android:name="android.app.actions"
                 android:resource="@xml/actions"/>
         </activity>
-        <!-- Foreground service type for background location updates (Android 10+) -->
+        <!-- Strip geolocator's location foreground service (our redundant copy
+             AND the plugin-injected one) from the merged manifest. Lumina uses
+             geolocator for FOREGROUND (whileInUse) location only — WLED/mDNS
+             discovery + geofence setup while the app is open — and never starts
+             the location FGS (no foregroundNotificationConfig). Removing the
+             service keeps the shipped manifest honest (no location
+             foregroundServiceType) and pairs with dropping
+             FOREGROUND_SERVICE_LOCATION above. Foreground getPositionStream
+             uses platform location APIs directly, not this service. -->
         <service
             android:name="com.baseflow.geolocator.GeolocatorLocationService"
-            android:foregroundServiceType="location"
-            android:exported="false" />
-        <!-- Sports Alerts background polling service -->
+            tools:node="remove" />
+        <!-- Sports/sync background polling service DISABLED for this release —
+             strip our copy AND the plugin-injected one from the merged manifest
+             so no foreground service ships (pairs with the removed
+             FOREGROUND_SERVICE* permissions above). -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            tools:node="remove" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

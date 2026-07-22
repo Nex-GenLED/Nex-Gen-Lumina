@@ -2,34 +2,36 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
-/// Streams the current user's controllers collection
+/// Streams the current user's controllers collection. Reads from
+/// [effectiveUserUidProvider] so installer impersonation (Existing
+/// Customer flow) transparently scopes the stream to the customer's UID.
 final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) {
-    debugPrint('🔒 controllersStreamProvider: No user logged in');
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) {
+    debugPrint('controllersStreamProvider: No user logged in');
     return const Stream.empty();
   }
 
-  debugPrint('📡 controllersStreamProvider: Listening to controllers for user ${user.uid}');
+  debugPrint('controllersStreamProvider: Listening to controllers for user $uid');
 
   // Don't use orderBy to avoid composite index requirement - we'll sort in memory
   final col = FirebaseFirestore.instance
       .collection('users')
-      .doc(user.uid)
+      .doc(uid)
       .collection('controllers');
 
   return col.snapshots().map((snap) {
-    debugPrint('📦 controllersStreamProvider: Received ${snap.docs.length} controllers from Firestore');
+    debugPrint('controllersStreamProvider: Received ${snap.docs.length} controllers from Firestore');
 
     final controllers = snap.docs.map((d) {
       final data = d.data();
       final createdTs = data['createdAt'];
       final updatedTs = data['updatedAt'];
-
-      debugPrint('   - Controller ${d.id}: name=${data['name']}, ip=${data['ip']}');
 
       return ControllerInfo(
         id: d.id,
@@ -38,6 +40,7 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
         serial: data['serial'] as String?,
         ssid: data['ssid'] as String?,
         wifiConfigured: data['wifiConfigured'] as bool?,
+        connectionMethod: connectionMethodFromJson(data['connectionMethod']),
         createdAt: createdTs is Timestamp ? createdTs.toDate() : null,
         updatedAt: updatedTs is Timestamp ? updatedTs.toDate() : null,
       );

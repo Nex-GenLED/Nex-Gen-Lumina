@@ -1,8 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
+import 'package:nexgen_command/features/installer/connection_method_resolver.dart';
+import 'package:nexgen_command/features/installer/connection_method_verification.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/widgets/team_autocomplete.dart';
+
+/// Test-visible key for the pre-flight verification section. Tests use
+/// `find.descendant(of: find.byKey(handoffVerificationSectionKey), ...)`
+/// to scope icon/text finds and avoid colliding with similarly-styled
+/// widgets elsewhere on the screen (autonomy tiles, Simple Mode list).
+const Key handoffVerificationSectionKey = ValueKey('handoff-verification');
 
 /// Customer handoff screen for installer setup wizard.
 /// Allows installer to configure user preferences before handing off.
@@ -31,19 +47,29 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   int _autonomyLevel = 1;
 
   final _managerEmailController = TextEditingController();
+  final _teamInputCtrl = TextEditingController();
 
-  static const _sportsTeams = [
-    'Chiefs',
-    'Royals',
-    'Sporting KC',
-    'Kansas City Current',
-    'Mavericks (STL)',
-    'Cardinals (STL)',
-    'Blues (STL)',
-    'Seahawks',
-    'Sounders',
-    'Mariners',
-  ];
+  // Verification state — keyed by controller doc id. Starts empty; the
+  // sweep fills entries as probes resolve. Complete Setup stays disabled
+  // until every selected controller has a non-pending entry and none are
+  // in the fail bucket.
+  final Map<String, VerificationResult> _verifications = {};
+  bool _sweepStarted = false;
+
+  // BUG-CLOCK-1: advisory controller clock health, keyed by controller id.
+  // Kept SEPARATE from [_verifications] so it can NEVER gate _canCompleteSetup —
+  // an unhealthy clock is a warn line, not a handoff blocker. A missing key
+  // means "not probed / unreachable" and surfaces nothing.
+  final Map<String, ClockHealth> _clockHealth = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _startSweep();
+    });
+  }
 
   static const _holidays = [
     'Christmas',
@@ -59,7 +85,150 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   @override
   void dispose() {
     _managerEmailController.dispose();
+    _teamInputCtrl.dispose();
     super.dispose();
+  }
+
+  List<ControllerInfo> _selectedControllers() {
+    final selectedIds = ref.read(installerSelectedControllersProvider);
+    final controllersAsync = ref.read(controllersStreamProvider);
+    return controllersAsync.maybeWhen(
+      data: (list) =>
+          list.where((c) => selectedIds.contains(c.id)).toList(),
+      orElse: () => const <ControllerInfo>[],
+    );
+  }
+
+  Future<void> _startSweep() async {
+    if (_sweepStarted) return;
+    _sweepStarted = true;
+    final controllers = _selectedControllers();
+    if (controllers.isEmpty) {
+      // Stream may still be loading; reschedule once and bail otherwise
+      // so the screen doesn't get stuck waiting forever in a test where
+      // the stream emits nothing.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final retry = _selectedControllers();
+        if (retry.isNotEmpty) {
+          _sweepStarted = false;
+          _startSweep();
+        }
+      });
+      return;
+    }
+    setState(() {
+      for (final c in controllers) {
+        _verifications[c.id] = const VerificationResult.pending();
+      }
+    });
+    final resolver = ref.read(connectionMethodResolverProvider);
+    final persistedMethods = ref.read(installerConnectionMethodsProvider);
+    final skipped = ref.read(installerConnectionMethodSkippedProvider);
+
+    for (final controller in controllers) {
+      unawaited(_verifyOne(
+        controller: controller,
+        resolver: resolver,
+        persisted: persistedMethods[controller.id],
+        isSkipped: skipped.contains(controller.id),
+      ));
+      // Advisory clock-health probe (non-blocking; separate from _verifications).
+      unawaited(_probeClock(controller: controller, resolver: resolver));
+    }
+  }
+
+  /// Read-only BUG-CLOCK-1 probe. Stores the result in [_clockHealth] for the
+  /// advisory checklist line. Never touches [_verifications], so it can't block
+  /// handoff. A null result (unreachable / unreadable) simply surfaces nothing.
+  Future<void> _probeClock({
+    required ControllerInfo controller,
+    required ConnectionMethodResolver resolver,
+  }) async {
+    final health = await resolver.probeClockOrNull(controller);
+    if (!mounted || health == null) return;
+    setState(() => _clockHealth[controller.id] = health);
+  }
+
+  Future<void> _verifyOne({
+    required ControllerInfo controller,
+    required ConnectionMethodResolver resolver,
+    required ConnectionMethod? persisted,
+    required bool isSkipped,
+  }) async {
+    final observed = await resolver.probeOrNull(controller);
+    if (!mounted) return;
+    final result = verifyController(
+      persisted: persisted,
+      isSkipped: isSkipped,
+      observed: observed,
+    );
+    setState(() {
+      _verifications[controller.id] = result;
+    });
+  }
+
+  bool get _canCompleteSetup {
+    final selected = _selectedControllers();
+    if (selected.isEmpty) return false;
+    if (_verifications.length < selected.length) return false;
+    return isAllVerifiedAcceptable(_verifications.values);
+  }
+
+  void _showBlockingFailureDialog() {
+    final controllers = _selectedControllers();
+    final fails = <ControllerInfo>[];
+    for (final c in controllers) {
+      final r = _verifications[c.id];
+      if (r != null && r.status == VerificationStatus.fail) {
+        fails.add(c);
+      }
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: const Text(
+          'Cannot complete install',
+          style: TextStyle(color: NexGenPalette.textHigh),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final c in fails)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '${c.name ?? c.ip} — ${_verifications[c.id]?.reason ?? 'verification failed'}',
+                  style:
+                      const TextStyle(color: NexGenPalette.textMedium),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // State (selected controllers, resolved methods, skipped
+              // set) is preserved — the wizard reads them from providers,
+              // not from screen-local state.
+              ref.read(installerWizardStepProvider.notifier).state =
+                  InstallerWizardStep.connectionMethod;
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+            ),
+            child: const Text(
+              'Back to Connection Step',
+              style: TextStyle(color: Colors.black),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _vibeDescription(double value) {
@@ -106,7 +275,11 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                   'Configure user preferences before completing setup.',
                   style: TextStyle(color: NexGenPalette.textMedium, fontSize: 16),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // ── Pre-flight: connection-method verification ──
+                _buildVerificationSection(),
+                const SizedBox(height: 24),
 
                 // ── SECTION 1: Profile Type ──
                 _buildSectionLabel('Profile Type'),
@@ -149,30 +322,34 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
 
                 // ── SECTION 2: Sports Teams ──
                 _buildSectionLabel('Favorite Teams'),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ..._sportsTeams.map((team) => _buildSelectableChip(
-                          label: team,
-                          selected: _selectedSportsTeams.contains(team),
-                          onTap: () => setState(() {
-                            _selectedSportsTeams.contains(team)
-                                ? _selectedSportsTeams.remove(team)
-                                : _selectedSportsTeams.add(team);
-                          }),
-                        )),
-                    _buildAddOtherChip(
-                      onAdd: (value) => setState(() {
-                        if (value.isNotEmpty && !_selectedSportsTeams.contains(value)) {
-                          _selectedSportsTeams.add(value);
-                        }
-                      }),
-                    ),
-                  ],
+                const SizedBox(height: 8),
+                const Text(
+                  'Search for your customer’s favorite teams. They '
+                  'can add more later from their profile.',
+                  style: TextStyle(
+                      color: NexGenPalette.textMedium, fontSize: 13),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 12),
+                TeamSelector(
+                  controller: _teamInputCtrl,
+                  selectedTeams: _selectedSportsTeams,
+                  onAddTeam: (name) =>
+                      setState(() => _selectedSportsTeams.add(name)),
+                  onRemoveTeam: (name) =>
+                      setState(() => _selectedSportsTeams.remove(name)),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () {},
+                    child: const Text(
+                      'Skip — customer will add later',
+                      style: TextStyle(
+                          color: NexGenPalette.textMedium, fontSize: 13),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // ── SECTION 3: Favorite Holidays ──
                 _buildSectionLabel('Favorite Holidays'),
@@ -388,9 +565,11 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
               if (widget.onNext != null)
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _completeHandoff,
+                    onPressed: _canCompleteSetup ? _completeHandoff : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: NexGenPalette.cyan,
+                      disabledBackgroundColor:
+                          NexGenPalette.cyan.withValues(alpha: 0.25),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -474,56 +653,6 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   }
 
   // ── "+ Add Other" Chip ──
-
-  Widget _buildAddOtherChip({required ValueChanged<String> onAdd}) {
-    return GestureDetector(
-      onTap: () async {
-        final controller = TextEditingController();
-        final result = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: NexGenPalette.gunmetal,
-            title: const Text('Add Team', style: TextStyle(color: Colors.white)),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Team name',
-                hintStyle: TextStyle(color: NexGenPalette.textMedium),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-                child: const Text('Add', style: TextStyle(color: NexGenPalette.cyan)),
-              ),
-            ],
-          ),
-        );
-        if (result != null && result.isNotEmpty) onAdd(result);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: NexGenPalette.line, style: BorderStyle.solid),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add, size: 16, color: NexGenPalette.textMedium),
-            SizedBox(width: 4),
-            Text('Add Other', style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
-          ],
-        ),
-      ),
-    );
-  }
 
   // ── Autonomy Tile ──
 
@@ -636,7 +765,114 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
     );
   }
 
+  Widget _buildVerificationSection() {
+    final controllers = _selectedControllers();
+    return Container(
+      key: handoffVerificationSectionKey,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.fact_check_outlined,
+                  color: NexGenPalette.cyan, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Pre-flight check',
+                style: TextStyle(
+                  color: NexGenPalette.textHigh,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Verifying every controller is on the connection method '
+            'you picked. Complete Setup unlocks once this passes.',
+            style:
+                TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          if (controllers.isEmpty)
+            const Text(
+              'No controllers selected — go back to add one.',
+              style:
+                  TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            )
+          else ...[
+            for (final c in controllers)
+              _VerificationRow(
+                controller: c,
+                result: _verifications[c.id] ??
+                    const VerificationResult.pending(),
+              ),
+            // Advisory (non-blocking) controller clock-health line.
+            _buildClockCheckRow(controllers),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// One aggregate, advisory clock-health line across the selected controllers.
+  /// Pending until at least one probe returns; PASS when every probed
+  /// controller is healthy; WARN (never fail) naming the worst issue + the
+  /// controller it affects. This is a warn-only checklist line — it does NOT
+  /// feed [_canCompleteSetup], so it can never block the install.
+  Widget _buildClockCheckRow(List<ControllerInfo> controllers) {
+    final probed =
+        controllers.where((c) => _clockHealth.containsKey(c.id)).toList();
+    if (probed.isEmpty) {
+      return const _ClockCheckRow(
+        status: VerificationStatus.pending,
+        reason: 'Checking controller clock…',
+      );
+    }
+    // Installer context: treat solar as relevant so a 0,0 location surfaces
+    // now, before the customer relies on sunset/sunrise schedules.
+    ClockHealthIssue? worst;
+    ControllerInfo? worstController;
+    for (final c in probed) {
+      final issue =
+          primaryIssueToSurface(_clockHealth[c.id]!, solarRelevant: true);
+      if (issue == null) continue;
+      if (worst == null || issue.index < worst.index) {
+        worst = issue;
+        worstController = c;
+      }
+    }
+    if (worst == null) {
+      return const _ClockCheckRow(
+        status: VerificationStatus.pass,
+        reason: 'Clock, timezone & location OK',
+      );
+    }
+    final who = worstController!.name ?? worstController.ip;
+    return _ClockCheckRow(
+      status: VerificationStatus.warn,
+      reason: '$who — ${clockHealthMessage(worst)}',
+    );
+  }
+
   void _completeHandoff() {
+    // Defensive failure guard — the button is gated by _canCompleteSetup,
+    // but if anything bypasses that (state race, hot-reload) we still
+    // block the install with the same dialog the gate would prevent.
+    final hasFail = _verifications.values
+        .any((r) => r.status == VerificationStatus.fail);
+    if (hasFail) {
+      _showBlockingFailureDialog();
+      return;
+    }
+
     // Apply Simple Mode preference
     if (_useSimpleMode) {
       ref.read(simpleModeProvider.notifier).enable();
@@ -656,5 +892,149 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
     );
 
     widget.onNext?.call(draft);
+  }
+}
+
+/// One row inside the pre-flight section. Renders the controller name +
+/// IP and a status pill (pending spinner, green check, amber warning, or
+/// red X) plus an inline reason for warn/fail.
+class _VerificationRow extends StatelessWidget {
+  const _VerificationRow({required this.controller, required this.result});
+
+  final ControllerInfo controller;
+  final VerificationResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusIcon(status: result.status),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  controller.name ?? controller.ip,
+                  style: const TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  controller.ip,
+                  style: const TextStyle(
+                    color: NexGenPalette.textMedium,
+                    fontSize: 11,
+                  ),
+                ),
+                if (result.reason != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.reason!,
+                    style: TextStyle(
+                      color: _reasonColor(result.status),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _reasonColor(VerificationStatus status) {
+    switch (status) {
+      case VerificationStatus.fail:
+        return Colors.red;
+      case VerificationStatus.warn:
+        return NexGenPalette.amber;
+      case VerificationStatus.pass:
+      case VerificationStatus.pending:
+        return NexGenPalette.textMedium;
+    }
+  }
+}
+
+/// Advisory clock-health checklist line (BUG-CLOCK-1). Reuses [_StatusIcon]
+/// but is never a `fail` — an unhealthy clock is a warn, so it can't block
+/// handoff. Fixed "Controller clock" title with the specific issue as reason.
+class _ClockCheckRow extends StatelessWidget {
+  const _ClockCheckRow({required this.status, required this.reason});
+
+  final VerificationStatus status;
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final reasonColor = status == VerificationStatus.warn
+        ? NexGenPalette.amber
+        : NexGenPalette.textMedium;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StatusIcon(status: status),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Controller clock',
+                  style: TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  reason,
+                  style: TextStyle(color: reasonColor, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusIcon extends StatelessWidget {
+  const _StatusIcon({required this.status});
+
+  final VerificationStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case VerificationStatus.pending:
+        return const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: NexGenPalette.cyan,
+          ),
+        );
+      case VerificationStatus.pass:
+        return const Icon(Icons.check_circle,
+            color: NexGenPalette.green, size: 18);
+      case VerificationStatus.warn:
+        return const Icon(Icons.warning_amber_rounded,
+            color: NexGenPalette.amber, size: 18);
+      case VerificationStatus.fail:
+        return const Icon(Icons.cancel, color: Colors.red, size: 18);
+    }
   }
 }

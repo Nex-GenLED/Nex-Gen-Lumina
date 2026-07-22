@@ -234,6 +234,7 @@ class DesignStudioOrchestrator {
   ) {
     for (final entry in choices.entries) {
       if (entry.value.id == 'manual') {
+        if (questions.isEmpty) return 'settings';
         final question = questions.firstWhere(
           (q) => q.id == entry.key,
           orElse: () => questions.first,

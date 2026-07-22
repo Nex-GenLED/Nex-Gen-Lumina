@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -31,7 +32,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           // Header section
           Text('My Areas', style: Theme.of(context).textTheme.titleLarge),
@@ -105,14 +106,14 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  NexGenPalette.cyan.withOpacity(0.15),
-                  NexGenPalette.violet.withOpacity(0.15),
+                  NexGenPalette.cyan.withValues(alpha: 0.15),
+                  NexGenPalette.violet.withValues(alpha: 0.15),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: NexGenPalette.cyan.withOpacity(0.3)),
+              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,7 +123,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: NexGenPalette.cyan.withOpacity(0.2),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(Icons.palette, color: NexGenPalette.cyan),
@@ -159,7 +160,7 @@ class _ZoneConfigurationPageState extends ConsumerState<ZoneConfigurationPage> {
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
-                  onPressed: () => context.push('/design-studio'),
+                  onPressed: () => context.push(AppRoutes.systemDesignStudio),
                   icon: const Icon(Icons.arrow_forward),
                   label: const Text('Open Design Studio'),
                   style: FilledButton.styleFrom(
@@ -272,10 +273,10 @@ class _EmptySegments extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.2),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
         ),
       ),
       child: Row(

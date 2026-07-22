@@ -1,14 +1,212 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 
-/// Admin PIN for accessing dealer/installer management
-/// In production, this should be stored securely or use Firebase Auth roles
-const String kAdminPin = '9999';
+/// Admin session timeout duration (30 minutes).
+///
+/// Idle timer kicks the user back to the PIN screen after this window.
+/// Distinct from the per-IP rate limit on `mintStaffToken` (Prompt 6,
+/// commit 97b6157) which is the actual abuse defense — this timeout
+/// is a UX freshness check.
+const Duration kAdminSessionTimeout = Duration(minutes: 30);
 
-/// Provider for admin authentication state
-final adminAuthenticatedProvider = StateProvider<bool>((ref) => false);
+/// Warning threshold before session timeout (5 minutes).
+const Duration kAdminSessionWarningThreshold = Duration(minutes: 5);
+
+/// Tracks an active admin session.
+///
+/// Pre-2026-05-05 this carried only `authenticatedAt`; the new pattern
+/// uses a [StateNotifier] for the lifecycle (matching SalesModeNotifier
+/// and InstallerModeNotifier) but keeps this immutable struct as the
+/// state value so existing consumers can still watch the
+/// [adminSessionProvider] and read `.isValid`.
+class AdminSession {
+  final DateTime authenticatedAt;
+
+  const AdminSession({required this.authenticatedAt});
+
+  /// Whether the session is still within the timeout window.
+  bool get isValid =>
+      DateTime.now().difference(authenticatedAt) < kAdminSessionTimeout;
+}
+
+/// Notifier that handles admin PIN authentication and session lifecycle.
+///
+/// Migrated to server-side validation via the `mintStaffToken` Cloud
+/// Function with `mode: 'admin'` (commit 1b45670). Mirrors the
+/// SalesModeNotifier / InstallerModeNotifier pattern from b1b871b:
+/// - PIN goes to mintStaffToken; the function validates against
+///   `app_config/master_admin` (or per-installer fallback with role
+///   enforcement) server-side and returns a custom token with
+///   `role: 'admin'` and a `dealerCode` claim.
+/// - On success we call `signInWithCustomToken`, store an
+///   [AdminSession] in [adminSessionProvider], and start the 30-minute
+///   idle timer.
+/// - On exit we sign out and re-establish the anonymous baseline so
+///   subsequent staff-pin entries work.
+///
+/// The previous client-side path (`validateAdminPin` + 15-minute
+/// `_AdminPinRateLimiter`) is gone. Rate limiting is now enforced by
+/// the Cloud Function's per-IP 10-attempts-per-60s window.
+class AdminModeNotifier extends StateNotifier<AdminSession?> {
+  AdminModeNotifier() : super(null);
+
+  // Unlike SalesModeNotifier / InstallerModeNotifier, this notifier
+  // doesn't need a Ref — its session state lives directly on the
+  // notifier (via super(null)/state = ...) rather than being mirrored
+  // into a separate StateProvider, so there's no need to mutate other
+  // providers from inside the methods.
+
+  Timer? _sessionTimer;
+  Timer? _warningTimer;
+
+  // Per-notifier failed-attempt counter. Same caveat as the corporate
+  // notifier: this duplicates the server-side IP-based rate limit on
+  // mintStaffToken (commit 97b6157). The local counter exists only for
+  // the existing UX behavior (5-strike lockout per app session). Both
+  // fire independently. Open Item #5 tracks consolidation.
+  static const int _maxAttempts = 5;
+  int _failedAttempts = 0;
+
+  /// Optional callback fired when the warning threshold is reached.
+  VoidCallback? onSessionWarning;
+
+  bool get isActive => state != null && state!.isValid;
+
+  /// Validate [enteredPin] by calling `mintStaffToken({mode: 'admin'})`.
+  /// On success, signs in with the returned custom token, creates an
+  /// [AdminSession], and starts the inactivity timer.
+  Future<bool> authenticate(String enteredPin) async {
+    if (_failedAttempts >= _maxAttempts) {
+      debugPrint(
+          'AdminMode: locked out after $_maxAttempts failed attempts');
+      return false;
+    }
+    if (enteredPin.length != 4) return false;
+
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('mintStaffToken');
+      final result = await callable.call<Map<String, dynamic>>({
+        'pin': enteredPin,
+        'mode': 'admin',
+      });
+
+      final data = result.data;
+      final token = data['token'] as String;
+
+      await FirebaseAuth.instance.signInWithCustomToken(token);
+
+      _failedAttempts = 0;
+      state = AdminSession(authenticatedAt: DateTime.now());
+      _startSessionTimer();
+      debugPrint('AdminMode: activated');
+      return true;
+    } on FirebaseFunctionsException catch (e) {
+      // permission-denied is the generic "no PIN match" response from
+      // mintStaffToken. Count it for the local lockout. Other Functions
+      // errors return false but don't count.
+      if (e.code == 'permission-denied') {
+        _failedAttempts++;
+        debugPrint(
+            'AdminMode: failed attempt $_failedAttempts/$_maxAttempts');
+      } else {
+        debugPrint('AdminMode: callable error ${e.code}: ${e.message}');
+      }
+      return false;
+    } catch (e) {
+      debugPrint('AdminMode: unexpected error: $e');
+      return false;
+    }
+  }
+
+  /// End the admin session (logout or expiry). Mirrors the
+  /// exitSalesMode / exitInstallerMode pattern: signs out and
+  /// re-establishes anonymous auth.
+  void signOut() {
+    _sessionTimer?.cancel();
+    _warningTimer?.cancel();
+    state = null;
+    debugPrint('AdminMode: signed out');
+
+    () async {
+      try {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (e) {
+        debugPrint('AdminMode: auth restore failed on signOut: $e');
+      }
+    }();
+  }
+
+  /// Reset the inactivity timer (called from UI on user activity).
+  void recordActivity() {
+    if (state != null) _startSessionTimer();
+  }
+
+  /// Extend the session by resetting timers.
+  void extendSession() {
+    _startSessionTimer();
+    debugPrint('AdminMode: session extended');
+  }
+
+  void _startSessionTimer() {
+    _sessionTimer?.cancel();
+    _warningTimer?.cancel();
+
+    final warningDelay =
+        kAdminSessionTimeout - kAdminSessionWarningThreshold;
+    _warningTimer = Timer(warningDelay, () {
+      onSessionWarning?.call();
+    });
+
+    _sessionTimer = Timer(kAdminSessionTimeout, () {
+      debugPrint('AdminMode: session timed out');
+      signOut();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sessionTimer?.cancel();
+    _warningTimer?.cancel();
+    super.dispose();
+  }
+}
+
+/// Primary provider for the admin mode notifier. State is the active
+/// [AdminSession] or null when not authenticated.
+final adminModeProvider =
+    StateNotifierProvider<AdminModeNotifier, AdminSession?>((ref) {
+  return AdminModeNotifier();
+});
+
+/// Backward-compat provider — existing widgets that `ref.watch` the
+/// session value go through this. Reads only; mutations happen through
+/// `adminModeProvider.notifier`.
+final adminSessionProvider = Provider<AdminSession?>((ref) {
+  return ref.watch(adminModeProvider);
+});
+
+/// Provider that returns true only if admin is authenticated AND
+/// session has not expired.
+final adminSessionActiveProvider = Provider<bool>((ref) {
+  final session = ref.watch(adminModeProvider);
+  if (session == null) return false;
+  return session.isValid;
+});
+
+/// Legacy provider kept for backward compatibility. Reads from the
+/// session-based provider so existing widgets that watch
+/// `adminAuthenticatedProvider` continue to work.
+final adminAuthenticatedProvider = Provider<bool>((ref) {
+  return ref.watch(adminSessionActiveProvider);
+});
 
 /// Provider for managing dealers
 final dealerListProvider = StreamProvider<List<DealerInfo>>((ref) {
@@ -43,26 +241,34 @@ class AdminService {
 
   // ============ DEALER OPERATIONS ============
 
-  /// Get next available dealer code
+  /// Get next available dealer code (canonical 2-digit — see [DealerCode]).
+  ///
+  /// C1: this previously did `int.parse` on the highest-sorted `dealerCode`,
+  /// which throws `FormatException` the moment ANY non-numeric code exists —
+  /// and one does live today (`NXG-DEALER-MISSOURI-001`, minted by the old
+  /// CorporateAdminService.generateDealerCode before C1). It now skips
+  /// non-canonical docs instead of parsing them, gap-fills the lowest free
+  /// code, and never hands out [DealerCode.masterReserved].
+  ///
+  /// Kept in sync with `CorporateAdminService.generateDealerCode` — that one
+  /// is the reachable path; this serves the orphaned DealerManagementScreen.
+  /// Consolidating the two is deferred (see the audit's P2 dead-code item).
   Future<String> getNextDealerCode() async {
-    final snapshot = await _firestore
-        .collection('dealers')
-        .orderBy('dealerCode', descending: true)
-        .limit(1)
-        .get();
+    final snapshot = await _firestore.collection('dealers').get();
 
-    if (snapshot.docs.isEmpty) {
-      return '01';
+    final used = <int>{};
+    for (final doc in snapshot.docs) {
+      final code = doc.data()['dealerCode'];
+      if (code is String && DealerCode.isValid(code)) {
+        used.add(int.parse(code));
+      }
     }
+    used.add(int.parse(DealerCode.masterReserved));
 
-    final lastCode = snapshot.docs.first.data()['dealerCode'] as String;
-    final nextCode = (int.parse(lastCode) + 1).toString().padLeft(2, '0');
-
-    if (int.parse(nextCode) > 99) {
-      throw Exception('Maximum dealer limit (99) reached');
+    for (var i = 1; i <= DealerCode.maxCode; i++) {
+      if (!used.contains(i)) return i.toString().padLeft(2, '0');
     }
-
-    return nextCode;
+    throw Exception('Maximum dealer limit (${DealerCode.maxCode}) reached');
   }
 
   /// Check if a dealer code is available
@@ -76,7 +282,19 @@ class AdminService {
   }
 
   /// Add a new dealer
+  ///
+  /// C1: the code is [DealerCode.validate]d before the write. This writer is
+  /// currently unreachable (its only caller, DealerManagementScreen, has no
+  /// route — see the dealer/corporate audit), but the guard ships anyway so
+  /// that reviving the screen cannot reintroduce a non-canonical code. The
+  /// canonical form is 2-digit; see [DealerCode] for why the PIN system
+  /// admits nothing else.
   Future<void> addDealer(DealerInfo dealer) async {
+    DealerCode.validate(
+      dealer.dealerCode,
+      context: 'AdminService.addDealer',
+    );
+
     // Check if code is available
     final available = await isDealerCodeAvailable(dealer.dealerCode);
     if (!available) {

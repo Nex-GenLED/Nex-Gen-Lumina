@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -29,7 +28,6 @@ class GeofenceSetupScreen extends StatefulWidget {
 class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
   final _userService = UserService();
   final _firestore = FirebaseFirestore.instance;
-  GoogleMapController? _mapController;
 
   static const double _defaultZoom = 16;
   static const LatLng _fallbackCenter = LatLng(37.422, -122.084); // Fallback: Googleplex
@@ -170,7 +168,7 @@ class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
           : Stack(children: [
               Positioned.fill(
                 child: GoogleMap(
-                  onMapCreated: (c) => _mapController = c,
+                  onMapCreated: (_) {},
                   initialCameraPosition: CameraPosition(target: _center, zoom: _defaultZoom),
                   myLocationButtonEnabled: true,
                   myLocationEnabled: true,
@@ -186,7 +184,7 @@ class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
                 child: SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, navBarTotalHeight(context)),
                     child: _ControlsCard(
                       radius: _radiusMeters,
                       actions: _actions,
@@ -226,13 +224,13 @@ class _ControlsCard extends StatelessWidget {
             Text('Geofence Controls', style: Theme.of(context).textTheme.titleMedium),
           ]),
           const SizedBox(height: 12),
-          Text('Trigger Distance: ${radius.round()} m', style: Theme.of(context).textTheme.labelLarge),
+          Text('Trigger Distance: ${(radius * 3.28084).round()} ft', style: Theme.of(context).textTheme.labelLarge),
           Slider(
             value: radius,
             min: 100,
             max: 1000,
             divisions: 18,
-            label: '${radius.round()} m',
+            label: '${(radius * 3.28084).round()} ft',
             onChanged: onRadiusChanged,
           ),
           const SizedBox(height: 8),

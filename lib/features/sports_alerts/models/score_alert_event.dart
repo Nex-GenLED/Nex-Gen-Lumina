@@ -7,8 +7,11 @@ enum AlertEventType {
   fieldGoal,
   safety,
 
-  // NHL / MLS / shared
+  // NHL (hockey goal — 15s animation)
   goal,
+
+  // Soccer: MLS / FIFA / Champions League (20s animation)
+  soccerGoal,
 
   // MLB
   run,

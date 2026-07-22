@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 
 /// Simple struct-like holder for formatted sunrise/sunset strings.
 class SunTimeStrings {
@@ -9,18 +10,11 @@ class SunTimeStrings {
   const SunTimeStrings({required this.sunriseLabel, required this.sunsetLabel});
 }
 
-/// Lightweight formatter to render local times in a user-friendly 12-hour format.
+/// Lightweight formatter to render local times using the user's preferred format.
 class SunTimeFormatter {
-  static String _two(int v) => v < 10 ? '0$v' : '$v';
-
-  /// Formats a DateTime to h:mm AM/PM (e.g., 8:14 PM) using local time.
-  static String format12h(DateTime dt) {
-    final local = dt.toLocal();
-    int hour = local.hour % 12;
-    if (hour == 0) hour = 12;
-    final minute = _two(local.minute);
-    final ampm = local.hour < 12 ? 'AM' : 'PM';
-    return '$hour:$minute $ampm';
+  /// Formats a DateTime to h:mm AM/PM (12h) or HH:mm (24h) using local time.
+  static String format12h(DateTime dt, {String timeFormat = kTimeFormatDefault}) {
+    return formatTime(dt, timeFormat: timeFormat);
   }
 }
 
@@ -36,6 +30,7 @@ class SunTimeFormatter {
 ///   );
 final sunTimeProvider = FutureProvider.family<SunTimeStrings, ({double lat, double lon})>((ref, coords) async {
   try {
+    final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final now = DateTime.now();
     final sunset = SunUtils.sunsetLocal(coords.lat, coords.lon, now);
     final sunrise = SunUtils.sunriseLocal(coords.lat, coords.lon, now);
@@ -44,10 +39,10 @@ final sunTimeProvider = FutureProvider.family<SunTimeStrings, ({double lat, doub
     String sunriseStr = 'Sunrise (—)';
 
     if (sunset != null) {
-      sunsetStr = 'Sunset (${SunTimeFormatter.format12h(sunset)})';
+      sunsetStr = 'Sunset (${SunTimeFormatter.format12h(sunset, timeFormat: timeFormat)})';
     }
     if (sunrise != null) {
-      sunriseStr = 'Sunrise (${SunTimeFormatter.format12h(sunrise)})';
+      sunriseStr = 'Sunrise (${SunTimeFormatter.format12h(sunrise, timeFormat: timeFormat)})';
     }
 
     return SunTimeStrings(sunriseLabel: sunriseStr, sunsetLabel: sunsetStr);

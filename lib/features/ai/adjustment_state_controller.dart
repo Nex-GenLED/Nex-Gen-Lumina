@@ -165,15 +165,19 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     if (repo == null) return;
 
     try {
-      final ok = await repo.applyJson(payload);
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
       if (ok) {
         ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
               colorSequence: s.colors,
               colorNames: s.palette.colorNames,
               effectName: s.effect.name,
             );
-        ref.read(activePresetLabelProvider.notifier).state =
-            s.palette.name != 'Custom Palette' ? s.palette.name : 'Lumina Pattern';
+        final paletteName = s.palette.name != 'Custom Palette' ? s.palette.name : null;
+        if (paletteName != null) {
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(paletteName, ref.read(wledStateProvider));
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
 
         // Update refinement context
         ref.read(luminaSheetProvider.notifier).setPatternContext(

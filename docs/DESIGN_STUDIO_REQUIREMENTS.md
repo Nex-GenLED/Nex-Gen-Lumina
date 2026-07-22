@@ -1,16 +1,17 @@
-# Design Studio Feature Requirements
+# Design Studio — Feature Requirements
 
 ## Document Information
 - **Version:** 1.0
-- **Date:** January 2026
+- **Date:** April 2026
+- **Owner:** Nex-Gen LED LLC — Product Team
 - **Product:** Nex-Gen Lumina v1.6
-- **Feature:** Design Studio - Custom LED Configuration & Design System
+- **Feature:** Design Studio — custom LED configuration and design system
 
 ---
 
 ## 1. Executive Summary
 
-The Design Studio is the premium customization feature of the Lumina app, enabling users to create lighting designs that are precisely tailored to their home's unique roofline architecture. This feature bridges the gap between generic lighting patterns and truly personalized home illumination by understanding the physical layout of each user's LED installation.
+Design Studio is Lumina's premium customization surface — the feature that lets a customer craft a lighting design fitted to the unique shape of their home. It bridges the gap between generic lighting patterns and genuinely personalized illumination by giving the app a map of the customer's roofline: where each LED sits, how segments connect, where the peaks and corners are. Nex-Gen LED LLC ships permanent residential and commercial lighting that works as hard as the people inside, and Design Studio is what lets the lighting tell their story specifically.
 
 ---
 
@@ -20,21 +21,21 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 
 #### REQ-2.1.1: Channel Start/End Definition
 - **Priority:** P0 (Critical)
-- **Description:** The system SHALL allow users to define the starting LED position (LED #1) and ending LED position for each channel/controller.
+- **Description:** The system SHALL allow the customer to define the starting LED position (LED #1) and ending LED position for each channel/controller.
 - **Acceptance Criteria:**
-  - User can specify the physical location of LED #1 (e.g., "left side of garage")
-  - User can specify the total LED count for the channel
-  - System validates LED count against connected WLED device
+  - The customer can specify the physical location of LED #1 (e.g., "left side of garage")
+  - The customer can specify the total LED count for the channel
+  - The system validates LED count against the connected controller
   - Configuration persists across app sessions
 
 #### REQ-2.1.2: Multi-Channel Support
 - **Priority:** P1 (High)
 - **Description:** The system SHALL support multiple channels/controllers per property.
 - **Acceptance Criteria:**
-  - Users can configure 1-N channels per property
+  - The customer can configure 1–N channels per property
   - Each channel maintains independent LED mapping
   - Channels can be linked for synchronized control
-  - System displays aggregate LED count across all channels
+  - The system displays aggregate LED count across all channels
 
 ---
 
@@ -42,15 +43,15 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 
 #### REQ-2.2.1: Segment Definition
 - **Priority:** P0 (Critical)
-- **Description:** The system SHALL allow users to define distinct architectural segments along their roofline with precise LED boundaries.
+- **Description:** The system SHALL allow the customer to define distinct architectural segments along their roofline with precise LED boundaries.
 - **Acceptance Criteria:**
-  - User can create segments with start/end LED numbers
+  - The customer can create segments with start/end LED numbers
   - Supported segment types:
-    - `run` - Horizontal or angled straight section
-    - `corner` - Direction change point (90° or other angles)
-    - `peak` - Triangular apex point
-    - `column` - Vertical section
-    - `connector` - Transition between sections
+    - `run` — horizontal or angled straight section
+    - `corner` — direction change point (90° or other angles)
+    - `peak` — triangular apex point
+    - `column` — vertical section
+    - `connector` — transition between sections
   - Each segment stores:
     - Segment ID (unique identifier)
     - Segment name/label
@@ -73,7 +74,7 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
     - LED index position
     - Anchor type (corner, peak, boundary, custom)
     - Optional label
-  - System auto-calculates default anchors based on segment type:
+  - The system auto-calculates default anchors based on segment type:
     - `peak` → center LED is anchor
     - `corner` → midpoint LED is anchor
     - `run` → start and end LEDs are anchors
@@ -82,20 +83,20 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P1 (High)
 - **Description:** The system SHALL track the directional flow of LEDs to understand the physical path of the light run.
 - **Acceptance Criteria:**
-  - System records direction indicators:
-    - Left-to-right / Right-to-left
-    - Upward / Downward
-    - Toward street / Away from street
-  - Directional data used for:
+  - The system records direction indicators:
+    - Left-to-right / right-to-left
+    - Upward / downward
+    - Toward street / away from street
+  - Directional data is used for:
     - Chase animation direction
     - Gradient calculations
     - Symmetry analysis
 
 #### REQ-2.2.4: Segment Visualization
 - **Priority:** P1 (High)
-- **Description:** The system SHALL provide visual representation of segments overlaid on the user's house photo.
+- **Description:** The system SHALL provide a visual representation of segments overlaid on the customer's house photo.
 - **Acceptance Criteria:**
-  - Segments displayed as colored regions on house image
+  - Segments displayed as colored regions on the house image
   - Anchor points highlighted with distinct markers
   - LED numbers displayed at key positions
   - Interactive editing of segment boundaries
@@ -111,23 +112,23 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Acceptance Criteria:**
   - Each LED independently controllable for:
     - Color (RGB/RGBW)
-    - Brightness (0-255)
-    - On/Off state
-  - Changes apply in real-time to physical device
+    - Brightness (0–255)
+    - On/off state
+  - Changes apply in real time to the physical device
   - Per-LED state persists in saved designs
 
 #### REQ-2.3.2: Efficient LED Selection Interface
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL provide an intuitive, efficient interface for selecting and manipulating LEDs without requiring individual clicks.
 - **Acceptance Criteria:**
-  - **Range Selection:** Tap-drag to select LED range (e.g., LEDs 28-45)
-  - **Segment Selection:** One-tap to select entire segment
-  - **Pattern Selection:** Select every Nth LED (e.g., every 3rd LED)
-  - **Anchor Selection:** One-tap to select all anchor points
-  - **Inverse Selection:** Select all non-selected LEDs
-  - **Smart Selection:** Select by segment type (all corners, all peaks)
-  - Visual feedback shows selected LEDs highlighted
-  - Selection count displayed in UI
+  - **Range Selection** — tap-drag to select an LED range (e.g., LEDs 28–45)
+  - **Segment Selection** — one-tap to select an entire segment
+  - **Pattern Selection** — select every Nth LED (e.g., every 3rd LED)
+  - **Anchor Selection** — one-tap to select all anchor points
+  - **Inverse Selection** — select all non-selected LEDs
+  - **Smart Selection** — select by segment type (all corners, all peaks)
+  - Visual feedback highlights selected LEDs
+  - Selection count is displayed in the UI
 
 #### REQ-2.3.3: Batch LED Operations
 - **Priority:** P0 (Critical)
@@ -144,9 +145,9 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P1 (High)
 - **Description:** The system SHALL provide multiple visualization modes for LED editing.
 - **Acceptance Criteria:**
-  - **Strip View:** Linear representation of LED strip with zoom/pan
-  - **Roofline View:** LEDs mapped to house photo overlay
-  - **Grid View:** 2D grid for segment-based editing
+  - **Strip View** — linear representation of the LED strip with zoom/pan
+  - **Roofline View** — LEDs mapped onto the house photo overlay
+  - **Grid View** — 2D grid for segment-based editing
   - Synchronized selection across all views
   - Toggle between views without losing state
 
@@ -158,23 +159,23 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL use roofline configuration data to generate personalized pattern recommendations.
 - **Acceptance Criteria:**
-  - Lumina AI accesses roofline configuration when generating suggestions
+  - Lumina AI accesses the roofline configuration when generating suggestions
   - Recommendations adapt to:
     - Number and position of peaks
     - Number and position of corners
     - Total LED count
     - Segment layout complexity
   - AI responses include roofline-specific instructions
-  - Example: "For your double-peak roofline, I recommend..."
+  - Example: "For your double-peak roofline, I recommend…"
 
 #### REQ-2.4.2: Accent Point Utilization
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL automatically utilize anchor/accent points when generating designs.
 - **Acceptance Criteria:**
-  - When user requests accented design (e.g., "green with red accents"):
+  - When the customer requests an accented design (e.g., "green with red accents"):
     - Primary color applied to run segments
     - Accent color applied to anchor points (peaks, corners)
-  - Accent distribution configurable:
+  - Accent distribution is configurable:
     - Peaks only
     - Corners only
     - Peaks and corners
@@ -190,8 +191,8 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
     - Gabled (single peak)
     - Multi-gabled (multiple peaks)
     - Complex (mixed architecture)
-  - Pattern library filters by user's architecture type
-  - Incompatible patterns show warning or adaptation suggestions
+  - Pattern library filters by the customer's architecture type
+  - Incompatible patterns show a warning or adaptation suggestions
 
 ---
 
@@ -201,8 +202,8 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL calculate optimal LED spacing for downlighting patterns that maintains visual symmetry.
 - **Acceptance Criteria:**
-  - User specifies desired spacing (e.g., every 3rd LED, every 5th LED)
-  - Algorithm calculates spacing per segment to ensure:
+  - The customer specifies desired spacing (e.g., every 3rd LED, every 5th LED)
+  - The algorithm calculates spacing per segment to ensure:
     - Equal visual spacing within each segment
     - Anchors (corners, peaks) always lit regardless of spacing
     - First and last LED of each segment always lit
@@ -213,32 +214,32 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P1 (High)
 - **Description:** The system SHALL analyze and optimize designs for visual symmetry.
 - **Acceptance Criteria:**
-  - System identifies symmetry axis (typically center peak)
+  - The system identifies a symmetry axis (typically center peak)
   - Symmetry modes:
-    - **Mirror:** Left side mirrors right side
-    - **Radial:** Patterns radiate from center
-    - **None:** Asymmetric design allowed
-  - Symmetry warnings when design is unbalanced
+    - **Mirror** — left side mirrors right side
+    - **Radial** — patterns radiate from center
+    - **None** — asymmetric design allowed
+  - Symmetry warnings when a design is unbalanced
   - Auto-correct option to enforce symmetry
 
 #### REQ-2.5.3: Brightness Gradient Patterns
 - **Priority:** P1 (High)
 - **Description:** The system SHALL support patterns with varied brightness levels (e.g., 1 bright, 3 dim).
 - **Acceptance Criteria:**
-  - User defines brightness pattern sequence (e.g., [255, 80, 80, 80])
-  - Pattern repeats across segment respecting spacing rules
-  - Anchor points can override brightness pattern
+  - The customer defines a brightness pattern sequence (e.g., `[255, 80, 80, 80]`)
+  - Pattern repeats across a segment respecting spacing rules
+  - Anchor points can override the brightness pattern
   - Preview shows brightness variation clearly
 
 #### REQ-2.5.4: Segment-Aware Spacing
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL maintain consistent visual spacing across segments of varying lengths.
 - **Acceptance Criteria:**
-  - Given: User wants "every 4th LED lit"
-  - System calculates per-segment:
+  - Given the customer wants "every 4th LED lit"
+  - The system calculates per-segment:
     - Segment A (28 LEDs): LEDs 1, 8, 15, 22, 28 lit (adjusted for clean distribution)
     - Segment B (36 LEDs): LEDs 1, 10, 19, 28, 36 lit (adjusted for segment length)
-  - Result: Visually consistent spacing despite different segment lengths
+  - Result: visually consistent spacing despite different segment lengths
   - Algorithm prioritizes:
     1. Anchor points always lit
     2. Segment boundaries always lit
@@ -252,33 +253,33 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL persist all design data including roofline-specific configurations.
 - **Acceptance Criteria:**
-  - Saved design includes:
+  - A saved design includes:
     - Design name and metadata
     - Per-LED color/brightness states
     - Effect configurations
     - Roofline configuration reference
     - Timestamp and version
   - Designs load correctly on app restart
-  - Designs sync across devices via Firestore
+  - Designs sync across devices via the Lumina cloud
 
 #### REQ-2.6.2: Design Application
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL apply designs to physical LED hardware with accurate reproduction.
 - **Acceptance Criteria:**
-  - Design converts to valid WLED JSON payload
-  - Per-LED designs use WLED individual LED control (`"i"` array)
+  - Design converts to a valid controller JSON payload
+  - Per-LED designs use the controller's individual LED control (`"i"` array)
   - Segment-based designs use standard segment control
-  - Apply confirms success/failure to user
+  - Apply confirms success/failure to the customer
   - Rollback option if apply fails
 
 #### REQ-2.6.3: Design Preview
 - **Priority:** P1 (High)
-- **Description:** The system SHALL provide accurate preview before applying designs.
+- **Description:** The system SHALL provide an accurate preview before applying a design.
 - **Acceptance Criteria:**
-  - AR overlay shows design on house photo
-  - Preview animates effects in real-time
+  - AR overlay shows the design on the house photo
+  - Preview animates effects in real time
   - Preview matches physical result within acceptable tolerance
-  - Preview available without affecting current device state
+  - Preview is available without affecting the current device state
 
 ---
 
@@ -290,27 +291,27 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL provide a guided wizard for initial roofline configuration.
 - **Acceptance Criteria:**
-  - Step-by-step wizard with progress indicator
+  - Step-by-step wizard with a progress indicator
   - Steps:
     1. Upload/capture house photo
-    2. Trace roofline path on photo
+    2. Trace the roofline path on the photo
     3. Mark segment boundaries
     4. Identify segment types
     5. Set anchor points
-    6. Validate against device LED count
-    7. Save configuration
+    6. Validate against the device's LED count
+    7. Save the configuration
   - Skip option for advanced users
   - Tutorial videos/animations for each step
 
 #### REQ-3.1.2: LED Identification Assistant
 - **Priority:** P1 (High)
-- **Description:** The system SHALL assist users in identifying LED positions on their physical installation.
+- **Description:** The system SHALL assist the customer in identifying LED positions on their physical installation.
 - **Acceptance Criteria:**
   - "Find LED" mode that:
     - Lights up specific LED numbers on command
-    - Runs chase animation to show LED direction
+    - Runs a chase animation to show LED direction
     - Flashes segment boundaries
-  - User can adjust LED mapping based on visual confirmation
+  - The customer can adjust LED mapping based on visual confirmation
   - Supports "mark as corner" while watching physical lights
 
 ### 3.2 Editing Experience
@@ -319,27 +320,27 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P0 (Critical)
 - **Description:** The system SHALL provide touch-optimized controls for mobile editing.
 - **Acceptance Criteria:**
-  - Minimum touch target size: 44x44 points
-  - Pinch-to-zoom on LED strip view
+  - Minimum touch target size: 44×44 points
+  - Pinch-to-zoom on the LED strip view
   - Two-finger pan for navigation
   - Long-press for context menus
   - Haptic feedback on selections
 
 #### REQ-3.2.2: Undo/Redo System
 - **Priority:** P1 (High)
-- **Description:** The system SHALL maintain undo/redo history for design edits.
+- **Description:** The system SHALL maintain an undo/redo history for design edits.
 - **Acceptance Criteria:**
   - Minimum 10 undo levels
   - Undo/redo buttons always visible
   - Keyboard shortcuts on tablet/desktop
-  - History survives view changes within session
+  - History survives view changes within a session
 
 #### REQ-3.2.3: Auto-Save
 - **Priority:** P1 (High)
 - **Description:** The system SHALL auto-save design progress to prevent data loss.
 - **Acceptance Criteria:**
   - Auto-save every 30 seconds during editing
-  - Auto-save on app background
+  - Auto-save when the app backgrounds
   - Draft recovery on app crash
   - Clear indication of save status
 
@@ -357,24 +358,24 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
     - "Create a Christmas pattern with green and red accents on the peaks"
     - "Make a downlighting pattern with every 4th light on"
     - "Apply Chiefs colors to my roofline with the red on corners"
-  - AI parses:
+  - The AI parses:
     - Primary/accent colors
     - Target segments/anchors
     - Spacing requirements
     - Effect preferences
-  - Response includes design preview
+  - Response includes a design preview
 
 #### REQ-4.1.2: Contextual Suggestions
 - **Priority:** P1 (High)
 - **Description:** The system SHALL provide contextual design suggestions based on roofline architecture.
 - **Acceptance Criteria:**
   - Suggestions adapt to:
-    - User's specific roofline shape
+    - The customer's specific roofline shape
     - Current season/holidays
-    - User preferences from profile
+    - Customer preferences from profile
     - Time of day
-  - Suggestion cards show roofline-aware preview
-  - One-tap to apply suggested design
+  - Suggestion cards show a roofline-aware preview
+  - One-tap to apply a suggested design
 
 ### 4.2 Schedule Integration
 
@@ -382,24 +383,24 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 - **Priority:** P1 (High)
 - **Description:** The system SHALL allow scheduling of custom designs.
 - **Acceptance Criteria:**
-  - Saved designs available in schedule action picker
-  - Schedule can specify:
+  - Saved designs are available in the schedule action picker
+  - The schedule can specify:
     - Design to apply
     - Brightness override
     - Duration
-  - Scheduled designs apply correctly via WLED timers
+  - Scheduled designs apply correctly via controller timers
 
 ---
 
 ## 5. Technical Requirements
 
-### 5.1 WLED Protocol Support
+### 5.1 Controller Protocol Support
 
 #### REQ-5.1.1: Individual LED Protocol
 - **Priority:** P0 (Critical)
-- **Description:** The system SHALL use WLED's individual LED control protocol for per-LED designs.
+- **Description:** The system SHALL use the controller's individual LED control protocol for per-LED designs.
 - **Acceptance Criteria:**
-  - Uses WLED JSON API with `"i"` array format:
+  - Uses the controller JSON API with `"i"` array format:
     ```json
     {
       "seg": [{
@@ -413,9 +414,9 @@ The Design Studio is the premium customization feature of the Lumina app, enabli
 
 #### REQ-5.1.2: Segment Protocol
 - **Priority:** P0 (Critical)
-- **Description:** The system SHALL use WLED's segment protocol for segment-based designs.
+- **Description:** The system SHALL use the controller's segment protocol for segment-based designs.
 - **Acceptance Criteria:**
-  - Creates multiple WLED segments matching roofline segments
+  - Creates multiple controller segments matching roofline segments
   - Segment boundaries align with architectural segments
   - Effects apply per-segment with correct parameters
 
@@ -509,9 +510,9 @@ LedColorGroup {
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| Roofline setup completion rate | >80% | Users completing full setup wizard |
+| Roofline setup completion rate | >80% | Customers completing the full setup wizard |
 | Design creation time | <5 min | Average time to create first custom design |
-| Design accuracy | >95% | User satisfaction with preview vs. physical result |
+| Design accuracy | >95% | Customer satisfaction with preview vs. physical result |
 | AI command success rate | >90% | Natural language commands correctly interpreted |
 | User retention | +20% | Increase in daily active users after feature launch |
 
@@ -521,9 +522,9 @@ LedColorGroup {
 
 | Dependency | Description | Status |
 |------------|-------------|--------|
-| WLED firmware | v0.14+ with individual LED support | Available |
-| Firestore | Cloud storage for configurations | Implemented |
-| House photo upload | User photo or stock image | Implemented |
+| Controller firmware | v0.14+ with individual LED support | Available |
+| Lumina cloud | Cloud storage for configurations | Implemented |
+| House photo upload | Customer photo or stock image | Implemented |
 | Roofline editor | Interactive polyline drawing | Implemented |
 | AR preview system | Animated overlay on house | Implemented |
 
@@ -537,7 +538,7 @@ The following features are explicitly out of scope for the initial release:
 2. Automatic roofline detection from photo
 3. Multi-property management
 4. Design sharing marketplace
-5. Third-party controller support (non-WLED)
+5. Third-party controller support (non-Nex-Gen)
 6. Offline design editing
 
 ---
@@ -546,7 +547,8 @@ The following features are explicitly out of scope for the initial release:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | Jan 2026 | Product Team | Initial requirements document |
+| 1.0 | Jan 2026 | Nex-Gen LED LLC Product Team | Initial requirements document |
+| 1.0 | Apr 2026 | Nex-Gen LED LLC Product Team | Brand and terminology refresh; content unchanged |
 
 ---
 
@@ -602,12 +604,12 @@ Total Anchors: 16 key positions for accent lighting
 ## Appendix B: Downlighting Spacing Algorithm Example
 
 **Input:**
-- Segment: 40 LEDs (index 98-138)
+- Segment: 40 LEDs (index 98–138)
 - Anchors at: 98, 118, 138
-- User request: "Every 4th LED lit"
+- Customer request: "Every 4th LED lit"
 
 **Algorithm:**
-1. Identify anchor zones: [98-118], [118-138]
+1. Identify anchor zones: [98–118], [118–138]
 2. Zone 1: 21 LEDs, need ~5 lit LEDs + anchors
 3. Zone 2: 21 LEDs, need ~5 lit LEDs + anchors
 4. Calculate: Zone 1 spacing = 21/5 ≈ 4.2 → LEDs 98, 102, 106, 110, 114, 118
@@ -616,3 +618,7 @@ Total Anchors: 16 key positions for accent lighting
 **Output:**
 Lit LEDs: 98, 102, 106, 110, 114, 118, 122, 126, 130, 134, 138
 Result: Visually even spacing with anchors always lit
+
+---
+
+*Nex-Gen LED LLC — Design Studio — Feature Requirements — April 2026*

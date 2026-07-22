@@ -4,7 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/services/wled_config_pusher.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 
@@ -16,13 +19,19 @@ class ManageControllersPage extends ConsumerWidget {
     final asyncList = ref.watch(controllersStreamProvider);
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Controllers')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(AppRoutes.wifiConnect),
-        icon: const Icon(Icons.add, color: Colors.black),
-        label: const Text('Add Controller'),
+      floatingActionButton: Padding(
+        // Lift the FAB above the glass dock nav bar overlay so it isn't
+        // hidden behind it. See main_scaffold.dart:187-198 for the
+        // convention. Matches my_schedule_page.dart / edit_profile_screen.
+        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+        child: FloatingActionButton.extended(
+          onPressed: () => context.push(AppRoutes.wifiConnect),
+          icon: const Icon(Icons.add, color: Colors.black),
+          label: const Text('Add Controller'),
+        ),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         child: asyncList.when(
           data: (items) {
             if (items.isEmpty) {
@@ -82,6 +91,11 @@ class _ControllerTile extends ConsumerWidget {
         isThreeLine: item.wifiConfigured == true && item.ssid != null,
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
+            tooltip: 'Re-sync Configuration',
+            onPressed: () => _resyncConfiguration(context, ref),
+            icon: const Icon(Icons.sync_rounded),
+          ),
+          IconButton(
             tooltip: 'Details',
             onPressed: () => _showDetails(context, ref),
             icon: const Icon(Icons.info_outline),
@@ -97,6 +111,77 @@ class _ControllerTile extends ConsumerWidget {
     );
   }
 
+  /// Re-runs [pushDefaultsForControllerType] against this controller using
+  /// the signed-in customer's lat/lon/timezone. Idempotent — re-running
+  /// produces the same on-device state. This is the migration path for
+  /// controllers installed before the geocoding-capture work landed; the
+  /// installer flow now pushes time/location automatically.
+  Future<void> _resyncConfiguration(BuildContext context, WidgetRef ref) async {
+    final profile = ref.read(currentUserProfileProvider).valueOrNull;
+    if (profile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile not loaded — try again in a moment.')),
+      );
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          ),
+          SizedBox(width: 12),
+          Text('Re-syncing controller…'),
+        ]),
+        duration: Duration(seconds: 30),
+      ),
+    );
+
+    final result = await pushDefaultsForControllerType(
+      item.ip,
+      // ControllerInfo doesn't carry a [ControllerType] today — the
+      // SKIKBILY profile is the Lumina standard and matches the install-
+      // time defaults pushed by hardware_config_step.
+      ControllerType.skikbily,
+      latitude: profile.latitude,
+      longitude: profile.longitude,
+      ianaTimezone: profile.timeZone,
+    );
+
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+
+    if (result.success && result.warnings.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Controller re-synced successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else if (result.success) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.amber.shade700,
+          content: Text(
+            'Re-synced with warnings: ${result.warnings.join("; ")}',
+            style: const TextStyle(color: Colors.black),
+          ),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('Re-sync failed: ${result.errorMessage ?? "unknown error"}'),
+        ),
+      );
+    }
+  }
+
   void _showDetails(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
@@ -110,7 +195,7 @@ class _ControllerTile extends ConsumerWidget {
             _DetailRow(label: 'IP Address', value: item.ip),
             _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
             if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
-            _DetailRow(label: 'Wi-Fi Configured', value: item.wifiConfigured == true ? 'Yes' : 'No'),
+            _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
             if (item.createdAt != null)
               _DetailRow(label: 'Added', value: _formatDate(item.createdAt)),
             if (item.updatedAt != null)

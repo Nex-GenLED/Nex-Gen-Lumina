@@ -3,10 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
-import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/analytics/analytics_providers.dart';
+import 'package:nexgen_command/features/whites/white_preference_providers.dart';
 
 /// Provider for the HabitLearner service
 final habitLearnerProvider = Provider.family<HabitLearner?, String>((ref, userId) {
@@ -29,62 +30,49 @@ final currentUserHabitLearnerProvider = Provider<HabitLearner?>((ref) {
 
 // ==================== Favorites ====================
 
-/// System default favorites that are always available
-/// Payload structure matches pattern_models.dart toWledPayload() for consistency
-final _systemDefaultFavorites = [
-  FavoritePattern(
-    id: 'system_warm_white',
-    patternName: 'Warm White',
-    addedAt: DateTime(2024, 1, 1),
-    usageCount: 0,
-    patternData: {
-      'on': true,
-      'bri': 220,
-      'seg': [
-        {
-          'fx': 0,       // Solid effect
-          'sx': 128,     // Speed (not used for solid)
-          'ix': 128,     // Intensity (not used for solid)
-          'pal': 0,      // No palette - use direct colors
-          'col': [[255, 180, 100, 255]],  // Warm amber + white channel
-        }
-      ]
-    },
-    autoAdded: false,
-  ),
-  FavoritePattern(
-    id: 'system_bright_white',
-    patternName: 'Bright White',
-    addedAt: DateTime(2024, 1, 1),
-    usageCount: 0,
-    patternData: {
-      'on': true,
-      'bri': 255,
-      'seg': [
-        {
-          'fx': 0,       // Solid effect
-          'sx': 128,     // Speed (not used for solid)
-          'ix': 128,     // Intensity (not used for solid)
-          'pal': 0,      // No palette - use direct colors
-          'col': [[255, 255, 255, 255]],  // Full white RGB + white channel
-        }
-      ]
-    },
-    autoAdded: false,
-  ),
-];
+/// Build the two reserved white slots from user preferences.
+/// These always occupy positions 0 and 1 in the favorites list.
+List<FavoritePattern> _buildWhiteSlots(Ref ref) {
+  final primary = ref.watch(preferredWhitePrimaryProvider);
+  final complement = ref.watch(preferredWhiteComplementProvider);
 
-/// Stream of user's favorite patterns (includes system defaults)
+  return [
+    FavoritePattern(
+      id: 'white_primary',
+      patternName: primary.name,
+      addedAt: DateTime(2024, 1, 1),
+      usageCount: 0,
+      patternData: primary.toWledPayload(),
+      autoAdded: false,
+    ),
+    FavoritePattern(
+      id: 'white_complement',
+      patternName: complement.name,
+      addedAt: DateTime(2024, 1, 1),
+      usageCount: 0,
+      patternData: complement.toWledPayload(),
+      autoAdded: false,
+    ),
+  ];
+}
+
+/// Stream of user's favorite patterns.
+/// Slots 1-2 are always the user's preferred whites (permanently reserved).
+/// Slots 3+ are user favorites sorted by usage/recency.
 final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern>>((ref) async* {
-  final user = ref.watch(authStateProvider).value;
-  if (user == null) {
-    // Return only system defaults when not logged in
-    yield _systemDefaultFavorites;
+  // Watch white preferences so favorites update when whites change
+  final whiteSlots = _buildWhiteSlots(ref);
+
+  // Effective UID — respects installer impersonation via the
+  // existing-customer flow.
+  final uid = ref.watch(effectiveUserUidProvider);
+  if (uid == null) {
+    yield whiteSlots;
     return;
   }
 
   final userService = ref.watch(userServiceProvider);
-  await for (final favoritesData in userService.streamFavorites(user.uid)) {
+  await for (final favoritesData in userService.streamFavorites(uid)) {
     final userFavorites = favoritesData
         .map((data) => FavoritePattern.fromJson(data))
         .toList();
@@ -103,10 +91,9 @@ final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern
       return b.usageCount.compareTo(a.usageCount);
     });
 
-    // Combine system defaults with user favorites
-    // System defaults appear first, then user patterns
+    // Reserved white slots first, then user favorites
     final combined = <FavoritePattern>[
-      ..._systemDefaultFavorites,
+      ...whiteSlots,
       ...userFavorites,
     ];
 
@@ -149,8 +136,8 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
 
   /// Update favorite usage (called when user applies a favorite)
   Future<void> recordFavoriteUsage(String favoriteId) async {
-    // Skip system defaults - they're not stored in Firestore
-    if (favoriteId.startsWith('system_')) return;
+    // Skip reserved white slots and system defaults - not stored in Firestore
+    if (favoriteId.startsWith('system_') || favoriteId.startsWith('white_')) return;
 
     final user = ref.read(authStateProvider).value;
     if (user == null) return;

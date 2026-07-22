@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,10 +48,10 @@ class DemoWelcomeScreen extends ConsumerWidget {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: NexGenPalette.cyan.withOpacity(0.1),
+                        color: NexGenPalette.cyan.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: NexGenPalette.cyan.withOpacity(0.3),
+                          color: NexGenPalette.cyan.withValues(alpha: 0.3),
                         ),
                       ),
                       child: Row(
@@ -107,7 +106,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: NexGenPalette.cyan.withOpacity(0.4),
+                              color: NexGenPalette.cyan.withValues(alpha: 0.4),
                               blurRadius: 30,
                               spreadRadius: 5,
                             ),
@@ -152,23 +151,9 @@ class DemoWelcomeScreen extends ConsumerWidget {
                       const SizedBox(height: 16),
                       _buildFeatureItem(
                         context,
-                        Icons.palette_outlined,
-                        'Explore 500+ Patterns',
-                        'Browse holidays, sports teams, and custom designs',
-                      ),
-                      const SizedBox(height: 16),
-                      _buildFeatureItem(
-                        context,
-                        Icons.schedule_outlined,
-                        'Smart Scheduling',
-                        'See how automation syncs with sunrise & sunset',
-                      ),
-                      const SizedBox(height: 16),
-                      _buildFeatureItem(
-                        context,
-                        Icons.auto_awesome_outlined,
-                        'Meet Lumina AI',
-                        'Your personal lighting assistant',
+                        Icons.roofing_outlined,
+                        'See Your Roofline Transformed',
+                        'Preview your home with Nex-Gen smart LED lighting in seconds',
                       ),
 
                       const SizedBox(height: 40),
@@ -181,7 +166,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: NexGenPalette.cyan.withOpacity(0.1),
+                                color: NexGenPalette.cyan.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -224,16 +209,19 @@ class DemoWelcomeScreen extends ConsumerWidget {
                         label: 'Start Demo',
                         icon: Icons.play_arrow,
                         onPressed: () {
-                          // Initialize demo session
-                          ref.read(demoSessionProvider.notifier).startDemo();
-                          // Navigate to profile screen
+                          // Demo session was already initialized in
+                          // demo_code_screen.dart post-validation. Re-calling
+                          // startDemo() here would reset demo state (clear
+                          // demoRooflineNotifierProvider, null out
+                          // demoRooflineConfigProvider, etc.) and wipe any
+                          // progress the user made since code entry.
                           ref.read(demoFlowProvider.notifier).goToStep(DemoStep.profile);
                           context.push(AppRoutes.demoProfile);
                         },
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Takes about 3 minutes',
+                        'Takes about 90 seconds',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: NexGenPalette.textMedium,
                             ),
@@ -261,7 +249,7 @@ class DemoWelcomeScreen extends ConsumerWidget {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal.withOpacity(0.6),
+            color: NexGenPalette.gunmetal.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: NexGenPalette.line),
           ),

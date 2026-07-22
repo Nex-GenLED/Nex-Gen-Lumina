@@ -123,9 +123,8 @@ class VoiceCommandHandler {
 
   Future<String> _handlePowerOn() async {
     try {
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.togglePower(true);
-      ref.read(activePresetLabelProvider.notifier).state = 'On';
+      await ref.read(wledStateProvider.notifier).togglePower(true);
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('On', ref.read(wledStateProvider));
       return '✓ Turning on';
     } catch (e) {
       debugPrint('Voice: Power on failed: $e');
@@ -135,9 +134,8 @@ class VoiceCommandHandler {
 
   Future<String> _handlePowerOff() async {
     try {
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.togglePower(false);
-      ref.read(activePresetLabelProvider.notifier).state = 'Off';
+      await ref.read(wledStateProvider.notifier).togglePower(false);
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Off', ref.read(wledStateProvider));
       return '✓ Turning off';
     } catch (e) {
       debugPrint('Voice: Power off failed: $e');
@@ -151,8 +149,7 @@ class VoiceCommandHandler {
       final currentBrightness = state.brightness;
       final newBrightness = (currentBrightness + 50).clamp(0, 255);
 
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.setBrightness(newBrightness);
+      await ref.read(wledStateProvider.notifier).setBrightness(newBrightness);
 
       final percent = ((newBrightness / 255) * 100).round();
       return '✓ Brightness increased to $percent%';
@@ -168,8 +165,7 @@ class VoiceCommandHandler {
       final currentBrightness = state.brightness;
       final newBrightness = (currentBrightness - 50).clamp(0, 255);
 
-      final notifier = ref.read(wledStateProvider.notifier);
-      await notifier.setBrightness(newBrightness);
+      await ref.read(wledStateProvider.notifier).setBrightness(newBrightness);
 
       final percent = ((newBrightness / 255) * 100).round();
       return '✓ Brightness decreased to $percent%';
@@ -190,7 +186,7 @@ class VoiceCommandHandler {
         'bri': 200,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 0, // Solid effect
             'col': [
               [255, 180, 100, 255], // Warm white: amber RGB + full W
@@ -199,13 +195,17 @@ class VoiceCommandHandler {
         ],
       };
 
-      await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      // applyToDevice returns false (does NOT throw) on a device-write
+      // failure — gate the spoken confirmation on it so the assistant never
+      // claims success when the lights didn't change (Audit-2 S15).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — warm white wasn't applied";
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 180, 100)],
         effectId: 0,
         effectName: 'Warm White',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Warm White';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Warm White', ref.read(wledStateProvider));
       return '✓ Applying warm white';
     } catch (e) {
       debugPrint('Voice: Warm white failed: $e');
@@ -218,29 +218,31 @@ class VoiceCommandHandler {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return 'No controller connected';
 
-      // Bright white: full RGB + full W channel for maximum brightness
+      // Bright white: pure W channel — dedicated white LED for clean white
       final payload = {
         'on': true,
         'bri': 255,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 0, // Solid effect
             'col': [
-              [255, 255, 255, 255], // Full RGB + full W
+              [0, 0, 0, 255], // Pure W channel — dedicated white LED
             ],
           }
         ],
       };
 
-      await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      // Gate the spoken confirmation on the actual write outcome (Audit-2 S16).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — bright white wasn't applied";
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [const Color.fromARGB(255, 255, 255, 255)],
         effectId: 0,
         brightness: 255,
         effectName: 'Bright White',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Bright White';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Bright White', ref.read(wledStateProvider));
       return '✓ Applying bright white';
     } catch (e) {
       debugPrint('Voice: Bright white failed: $e');
@@ -259,7 +261,7 @@ class VoiceCommandHandler {
         'bri': 255,
         'seg': [
           {
-            'id': 0,
+            // No 'id' — applyToDevice fans this out per effective channel.
             'fx': 28, // Chase effect
             'sx': 150, // Medium-fast speed
             'col': [
@@ -271,8 +273,10 @@ class VoiceCommandHandler {
         ],
       };
 
-      await repo.applyJson(payload);
-      ref.read(wledStateProvider.notifier).applyLocalPreview(
+      // Gate the spoken confirmation on the actual write outcome (Audit-2 S17).
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+      if (!ok) return "I couldn't reach your lights — festive pattern wasn't applied";
+      ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: [
           const Color.fromARGB(255, 255, 0, 0),
           const Color.fromARGB(255, 0, 255, 0),
@@ -281,7 +285,7 @@ class VoiceCommandHandler {
         speed: 150,
         effectName: 'Festive',
       );
-      ref.read(activePresetLabelProvider.notifier).state = 'Festive';
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint('Festive', ref.read(wledStateProvider));
       return '✓ Applying festive pattern';
     } catch (e) {
       debugPrint('Voice: Festive failed: $e');
@@ -398,7 +402,7 @@ class VoiceCommandHandler {
       final success = await applyScene(scene);
 
       if (success) {
-        ref.read(activePresetLabelProvider.notifier).state = scene.name;
+        ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(scene.name, ref.read(wledStateProvider));
         return '✓ Applying ${scene.name}';
       } else {
         return 'Failed to apply ${scene.name}';

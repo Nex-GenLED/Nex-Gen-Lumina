@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/demo/demo_lead_service.dart';
 import 'package:nexgen_command/features/demo/demo_models.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 
 // =============================================================================
 // Demo Experience State Providers
@@ -28,6 +29,19 @@ final demoPhotoProvider = StateProvider<Uint8List?>((ref) => null);
 
 /// Whether the user chose to use the stock photo instead of their own.
 final demoUsingStockPhotoProvider = StateProvider<bool>((ref) => false);
+
+/// The active roofline configuration for demo mode.
+///
+/// Populated from one of two sources:
+/// - DemoStockHome.load() when the user chooses the sample home
+/// - migrateFromLegacyMask(...) after RooflineAutoDetectService runs on
+///   the user's captured photo
+///
+/// Read by currentRooflineConfigProvider when demoExperienceActiveProvider
+/// is true, so the production AnimatedRooflineOverlay renders demo
+/// previews correctly.
+final demoRooflineConfigProvider =
+    StateProvider<RooflineConfiguration?>((ref) => null);
 
 /// Currently selected pattern ID in demo mode.
 final demoSelectedPatternProvider = StateProvider<String?>((ref) => null);
@@ -174,36 +188,6 @@ class DemoRooflineNotifier extends Notifier<List<DemoSegment>> {
     state = [];
   }
 
-  /// Apply a suggested layout (pre-configured segments).
-  void applySuggestedLayout() {
-    state = [
-      DemoSegment(
-        id: 'demo-seg-1',
-        name: 'Front Left Run',
-        pixelCount: 60,
-        type: DemoSegmentType.run,
-      ),
-      DemoSegment(
-        id: 'demo-seg-2',
-        name: 'Front Peak',
-        pixelCount: 30,
-        type: DemoSegmentType.peak,
-      ),
-      DemoSegment(
-        id: 'demo-seg-3',
-        name: 'Front Right Run',
-        pixelCount: 60,
-        type: DemoSegmentType.run,
-      ),
-      DemoSegment(
-        id: 'demo-seg-4',
-        name: 'Garage',
-        pixelCount: 40,
-        type: DemoSegmentType.run,
-      ),
-    ];
-  }
-
   /// Check if we can add more segments.
   bool get canAddMore => state.length < maxSegments;
 }
@@ -277,6 +261,7 @@ class DemoSessionNotifier extends Notifier<bool> {
     ref.read(demoRooflineNotifierProvider.notifier).clear();
     ref.read(demoPhotoProvider.notifier).state = null;
     ref.read(demoUsingStockPhotoProvider.notifier).state = false;
+    ref.read(demoRooflineConfigProvider.notifier).state = null;
     ref.read(demoSelectedPatternProvider.notifier).state = null;
     ref.read(demoPatternsViewedProvider.notifier).state = [];
 

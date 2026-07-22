@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/features/wled/pattern_models.dart';
 
 /// Storage key for Simple Mode setting
 const String _simpleModeKey = 'simple_mode_enabled';

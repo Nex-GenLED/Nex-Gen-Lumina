@@ -81,6 +81,9 @@ app.*.map.json
 **/android/key.properties
 *.jks
 
+# Gradle Kotlin daemon cache — per-session artifacts
+android/.kotlin/
+
 # Web related
 lib/generated_plugin_registrant.dart
 
@@ -104,6 +107,70 @@ coverage/
 .env
 .env.*
 *.keystore
+*service-account*.json
+*serviceaccount*.json
+*mint-admin.json
+*firebase-adminsdk*.json
+*-adminsdk-*.json
+**/key.properties
+# Explicit: this admin SDK key lives on-disk for local diag scripts only —
+# never commit it (also covered by *firebase-adminsdk*.json above).
+android/app/*-firebase-adminsdk-*.json
+
+# Pulled diagnostic data from read-only Firestore scans (may contain device
+# state / IPs). Keep local — never commit.
+scripts/diag-*.json
+
+# Bridge firmware secrets — config.h files contain real credentials.
+# Use config.h.example as the committed template.
+esp32-bridge/src/config.h
+esp32-mqtt-bridge/src/config.h
+
+# PlatformIO build outputs (any firmware tree)
+**/.pio/
+
+# Merged firmware images (build artifacts — flash output, regenerable)
+esp32-bridge/*-merged.bin
+
+# One-off destructive admin scripts — never commit
+scripts/wipe_controllers.js
+scripts/fix_bridge_email.js
+scripts/cleanup_schedules.js
+scripts/enforce_schedule_limit.js
+scripts/reset_all_bridge_records.js
+scripts/clear_bridge_data.js
+scripts/clear_bridge_state.js
+scripts/wipe_customer_data.js
+scripts/clear_account_state.js
+scripts/_cleanup_failed_customer.js
+scripts/audit_test_data.js
+scripts/_drive_clear_accounts.js
+scripts/clear_leftovers.js
+scripts/_diag_command_routing.sh
+scripts/diag-output-*.log
+scripts/_diag_firestore_pull.js
+scripts/diag-firestore-*.json
+# Ad-hoc bridge/rules diagnostics — local-only, never committed.
+scripts/_diag_*.js
+scripts/_monitor_*.js
+scripts/_test_rules_block.js
+
+# Catalog seeder — run once to seed the canonical SKU list, then forget.
+# Per Tyler's request, kept out of source control to discourage re-runs.
+scripts/seed_product_catalog.js
+
+# Wipe audit logs — outputs of wipe_customer_data.js. Archived to ~/.claude memory dir.
+wipe_*.json
+wipe_dryrun_*.json
+clear_accounts_*.json
+audit_test_data_*.json
+clear_leftovers*.json
+audit_for_risk_check.json
+
+# Brand library seeder secrets (script + JSON are committed; only .env isn't)
+scripts/.env
+# .env.example is a safe template — exempt it from the broader .env.* rule above
+!scripts/.env.example
 
 # Claude Code temp files
 tmpclaude-*
@@ -117,6 +184,48 @@ nul
 *.tmp
 **/wled_config.json
 
+# Cloud Functions secrets
+functions/.env
+functions/.env.local
+functions/.env.production
+
 # Node modules (for Firebase functions)
 **/node_modules/
 functions/.runtimeconfig.json
+android/app/*.keystore
+android/build/
+android/.gradle/
+
+# Preserved debug symbols from prior release builds. Lives outside /build/
+# so `flutter clean` can't wipe it. Required for Play Console crash
+# de-obfuscation; never commit (large + per-build) and never delete locally.
+debug-info-archive/
+
+# Last Android release versionCode marker — written by build.sh after a
+# successful build_android_release run. Pre-flight check refuses to
+# rebuild the same versionCode (Play Console rejects duplicates and
+# Android has no auto-bumper, unlike iOS via codemagic.yaml). Lives
+# outside /build/ so `flutter clean` can't wipe the protection.
+.android-versioncode-state
+
+# Tablet/device log dumps
+pulla-logs/
+
+# Release-build staging artifacts (large signed AABs / IPAs awaiting upload)
+submission_artifacts/
+
+# Session log captures (Pulla smoke tests, diagnostic runs)
+logs/
+
+# Marketing content (sell sheets, how-to guides, Playwright screenshot scripts)
+marketing/
+
+# Cloud Functions TypeScript build output
+functions/lib/
+
+# One-off diagnostic scripts (underscore-prefixed) — throwaway probes written
+# during an investigation. Durable, reusable tools live in functions/scripts/
+# WITHOUT the underscore and ARE committed (e.g. repair_array_sortkeys.js,
+# backfill_dryrun.js). Ignored because these dump per-user/PII output and are
+# shaped for one session's question, not for reuse.
+functions/scripts/_*.js

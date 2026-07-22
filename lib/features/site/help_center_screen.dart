@@ -14,7 +14,7 @@ class HelpCenterScreen extends StatelessWidget {
       ),
       (
         'How to reset Wi-Fi?',
-        "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to 'WLED-AP' first."
+        "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to the controller's AP (Lumina-XXXX) first."
       ),
       (
         'Can I cut the strips?',
@@ -42,7 +42,7 @@ class HelpCenterScreen extends StatelessWidget {
           Expanded(
             child: Card(
               child: ListView.separated(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.fromLTRB(8, 8, 8, navBarTotalHeight(context)),
                 itemCount: faqs.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {

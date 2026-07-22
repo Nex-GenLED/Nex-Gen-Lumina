@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Trigger types for autopilot schedule items.
 enum AutopilotTrigger {
@@ -77,6 +80,10 @@ class AutopilotScheduleItem {
   /// Duration in minutes before auto-off (null = no auto-off).
   final int? durationMinutes;
 
+  /// Lumina's narrative voice for this event.
+  /// e.g., "Thursday: Chiefs vs. Raiders kickoff — red and gold pulse at game time."
+  final String? message;
+
   const AutopilotScheduleItem({
     required this.id,
     required this.scheduledTime,
@@ -96,6 +103,7 @@ class AutopilotScheduleItem {
     this.wasAutoApplied = false,
     this.eventName,
     this.durationMinutes,
+    this.message,
   });
 
   /// Create from Firestore document.
@@ -114,7 +122,9 @@ class AutopilotScheduleItem {
         orElse: () => AutopilotTrigger.custom,
       ),
       confidenceScore: (json['confidence_score'] as num?)?.toDouble() ?? 0.5,
-      wledPayload: Map<String, dynamic>.from(json['wled_payload'] as Map? ?? {}),
+      wledPayload: json['wled_payload'] is String
+          ? Map<String, dynamic>.from(jsonDecode(json['wled_payload'] as String) as Map? ?? {})
+          : Map<String, dynamic>.from(json['wled_payload'] as Map? ?? {}),
       colors: (json['colors'] as List?)?.cast<int>(),
       effectId: json['effect_id'] as int?,
       paletteId: json['palette_id'] as int?,
@@ -130,6 +140,7 @@ class AutopilotScheduleItem {
       wasAutoApplied: json['was_auto_applied'] as bool? ?? false,
       eventName: json['event_name'] as String?,
       durationMinutes: json['duration_minutes'] as int?,
+      message: json['message'] as String?,
     );
   }
 
@@ -144,7 +155,7 @@ class AutopilotScheduleItem {
       'reason': reason,
       'trigger': trigger.name,
       'confidence_score': confidenceScore,
-      'wled_payload': wledPayload,
+      'wled_payload': jsonEncode(wledPayload),
       if (colors != null) 'colors': colors,
       if (effectId != null) 'effect_id': effectId,
       if (paletteId != null) 'palette_id': paletteId,
@@ -154,6 +165,7 @@ class AutopilotScheduleItem {
       'was_auto_applied': wasAutoApplied,
       if (eventName != null) 'event_name': eventName,
       if (durationMinutes != null) 'duration_minutes': durationMinutes,
+      if (message != null) 'message': message,
     };
   }
 
@@ -177,6 +189,7 @@ class AutopilotScheduleItem {
     bool? wasAutoApplied,
     String? eventName,
     int? durationMinutes,
+    String? message,
   }) {
     return AutopilotScheduleItem(
       id: id ?? this.id,
@@ -197,6 +210,7 @@ class AutopilotScheduleItem {
       wasAutoApplied: wasAutoApplied ?? this.wasAutoApplied,
       eventName: eventName ?? this.eventName,
       durationMinutes: durationMinutes ?? this.durationMinutes,
+      message: message ?? this.message,
     );
   }
 
@@ -255,6 +269,13 @@ class AutopilotScheduleItem {
 
     return '${repeatDays.join(", ")} at $timeStr';
   }
+
+  /// UI-safe pattern name. Routes the stored [patternName] through the
+  /// centralized slug resolver so render sites can't leak snake_case
+  /// identifiers. Authored strings pass through unchanged. Distinct from
+  /// [AutopilotTriggerExtension.displayName] below — that one names the
+  /// trigger category ("Game Day", "Holiday"), this one names the pattern.
+  String get displayName => displayNameFor(patternName);
 
   @override
   String toString() =>

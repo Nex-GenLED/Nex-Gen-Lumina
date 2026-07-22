@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/wled/current_colors_provider.dart';
 import 'package:nexgen_command/features/wled/widgets/neon_color_wheel.dart';
@@ -69,7 +70,7 @@ class CurrentColorsEditorScreen extends ConsumerWidget {
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -352,6 +353,10 @@ class CurrentColorsEditorScreen extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      // #9: disable sheet drag-to-dismiss so a downward color-wheel drag isn't
+      // partially claimed by the sheet's pull-to-close recognizer. Cancel button
+      // + tap-outside still dismiss.
+      enableDrag: false,
       builder: (context) => _ColorPickerModal(
         initialColor: currentColor,
         onColorSelected: (color) {
@@ -467,10 +472,9 @@ class _ColorPickerModalState extends State<_ColorPickerModal> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + navBarTotalHeight(context)),
+        child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Handle bar
@@ -570,7 +574,6 @@ class _ColorPickerModalState extends State<_ColorPickerModal> {
             ],
           ),
         ),
-      ),
     );
   }
 }

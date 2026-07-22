@@ -83,7 +83,7 @@ ThemeData get lightTheme => ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
       side: BorderSide(
-        color: LightModeColors.lightOutline.withOpacity(0.2),
+        color: LightModeColors.lightOutline.withValues(alpha: 0.2),
         width: 1,
       ),
     ),
@@ -128,7 +128,7 @@ ThemeData get darkTheme => ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
       side: BorderSide(
-        color: DarkModeColors.darkOutline.withOpacity(0.2),
+        color: DarkModeColors.darkOutline.withValues(alpha: 0.2),
         width: 1,
       ),
     ),
@@ -207,35 +207,35 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
     contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
   ),
   switchTheme: SwitchThemeData(
-    thumbColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-    trackColor: MaterialStateProperty.resolveWith((states) {
-      if (states.contains(MaterialState.selected)) return NexGenPalette.cyan.withValues(alpha: 0.25);
+    thumbColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+    trackColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.selected)) return NexGenPalette.cyan.withValues(alpha: 0.25);
       return NexGenPalette.line;
     }),
   ),
   filledButtonTheme: FilledButtonThemeData(
     style: ButtonStyle(
-      backgroundColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-      foregroundColor: const MaterialStatePropertyAll(Colors.black),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-      elevation: const MaterialStatePropertyAll(6),
-      shadowColor: MaterialStatePropertyAll(NexGenPalette.cyan.withValues(alpha: 0.4)),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+      backgroundColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+      foregroundColor: const WidgetStatePropertyAll(Colors.black),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      elevation: const WidgetStatePropertyAll(6),
+      shadowColor: WidgetStatePropertyAll(NexGenPalette.cyan.withValues(alpha: 0.4)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
     ),
   ),
   outlinedButtonTheme: OutlinedButtonThemeData(
     style: ButtonStyle(
-      side: const MaterialStatePropertyAll(BorderSide(color: NexGenPalette.line, width: 1.5)),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-      foregroundColor: const MaterialStatePropertyAll(NexGenPalette.textHigh),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+      side: const WidgetStatePropertyAll(BorderSide(color: NexGenPalette.line, width: 1.5)),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      foregroundColor: const WidgetStatePropertyAll(NexGenPalette.textHigh),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
     ),
   ),
   textButtonTheme: TextButtonThemeData(
     style: ButtonStyle(
-      foregroundColor: const MaterialStatePropertyAll(NexGenPalette.cyan),
-      shape: MaterialStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-      padding: const MaterialStatePropertyAll(EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+      foregroundColor: const WidgetStatePropertyAll(NexGenPalette.cyan),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
     ),
   ),
   snackBarTheme: const SnackBarThemeData(
@@ -247,23 +247,23 @@ ThemeData get nexGenPremiumDarkTheme => ThemeData(
   textTheme: _buildPremiumTextTheme(),
 );
 
-/// Premium text theme: Montserrat for headings/labels, Inter for body
+/// Premium text theme: Exo 2 for headings/labels, DM Sans for body — brand spec
 TextTheme _buildPremiumTextTheme() => TextTheme(
-  displayLarge: GoogleFonts.montserrat(fontSize: FontSizes.displayLarge, fontWeight: FontWeight.w700, letterSpacing: -0.25, color: NexGenPalette.textHigh),
-  displayMedium: GoogleFonts.montserrat(fontSize: FontSizes.displayMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  displaySmall: GoogleFonts.montserrat(fontSize: FontSizes.displaySmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  headlineLarge: GoogleFonts.montserrat(fontSize: FontSizes.headlineLarge, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: NexGenPalette.textHigh),
-  headlineMedium: GoogleFonts.montserrat(fontSize: FontSizes.headlineMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  headlineSmall: GoogleFonts.montserrat(fontSize: FontSizes.headlineSmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
-  titleLarge: GoogleFonts.montserrat(fontSize: FontSizes.titleLarge, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  titleMedium: GoogleFonts.montserrat(fontSize: FontSizes.titleMedium, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  titleSmall: GoogleFonts.montserrat(fontSize: FontSizes.titleSmall, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
-  labelLarge: GoogleFonts.montserrat(fontSize: FontSizes.labelLarge, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: NexGenPalette.textHigh),
-  labelMedium: GoogleFonts.montserrat(fontSize: FontSizes.labelMedium, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
-  labelSmall: GoogleFonts.montserrat(fontSize: FontSizes.labelSmall, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
-  bodyLarge: GoogleFonts.inter(fontSize: FontSizes.bodyLarge, fontWeight: FontWeight.w400, letterSpacing: 0.15, color: NexGenPalette.textHigh),
-  bodyMedium: GoogleFonts.inter(fontSize: FontSizes.bodyMedium, fontWeight: FontWeight.w400, letterSpacing: 0.25, color: NexGenPalette.textMedium),
-  bodySmall: GoogleFonts.inter(fontSize: FontSizes.bodySmall, fontWeight: FontWeight.w400, letterSpacing: 0.4, color: NexGenPalette.textMedium),
+  displayLarge: GoogleFonts.exo2(fontSize: FontSizes.displayLarge, fontWeight: FontWeight.w700, letterSpacing: -0.25, color: NexGenPalette.textHigh),
+  displayMedium: GoogleFonts.exo2(fontSize: FontSizes.displayMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  displaySmall: GoogleFonts.exo2(fontSize: FontSizes.displaySmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  headlineLarge: GoogleFonts.exo2(fontSize: FontSizes.headlineLarge, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: NexGenPalette.textHigh),
+  headlineMedium: GoogleFonts.exo2(fontSize: FontSizes.headlineMedium, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  headlineSmall: GoogleFonts.exo2(fontSize: FontSizes.headlineSmall, fontWeight: FontWeight.w700, color: NexGenPalette.textHigh),
+  titleLarge: GoogleFonts.exo2(fontSize: FontSizes.titleLarge, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  titleMedium: GoogleFonts.exo2(fontSize: FontSizes.titleMedium, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  titleSmall: GoogleFonts.exo2(fontSize: FontSizes.titleSmall, fontWeight: FontWeight.w600, color: NexGenPalette.textHigh),
+  labelLarge: GoogleFonts.exo2(fontSize: FontSizes.labelLarge, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: NexGenPalette.textHigh),
+  labelMedium: GoogleFonts.exo2(fontSize: FontSizes.labelMedium, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
+  labelSmall: GoogleFonts.exo2(fontSize: FontSizes.labelSmall, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: NexGenPalette.textHigh),
+  bodyLarge: GoogleFonts.dmSans(fontSize: FontSizes.bodyLarge, fontWeight: FontWeight.w400, letterSpacing: 0.15, color: NexGenPalette.textHigh),
+  bodyMedium: GoogleFonts.dmSans(fontSize: FontSizes.bodyMedium, fontWeight: FontWeight.w400, letterSpacing: 0.25, color: NexGenPalette.textMedium),
+  bodySmall: GoogleFonts.dmSans(fontSize: FontSizes.bodySmall, fontWeight: FontWeight.w400, letterSpacing: 0.4, color: NexGenPalette.textMedium),
 );
 
 // =============================================================================

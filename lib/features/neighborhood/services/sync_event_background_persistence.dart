@@ -1,0 +1,526 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/sync_event.dart';
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SYNC EVENT BACKGROUND PERSISTENCE
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// SharedPreferences-based persistence layer for sync event configs.
+// Used by the background service isolate which has no access to Riverpod
+// or Firestore listeners.
+//
+// The UI layer writes sync event state here whenever it changes, and the
+// background service reads it on each polling cycle.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const _kSyncEventsKey = 'bg_sync_events';
+const _kSyncGroupIdKey = 'bg_sync_group_id';
+const _kSyncHostUidKey = 'bg_sync_host_uid';
+const _kSyncBackupHostUidKey = 'bg_sync_backup_host_uid';
+const _kSyncUserUidKey = 'bg_sync_user_uid';
+const _kSyncActiveSessionKey = 'bg_sync_active_session';
+const _kSyncHostFailoverTsKey = 'bg_sync_host_failover_ts';
+const _kSyncIdTokenKey = 'bg_sync_id_token';
+const _kSyncIdTokenExpiresAtKey = 'bg_sync_id_token_expires_at';
+const _kLocalParticipatingChannelsKey = 'bg_local_participating_channels';
+
+/// Serializable subset of SyncEvent for background service consumption.
+/// Avoids pulling in Firestore dependencies in the background isolate.
+class BackgroundSyncEventConfig {
+  final String id;
+  final String name;
+  final String groupId;
+  final String triggerType; // 'scheduledTime', 'gameStart', 'manual'
+  final String? sportLeague;
+  final String? espnTeamId;
+  final String? teamId;
+  final DateTime? scheduledTime;
+  final DateTime? scheduledEndTime;
+  final List<int> repeatDays;
+  final bool isEnabled;
+  final String category;
+  // Pattern data needed for WLED commands in background
+  final int baseEffectId;
+  final List<int> baseColors;
+  final int baseSpeed;
+  final int baseIntensity;
+  final int baseBrightness;
+  final int celebrationEffectId;
+  final List<int> celebrationColors;
+  final int celebrationDurationSeconds;
+  final String postEventBehavior;
+  // Season schedule fields
+  final bool isSeasonSchedule;
+  final int? seasonYear;
+  final List<String> excludedGameIds;
+
+  const BackgroundSyncEventConfig({
+    required this.id,
+    required this.name,
+    required this.groupId,
+    required this.triggerType,
+    this.sportLeague,
+    this.espnTeamId,
+    this.teamId,
+    this.scheduledTime,
+    this.scheduledEndTime,
+    this.repeatDays = const [],
+    this.isEnabled = true,
+    this.category = 'gameDay',
+    this.baseEffectId = 0,
+    this.baseColors = const [0xFFFFFF],
+    this.baseSpeed = 128,
+    this.baseIntensity = 128,
+    this.baseBrightness = 200,
+    this.celebrationEffectId = 88,
+    this.celebrationColors = const [0xFFFFFF],
+    this.celebrationDurationSeconds = 15,
+    this.postEventBehavior = 'returnToAutopilot',
+    this.isSeasonSchedule = false,
+    this.seasonYear,
+    this.excludedGameIds = const [],
+  });
+
+  bool get isGameStart => triggerType == 'gameStart';
+  bool get isScheduledTime => triggerType == 'scheduledTime';
+  bool get isManual => triggerType == 'manual';
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'groupId': groupId,
+        'triggerType': triggerType,
+        'sportLeague': sportLeague,
+        'espnTeamId': espnTeamId,
+        'teamId': teamId,
+        'scheduledTime': scheduledTime?.toIso8601String(),
+        'scheduledEndTime': scheduledEndTime?.toIso8601String(),
+        'repeatDays': repeatDays,
+        'isEnabled': isEnabled,
+        'category': category,
+        'baseEffectId': baseEffectId,
+        'baseColors': baseColors,
+        'baseSpeed': baseSpeed,
+        'baseIntensity': baseIntensity,
+        'baseBrightness': baseBrightness,
+        'celebrationEffectId': celebrationEffectId,
+        'celebrationColors': celebrationColors,
+        'celebrationDurationSeconds': celebrationDurationSeconds,
+        'postEventBehavior': postEventBehavior,
+        'isSeasonSchedule': isSeasonSchedule,
+        'seasonYear': seasonYear,
+        'excludedGameIds': excludedGameIds,
+      };
+
+  factory BackgroundSyncEventConfig.fromJson(Map<String, dynamic> json) {
+    return BackgroundSyncEventConfig(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      groupId: json['groupId'] ?? '',
+      triggerType: json['triggerType'] ?? 'scheduledTime',
+      sportLeague: json['sportLeague'],
+      espnTeamId: json['espnTeamId'],
+      teamId: json['teamId'],
+      scheduledTime: json['scheduledTime'] != null
+          ? DateTime.tryParse(json['scheduledTime'])
+          : null,
+      scheduledEndTime: json['scheduledEndTime'] != null
+          ? DateTime.tryParse(json['scheduledEndTime'])
+          : null,
+      repeatDays: List<int>.from(json['repeatDays'] ?? []),
+      isEnabled: json['isEnabled'] ?? true,
+      category: json['category'] ?? 'gameDay',
+      baseEffectId: json['baseEffectId'] ?? 0,
+      baseColors: List<int>.from(json['baseColors'] ?? [0xFFFFFF]),
+      baseSpeed: json['baseSpeed'] ?? 128,
+      baseIntensity: json['baseIntensity'] ?? 128,
+      baseBrightness: json['baseBrightness'] ?? 200,
+      celebrationEffectId: json['celebrationEffectId'] ?? 88,
+      celebrationColors:
+          List<int>.from(json['celebrationColors'] ?? [0xFFFFFF]),
+      celebrationDurationSeconds: json['celebrationDurationSeconds'] ?? 15,
+      postEventBehavior: json['postEventBehavior'] ?? 'returnToAutopilot',
+      isSeasonSchedule: json['isSeasonSchedule'] ?? false,
+      seasonYear: json['seasonYear'],
+      excludedGameIds: List<String>.from(json['excludedGameIds'] ?? []),
+    );
+  }
+
+  /// Create from a full SyncEvent model (called from UI layer).
+  factory BackgroundSyncEventConfig.fromSyncEvent(SyncEvent event) {
+    return BackgroundSyncEventConfig(
+      id: event.id,
+      name: event.name,
+      groupId: event.syncGroupId,
+      triggerType: event.triggerType.name,
+      sportLeague: event.sportLeague,
+      espnTeamId: event.espnTeamId,
+      teamId: event.teamId,
+      scheduledTime: event.scheduledTime,
+      scheduledEndTime: event.scheduledEndTime,
+      repeatDays: event.repeatDays,
+      isEnabled: event.isEnabled,
+      category: event.category.name,
+      baseEffectId: event.basePattern.effectId,
+      baseColors: event.basePattern.colors,
+      baseSpeed: event.basePattern.speed,
+      baseIntensity: event.basePattern.intensity,
+      baseBrightness: event.basePattern.brightness,
+      celebrationEffectId: event.celebrationPattern.effectId,
+      celebrationColors: event.celebrationPattern.colors,
+      celebrationDurationSeconds: event.celebrationDurationSeconds,
+      postEventBehavior: event.postEventBehavior.name,
+      isSeasonSchedule: event.isSeasonSchedule,
+      seasonYear: event.seasonYear,
+      excludedGameIds: event.excludedGameIds,
+    );
+  }
+}
+
+/// Minimal active session state for background service tracking.
+class BackgroundActiveSession {
+  final String sessionId;
+  final String syncEventId;
+  final String groupId;
+  final String? gameId;
+  final DateTime startedAt;
+
+  const BackgroundActiveSession({
+    required this.sessionId,
+    required this.syncEventId,
+    required this.groupId,
+    this.gameId,
+    required this.startedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'sessionId': sessionId,
+        'syncEventId': syncEventId,
+        'groupId': groupId,
+        'gameId': gameId,
+        'startedAt': startedAt.toIso8601String(),
+      };
+
+  factory BackgroundActiveSession.fromJson(Map<String, dynamic> json) {
+    return BackgroundActiveSession(
+      sessionId: json['sessionId'] ?? '',
+      syncEventId: json['syncEventId'] ?? '',
+      groupId: json['groupId'] ?? '',
+      gameId: json['gameId'],
+      startedAt: DateTime.tryParse(json['startedAt'] ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PERSISTENCE FUNCTIONS (called from UI layer)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Save sync event configs for the background service to read.
+/// Called whenever sync events change in the UI.
+Future<void> saveSyncEventsForBackground(
+  List<BackgroundSyncEventConfig> configs,
+) async {
+  final prefs = await SharedPreferences.getInstance();
+  final encoded = configs.map((c) => jsonEncode(c.toJson())).toList();
+  await prefs.setStringList(_kSyncEventsKey, encoded);
+  debugPrint(
+    '[SyncBgPersistence] Saved ${configs.length} sync events for background',
+  );
+}
+
+/// Save the active group ID for background service.
+Future<void> saveSyncGroupId(String? groupId) async {
+  final prefs = await SharedPreferences.getInstance();
+  if (groupId == null) {
+    await prefs.remove(_kSyncGroupIdKey);
+  } else {
+    await prefs.setString(_kSyncGroupIdKey, groupId);
+  }
+}
+
+/// Save the current user's UID for background auth context.
+Future<void> saveSyncUserUid(String? uid) async {
+  final prefs = await SharedPreferences.getInstance();
+  if (uid == null) {
+    await prefs.remove(_kSyncUserUidKey);
+  } else {
+    await prefs.setString(_kSyncUserUidKey, uid);
+  }
+}
+
+/// Save host and backup host UIDs for failover logic.
+Future<void> saveSyncHostInfo({
+  required String hostUid,
+  String? backupHostUid,
+}) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_kSyncHostUidKey, hostUid);
+  if (backupHostUid != null) {
+    await prefs.setString(_kSyncBackupHostUidKey, backupHostUid);
+  }
+}
+
+/// Mark that an active session was started (background or foreground).
+Future<void> saveActiveSession(BackgroundActiveSession session) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_kSyncActiveSessionKey, jsonEncode(session.toJson()));
+}
+
+/// Clear the active session marker.
+Future<void> clearActiveSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove(_kSyncActiveSessionKey);
+}
+
+/// Record the timestamp when a host failover grace window begins.
+Future<void> saveHostFailoverTimestamp(DateTime ts) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(_kSyncHostFailoverTsKey, ts.toIso8601String());
+}
+
+// ─── Participating-channels in-memory cache ─────────────────────────────
+// The chokepoint at WledService.applyJson / CloudRelayRepository.applyJson
+// reads this on every apply (audit #4 / Bundle 3b.2). Per-apply
+// SharedPreferences reads would slow slider drags / audio-reactive paths,
+// so we cache the resolved list in module-level memory:
+//
+//   - getCachedParticipatingChannels()  — lazy-load on first call; cached
+//                                         thereafter. Returns Future<List<int>?>;
+//                                         only the first call awaits disk.
+//   - saveLocalParticipatingChannels()  — updates the cache synchronously
+//                                         before the async SharedPreferences
+//                                         write, so the cache and persisted
+//                                         value cannot diverge.
+//   - participationCacheNotifier        — ValueNotifier that exposes the
+//                                         cache to Riverpod providers
+//                                         (Bundle 3b.3b — the dashboard
+//                                         gate watches this for reactivity).
+//   - resetParticipationCacheForTest()  — clears state between unit tests.
+//
+// ISOLATE NOTE: Dart isolates have independent module-level memory. The
+// foreground and (future) background isolate each maintain their own
+// cache. The Bundle 4 background path will lazy-load identically; if the
+// foreground updates participation while the background is running, the
+// background's cache stays stale until a separate invalidation mechanism
+// is added in Bundle 4 (likely per-poll-cycle reload).
+
+/// ValueNotifier exposing the participation cache. Riverpod providers
+/// listen to this (via addListener) to react when the cache changes —
+/// the dashboard's U1 participation gate (Bundle 3b.3b) rebuilds the
+/// effective-channel list whenever this fires.
+///
+/// Direct readers (the applyJson chokepoint, Bundle 3b.2) can also read
+/// `.value` synchronously, but should prefer the [peekCachedParticipatingChannels]
+/// / [getCachedParticipatingChannels] helpers since they handle the
+/// "loaded yet?" distinction.
+final ValueNotifier<List<int>?> participationCacheNotifier =
+    ValueNotifier<List<int>?>(null);
+
+bool _participationCacheLoaded = false;
+
+/// Returns the cached participating-channels list, lazy-loading from
+/// SharedPreferences on first call. Cheap on every subsequent call.
+///
+/// Semantics match [loadLocalParticipatingChannels]:
+///   - `null`  → no preference set / cold-start cache (chokepoint will
+///               pass payloads through unchanged).
+///   - `[]`    → explicit "no channels" (chokepoint still passes through;
+///               skip-apply belongs upstream).
+///   - `[..]`  → explicit set (chokepoint expands broadcast-intent
+///               payloads to these channel ids).
+Future<List<int>?> getCachedParticipatingChannels() async {
+  if (!_participationCacheLoaded) {
+    participationCacheNotifier.value = await loadLocalParticipatingChannels();
+    _participationCacheLoaded = true;
+  }
+  return participationCacheNotifier.value;
+}
+
+/// Synchronous peek at the cache. Returns null if the cache has not been
+/// warmed yet (the chokepoint should never block applyJson on a load —
+/// callers that have not warmed the cache simply get a pass-through
+/// payload from [expandForParticipation], matching legacy behavior).
+List<int>? peekCachedParticipatingChannels() {
+  return _participationCacheLoaded ? participationCacheNotifier.value : null;
+}
+
+/// Test helper: clear the cache so each test starts cold.
+@visibleForTesting
+void resetParticipationCacheForTest() {
+  participationCacheNotifier.value = null;
+  _participationCacheLoaded = false;
+}
+
+/// Persist the LOCAL user's participating channel indices for the
+/// background isolate. Shared by the sync worker and the game-day
+/// worker — both apply on behalf of the local user to the local
+/// user's own controllers, so a single key is sufficient.
+///
+/// Semantics (must match the model layer in
+/// [NeighborhoodMember.participatingChannelIndices] and
+/// [GameDayAutopilotConfig.participatingChannelIndices]):
+///
+///   - `null`  → clears the key. On the next load the background
+///               worker reads null and falls back to all-channels
+///               (its safe default — the isolate cannot run the
+///               isPrimary resolver because it has no
+///               RooflineConfiguration access).
+///   - `[]`    → explicit "no channels participate". Persisted as
+///               an empty stringlist so load can distinguish it
+///               from null.
+///   - `[..]`  → explicit set, persisted verbatim (no implicit sort
+///               — the foreground writes the resolved list which is
+///               already sorted by the resolver).
+///
+/// In normal operation the foreground runs the isPrimary default
+/// resolver and writes the RESOLVED list here. Null is the
+/// cold-start state for users who have never opened the picker and
+/// whose foreground has not yet seeded the key.
+Future<void> saveLocalParticipatingChannels(List<int>? channels) async {
+  // Update the in-memory cache FIRST (synchronously) so the chokepoint at
+  // applyJson sees the new value immediately — even if the SharedPrefs
+  // write below hasn't completed yet. ValueNotifier.value = ... also
+  // notifies UI listeners (Bundle 3b.3b's participation gate).
+  participationCacheNotifier.value =
+      channels == null ? null : List<int>.from(channels);
+  _participationCacheLoaded = true;
+
+  final prefs = await SharedPreferences.getInstance();
+  if (channels == null) {
+    await prefs.remove(_kLocalParticipatingChannelsKey);
+  } else {
+    await prefs.setStringList(
+      _kLocalParticipatingChannelsKey,
+      channels.map((i) => i.toString()).toList(),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LOAD FUNCTIONS (called from background isolate)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Load sync event configs in background isolate.
+Future<List<BackgroundSyncEventConfig>> loadSyncEventsForBackground() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_kSyncEventsKey);
+    if (raw == null || raw.isEmpty) return const [];
+    return raw.map((jsonStr) {
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      return BackgroundSyncEventConfig.fromJson(map);
+    }).toList();
+  } catch (e) {
+    debugPrint('[SyncBgPersistence] Error loading sync events: $e');
+    return const [];
+  }
+}
+
+/// Load the active group ID.
+Future<String?> loadSyncGroupId() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncGroupIdKey);
+}
+
+/// Load the current user UID.
+Future<String?> loadSyncUserUid() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncUserUidKey);
+}
+
+/// Load host UID.
+Future<String?> loadSyncHostUid() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncHostUidKey);
+}
+
+/// Load backup host UID.
+Future<String?> loadSyncBackupHostUid() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncBackupHostUidKey);
+}
+
+/// Load active session info.
+Future<BackgroundActiveSession?> loadActiveSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_kSyncActiveSessionKey);
+  if (raw == null) return null;
+  try {
+    return BackgroundActiveSession.fromJson(
+      jsonDecode(raw) as Map<String, dynamic>,
+    );
+  } catch (e) {
+    return null;
+  }
+}
+
+/// Load the host failover timestamp.
+Future<DateTime?> loadHostFailoverTimestamp() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_kSyncHostFailoverTsKey);
+  if (raw == null) return null;
+  return DateTime.tryParse(raw);
+}
+
+/// Clear the failover timestamp.
+Future<void> clearHostFailoverTimestamp() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove(_kSyncHostFailoverTsKey);
+}
+
+/// Load the LOCAL user's participating channel indices. Returns null
+/// if no preference has been set (cold-start / never-configured); the
+/// background worker treats null as "fall back to all-channels."
+/// Returns an empty list when the user has explicitly opted out of
+/// all channels. See [saveLocalParticipatingChannels] for the full
+/// null/empty/list semantics.
+Future<List<int>?> loadLocalParticipatingChannels() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getStringList(_kLocalParticipatingChannelsKey);
+  if (raw == null) return null;
+  return raw.map(int.parse).toList();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FIREBASE ID TOKEN PERSISTENCE
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The background isolate has no FirebaseAuth — it cannot mint or refresh
+// tokens. The foreground app writes the current user's ID token here on
+// every auth state change and on app resume, and the background workers
+// read it before posting to the onRequest Cloud Functions.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Persist the current user's Firebase ID token for background HTTPS
+/// calls to onRequest Cloud Functions. Token is short-lived (1 hour)
+/// but is refreshed by the foreground on each app foreground event.
+Future<void> saveSyncIdToken(String? token, {DateTime? expiresAt}) async {
+  final prefs = await SharedPreferences.getInstance();
+  if (token == null) {
+    await prefs.remove(_kSyncIdTokenKey);
+    await prefs.remove(_kSyncIdTokenExpiresAtKey);
+  } else {
+    await prefs.setString(_kSyncIdTokenKey, token);
+    if (expiresAt != null) {
+      await prefs.setString(
+        _kSyncIdTokenExpiresAtKey,
+        expiresAt.toIso8601String(),
+      );
+    }
+  }
+}
+
+Future<String?> loadSyncIdToken() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_kSyncIdTokenKey);
+}
+
+Future<DateTime?> loadSyncIdTokenExpiresAt() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_kSyncIdTokenExpiresAtKey);
+  if (raw == null) return null;
+  return DateTime.tryParse(raw);
+}

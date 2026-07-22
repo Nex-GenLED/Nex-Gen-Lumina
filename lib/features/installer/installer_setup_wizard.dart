@@ -7,18 +7,207 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/models/dealer_code.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
 import 'package:nexgen_command/features/installer/screens/controller_setup_screen.dart';
+import 'package:nexgen_command/features/installer/screens/connection_method_screen.dart';
+import 'package:nexgen_command/features/installer/screens/hardware_config_step.dart';
+import 'package:nexgen_command/features/installer/screens/map_roofline_step.dart';
 import 'package:nexgen_command/features/installer/screens/zone_configuration_screen.dart';
+import 'package:nexgen_command/features/installer/screens/commercial_brand_setup_step.dart';
 import 'package:nexgen_command/features/installer/handoff_screen.dart';
+import 'package:nexgen_command/features/commercial/brand/brand_design_generator.dart';
+import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/referrals/services/referral_pipeline_service.dart';
+import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/installation_model.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
+
+/// Linear forward routing for the installer wizard. Single source of
+/// truth for "what comes next" — `_buildStepContent` wires every onNext
+/// closure through this so a step insertion or rename touches one place.
+/// The terminal step (handoff) is its own successor; the wizard does not
+/// auto-advance off of it.
+@visibleForTesting
+InstallerWizardStep nextWizardStep(InstallerWizardStep step) {
+  switch (step) {
+    case InstallerWizardStep.customerInfo:
+      return InstallerWizardStep.controllerSetup;
+    case InstallerWizardStep.controllerSetup:
+      return InstallerWizardStep.connectionMethod;
+    case InstallerWizardStep.connectionMethod:
+      return InstallerWizardStep.zoneConfiguration;
+    case InstallerWizardStep.zoneConfiguration:
+      return InstallerWizardStep.hardwareConfig;
+    case InstallerWizardStep.hardwareConfig:
+      return InstallerWizardStep.mapRoofline;
+    case InstallerWizardStep.mapRoofline:
+      return InstallerWizardStep.brandSetup;
+    case InstallerWizardStep.brandSetup:
+      return InstallerWizardStep.handoff;
+    case InstallerWizardStep.handoff:
+      return InstallerWizardStep.handoff;
+  }
+}
+
+/// Linear backward routing for the installer wizard. Mirrors
+/// [nextWizardStep]; customerInfo is its own predecessor (the back button
+/// at the very first step is suppressed at the call site).
+@visibleForTesting
+InstallerWizardStep prevWizardStep(InstallerWizardStep step) {
+  switch (step) {
+    case InstallerWizardStep.customerInfo:
+      return InstallerWizardStep.customerInfo;
+    case InstallerWizardStep.controllerSetup:
+      return InstallerWizardStep.customerInfo;
+    case InstallerWizardStep.connectionMethod:
+      return InstallerWizardStep.controllerSetup;
+    case InstallerWizardStep.zoneConfiguration:
+      return InstallerWizardStep.connectionMethod;
+    case InstallerWizardStep.hardwareConfig:
+      return InstallerWizardStep.zoneConfiguration;
+    case InstallerWizardStep.mapRoofline:
+      return InstallerWizardStep.hardwareConfig;
+    case InstallerWizardStep.brandSetup:
+      return InstallerWizardStep.mapRoofline;
+    case InstallerWizardStep.handoff:
+      return InstallerWizardStep.brandSetup;
+  }
+}
+
+/// True when [dealerCode] is the reserved fleet-shared master code that master
+/// installer/admin PINs mint ([DealerCode.masterReserved], '55').
+///
+/// A real customer install must never be attributed to it: every customer
+/// stamped '55' shares one dealer scope, so any master-PIN holder in the fleet
+/// could read them all (the /users read rule scopes on dealer_code). Master
+/// PINs are for support access, not installs — the wizard refuses this code up
+/// front so the install stops before any Firebase work, not at step 8 after the
+/// customer, controllers, and docs have all been written.
+bool installUsesReservedDealerCode(String dealerCode) =>
+    dealerCode == DealerCode.masterReserved;
+
+/// What to do when [_WledInstallerSetupWizardState._completeSetup] throws.
+enum InstallErrorOutcome {
+  /// Pre-commit failure — the customer is not provisioned. Report failure.
+  reportFailure,
+
+  /// Post-commit — the customer's account and core docs already committed, so
+  /// they can sign in. The throw is post-provisioning bookkeeping (analytics
+  /// counter, referral status); complete the install and show the handoff
+  /// screen with a warning rather than claiming the whole install failed.
+  completeWithWarning,
+}
+
+/// Classify a mid-setup exception by whether the install had already committed.
+///
+/// The commit point is the customer's user-doc write: once it lands, the
+/// controllers are migrated and the /installations doc exists, so the customer
+/// can sign in and control their lights. A blanket "Setup failed" past that
+/// point is a lie that also hides the handoff-credentials screen — the exact
+/// D3-HOTFIX regression at :1191 (an admin/owner-scoped /installers counter
+/// read denied to a non-admin installer session).
+InstallErrorOutcome classifyInstallError({required bool installCommitted}) =>
+    installCommitted
+        ? InstallErrorOutcome.completeWithWarning
+        : InstallErrorOutcome.reportFailure;
+
+/// Copies controller documents added during the installer wizard from the
+/// installer/staff UID to the customer UID, then deletes the originals — with
+/// **each controller's `pixelMap/*` subcollection carried along** (Design
+/// Studio Slice 2: a wizard-captured roofline map MUST arrive under the
+/// customer uid; the parent controller doc copy does NOT carry subcollections).
+/// One batch for atomicity.
+///
+/// Only controllers whose ids are in [controllerIds] migrate; empty →
+/// ALL (legacy safety fallback). No-op when [fromUid] is null/empty or equals
+/// [toUid]. Non-throwing — a failure is logged and swallowed so handoff still
+/// completes.
+///
+/// Extracted as a top-level function (injectable [firestore]) so the migration
+/// — the slice's integrity guarantee — is unit-testable against a fake.
+@visibleForTesting
+Future<void> migrateInstallerControllersToCustomer({
+  required FirebaseFirestore firestore,
+  required String? fromUid,
+  required String toUid,
+  required Set<String> controllerIds,
+}) async {
+  if (fromUid == null || fromUid.isEmpty) {
+    debugPrint('Installer: skipping controller migration — no source UID');
+    return;
+  }
+  if (fromUid == toUid) {
+    debugPrint('Installer: skipping controller migration — same UID');
+    return;
+  }
+  try {
+    final sourceCol =
+        firestore.collection('users').doc(fromUid).collection('controllers');
+    final destCol =
+        firestore.collection('users').doc(toUid).collection('controllers');
+
+    final snapshot = await sourceCol.get();
+    if (snapshot.docs.isEmpty) {
+      debugPrint('Installer: no controllers to migrate from $fromUid');
+      return;
+    }
+
+    // Only migrate controllers from this installation session, so an admin's
+    // pre-existing controllers aren't moved to the customer.
+    final docsToMigrate = controllerIds.isEmpty
+        ? snapshot.docs
+        : snapshot.docs.where((d) => controllerIds.contains(d.id)).toList();
+
+    if (docsToMigrate.isEmpty) {
+      debugPrint('Installer: no matching controllers to migrate '
+          '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
+      return;
+    }
+
+    // Read each controller's pixelMap subcollection BEFORE the batch (reads
+    // can't live inside a WriteBatch).
+    final pixelMapByController = <String, QuerySnapshot<Map<String, dynamic>>>{};
+    for (final doc in docsToMigrate) {
+      pixelMapByController[doc.id] =
+          await sourceCol.doc(doc.id).collection('pixelMap').get();
+    }
+
+    final batch = firestore.batch();
+    int pixelMapDocs = 0;
+    for (final doc in docsToMigrate) {
+      batch.set(destCol.doc(doc.id), doc.data());
+      batch.delete(sourceCol.doc(doc.id));
+
+      final pm = pixelMapByController[doc.id];
+      if (pm != null) {
+        for (final ch in pm.docs) {
+          batch.set(
+            destCol.doc(doc.id).collection('pixelMap').doc(ch.id),
+            ch.data(),
+          );
+          batch.delete(
+            sourceCol.doc(doc.id).collection('pixelMap').doc(ch.id),
+          );
+          pixelMapDocs++;
+        }
+      }
+    }
+    await batch.commit();
+    debugPrint('Installer: migrated ${docsToMigrate.length} controller(s) '
+        '($pixelMapDocs pixelMap doc(s)) from $fromUid to $toUid');
+  } catch (e) {
+    debugPrint('Installer: controller migration failed (non-blocking): $e');
+  }
+}
 
 /// Main wizard shell for installer setup flow
 class InstallerSetupWizard extends ConsumerStatefulWidget {
@@ -429,24 +618,63 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     // Record activity when navigating between steps
     ref.read(installerModeActiveProvider.notifier).recordActivity();
 
+    // onNext / onBack targets come from nextWizardStep / prevWizardStep
+    // (top of file) — one source of truth for the linear progression.
     switch (step) {
       case InstallerWizardStep.customerInfo:
         return CustomerInfoScreen(
-          onNext: () => _goToStep(InstallerWizardStep.controllerSetup),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.controllerSetup:
         return ControllerSetupScreen(
-          onBack: () => _goToStep(InstallerWizardStep.customerInfo),
-          onNext: () => _goToStep(InstallerWizardStep.zoneConfiguration),
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
+      case InstallerWizardStep.connectionMethod:
+        return ConnectionMethodScreen(
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
         );
       case InstallerWizardStep.zoneConfiguration:
         return ZoneConfigurationScreen(
-          onBack: () => _goToStep(InstallerWizardStep.controllerSetup),
-          onNext: () => _goToStep(InstallerWizardStep.handoff),
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
+      case InstallerWizardStep.hardwareConfig:
+        return HardwareConfigStep(
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
+      case InstallerWizardStep.mapRoofline:
+        return MapRooflineStep(
+          onBack: () => _goToStep(prevWizardStep(step)),
+          onNext: () => _goToStep(nextWizardStep(step)),
+        );
+      case InstallerWizardStep.brandSetup:
+        // Auto-advance for residential — the brand-setup step is a
+        // commercial-only insertion that must be transparent for the
+        // residential install path. Reads the site mode synchronously
+        // and either renders the commercial pre-seed UI or advances
+        // post-frame to handoff.
+        final isCommercial =
+            ref.read(installerSiteModeProvider) == SiteMode.commercial;
+        if (!isCommercial) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted &&
+                ref.read(installerWizardStepProvider) ==
+                    InstallerWizardStep.brandSetup) {
+              _goToStep(InstallerWizardStep.handoff);
+            }
+          });
+          return const SizedBox.shrink();
+        }
+        return CommercialBrandSetupStep(
+          onComplete: () => _goToStep(InstallerWizardStep.handoff),
+          onSkip: () => _goToStep(InstallerWizardStep.handoff),
         );
       case InstallerWizardStep.handoff:
         return HandoffScreen(
-          onBack: () => _goToStep(InstallerWizardStep.zoneConfiguration),
+          onBack: () => _goToStep(prevWizardStep(step)),
           onNext: (draft) {
             ref.read(installerPreferenceDraftProvider.notifier).state = draft;
             _completeSetup();
@@ -470,13 +698,89 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
+  /// Thin instance wrapper around [migrateInstallerControllersToCustomer] using
+  /// the live Firestore instance. A failure here is non-blocking — the handoff
+  /// still completes.
+  Future<void> _migrateControllersToCustomer(
+    String? fromUid,
+    String toUid,
+    Set<String> controllerIds,
+  ) {
+    return migrateInstallerControllersToCustomer(
+      firestore: FirebaseFirestore.instance,
+      fromUid: fromUid,
+      toUid: toUid,
+      controllerIds: controllerIds,
+    );
+  }
+
+  /// True once [_restoreInstallerAuth] has put the installer's STAFF CLAIMS
+  /// back on the Firebase Auth session. False means we fell back to an
+  /// anonymous session and hold no `role`/`dealerCode` claim.
+  bool _installerClaimsRestored = false;
+
+  /// Restore the installer's claim-bearing session after
+  /// `createUserWithEmailAndPassword` signed us in as the customer.
+  ///
+  /// Re-signs with the custom token cached at PIN entry
+  /// (InstallerSession.staffToken), which carries `role: 'installer'` +
+  /// `dealerCode`. Those claims are what firestore.rules hasStaffClaim() and
+  /// the setAccountProfile callable check.
+  ///
+  /// Falls back to anonymous — today's behavior — if no token was cached or
+  /// the token has aged out (custom tokens live ONE HOUR). The fallback is
+  /// deliberately non-fatal so residential installs keep working exactly as
+  /// before; commercial activation checks [_installerClaimsRestored] and fails
+  /// loud instead, because the callable will reject a claim-less caller.
+  ///
+  /// Returns true when the claims were restored.
+  Future<bool> _restoreInstallerAuth(InstallerSession? session) async {
+    final token = session?.staffToken;
+    if (token != null) {
+      try {
+        await FirebaseAuth.instance.signInWithCustomToken(token);
+        _installerClaimsRestored = true;
+        debugPrint('Installer: staff claims restored after account creation');
+        return true;
+      } catch (e) {
+        // Most likely the 1-hour custom-token TTL expired mid-install.
+        debugPrint('Installer: staff-claim restore FAILED ($e) — falling back '
+            'to anonymous. Commercial activation will be blocked.');
+      }
+    } else {
+      debugPrint('Installer: no cached staff token — falling back to '
+          'anonymous. Commercial activation will be blocked.');
+    }
+
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (e) {
+      debugPrint('Installer: anonymous fallback also failed: $e');
+    }
+    _installerClaimsRestored = false;
+    return false;
+  }
+
   Future<void> _completeSetup() async {
     final customerInfo = ref.read(installerCustomerInfoProvider);
     final session = ref.read(installerSessionProvider);
     final draft = ref.read(installerPreferenceDraftProvider);
+    _installerClaimsRestored = false;
 
     if (session == null) {
       _showError('Installer session expired. Please re-enter your PIN.');
+      return;
+    }
+
+    // Refuse the reserved master code BEFORE any install work (not at step 8).
+    // A master support PIN mints DealerCode.masterReserved ('55'); attributing
+    // a customer to it collapses per-dealer scoping — see the function doc.
+    if (installUsesReservedDealerCode(session.dealer.dealerCode)) {
+      _showError(
+        "That's a master support PIN — it can't be used to set up a customer. "
+        'Re-enter your own installer PIN (your dealer code + installer code) to '
+        'install this customer.',
+      );
       return;
     }
 
@@ -488,21 +792,149 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
+    // Commit tracking for the outer catch (see classifyInstallError): flips true
+    // once the customer's user doc lands, after which a throw is post-commit
+    // bookkeeping, not an install failure. The handoff vars are hoisted so the
+    // catch can still show the credentials screen.
+    bool installCommitted = false;
+    bool isExistingAccount = false;
+    String? handoffTempPassword;
+    String? handoffInstallationId;
+
     try {
       // 1. Generate temporary password
       final tempPassword = _generateTempPassword();
+      handoffTempPassword = tempPassword;
 
-      // 2. Create Firebase Auth account for customer
-      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: customerInfo.email.trim().toLowerCase(),
-        password: tempPassword,
-      );
-      final userId = credential.user!.uid;
+      // Capture the anonymous/installer UID BEFORE createUserWithEmailAndPassword
+      // overwrites FirebaseAuth.currentUser with the new customer account.
+      // This is the UID under which controllers were added during the wizard.
+      final installerAnonymousUid = FirebaseAuth.instance.currentUser?.uid;
+
+      // 2. Create Firebase Auth account for customer (or link existing account)
+      //
+      // IMPORTANT: createUserWithEmailAndPassword() auto-signs-in as the new
+      // user, which kills the installer's session. We then restore the
+      // installer's STAFF-CLAIM session (not an anonymous one) so the
+      // remaining writes carry role + dealerCode — see _restoreInstallerAuth.
+      String userId;
+      try {
+        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: customerInfo.email.trim().toLowerCase(),
+          password: tempPassword,
+        );
+        userId = credential.user!.uid;
+        // Send password reset email while still signed in as the customer.
+        // This gives them a proper "Set your password" link instead of
+        // relying on the installer reading a temp password aloud.
+        try {
+          await FirebaseAuth.instance.sendPasswordResetEmail(
+            email: customerInfo.email.trim().toLowerCase(),
+          );
+          debugPrint('Installer: password reset email sent to ${customerInfo.email}');
+        } catch (resetErr) {
+          debugPrint('Installer: password reset email failed (non-blocking): $resetErr');
+        }
+        // Customer account created — restore the installer's staff claims for
+        // the remaining writes.
+        await _restoreInstallerAuth(session);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          // Account already exists — look up the existing user doc to
+          // recover their real uid. The /users read rule for staff
+          // installer/salesperson sessions is caller-and-resource
+          // scoped on dealer_code, so the query MUST filter by
+          // dealer_code or Firestore denies the entire list. Uses the
+          // (dealer_code, email) composite index deployed in a848f25.
+          //
+          // Empty results and query failures are HARD errors here —
+          // the previous behavior silently fabricated a placeholder
+          // uid, which orphaned the entire install (controllers,
+          // /installations doc, and user merge all wrote against a
+          // throwaway uid that the real customer's account never
+          // referenced). Fail loud so the installer can correct the
+          // input or escalate.
+          try {
+            final dealerCode = session.dealer.dealerCode;
+
+            final existingQuery = await FirebaseFirestore.instance
+                .collection('users')
+                .where('dealer_code', isEqualTo: dealerCode)
+                .where('email', isEqualTo: customerInfo.email.trim().toLowerCase())
+                .limit(1)
+                .get();
+
+            if (existingQuery.docs.isEmpty) {
+              // No customer matches both email AND dealer_code in this
+              // dealer's scope. Either a typo, a customer registered
+              // under a different dealer, or a self-registered customer
+              // with no dealer association — none of which the installer
+              // can resolve in-app today.
+              if (mounted) setState(() => _isProcessing = false);
+              _showError(
+                'No existing customer matches this email under your dealer code. '
+                'Double-check the email. If they\'re a Nex-Gen customer through '
+                'another dealer or self-registered without an installer, contact '
+                'support to associate them with your account before continuing.',
+              );
+              return;
+            }
+
+            userId = existingQuery.docs.first.id;
+            isExistingAccount = true;
+          } catch (queryError) {
+            // Query itself failed (permission denied, network, etc.).
+            // Do NOT silently create a placeholder — that orphans the
+            // install. Fail loud so the installer can retry or escalate.
+            debugPrint('Installer: Customer lookup failed: $queryError');
+            if (mounted) setState(() => _isProcessing = false);
+            _showError(
+              'Unable to verify customer account. Check your network '
+              'connection and retry. If the issue persists, contact support.',
+            );
+            return;
+          }
+        } else {
+          rethrow;
+        }
+      }
 
       // 3. Get installer-collected configuration
       final siteMode = ref.read(installerSiteModeProvider);
+
+      // Reconcile the two residential/commercial signals at the write
+      // boundary. Today the wizard exposes them through two independent
+      // UIs:
+      //   • zone_configuration_screen toggles installerSiteModeProvider
+      //   • handoff_screen sets draft.profileType (default 'residential')
+      // A May 6 audit found nothing keeps them in sync, so an installer
+      // who picks Commercial on the zone-config toggle but speeds past
+      // the handoff cards (or vice versa) can silently produce a broken
+      // hybrid account. Until the UI is consolidated in the staged
+      // Wizard UX prompt, treat siteMode as the source of truth — it is
+      // the more recent decision in the wizard flow and drives the
+      // installation doc's schema/limits already.
+      final resolvedProfileType =
+          siteMode == SiteMode.commercial ? 'commercial' : 'residential';
+      if (draft != null && draft.profileType != resolvedProfileType) {
+        debugPrint('Installer: wizard signal mismatch — handoff said '
+            '"${draft.profileType}" but zone-config said '
+            '"$resolvedProfileType". Using "$resolvedProfileType" '
+            '(siteMode is the source of truth).');
+      }
+
       final selectedControllers = ref.read(installerSelectedControllersProvider);
       final linkedControllers = ref.read(installerLinkedControllersProvider);
+
+      // 2b. Migrate controllers from the installer's UID to the customer's
+      // UID so controllersStreamProvider finds them on first login. Only move
+      // the controllers that were selected for this installation — leave the
+      // admin's own controllers untouched.
+      await _migrateControllersToCustomer(
+        installerAnonymousUid,
+        userId,
+        selectedControllers,
+      );
       final zones = ref.read(installerZonesProvider);
       final photoUrl = ref.read(installerPhotoUrlProvider);
       final maxSubUsers = siteMode == SiteMode.commercial ? 20 : 5;
@@ -537,6 +969,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
       // 4. Create Installation document
       final installationRef = FirebaseFirestore.instance.collection('installations').doc();
+      handoffInstallationId = installationRef.id;
 
       final installation = Installation(
         id: installationRef.id,
@@ -561,7 +994,7 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         primaryUserPhone: customerInfo.phone,
       );
 
-      await installationRef.set(installation.toJson());
+      await installationRef.set(UserService.sanitizeForFirestore(installation.toJson()));
 
       // 5. Create UserModel with Primary role + installer preference draft
       final userModel = UserModel(
@@ -570,6 +1003,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         displayName: customerInfo.name,
         phoneNumber: customerInfo.phone,
         address: '${customerInfo.address}\n${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}',
+        latitude: customerInfo.latitude,
+        longitude: customerInfo.longitude,
+        timeZone: customerInfo.ianaTimezone,
         ownerId: userId,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -577,6 +1013,13 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         installationRole: InstallationRole.primary,
         primaryUserId: userId,
         linkedAt: DateTime.now(),
+        // Per-dealer scoping for /users read rule + customer search.
+        // The email-already-in-use branch above sets isExistingAccount=true
+        // and reuses the existing customer's uid; the set(merge:true) at
+        // the bottom of this block then merges dealer_code into the
+        // existing user doc — converting self-registered customers into
+        // dealer-affiliated ones on installer link.
+        dealerCode: session.dealer.dealerCode,
         // Auto-Pilot preferences from installer handoff
         sportsTeams: draft?.sportsTeams ?? const [],
         sportsTeamPriority: draft?.sportsTeams ?? const [],
@@ -584,17 +1027,203 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         vibeLevel: draft?.vibeLevel ?? 0.5,
         changeToleranceLevel: draft?.changeToleranceLevel ?? 2,
         autonomyLevel: draft?.autonomyLevel ?? 1,
-        profileType: draft?.profileType ?? 'residential',
+        profileType: resolvedProfileType,
         managerEmail: draft?.managerEmail,
-        autopilotEnabled: true,
-        weeklySchedulePreviewEnabled: true,
-        autoDetectGameDays: true,
-        preGameLighting: true,
-        scoreCelebrations: true,
+        // Autopilot stays off by default — users opt in from the autopilot
+        // screen post-install. The previous behavior auto-enabled autopilot
+        // and pushed a "Daily" + days-of-week schedule the customer never
+        // asked for (Bug 4c, 2026-05-07 tracker).
         welcomeCompleted: false,
       );
 
-      await FirebaseFirestore.instance.collection('users').doc(userId).set(userModel.toJson());
+      final userJson = UserService.sanitizeForFirestore(userModel.toJson());
+      // Force the customer to set a new password on first login. The temp
+      // password was generated by the installer and read aloud / printed
+      // for the customer — it must be replaced before app access.
+      // Skipped when an existing account is reused (they keep their pwd).
+      if (!isExistingAccount) {
+        userJson['must_reset_password'] = true;
+      }
+      await FirebaseFirestore.instance.collection('users').doc(userId).set(
+        userJson,
+        SetOptions(merge: true),
+      );
+
+      // COMMIT POINT. The customer's user doc now exists; controllers were
+      // migrated (step 2b) and the /installations doc committed (step 4) before
+      // this. The customer can sign in and control their lights. Everything
+      // below — teams, commercial activation, brand pre-seed,
+      // installation_records, referral status, the install-count bump — is
+      // post-provisioning bookkeeping: a throw past here must NOT report the
+      // install as failed (classifyInstallError).
+      installCommitted = true;
+
+      // Register the installer-collected Game Day teams (#63 E1, step 3).
+      //
+      // The customer's user-doc write above already persists the free-text
+      // team names into sports_teams / sports_team_priority. This loop
+      // additionally creates /users/{userId}/game_day_autopilot/{slug}
+      // docs (enabled:false — adding ≠ enabling, per the E5 decision) so
+      // gameDayTeamsProvider's AND-intersection between the profile
+      // arrays and the subcollection actually surfaces these teams on
+      // the customer's first sign-in. Without this loop the AND
+      // collapses to empty and My Teams stays blank post-install (the
+      // root cause E1 closes).
+      //
+      // Non-blocking by design: any failure here logs and is skipped so
+      // a flaky Firestore call or an unrecognized team name can't abort
+      // the install. Asymmetric with toggleAutopilot's create branch
+      // (which propagates the same errors) — user-initiated toggles
+      // surface failure; background installer commit must not block
+      // customer setup.
+      //
+      // Unresolved free-text (no kTeamColors match) is logged and
+      // skipped — the name remains in sports_teams from the user-doc
+      // write above (NOT silently dropped), to be picked up by the
+      // v1.0.1 Local Team Color Discovery flow.
+      final installerTeams = draft?.sportsTeams ?? const <String>[];
+      if (installerTeams.isNotEmpty) {
+        final teamRegService = ref.read(teamRegistrationServiceProvider);
+        for (final raw in installerTeams) {
+          final slug =
+              TeamRegistrationService.resolveFreeTextToKTeamSlug(raw);
+          if (slug == null) {
+            debugPrint(
+                'Installer: unresolved team "$raw" (no kTeamColors match)');
+            continue;
+          }
+          try {
+            await teamRegService.addTeam(uid: userId, teamSlug: slug);
+          } catch (e) {
+            debugPrint('Installer: addTeam("$slug") failed (non-blocking): $e');
+          }
+        }
+      }
+
+      // For commercial installs: activate commercial mode via the
+      // setAccountProfile callable — THE single activation path (item #32).
+      // It owns the writes this batch used to do inline, plus the
+      // /installations reconciliation (site_mode + max_sub_users: 20) that
+      // this path could never do from the client and therefore skipped,
+      // leaving commercial accounts on residential invite limits forever.
+      //
+      // The callable authorises on the installer's staff claim, restored by
+      // _restoreInstallerAuth after customer-account creation. Without those
+      // claims it will (correctly) reject us, so fail loud rather than seed a
+      // half-configured commercial account.
+      if (siteMode == SiteMode.commercial) {
+        if (!_installerClaimsRestored) {
+          debugPrint('Installer: commercial activation SKIPPED — staff claims '
+              'were not restored (token missing or expired).');
+          _showError(
+            'Commercial setup could not be completed: your installer session '
+            'expired during setup. The system is installed and the customer '
+            'can sign in, but their account is still Residential. Re-enter '
+            'your installer PIN and re-run setup for this customer to '
+            'activate Commercial mode.',
+          );
+        } else {
+          try {
+            final callable =
+                FirebaseFunctions.instanceFor(region: 'us-central1')
+                    .httpsCallable('setAccountProfile');
+            await callable.call<Map<String, dynamic>>({
+              'uid': userId,
+              'direction': 'commercial',
+              'location': {
+                'locationName': customerInfo.name.isNotEmpty
+                    ? customerInfo.name
+                    : 'Primary Location',
+                'address':
+                    '${customerInfo.address}, ${customerInfo.city}, ${customerInfo.state} ${customerInfo.zipCode}'
+                        .trim(),
+                // Real coords — the callable falls back to the user doc's own
+                // lat/lng, then null. Never a fake 0.0 on the equator.
+                if (customerInfo.latitude != null) 'lat': customerInfo.latitude,
+                if (customerInfo.longitude != null)
+                  'lng': customerInfo.longitude,
+              },
+            });
+          } catch (e) {
+            // Non-blocking, consistent with the brand pre-seed below: the
+            // install itself succeeded and the customer can sign in. The
+            // account stays residential and is repairable by re-running
+            // setAccountProfile (it is idempotent).
+            debugPrint('Installer: commercial activation failed '
+                '(non-blocking): $e');
+          }
+        }
+      }
+
+      // Pre-seed the commercial brand profile if the installer selected a
+      // brand library entry during the brandSetup step (Part 8, Path 2).
+      // This must happen AFTER the customer's user doc exists (the
+      // brand_profile rule requires writing under the customer's uid).
+      // BrandDesignGenerator writes favorites directly to
+      // /users/{userId}/favorites/* via Firestore (see Part 8 generator
+      // refactor), so the auth state at the moment of execution
+      // (anonymous after the signInAnonymously above) doesn't matter —
+      // the explicit userId is authoritative.
+      // Non-blocking: a failure here doesn't undo the install. The
+      // customer can re-run brand setup themselves from the Brand tab.
+      final selectedBrand =
+          ref.read(installerSelectedBrandLibraryEntryProvider);
+      if (selectedBrand != null && siteMode == SiteMode.commercial) {
+        try {
+          final brandProfile = CommercialBrandProfile(
+            companyName: selectedBrand.companyName,
+            brandLibraryId: selectedBrand.brandId,
+            colors: selectedBrand.colors,
+            customized: false,
+            signature: selectedBrand.signature,
+            generatedDesigns: const [],
+            createdByInstaller: installerAnonymousUid,
+            createdAt: DateTime.now(),
+          );
+          final brandJson = brandProfile.toJson();
+          brandJson['created_at'] = FieldValue.serverTimestamp();
+
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .collection('brand_profile')
+              .doc('brand')
+              .set(brandJson, SetOptions(merge: true));
+
+          // Mirror brand_library_id onto the user-doc commercial_profile
+          // map for the residential→commercial mode switcher's quick-read
+          // path. The full commercial_profile structure is written later
+          // by the customer's CommercialOnboardingWizard (or here if a
+          // commercial profile already exists, set+merge will only add
+          // brand_library_id without overwriting other fields).
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .set({
+            'commercial_profile': {
+              'brand_library_id': selectedBrand.brandId,
+            },
+          }, SetOptions(merge: true));
+
+          // Auto-generate the five canonical brand designs into the
+          // customer's favorites + write generated_designs to the
+          // brand_profile doc.
+          final gen = BrandDesignGenerator(
+              firestore: FirebaseFirestore.instance);
+          await gen.generateBrandDesigns(
+              userId: userId, brand: brandProfile);
+
+          debugPrint('Installer: brand profile pre-seeded for '
+              '${selectedBrand.companyName} → $userId');
+        } catch (e) {
+          debugPrint('Installer: brand pre-seed failed (non-blocking): $e');
+        }
+      }
+
+      // No initial autopilot regeneration here — autopilot defaults to off
+      // for fresh installs (Bug 4c, 2026-05-07 tracker). Customers who want
+      // autopilot can enable it from the autopilot screen, which seeds the
+      // calendar on first enable.
 
       // 6. Create installation record for tracking/analytics
       final installationRecord = InstallationRecord(
@@ -614,23 +1243,50 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       await FirebaseFirestore.instance
           .collection('installation_records')
           .doc(installationRef.id)
-          .set(installationRecord.toMap());
+          .set(UserService.sanitizeForFirestore(installationRecord.toMap()));
 
-      // 7. Increment installer's installation count
-      final installerQuery = await FirebaseFirestore.instance
-          .collection('installers')
-          .where('fullPin', isEqualTo: session.installer.fullPin)
-          .limit(1)
-          .get();
-
-      if (installerQuery.docs.isNotEmpty) {
-        await installerQuery.docs.first.reference.update({
-          'totalInstallations': FieldValue.increment(1),
-        });
+      // 7. Update referral pipeline status → "installed"
+      try {
+        await ref.read(referralPipelineServiceProvider).updateReferralStatus(
+          prospectUid: userId,
+          newStatus: 'installed',
+          jobId: installationRef.id,
+        );
+      } catch (e) {
+        debugPrint('Referral pipeline update failed (non-blocking): $e');
       }
 
-      // 8. Sign out installer from customer's account
-      await FirebaseAuth.instance.signOut();
+      // 8. Increment installer's installation count — best-effort analytics.
+      //
+      // The /installers read is admin/owner-scoped (D3-HOTFIX,
+      // firestore.rules:1120 → hasAdminOrOwnerClaim). A non-admin installer
+      // session — anonymous fallback, or an 'installer'/'salesperson' staff
+      // claim — is DENIED here. That must never fail a completed install, so
+      // this mirrors the non-blocking referral block above. (This exact read is
+      // what surfaced the whole "install failed on a successful install" bug:
+      // it was unwrapped and threw to the outer catch after the customer was
+      // already provisioned.)
+      try {
+        final installerQuery = await FirebaseFirestore.instance
+            .collection('installers')
+            .where('fullPin', isEqualTo: session.installer.fullPin)
+            .limit(1)
+            .get();
+
+        if (installerQuery.docs.isNotEmpty) {
+          await installerQuery.docs.first.reference.update({
+            'totalInstallations': FieldValue.increment(1),
+          });
+        }
+      } catch (e) {
+        debugPrint('Installer: installation-count bump failed (non-blocking): $e');
+      }
+
+      // NOTE: Do NOT sign out here. Signing out fires AuthStateListenable
+      // which triggers GoRouter's redirect, destroying the wizard widget
+      // tree and the handoff credentials dialog before the installer can
+      // read the customer's temp password. Sign-out is deferred to the
+      // "Done" button inside _showHandoffCredentials() instead.
 
       setState(() => _isProcessing = false);
 
@@ -639,12 +1295,26 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         _showHandoffCredentials(
           customerName: customerInfo.name,
           email: customerInfo.email,
-          tempPassword: tempPassword,
+          tempPassword: isExistingAccount ? null : tempPassword,
           installationId: installationRef.id,
         );
       }
     } on FirebaseAuthException catch (e) {
       setState(() => _isProcessing = false);
+      // Post-commit: the customer is provisioned. Show handoff + warning, never
+      // "Setup failed" (which also hides the credentials the installer needs).
+      if (classifyInstallError(installCommitted: installCommitted) ==
+          InstallErrorOutcome.completeWithWarning) {
+        _completeWithHandoffWarning(
+          customerName: customerInfo.name,
+          email: customerInfo.email,
+          isExistingAccount: isExistingAccount,
+          tempPassword: handoffTempPassword,
+          installationId: handoffInstallationId,
+          error: e,
+        );
+        return;
+      }
       String errorMessage;
       switch (e.code) {
         case 'email-already-in-use':
@@ -662,8 +1332,43 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       _showError(errorMessage);
     } catch (e) {
       setState(() => _isProcessing = false);
+      if (classifyInstallError(installCommitted: installCommitted) ==
+          InstallErrorOutcome.completeWithWarning) {
+        _completeWithHandoffWarning(
+          customerName: customerInfo.name,
+          email: customerInfo.email,
+          isExistingAccount: isExistingAccount,
+          tempPassword: handoffTempPassword,
+          installationId: handoffInstallationId,
+          error: e,
+        );
+        return;
+      }
       _showError('Setup failed: $e');
     }
+  }
+
+  /// Post-commit fallback: the customer is provisioned but a later bookkeeping
+  /// step threw. Show the handoff-credentials screen (the install IS done) with
+  /// a warning banner instead of a failure dialog.
+  void _completeWithHandoffWarning({
+    required String customerName,
+    required String email,
+    required bool isExistingAccount,
+    required String? tempPassword,
+    required String? installationId,
+    required Object error,
+  }) {
+    debugPrint('Installer: post-commit bookkeeping failed (non-fatal): $error');
+    if (!mounted) return;
+    _showHandoffCredentials(
+      customerName: customerName,
+      email: email,
+      tempPassword: isExistingAccount ? null : tempPassword,
+      installationId: installationId ?? '',
+      warning: 'The customer is fully set up and can sign in. A final '
+          "bookkeeping step didn't finish — no action needed.",
+    );
   }
 
   void _showError(String message) {
@@ -686,9 +1391,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   void _showHandoffCredentials({
     required String customerName,
     required String email,
-    required String tempPassword,
+    required String? tempPassword,
     required String installationId,
+    String? warning,
   }) {
+    final isExisting = tempPassword == null;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -708,9 +1415,34 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Customer account has been created successfully.',
-                style: TextStyle(color: NexGenPalette.textMedium),
+              if (warning != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: Colors.orange, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(warning,
+                            style: const TextStyle(
+                                color: Colors.orange, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              Text(
+                isExisting
+                    ? 'Existing account has been linked to this installation.'
+                    : 'Customer account has been created successfully.',
+                style: const TextStyle(color: NexGenPalette.textMedium),
               ),
               const SizedBox(height: 24),
               const Text(
@@ -726,8 +1458,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
               _buildCredentialRow('Name', customerName),
               const SizedBox(height: 8),
               _buildCredentialRow('Email', email, canCopy: true),
-              const SizedBox(height: 8),
-              _buildCredentialRow('Temporary Password', tempPassword, canCopy: true, isPassword: true),
+              if (!isExisting) ...[
+                const SizedBox(height: 8),
+                _buildCredentialRow('Temporary Password', tempPassword, canCopy: true, isPassword: true),
+              ],
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -736,14 +1470,16 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.amber, size: 20),
-                    SizedBox(width: 8),
+                    const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Customer should change their password after first login.',
-                        style: TextStyle(color: Colors.amber, fontSize: 12),
+                        isExisting
+                            ? 'Customer can sign in with their existing password.'
+                            : 'Customer should change their password after first login.',
+                        style: const TextStyle(color: Colors.amber, fontSize: 12),
                       ),
                     ),
                   ],
@@ -753,11 +1489,12 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () {
-              // Copy all credentials to clipboard
-              final credentials = 'Lumina App Login\n\nEmail: $email\nTemporary Password: $tempPassword\n\nPlease change your password after first login.';
-              Clipboard.setData(ClipboardData(text: credentials));
+          if (!isExisting)
+            TextButton(
+              onPressed: () {
+                // Copy all credentials to clipboard
+                final credentials = 'Lumina App Login\n\nEmail: $email\nTemporary Password: $tempPassword\n\nPlease change your password after first login.';
+                Clipboard.setData(ClipboardData(text: credentials));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Credentials copied to clipboard'),
@@ -775,6 +1512,12 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
               // Reset all wizard state
               resetInstallerWizardState(ref);
               ref.read(installerModeActiveProvider.notifier).exitInstallerMode();
+              // Sign out the anonymous/installer session NOW — after the
+              // installer has seen the credentials. Doing this earlier
+              // (in _completeSetup) would fire AuthStateListenable and
+              // trigger GoRouter to redirect to /login, destroying the
+              // dialog before the installer could read the temp password.
+              await FirebaseAuth.instance.signOut();
               if (mounted) this.context.go('/');
             },
             style: ElevatedButton.styleFrom(
@@ -883,8 +1626,16 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         return _StepInfo('Customer Info', 'Customer');
       case InstallerWizardStep.controllerSetup:
         return _StepInfo('Controller Setup', 'Controllers');
+      case InstallerWizardStep.connectionMethod:
+        return _StepInfo('Connection Method', 'Network');
       case InstallerWizardStep.zoneConfiguration:
         return _StepInfo('Zone Configuration', 'Zones');
+      case InstallerWizardStep.hardwareConfig:
+        return _StepInfo('Hardware Config', 'Hardware');
+      case InstallerWizardStep.mapRoofline:
+        return _StepInfo('Map Roofline', 'Map');
+      case InstallerWizardStep.brandSetup:
+        return _StepInfo('Brand Setup', 'Brand');
       case InstallerWizardStep.handoff:
         return _StepInfo('Customer Handoff', 'Handoff');
     }

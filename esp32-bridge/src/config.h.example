@@ -1,0 +1,89 @@
+// Lumina ESP32 Bridge Configuration — TEMPLATE
+//
+// Copy this file to `config.h` (in the same directory) and fill in your
+// real values. `config.h` is git-ignored — never commit it.
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ============================================================================
+// Firebase Configuration
+// ============================================================================
+// Get these from your Firebase Console:
+// 1. Go to Project Settings (gear icon)
+// 2. Under "Your apps", select your web app
+// 3. Find the firebaseConfig object
+
+// Your Firebase project's API key
+#define FIREBASE_API_KEY "YOUR_API_KEY_HERE"
+
+// Your Firebase project ID (e.g., "lumina-12345")
+#define FIREBASE_PROJECT_ID "YOUR_PROJECT_ID"
+
+// Firebase Auth - The user ID whose commands this bridge will execute
+// This is the UID from Firebase Authentication for the home owner
+#define FIREBASE_USER_UID "USER_UID_HERE"
+
+// Firebase Auth credentials for the bridge's own Firebase account.
+// The bridge signs in with these to get an ID token for authenticated
+// Firestore access. Create this account in Firebase Console > Authentication.
+#define FIREBASE_AUTH_EMAIL    "bridge@example.local"
+#define FIREBASE_AUTH_PASSWORD "PASSWORD_HERE"
+
+// ============================================================================
+// WiFi Configuration (optional - can use WiFiManager instead)
+// ============================================================================
+// If you leave these empty, the bridge will start in AP mode
+// and let you configure WiFi via a web portal
+
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+
+// ============================================================================
+// Default WLED Target
+// ============================================================================
+// Compile-time fallback IP for the local WLED controller. Used only when
+// no NVS-saved pairing exists (i.e. fresh bridge, never paired via the app).
+// After the app calls /api/bridge/pair, the runtime value is loaded from NVS.
+
+#define DEFAULT_WLED_IP "192.168.1.100"
+
+// ============================================================================
+// Bridge Configuration
+// ============================================================================
+
+// How often to poll Firestore for new commands (in milliseconds).
+// 1000ms (Item #76 latency fix). Each bridge polls Firestore at this
+// cadence; halving the interval from the old 2000ms ~doubles
+// per-bridge Firestore read load in exchange for halved per-command
+// pickup latency. Revisit via Firestore listeners (Item #82) once
+// customer count grows.
+#define POLL_INTERVAL_MS 1000
+
+// Timeout for HTTP requests to WLED devices (in milliseconds)
+#define WLED_HTTP_TIMEOUT_MS 10000
+
+// Maximum number of pending commands to process per poll cycle
+#define MAX_COMMANDS_PER_POLL 5
+
+// LED pin for status indication (built-in LED on most ESP32 dev boards)
+#define STATUS_LED_PIN 2
+
+// ============================================================================
+// Debug Configuration
+// ============================================================================
+
+// Set to 1 to enable verbose debug output
+#define DEBUG_ENABLED 1
+
+#if DEBUG_ENABLED
+  #define DEBUG_PRINT(x) Serial.print(x)
+  #define DEBUG_PRINTLN(x) Serial.println(x)
+  #define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)
+  #define DEBUG_PRINTF(...)
+#endif
+
+#endif // CONFIG_H

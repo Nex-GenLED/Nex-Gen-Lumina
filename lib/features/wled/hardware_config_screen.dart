@@ -5,7 +5,46 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+
+/// Builds the `hw.led.ins` array from the per-port UI state, preserving each
+/// port's existing reverse (`rev`) flag from [originalBuses] so a Hardware
+/// Config save doesn't reset a manual bus-direction flip (config half of
+/// #3/#4). Ports map to buses by index, matching how the screen loads them
+/// in [_HardwareConfigScreenState._applyHardwareConfig]. Ports beyond
+/// [originalBuses] (genuinely new channels) default to rev:false.
+@visibleForTesting
+List<Map<String, dynamic>> buildHardwareConfigBuses({
+  required List<bool> enabled,
+  required List<int> counts,
+  required List<int> pins,
+  required int ledType,
+  List<WledLedBus>? originalBuses,
+}) {
+  final List<Map<String, dynamic>> segs = [];
+  int startAddress = 0;
+  for (var i = 0; i < enabled.length; i++) {
+    if (!enabled[i]) continue;
+    final count = counts[i];
+    if (count <= 0) continue;
+    final existing = (originalBuses != null && i < originalBuses.length)
+        ? originalBuses[i]
+        : null;
+    segs.add({
+      'start': startAddress,
+      'len': count,
+      'pin': [pins[i]],
+      'order': 1,
+      'rev': existing?.rev ?? false, // PRESERVE manual bus direction
+      'skip': 0,
+      'type': ledType,
+    });
+    startAddress += count;
+  }
+  return segs;
+}
 
 class HardwareConfigScreen extends ConsumerStatefulWidget {
   const HardwareConfigScreen({super.key});
@@ -178,24 +217,13 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
   }
 
   List<Map<String, dynamic>> _buildBusesForCfg() {
-    final List<Map<String, dynamic>> segs = [];
-    int startAddress = 0;
-    for (var i = 0; i < _portCount; i++) {
-      if (!_enabled[i]) continue;
-      final count = _parseCount(i);
-      if (count <= 0) continue;
-      segs.add({
-        'start': startAddress,
-        'len': count,
-        'pin': [_pins[i]],
-        'order': 1,
-        'rev': false,
-        'skip': 0,
-        'type': _ledType,
-      });
-      startAddress += count;
-    }
-    return segs;
+    return buildHardwareConfigBuses(
+      enabled: _enabled,
+      counts: List.generate(_portCount, _parseCount),
+      pins: _pins,
+      ledType: _ledType,
+      originalBuses: _originalConfig?.buses,
+    );
   }
 
   Future<void> _save() async {
@@ -205,7 +233,27 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     if (repo == null) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No WLED device selected.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller selected.')));
+      }
+      return;
+    }
+
+    // LED hardware changes are /json/cfg writes, which the bridge cannot carry
+    // (it only relays live state). Previously these silently "succeeded"
+    // off-LAN and nothing changed on the controller. Refuse up front and say
+    // why — note the manual-config dialog is NOT the right fallback here: it
+    // tells the user to open the controller's own web UI, which is equally
+    // unreachable from off the home network. That dialog stays for genuine
+    // on-LAN write failures, which is what it was written for.
+    if (!repoCanWriteCfg(repo)) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              "LED hardware settings can only be changed on your home WiFi. "
+              "Connect to the same network as your controller and try again."),
+          duration: Duration(seconds: 5),
+        ));
       }
       return;
     }
@@ -285,7 +333,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your WLED device.'),
+        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your controller.'),
       ));
     }
   }
@@ -342,7 +390,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'The WLED device requires manual LED configuration via its web interface.',
+                'This controller requires manual LED configuration via its web interface.',
                 style: TextStyle(fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 16),
@@ -354,7 +402,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
               const SizedBox(height: 8),
               Text('\u2022 Total LEDs: $totalLeds'),
               const Text('\u2022 LED Type: SK6812 RGBW'),
-              const Text('\u2022 Color Order: GRB (important!)'),
+              const Text('\u2022 Color Order: RGB (important!)'),
               const SizedBox(height: 8),
               const Text('Per-port configuration:', style: TextStyle(fontWeight: FontWeight.w600)),
               ...ledBuses.map((bus) => Padding(
@@ -375,7 +423,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Setting Color Order to GRB fixes color accuracy issues (green/red swap).',
+                        'Setting Color Order to RGB matches the Lumina default and fixes color accuracy issues.',
                         style: TextStyle(fontSize: 13),
                       ),
                     ),
@@ -412,7 +460,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
           : AbsorbPointer(
               absorbing: _saving,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
                 children: [
                   Text('Channel Configuration', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 6),
@@ -457,7 +505,6 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
                     ledType: _ledType,
                     onCurrentChanged: (v) => setState(() => _maxCurrentA = v),
                   ),
-                  const SizedBox(height: 90),
                 ],
               ),
             ),
@@ -468,25 +515,31 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     final structural = _isStructuralChange;
     final scheme = Theme.of(context).colorScheme;
 
-    return FloatingActionButton.extended(
-      onPressed: _saving ? null : _save,
-      backgroundColor: structural ? scheme.error : NexGenPalette.cyan,
-      foregroundColor: structural ? scheme.onError : Colors.black,
-      icon: _saving
-          ? SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: structural ? scheme.onError : Colors.black,
-              ),
-            )
-          : Icon(structural ? Icons.restart_alt : Icons.save),
-      label: Text(_saving
-          ? 'Saving\u2026'
-          : structural
-              ? 'Save & Reboot Board'
-              : 'Save Changes'),
+    // Lift the FAB above the glass dock nav bar overlay so it isn't hidden
+    // behind it. See main_scaffold.dart:187-198 for the convention. Matches
+    // my_schedule_page.dart / edit_profile_screen.dart.
+    return Padding(
+      padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
+      child: FloatingActionButton.extended(
+        onPressed: _saving ? null : _save,
+        backgroundColor: structural ? scheme.error : NexGenPalette.cyan,
+        foregroundColor: structural ? scheme.onError : Colors.black,
+        icon: _saving
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: structural ? scheme.onError : Colors.black,
+                ),
+              )
+            : Icon(structural ? Icons.restart_alt : Icons.save),
+        label: Text(_saving
+            ? 'Saving\u2026'
+            : structural
+                ? 'Save & Reboot Board'
+                : 'Save Changes'),
+      ),
     );
   }
 }
@@ -637,7 +690,7 @@ class _AdvancedPowerSettings extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Type $ledType - GRB+W Color Order',
+                            'Type $ledType - RGB Color Order',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],

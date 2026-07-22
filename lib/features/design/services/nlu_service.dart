@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
-import 'package:nexgen_command/features/design/models/clarification_models.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 
 /// Natural Language Understanding service for the Design Studio.

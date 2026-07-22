@@ -25,13 +25,13 @@ class UserProfileScreen extends ConsumerWidget {
             stream: stream,
             builder: (context, snap) {
               final model = snap.data;
-              final displayName = (model?.displayName?.trim().isNotEmpty ?? false)
+              final displayName = (model?.displayName.trim().isNotEmpty ?? false)
                   ? model!.displayName
                   : (user.displayName ?? 'User');
               final email = user.email ?? model?.email ?? '';
               final photoUrl = model?.photoUrl ?? user.photoURL;
               return ListView(
-                padding: EdgeInsets.zero,
+                padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
                 children: [
                   _ProfileHeader(
                     name: displayName,

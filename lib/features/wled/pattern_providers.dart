@@ -1,29 +1,119 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/data/us_federal_holidays.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/services/sports_schedule_service.dart';
-import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
+import 'package:nexgen_command/models/user_model.dart';
 
 /// Repository provider for the Pattern Library.
 /// For now we use an in-memory mock; can be swapped to Firestore later.
+///
+/// The ref.listen on currentUserProfileProvider populates the Explore
+/// "My Teams" folder (#63 E3, step 4). updateMyTeams / clearMyTeams had
+/// zero call sites pre-fix, so _myTeamsNodes was always [] and the
+/// always-rendered "My Teams" folder collapsed to empty.
+///
+/// Lifecycle: this is a provider-scoped ref.listen, NOT a widget
+/// State.dispose() callback (the #84 failure mode). Riverpod auto-
+/// cancels the subscription when the provider disposes; no onDispose
+/// cleanup needed. fireImmediately:true covers warm-start (profile
+/// already loaded). Subsequent profile mutations (add-team writes →
+/// stream emits) re-fire and rebuild the My Teams cache.
 final patternRepositoryProvider = Provider<PatternRepository>((ref) {
   final repo = PatternRepository();
+  ref.listen<AsyncValue<UserModel?>>(
+    currentUserProfileProvider,
+    (prev, next) {
+      next.whenData((profile) {
+        if (profile == null) {
+          repo.clearMyTeams();
+        } else {
+          repo.updateMyTeams(profile.sportsTeams);
+        }
+      });
+    },
+    fireImmediately: true,
+  );
   return repo;
 });
 
-/// Loads all pattern categories (folders)
+/// Synthetic root category id for the user's saved designs. See
+/// [myDesignsCategoryNode] + [_customDesignToLibraryNode]. The category
+/// itself lives at this id; individual designs surface as palette nodes
+/// with id `design_{firestoreId}` under this parent.
+const String kMyDesignsCategoryId = 'my_designs';
+
+/// Synthetic LibraryNode used when LibraryBrowserScreen / breadcrumbs look
+/// up the My Designs category by id. Title matches the home + Explore
+/// surface label so breadcrumbs read correctly.
+const LibraryNode myDesignsCategoryNode = LibraryNode(
+  id: kMyDesignsCategoryId,
+  name: 'My Designs',
+  nodeType: LibraryNodeType.category,
+  sortOrder: -1,
+);
+
+/// Adapter: a Firestore-backed [CustomDesign] becomes a palette-shaped
+/// [LibraryNode] so the Explore catalog rendering + apply machinery can
+/// handle saved designs without a parallel UI. The `isSavedDesign`
+/// metadata flag is the discriminator the LibraryBrowserScreen branch
+/// uses to route taps through [applySavedDesign] instead of the catalog
+/// palette tuner.
+LibraryNode _customDesignToLibraryNode(CustomDesign design) {
+  final colors = <Color>[];
+  for (final ch in design.channels.where((c) => c.included)) {
+    for (final group in ch.colorGroups.take(2)) {
+      colors.add(group.flutterColor);
+      if (colors.length >= 3) break;
+    }
+    if (colors.length >= 3) break;
+  }
+  return LibraryNode(
+    id: 'design_${design.id}',
+    name: design.name,
+    nodeType: LibraryNodeType.palette,
+    parentId: kMyDesignsCategoryId,
+    themeColors: colors.isEmpty ? const <Color>[Colors.white] : colors,
+    metadata: <String, dynamic>{
+      'isSavedDesign': true,
+      'sourceDesignId': design.id,
+    },
+  );
+}
+
+/// Loads all pattern categories (folders).
+///
+/// Prepends the synthetic "My Designs" category when the user is signed in
+/// and has at least one saved design — keeping the surface empty for
+/// guests / brand-new accounts.
 final patternCategoriesProvider = FutureProvider<List<PatternCategory>>((ref) async {
   final repo = ref.watch(patternRepositoryProvider);
-  return repo.getCategories();
+  final baseCategories = await repo.getCategories();
+
+  // ALWAYS prepend the synthetic my_designs category — the empty case renders
+  // an empty-state placeholder inside the drill-in view rather than hiding the
+  // category. #85 companion: previously this short-circuited to baseCategories
+  // when designs was empty, which combined with a parallel writer-bug to make
+  // a writer-drift "lost save" present as "the My Designs surface disappeared
+  // entirely," costing a debugging detour. Always rendering the surface means
+  // a future writer-drift can only make the surface look EMPTY (visible bug)
+  // rather than VANISH (silent bug).
+  return <PatternCategory>[
+    const PatternCategory(
+      id: kMyDesignsCategoryId,
+      name: 'My Designs',
+      imageUrl: '',
+    ),
+    ...baseCategories,
+  ];
 });
 
 /// Loads items for a given category id
@@ -475,13 +565,42 @@ String _formatUsageTime(DateTime time) {
 
 /// Provider to get child nodes of a parent node in the library hierarchy.
 /// Pass null for parentId to get root categories.
+///
+/// Branches on the synthetic [kMyDesignsCategoryId] id space so saved
+/// designs appear as palette children without modifying [PatternRepository].
 final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, String?>((ref, parentId) async {
+  if (parentId == kMyDesignsCategoryId) {
+    final designs = ref.watch(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    return designs.map(_customDesignToLibraryNode).toList(growable: false);
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getChildNodes(parentId);
 });
 
 /// Provider to get a single node by its ID.
+///
+/// Branches on the synthetic id space:
+///   - `my_designs` → returns the synthetic category node.
+///   - `design_*`   → resolves the saved design from designsStreamProvider
+///                    and adapts it via [_customDesignToLibraryNode].
 final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref, nodeId) async {
+  if (nodeId == kMyDesignsCategoryId) {
+    return myDesignsCategoryNode;
+  }
+  if (nodeId.startsWith('design_')) {
+    final designId = nodeId.substring('design_'.length);
+    final designs = ref.watch(designsStreamProvider).valueOrNull
+        ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    return match == null ? null : _customDesignToLibraryNode(match);
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getNodeById(nodeId);
 });
@@ -489,6 +608,11 @@ final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref
 /// Provider to get the ancestor chain for breadcrumb navigation.
 /// Returns list from root to parent (does not include current node).
 final libraryAncestorsProvider = FutureProvider.family<List<LibraryNode>, String>((ref, nodeId) async {
+  if (nodeId == kMyDesignsCategoryId) return const <LibraryNode>[];
+  if (nodeId.startsWith('design_')) {
+    // Saved-design palettes sit one level under the My Designs category.
+    return const <LibraryNode>[myDesignsCategoryNode];
+  }
   final repo = ref.watch(patternRepositoryProvider);
   return repo.getAncestors(nodeId);
 });
@@ -587,6 +711,15 @@ final selectorIntensityProvider = StateProvider<int>((ref) => 128);
 /// Color layout (LEDs per color, 1-5) in the effect selector.
 final selectorColorGroupProvider = StateProvider<int>((ref) => 1);
 
+/// Spacing (dark LEDs between lit groups, 0-4) in the effect selector.
+final selectorSpacingProvider = StateProvider<int>((ref) => 0);
+
+/// Active gradient preset index for brightness gradient patterns.
+final selectorGradientPresetProvider = StateProvider<int>((ref) => 0);
+
+/// Breathing toggle for brightness gradient patterns.
+final selectorBreathingProvider = StateProvider<bool>((ref) => false);
+
 /// Which mood categories are expanded in the effect list.
 final selectorExpandedMoodsProvider = StateProvider<Set<SelectorMood>>((ref) => {SelectorMood.calm});
 
@@ -596,25 +729,3 @@ final selectorMotionTypeProvider = StateProvider<MotionType?>((ref) => null);
 /// Selected color behavior filter (null = all).
 final selectorColorBehaviorProvider = StateProvider<ColorBehavior?>((ref) => null);
 
-/// Preview state for the Explore page roofline hero.
-///
-/// Set when a design card is tapped on the Explore page. Cleared when
-/// navigating back to the folder list.
-class ExplorePreviewState {
-  final List<Color> colors;
-  final int effectId;
-  final int speed;
-  final int brightness;
-  final String name;
-
-  const ExplorePreviewState({
-    required this.colors,
-    required this.effectId,
-    this.speed = 128,
-    this.brightness = 255,
-    this.name = '',
-  });
-}
-
-/// Provider for the Explore page roofline preview. Null = hidden.
-final explorePreviewProvider = StateProvider<ExplorePreviewState?>((ref) => null);

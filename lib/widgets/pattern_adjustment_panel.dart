@@ -7,7 +7,9 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_effect_metadata.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 
 /// All WLED effects that respect user color selection (uses or blends colors).
 /// Excludes effects that generate their own colors, use palettes, require 2D matrix, or require audio.
@@ -240,7 +242,11 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
         ]
       };
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('PatternAdjustmentPanel effect apply: skip (no effective channels — U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
       await repo.applyJson(payload);
     } catch (e) {
       debugPrint('PatternAdjustmentPanel effect apply failed: $e');
@@ -263,7 +269,11 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           ]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternAdjustmentPanel debounced apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel apply failed: $e');
@@ -286,7 +296,11 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           ]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternAdjustmentPanel layout apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         await repo.applyJson(payload);
       } catch (e) {
         debugPrint('PatternAdjustmentPanel layout apply failed: $e');
@@ -310,22 +324,21 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Speed slider (hide if effect doesn't use speed)
+            // Speed slider with per-effect profile (hide if effect doesn't use speed)
             if (effectMetadata.usesSpeed) ...[
-              _SliderRow(
-                icon: Icons.speed,
-                label: 'Speed',
-                value: _speed.toDouble(),
-                min: 0,
-                max: 255,
-                onChanged: (v) {
-                  setState(() => _speed = v.round().clamp(0, 255));
+              EffectSpeedSlider(
+                rawSpeed: _speed,
+                effectId: _effectId ?? state.effectId,
+                initialExtended: getSpeedProfile(_effectId ?? state.effectId)
+                    .mapRawToSlider(_speed)
+                    .needsExtended,
+                onChanged: (raw) {
+                  setState(() => _speed = raw);
                   _notifyChanged();
                   _scheduleDebouncedApply();
                 },
-                displayValue: '$_speed',
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
             ],
             // Intensity slider (hide if effect doesn't use intensity or label is null)
             if (effectMetadata.usesIntensity && effectMetadata.intensityLabel != null) ...[
@@ -516,7 +529,11 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                         ]
                       };
                       final channels = ref.read(effectiveChannelIdsProvider);
-                      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+                      if (channels.isEmpty) {
+                        debugPrint('ColorSequenceBuilder apply: skip (U1 gate)');
+                        return;
+                      }
+                      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
                       await repo.applyJson(payload);
                     } catch (e) {
                       debugPrint('Apply custom palette failed: $e');

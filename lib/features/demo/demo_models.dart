@@ -7,10 +7,6 @@ enum DemoStep {
   profile,
   photoCapture,
   rooflineSetup,
-  patternPreview,
-  schedulePreview,
-  explorePatterns,
-  luminaGuide,
   completion,
 }
 
@@ -26,14 +22,6 @@ extension DemoStepExtension on DemoStep {
         return 'Your Home';
       case DemoStep.rooflineSetup:
         return 'Roofline';
-      case DemoStep.patternPreview:
-        return 'Preview';
-      case DemoStep.schedulePreview:
-        return 'Schedule';
-      case DemoStep.explorePatterns:
-        return 'Explore';
-      case DemoStep.luminaGuide:
-        return 'Lumina';
       case DemoStep.completion:
         return 'Get Started';
     }
@@ -182,6 +170,16 @@ class DemoLead {
   final String zipCode;
   final HomeType? homeType;
   final ReferralSource? referralSource;
+
+  /// Dealer code used to start this demo (from the demo code gate).
+  final String? dealerCode;
+
+  /// Display name of the dealer who owns this code.
+  final String? dealerName;
+
+  /// Market identifier for the dealer (e.g., "Kansas City", "Seattle").
+  final String? market;
+
   final DateTime capturedAt;
   final bool demoCompleted;
   final List<String> patternsViewed;
@@ -197,6 +195,9 @@ class DemoLead {
     required this.zipCode,
     this.homeType,
     this.referralSource,
+    this.dealerCode,
+    this.dealerName,
+    this.market,
     required this.capturedAt,
     this.demoCompleted = false,
     this.patternsViewed = const [],
@@ -213,6 +214,9 @@ class DemoLead {
     String? zipCode,
     HomeType? homeType,
     ReferralSource? referralSource,
+    String? dealerCode,
+    String? dealerName,
+    String? market,
     DateTime? capturedAt,
     bool? demoCompleted,
     List<String>? patternsViewed,
@@ -228,6 +232,9 @@ class DemoLead {
       zipCode: zipCode ?? this.zipCode,
       homeType: homeType ?? this.homeType,
       referralSource: referralSource ?? this.referralSource,
+      dealerCode: dealerCode ?? this.dealerCode,
+      dealerName: dealerName ?? this.dealerName,
+      market: market ?? this.market,
       capturedAt: capturedAt ?? this.capturedAt,
       demoCompleted: demoCompleted ?? this.demoCompleted,
       patternsViewed: patternsViewed ?? this.patternsViewed,
@@ -245,6 +252,9 @@ class DemoLead {
         'zipCode': zipCode,
         if (homeType != null) 'homeType': homeType!.name,
         if (referralSource != null) 'referralSource': referralSource!.name,
+        if (dealerCode != null) 'dealerCode': dealerCode,
+        if (dealerName != null) 'dealerName': dealerName,
+        if (market != null) 'market': market,
         'capturedAt': Timestamp.fromDate(capturedAt),
         'demoCompleted': demoCompleted,
         'patternsViewed': patternsViewed,
@@ -271,6 +281,9 @@ class DemoLead {
                 orElse: () => ReferralSource.other,
               )
             : null,
+        dealerCode: json['dealerCode'] as String?,
+        dealerName: json['dealerName'] as String?,
+        market: json['market'] as String?,
         capturedAt: (json['capturedAt'] as Timestamp).toDate(),
         demoCompleted: json['demoCompleted'] as bool? ?? false,
         patternsViewed: (json['patternsViewed'] as List?)

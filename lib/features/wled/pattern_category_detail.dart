@@ -5,12 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
-import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
-import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -18,6 +14,7 @@ import 'package:nexgen_command/models/smart_pattern.dart';
 import 'package:nexgen_command/features/patterns/pattern_generator_service.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/widgets/color_behavior_badge.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -101,16 +98,34 @@ class _GradientPatternCard extends ConsumerWidget {
           try {
             var payload = data.toWledPayload();
             final channels = ref.read(effectiveChannelIdsProvider);
-            if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-            await repo.applyJson(payload);
-            ref.read(activePresetLabelProvider.notifier).state = data.name;
-            ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
+            if (channels.isEmpty) {
+              debugPrint('PatternCategoryDetail apply: skip (U1 gate)');
+              return;
+            }
+            payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+            // applyJson returns false (does NOT throw) on a device-write
+            // failure — gate success on it so we don't claim "applied!" when
+            // the lights never changed (Audit-2 S6).
+            final success = await repo.applyJson(payload);
+            if (!success) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+                );
+              }
+              return;
+            }
+            // Update home dashboard preview AND Explore hero from the
+            // as-sent payload + arm poll-overwrite suppression.
+            ref.read(wledStateProvider.notifier).applyPreviewSync(
               colors: data.colors,
               effectId: data.effectId,
+              effectName: data.name,
               speed: data.speed,
+              intensity: data.intensity,
               brightness: data.brightness,
-              name: data.name,
             );
+            ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(data.name, ref.read(wledStateProvider));
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${data.name} applied!')));
             }
@@ -194,83 +209,6 @@ class _GradientPatternCard extends ConsumerWidget {
   }
 }
 
-class _GradientResultTile extends ConsumerWidget {
-  final GradientPattern data;
-  const _GradientResultTile({required this.data});
-
-  Future<void> _apply(BuildContext context, WidgetRef ref) async {
-    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-    if (!shouldProceed) return;
-
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-      }
-      return;
-    }
-    try {
-      var payload = data.toWledPayload();
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      final success = await repo.applyJson(payload);
-      if (!success) throw Exception('Device did not accept command');
-      ref.read(activePresetLabelProvider.notifier).state = data.name;
-      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-        colors: data.colors,
-        effectId: data.effectId,
-        speed: data.speed,
-        brightness: data.brightness,
-        name: data.name,
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${data.name}')));
-      }
-    } catch (e) {
-      debugPrint('Apply result pattern failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return InkWell(
-      onTap: () => _apply(context, ref),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: NexGenPalette.line),
-        ),
-        child: Row(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: data.colors),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Text(data.name, style: Theme.of(context).textTheme.titleMedium)),
-          const SizedBox(width: 12),
-          FilledButton.icon(
-            onPressed: () => _apply(context, ref),
-            icon: const Icon(Icons.bolt, color: Colors.black),
-            label: const Text('Apply'),
-          )
-        ]),
-      ),
-    );
-  }
-}
-
 /// Rich, expandable control card for a SmartPattern
 class PatternControlCard extends ConsumerStatefulWidget {
   final SmartPattern pattern;
@@ -314,9 +252,23 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
     try {
       var payload = _payloadFromCurrent();
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = _current.name;
+      if (channels.isEmpty) {
+        debugPrint('PatternCategoryDetail _applyNow: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      // Gate label/toast on the write result — don't say "Playing:" when the
+      // device write failed (Audit-2 S7).
+      final success = await repo.applyJson(payload);
+      if (!success) {
+        if (toast && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(_current.name, ref.read(wledStateProvider));
       if (toast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playing: ${_current.name}')));
       }
@@ -343,8 +295,18 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
           'seg': [{'grp': _current.grouping, 'spc': _current.spacing}]
         };
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+        if (channels.isEmpty) {
+          debugPrint('PatternCategoryDetail layout apply: skip (U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        // Background debounced push — surface failure non-blockingly instead
+        // of swallowing it with debugPrint only (Audit-2 S layout push).
+        final success = await repo.applyJson(payload);
+        if (!success && mounted) {
+          ref.read(wledCommandFailureProvider.notifier).state =
+              WledCommandFailure("Couldn't update your lights — check your connection");
+        }
       } catch (e) {
         debugPrint('Apply grp/spc failed: $e');
       }
@@ -563,8 +525,18 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   try {
                     var palPayload = <String, dynamic>{'seg': [{'pal': seq}]};
                     final channels = ref.read(effectiveChannelIdsProvider);
-                    if (channels.isNotEmpty) palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
-                    await repo.applyJson(palPayload);
+                    if (channels.isEmpty) {
+                      debugPrint('PatternCategoryDetail palette apply: skip (U1 gate)');
+                      return;
+                    }
+                    palPayload = applyChannelFilter(palPayload, channels, ref.read(deviceChannelsProvider));
+                    // Surface a failed sequence/palette push instead of only
+                    // debugPrint (Audit-2 S sequence push).
+                    final success = await repo.applyJson(palPayload);
+                    if (!success && mounted) {
+                      ref.read(wledCommandFailureProvider.notifier).state =
+                          WledCommandFailure("Couldn't update your lights — check your connection");
+                    }
                   } catch (e) {
                     debugPrint('Apply custom palette failed: $e');
                   }
@@ -574,8 +546,41 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
             const SizedBox(height: 12),
             Row(children: [
               TextButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved to Favorites')));
+                onPressed: () async {
+                  // S4 (Audit-2): previously this only showed a success toast
+                  // and persisted nothing. Wire it to the same favorites-write
+                  // FavoriteHeartButton uses, and gate the toast on the result.
+                  final user = ref.read(authStateProvider).value;
+                  if (user == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please sign in to save favorites')),
+                      );
+                    }
+                    return;
+                  }
+                  try {
+                    await ref.read(favoritesNotifierProvider.notifier).addFavorite(
+                          patternId: _current.id,
+                          patternName: _current.name,
+                          patternData: _current.toJson(),
+                        );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Saved to Favorites')),
+                      );
+                    }
+                  } catch (e) {
+                    debugPrint('Save to Favorites failed: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Failed to save to Favorites'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
+                  }
                 },
                 icon: const Icon(Icons.favorite_border, color: NexGenPalette.cyan),
                 label: const Text('Save to Favorites'),
@@ -589,8 +594,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                     if (result != null) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('${_current.name} saved to My Scenes'),
-                          action: SnackBarAction(label: 'View', onPressed: () => context.push('/explore/scenes')),
+                          content: Text('${_current.name} saved'),
                         ),
                       );
                     } else {
@@ -601,7 +605,7 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                   }
                 },
                 icon: const Icon(Icons.save_alt, color: NexGenPalette.cyan),
-                label: const Text('Save to My Scenes'),
+                label: const Text('Save'),
               ),
             ]),
           ]
@@ -678,52 +682,6 @@ class _EffectBadge extends StatelessWidget {
       case ColorBehavior.generatesOwnColors: return const Color(0xFFFFB74D);
       case ColorBehavior.usesPalette: return const Color(0xFFBA68C8);
     }
-  }
-}
-
-class _CategoryCard extends StatelessWidget {
-  final PatternCategory category;
-  const _CategoryCard({required this.category});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => context.push('/explore/${category.id}', extra: category),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Stack(children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                image: DecorationImage(image: NetworkImage(category.imageUrl), fit: BoxFit.cover),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    NexGenPalette.matteBlack.withValues(alpha: 0.1),
-                    NexGenPalette.matteBlack.withValues(alpha: 0.6),
-                  ],
-                ),
-                border: Border.all(color: NexGenPalette.line),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(category.name, style: Theme.of(context).textTheme.titleMedium),
-            ),
-          ),
-        ]),
-      ),
-    );
   }
 }
 
@@ -804,7 +762,7 @@ class CategoryDetailScreen extends ConsumerWidget {
                 ),
               ),
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(12, 0, 12, kBottomNavBarPadding),
+                padding: EdgeInsets.fromLTRB(12, 0, 12, navBarTotalHeight(context)),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
@@ -877,10 +835,9 @@ class CategoryDetailScreen extends ConsumerWidget {
   }
 
   Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
-    final notifier = ref.read(pinnedCategoriesNotifierProvider.notifier);
     final success = isPinned
-        ? await notifier.unpinCategory(categoryId)
-        : await notifier.pinCategory(categoryId);
+        ? await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(categoryId)
+        : await ref.read(pinnedCategoriesNotifierProvider.notifier).pinCategory(categoryId);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1113,7 +1070,8 @@ IconData _heroIconForSubCategory(String subId) {
     case 'sub_la_liga':       return Icons.sports_soccer;
     case 'sub_bundesliga':    return Icons.sports_soccer;
     case 'sub_serie_a':       return Icons.sports_soccer;
-    case 'sub_ligue_1':       return Icons.sports_soccer;
+    case 'sub_champions_league': return Icons.sports_soccer;
+    case 'sub_fifa_world_cup': return Icons.sports_soccer;
     case 'sub_fifa':
     case 'sub_world_cup':     return Icons.sports_soccer;
   }
@@ -1133,7 +1091,8 @@ IconData _heroIconForSubCategory(String subId) {
       subId.contains('fifa') || subId.contains('world_cup') ||
       subId.contains('epl') || subId.contains('premier') ||
       subId.contains('la_liga') || subId.contains('bundesliga') ||
-      subId.contains('serie_a') || subId.contains('ligue_1')) {
+      subId.contains('serie_a') || subId.contains('champions_league') ||
+      subId.contains('fifa_world_cup')) {
     return Icons.sports_soccer;
   }
   if (subId.contains('football') || subId.contains('nfl') ||
@@ -1216,7 +1175,8 @@ int _sportSubSortKey(String id) {
   if (id.contains('la_liga')) return 840;
   if (id.contains('bundesliga')) return 850;
   if (id.contains('serie_a')) return 860;
-  if (id.contains('ligue_1')) return 870;
+  if (id.contains('champions_league')) return 870;
+  if (id.contains('fifa_world_cup')) return 875;
   // NWSL
   if (id.contains('nwsl')) {
     if (id.contains('east')) return 910;
@@ -1281,7 +1241,8 @@ List<Color> _gradientForSubCategory(String subId) {
     case 'sub_la_liga':     return const [Color(0xFFFF6B35), Color(0xFFCC4400)]; // La Liga Orange
     case 'sub_bundesliga':  return const [Color(0xFFD4020D), Color(0xFF8B0000)]; // Bundesliga Red
     case 'sub_serie_a':     return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)]; // Serie A Blue
-    case 'sub_ligue_1':     return const [Color(0xFF003189), Color(0xFF001E55)]; // Ligue 1 Navy
+    case 'sub_champions_league': return const [Color(0xFF0D47A1), Color(0xFF1A237E)]; // CL Blue
+    case 'sub_fifa_world_cup': return const [Color(0xFFD4AF37), Color(0xFF1565C0)]; // Gold/Blue
     case 'sub_fifa':
     case 'sub_world_cup':   return const [Color(0xFFFFD700), Color(0xFF1565C0)]; // Gold/Blue
     // ── MLB conferences ───────────────────────────────────────────────────────
@@ -1366,7 +1327,8 @@ Color _accentForSubCategory(String subId) {
     case 'sub_la_liga':     return const Color(0xFFFF6B35);   // La Liga Orange
     case 'sub_bundesliga':  return const Color(0xFFD4020D);   // Bundesliga Red
     case 'sub_serie_a':     return const Color(0xFF1B4FBB);   // Serie A Blue
-    case 'sub_ligue_1':     return const Color(0xFF003189);   // Ligue 1 Blue
+    case 'sub_champions_league': return const Color(0xFF0D47A1); // CL Blue
+    case 'sub_fifa_world_cup': return const Color(0xFFD4AF37); // WC Gold
     case 'sub_fifa':
     case 'sub_world_cup':   return const Color(0xFFFFD700);   // Gold
     // ── MLB divisions ─────────────────────────────────────────────────────────
@@ -1431,7 +1393,6 @@ class _SubCategoryCard extends StatelessWidget {
     final heroIcon = _heroIconForSubCategory(sub.id);
     final accentColor = _accentForSubCategory(sub.id);
     final gradientColors = _gradientForSubCategory(sub.id);
-    final previewColors = _previewColorsForSub(sub);
 
     return Material(
       color: Colors.transparent,
@@ -1536,552 +1497,7 @@ class _SubCategoryCard extends StatelessWidget {
   }
 }
 
-class _ColorDot extends StatelessWidget {
-  final Color color;
-  const _ColorDot({required this.color});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 20,
-      height: 20,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color, border: Border.all(color: NexGenPalette.matteBlack, width: 1)),
-    );
-  }
-}
 
-class _PatternItemCard extends ConsumerWidget {
-  final PatternItem item;
-  const _PatternItemCard({required this.item});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return InkWell(
-      onTap: () async {
-        final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-        if (!shouldProceed) return;
-
-        final repo = ref.read(wledRepositoryProvider);
-        if (repo == null) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-          }
-          return;
-        }
-        try {
-          var itemPayload = Map<String, dynamic>.from(item.wledPayload);
-          final channels = ref.read(effectiveChannelIdsProvider);
-          if (channels.isNotEmpty) itemPayload = applyChannelFilter(itemPayload, channels, ref.read(deviceChannelsProvider));
-          await repo.applyJson(itemPayload);
-          ref.read(activePresetLabelProvider.notifier).state = item.name;
-          final notifier = ref.read(wledStateProvider.notifier);
-          final bri = item.wledPayload['bri'];
-          if (bri is int) notifier.setBrightness(bri);
-          final seg = item.wledPayload['seg'];
-          if (seg is List && seg.isNotEmpty && seg.first is Map) {
-            final s0 = seg.first as Map;
-            final sx = s0['sx'];
-            if (sx is int) notifier.setSpeed(sx);
-            final col = s0['col'];
-            if (col is List && col.isNotEmpty && col.first is List) {
-              final c = col.first as List;
-              if (c.length >= 3) {
-                notifier.setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
-              }
-            }
-          }
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-          }
-        } catch (e) {
-          debugPrint('Apply pattern failed: $e');
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-          }
-        }
-      },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Stack(children: [
-          Positioned.fill(child: _ItemLiveGradient(colors: _extractColorsFromItem(item), speed: 128)),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [NexGenPalette.matteBlack.withValues(alpha: 0.08), NexGenPalette.matteBlack.withValues(alpha: 0.65)],
-                ),
-                border: Border.all(color: NexGenPalette.line),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(item.name, style: Theme.of(context).textTheme.labelLarge),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-/// Compact pattern item card for 4-column grid layout.
-class _CompactPatternItemCard extends ConsumerWidget {
-  final PatternItem item;
-  final List<Color> themeColors;
-  const _CompactPatternItemCard({required this.item, required this.themeColors});
-
-  static int _getColorSlotsForEffect(int effectId) {
-    const autoColorEffects = {
-      4, 5, 7, 8, 9, 14, 19, 24, 26, 29, 30, 32, 33, 34, 35, 36, 38, 45, 63, 66, 88,
-      94, 99, 101, 104, 116, 117, 39, 42, 43, 61, 64, 65, 67, 68, 69, 70, 71, 72, 73,
-      74, 75, 79, 80, 81, 89, 90, 92, 93, 97, 105, 106, 107, 108, 109, 110, 115, 128,
-    };
-    if (autoColorEffects.contains(effectId)) return 0;
-    return 3;
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final effectId = PatternRepository.effectIdFromPayload(item.wledPayload) ?? 0;
-    final extractedColors = _extractColorsFromItem(item);
-    final displayColors = extractedColors;
-    final effectName = _getEffectDisplayName(effectId);
-
-    return InkWell(
-      onTap: () => _handleTap(context, ref, effectId, extractedColors),
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        decoration: BoxDecoration(
-          color: NexGenPalette.matteBlack,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: NexGenPalette.line.withValues(alpha: 0.6)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              flex: 3,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
-                child: _EffectPreviewStrip(
-                  colors: displayColors.isNotEmpty ? displayColors : [Colors.white],
-                  effectId: effectId,
-                  speed: _getSpeedFromPayload(item.wledPayload),
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      displayColors.isNotEmpty ? displayColors.first.withValues(alpha: 0.15) : NexGenPalette.cyan.withValues(alpha: 0.1),
-                      NexGenPalette.matteBlack,
-                    ],
-                  ),
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(9)),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Colors.white, height: 1.1),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: displayColors.isNotEmpty
-                            ? displayColors.first.withValues(alpha: 0.3)
-                            : NexGenPalette.cyan.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        effectName,
-                        style: TextStyle(fontSize: 7, fontWeight: FontWeight.w500, color: Colors.white.withValues(alpha: 0.9)),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static String _getEffectDisplayName(int effectId) {
-    const effectNames = {
-      0: 'Solid', 1: 'Blink', 2: 'Breathe', 3: 'Wipe', 6: 'Sweep', 10: 'Scan',
-      12: 'Fade', 22: 'Running', 23: 'Chase', 37: 'Fill Noise', 43: 'Theater',
-      46: 'Twinkle', 49: 'Fire', 51: 'Gradient', 52: 'Loading', 63: 'Palette',
-      65: 'Colorwave', 67: 'Ripple', 73: 'Pacifica', 76: 'Fireworks', 78: 'Meteor',
-      108: 'Meteor', 120: 'Sparkle',
-    };
-    return effectNames[effectId] ?? 'Effect';
-  }
-
-  static double _getSpeedFromPayload(Map<String, dynamic> payload) {
-    try {
-      final seg = payload['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final first = seg.first;
-        if (first is Map) {
-          final sx = first['sx'];
-          if (sx is num) return sx.toDouble();
-        }
-      }
-    } catch (_) {}
-    return 128;
-  }
-
-  Future<void> _handleTap(BuildContext context, WidgetRef ref, int effectId, List<Color> extractedColors) async {
-    final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-    if (!shouldProceed) return;
-
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-      }
-      return;
-    }
-
-    if (effectId == 0 && themeColors.length > 1) {
-      if (context.mounted) {
-        final selectedColor = await _showSolidColorPicker(context, themeColors);
-        if (selectedColor != null && context.mounted) {
-          await _applyPatternWithColor(context, ref, repo, selectedColor);
-        }
-      }
-      return;
-    }
-
-    try {
-      var applyPayload = Map<String, dynamic>.from(item.wledPayload);
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) applyPayload = applyChannelFilter(applyPayload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(applyPayload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
-      _updateLocalState(ref);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-      }
-    } catch (e) {
-      debugPrint('Apply pattern failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
-  }
-
-  void _updateLocalState(WidgetRef ref) {
-    final notifier = ref.read(wledStateProvider.notifier);
-    final bri = item.wledPayload['bri'];
-    if (bri is int) notifier.setBrightness(bri);
-    final seg = item.wledPayload['seg'];
-    if (seg is List && seg.isNotEmpty && seg.first is Map) {
-      final s0 = seg.first as Map;
-      final sx = s0['sx'];
-      if (sx is int) notifier.setSpeed(sx);
-      final col = s0['col'];
-      if (col is List && col.isNotEmpty && col.first is List) {
-        final c = col.first as List;
-        if (c.length >= 3) {
-          notifier.setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
-        }
-      }
-    }
-  }
-
-  Future<Color?> _showSolidColorPicker(BuildContext context, List<Color> colors) async {
-    return showModalBottomSheet<Color>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _SolidColorPickerSheet(colors: colors),
-    );
-  }
-
-  Future<void> _applyPatternWithColor(BuildContext context, WidgetRef ref, WledRepository repo, Color color) async {
-    try {
-      var payload = Map<String, dynamic>.from(item.wledPayload);
-      final seg = payload['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final s0 = Map<String, dynamic>.from(seg.first as Map);
-        s0['col'] = [rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true)];
-        payload['seg'] = [s0];
-      }
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-      }
-    } catch (e) {
-      debugPrint('Apply pattern failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
-  }
-
-  Future<void> _applyPatternWithColors(BuildContext context, WidgetRef ref, WledRepository repo, List<Color> colors, int effectId) async {
-    try {
-      var payload = Map<String, dynamic>.from(item.wledPayload);
-      final seg = payload['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final s0 = Map<String, dynamic>.from(seg.first as Map);
-        s0['col'] = colors.map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true)).toList();
-        payload['seg'] = [s0];
-      }
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-      ref.read(activePresetLabelProvider.notifier).state = item.name;
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-      }
-    } catch (e) {
-      debugPrint('Apply pattern failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helper bottom sheets
-// ---------------------------------------------------------------------------
-
-class _SolidColorPickerSheet extends StatelessWidget {
-  final List<Color> colors;
-  const _SolidColorPickerSheet({required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.palette, color: NexGenPalette.cyan, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Choose Solid Color',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Solid effect displays a single color. Select which color to use:',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: colors.map((color) => _ColorPickerTile(color: color, onTap: () => Navigator.pop(context, color))).toList(),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ColorAssignmentSheet extends StatefulWidget {
-  final List<Color> availableColors;
-  final int slots;
-  final int effectId;
-  const _ColorAssignmentSheet({required this.availableColors, required this.slots, required this.effectId});
-
-  @override
-  State<_ColorAssignmentSheet> createState() => _ColorAssignmentSheetState();
-}
-
-class _ColorAssignmentSheetState extends State<_ColorAssignmentSheet> {
-  late List<Color> _assignedColors;
-
-  @override
-  void initState() {
-    super.initState();
-    _assignedColors = widget.availableColors.take(widget.slots).toList();
-    while (_assignedColors.length < widget.slots) {
-      _assignedColors.add(widget.availableColors.first);
-    }
-  }
-
-  String _getSlotLabel(int index) {
-    switch (index) {
-      case 0: return 'Primary';
-      case 1: return 'Secondary';
-      case 2: return 'Accent';
-      default: return 'Color ${index + 1}';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final effectName = kEffectNames[widget.effectId] ?? 'Effect ${widget.effectId}';
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.tune, color: NexGenPalette.cyan, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Assign Colors for $effectName',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: NexGenPalette.textHigh, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'This effect uses ${widget.slots} color${widget.slots > 1 ? 's' : ''}. Assign colors to each slot:',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
-          ),
-          const SizedBox(height: 16),
-          ...List.generate(widget.slots, (slotIndex) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 80,
-                    child: Text(_getSlotLabel(slotIndex), style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13)),
-                  ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: widget.availableColors.map((color) {
-                          final isSelected = _assignedColors[slotIndex] == color;
-                          return GestureDetector(
-                            onTap: () => setState(() => _assignedColors[slotIndex] = color),
-                            child: Container(
-                              width: 36,
-                              height: 36,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                color: color,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
-                                  width: isSelected ? 3 : 1,
-                                ),
-                                boxShadow: isSelected ? [BoxShadow(color: NexGenPalette.cyan.withValues(alpha: 0.4), blurRadius: 8, spreadRadius: 1)] : null,
-                              ),
-                              child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 18) : null,
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-          const SizedBox(height: 8),
-          Container(
-            height: 24,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: LinearGradient(colors: _assignedColors)),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(context, _assignedColors),
-                  style: FilledButton.styleFrom(backgroundColor: NexGenPalette.cyan),
-                  child: const Text('Apply'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ColorPickerTile extends StatelessWidget {
-  final Color color;
-  final VoidCallback onTap;
-  const _ColorPickerTile({required this.color, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: 64,
-        height: 64,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: NexGenPalette.line, width: 2),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 2))],
-        ),
-        child: const Center(child: Icon(Icons.touch_app, color: Colors.white54, size: 20)),
-      ),
-    );
-  }
-}
-
-class _ItemLiveGradient extends StatelessWidget {
-  final List<Color> colors;
-  final double speed;
-  const _ItemLiveGradient({required this.colors, required this.speed});
-
-  @override
-  Widget build(BuildContext context) => LiveGradientStrip(colors: colors, speed: speed);
-}
 
 // ---------------------------------------------------------------------------
 // Effect preview strip (unchanged)
@@ -2090,9 +1506,8 @@ class _ItemLiveGradient extends StatelessWidget {
 class _EffectPreviewStrip extends StatefulWidget {
   final List<Color> colors;
   final int effectId;
-  final double speed;
 
-  const _EffectPreviewStrip({required this.colors, required this.effectId, this.speed = 128});
+  const _EffectPreviewStrip({required this.colors, required this.effectId});
 
   @override
   State<_EffectPreviewStrip> createState() => _EffectPreviewStripState();
@@ -2107,7 +1522,8 @@ class _EffectPreviewStripState extends State<_EffectPreviewStrip>
   @override
   void initState() {
     super.initState();
-    final durationMs = (3000 - (widget.speed / 255) * 2500).clamp(500, 5000).round();
+    const speed = 128.0;
+    final durationMs = (3000 - (speed / 255) * 2500).clamp(500, 5000).round();
     _controller = AnimationController(vsync: this, duration: Duration(milliseconds: durationMs));
     for (int i = 0; i < 20; i++) {
       _twinkleOpacities.add(0.0);
@@ -2356,32 +1772,7 @@ class _EffectPainter extends CustomPainter {
 
 enum _EffectType { solid, breathing, chase, wipe, sparkle, scan, fade, gradient, theater, running, twinkle, fire, meteor, wave }
 
-List<Color> _extractColorsFromItem(PatternItem item) {
-  try {
-    final seg = item.wledPayload['seg'];
-    if (seg is List && seg.isNotEmpty) {
-      final first = seg.first;
-      if (first is Map) {
-        final col = first['col'];
-        if (col is List) {
-          final result = <Color>[];
-          for (final c in col) {
-            if (c is List && c.length >= 3) {
-              final r = (c[0] as num).toInt().clamp(0, 255);
-              final g = (c[1] as num).toInt().clamp(0, 255);
-              final b = (c[2] as num).toInt().clamp(0, 255);
-              result.add(Color.fromARGB(255, r, g, b));
-            }
-          }
-          if (result.isNotEmpty) return result;
-        }
-      }
-    }
-  } catch (e) {
-    debugPrint('Failed to extract colors from PatternItem: $e');
-  }
-  return const [Colors.white, Colors.white];
-}
+
 
 class _ErrorState extends StatelessWidget {
   final String error;

@@ -240,6 +240,12 @@ class NeighborhoodGroup {
   }
 
   bool get isCreator => creatorUid.isNotEmpty;
+
+  /// True when [uid] is this crew's creator. Same check the sync screen uses
+  /// inline (`group.creatorUid == uid`), named so the creator-only invite-code
+  /// rotation gate is unit-testable. Null uid → false.
+  bool isCreatedBy(String? uid) => uid != null && creatorUid == uid;
+
   int get memberCount => memberUids.length;
   bool get hasLocation => latitude != null && longitude != null;
 }
@@ -299,10 +305,34 @@ class NeighborhoodMember {
   final double rooflineMeters;
   final RooflineDirection rooflineDirection;
   final String? controllerIp;
+
+  /// Denormalized list of this member's controller doc ids (from
+  /// users/{uid}/controllers). Written at member-doc save time so the
+  /// server-side fanout (applySyncPattern, Slice 1) can resolve targets
+  /// without a per-member cross-collection read. Empty when not yet
+  /// denormalized — the function falls back to a live read. Additive:
+  /// existing members deserialize to `const []`.
+  final List<String> controllerId;
+
   final bool isOnline;
   final DateTime lastSeen;
   final MemberParticipationStatus participationStatus;
   final List<String> optedOutScheduleIds;
+
+  /// Channel indices that participate in sync/Game Day shows for this
+  /// member's controller. `null` means "no explicit choice" — the
+  /// default-participation policy in [resolveParticipatingChannels]
+  /// applies. An empty list `[]` means the user explicitly opted out
+  /// of all channels. Read by the apply path, not stored verbatim.
+  final List<int>? participatingChannelIndices;
+
+  /// Per-member live-sync apply gate. Set true by the engine when this
+  /// member receives a SyncCommand and begins applying; cleared by
+  /// member-stop UI, owner endGroupSync fan-clear, and app-close
+  /// lifecycle. Drives the asymmetric trigger's teardown narrow gate —
+  /// decoupled from shared `g.isActive` so one member's stop does not
+  /// cascade a revert to other members.
+  final bool isParticipating;
 
   const NeighborhoodMember({
     required this.oderId,
@@ -312,14 +342,18 @@ class NeighborhoodMember {
     this.rooflineMeters = 15.0,
     this.rooflineDirection = RooflineDirection.leftToRight,
     this.controllerIp,
+    this.controllerId = const [],
     this.isOnline = false,
     required this.lastSeen,
     this.participationStatus = MemberParticipationStatus.active,
     this.optedOutScheduleIds = const [],
+    this.participatingChannelIndices,
+    this.isParticipating = false,
   });
 
   factory NeighborhoodMember.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final rawParticipating = data['participatingChannelIndices'];
     return NeighborhoodMember(
       oderId: doc.id,
       displayName: data['displayName'] ?? 'Unknown Home',
@@ -328,10 +362,18 @@ class NeighborhoodMember {
       rooflineMeters: (data['rooflineMeters'] ?? 15.0).toDouble(),
       rooflineDirection: RooflineDirectionExtension.fromJson(data['rooflineDirection']),
       controllerIp: data['controllerIp'],
+      controllerId: data['controllerId'] is List
+          ? List<String>.from(
+              (data['controllerId'] as List).map((e) => e.toString()))
+          : const [],
       isOnline: data['isOnline'] ?? false,
       lastSeen: (data['lastSeen'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participationStatus: MemberParticipationStatusExtension.fromJson(data['participationStatus']),
       optedOutScheduleIds: List<String>.from(data['optedOutScheduleIds'] ?? []),
+      participatingChannelIndices: rawParticipating is List
+          ? rawParticipating.map((e) => (e as num).toInt()).toList()
+          : null,
+      isParticipating: data['isParticipating'] as bool? ?? false,
     );
   }
 
@@ -343,10 +385,14 @@ class NeighborhoodMember {
       'rooflineMeters': rooflineMeters,
       'rooflineDirection': rooflineDirection.toJson(),
       'controllerIp': controllerIp,
+      'controllerId': controllerId,
       'isOnline': isOnline,
       'lastSeen': Timestamp.fromDate(lastSeen),
       'participationStatus': participationStatus.toJson(),
       'optedOutScheduleIds': optedOutScheduleIds,
+      if (participatingChannelIndices != null)
+        'participatingChannelIndices': participatingChannelIndices,
+      'isParticipating': isParticipating,
     };
   }
 
@@ -358,10 +404,14 @@ class NeighborhoodMember {
     double? rooflineMeters,
     RooflineDirection? rooflineDirection,
     String? controllerIp,
+    List<String>? controllerId,
     bool? isOnline,
     DateTime? lastSeen,
     MemberParticipationStatus? participationStatus,
     List<String>? optedOutScheduleIds,
+    List<int>? participatingChannelIndices,
+    bool clearParticipatingChannelIndices = false,
+    bool? isParticipating,
   }) {
     return NeighborhoodMember(
       oderId: oderId ?? this.oderId,
@@ -371,10 +421,15 @@ class NeighborhoodMember {
       rooflineMeters: rooflineMeters ?? this.rooflineMeters,
       rooflineDirection: rooflineDirection ?? this.rooflineDirection,
       controllerIp: controllerIp ?? this.controllerIp,
+      controllerId: controllerId ?? this.controllerId,
       isOnline: isOnline ?? this.isOnline,
       lastSeen: lastSeen ?? this.lastSeen,
       participationStatus: participationStatus ?? this.participationStatus,
       optedOutScheduleIds: optedOutScheduleIds ?? this.optedOutScheduleIds,
+      participatingChannelIndices: clearParticipatingChannelIndices
+          ? null
+          : (participatingChannelIndices ?? this.participatingChannelIndices),
+      isParticipating: isParticipating ?? this.isParticipating,
     );
   }
 
@@ -618,6 +673,28 @@ class SyncCommand {
   final String? patternName;
   final String? scheduleId;
 
+  /// True when this command is an explicit teardown ("revert now") signal
+  /// rather than a design to apply. Broadcast on the SAME /commands channel
+  /// propagation uses, so it reliably reaches members (the flag-trigger was
+  /// unreliable — see the End-Group revert audit). The engine branches on
+  /// this in handleCommandSnapshot and runs the local teardown restore
+  /// instead of applying a pattern. Legacy commands decode to false.
+  final bool isTeardown;
+
+  /// For a teardown command: which member should revert. null = ALL members
+  /// (owner End Group). Non-null = only that member's uid (self-leave), so a
+  /// member leaving doesn't tear down everyone else. Ignored when
+  /// [isTeardown] is false.
+  final String? targetMemberUid;
+
+  /// WLED palette/grouping/spacing for the GLOBAL pattern. Carried so
+  /// [getPatternForMember] can rebuild a faithful seg (with pal:5 "Colors
+  /// Only") instead of one that defaults to the rainbow palette. Defaults match
+  /// the catalog invariant; legacy commands without these keys decode to them.
+  final int pal;
+  final int grp;
+  final int spc;
+
   /// Member-specific color overrides for Complement Mode.
   /// Key: member userId, Value: list of colors (as int values) for that member.
   /// If a member is not in this map, they use the default [colors] field.
@@ -626,6 +703,11 @@ class SyncCommand {
   /// The complement theme being used (e.g., "july4th", "christmas").
   /// Helps UI display the correct theme name.
   final String? complementTheme;
+
+  /// Per-member full pattern overrides for Custom Mode per-house assignments.
+  /// Key: member userId, Value: SyncPatternAssignment with effectId, colors, speed, intensity, brightness.
+  /// If a member is not in this map, they use the global fields.
+  final Map<String, SyncPatternAssignment>? memberPatternOverrides;
 
   const SyncCommand({
     required this.id,
@@ -641,9 +723,42 @@ class SyncCommand {
     this.syncType = SyncType.sequentialFlow,
     this.patternName,
     this.scheduleId,
+    this.isTeardown = false,
+    this.targetMemberUid,
+    this.pal = 5,
+    this.grp = 1,
+    this.spc = 0,
     this.memberColorOverrides,
     this.complementTheme,
+    this.memberPatternOverrides,
   });
+
+  /// Builds a minimal teardown command — the explicit "revert now" signal
+  /// broadcast on the same `/commands` channel that propagation uses. A
+  /// member's listener branches on [isTeardown] and runs its local teardown
+  /// restore (schedule → autopilot → pre-sync scene → off) instead of
+  /// applying a design. [targetMemberUid] null = all members revert (owner
+  /// End Group); non-null = only that member (self-leave).
+  factory SyncCommand.teardown({
+    required String groupId,
+    required DateTime startTimestamp,
+    String? targetMemberUid,
+  }) {
+    return SyncCommand(
+      id: '',
+      groupId: groupId,
+      effectId: 0,
+      colors: const [],
+      speed: 128,
+      intensity: 128,
+      brightness: 0,
+      startTimestamp: startTimestamp,
+      memberDelays: const {},
+      timingConfig: const SyncTimingConfig(),
+      isTeardown: true,
+      targetMemberUid: targetMemberUid,
+    );
+  }
 
   factory SyncCommand.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -653,6 +768,15 @@ class SyncCommand {
     if (data['memberColorOverrides'] != null) {
       final raw = data['memberColorOverrides'] as Map<String, dynamic>;
       colorOverrides = raw.map((k, v) => MapEntry(k, List<int>.from(v)));
+    }
+
+    // Parse memberPatternOverrides from Firestore
+    Map<String, SyncPatternAssignment>? patternOverrides;
+    if (data['memberPatternOverrides'] != null) {
+      final raw = data['memberPatternOverrides'] as Map<String, dynamic>;
+      patternOverrides = raw.map(
+        (k, v) => MapEntry(k, SyncPatternAssignment.fromJson(Map<String, dynamic>.from(v))),
+      );
     }
 
     return SyncCommand(
@@ -671,8 +795,16 @@ class SyncCommand {
       syncType: SyncTypeExtension.fromJson(data['syncType']),
       patternName: data['patternName'],
       scheduleId: data['scheduleId'],
+      isTeardown: data['isTeardown'] as bool? ?? false,
+      targetMemberUid: data['targetMemberUid'] as String?,
+      // Legacy commands omit these; default to the catalog invariant (Colors
+      // Only) so they apply selected colors instead of the rainbow palette.
+      pal: data['pal'] ?? 5,
+      grp: data['grp'] ?? 1,
+      spc: data['spc'] ?? 0,
       memberColorOverrides: colorOverrides,
       complementTheme: data['complementTheme'],
+      memberPatternOverrides: patternOverrides,
     );
   }
 
@@ -690,8 +822,17 @@ class SyncCommand {
       'syncType': syncType.toJson(),
       'patternName': patternName,
       'scheduleId': scheduleId,
+      'isTeardown': isTeardown,
+      if (targetMemberUid != null) 'targetMemberUid': targetMemberUid,
+      'pal': pal,
+      'grp': grp,
+      'spc': spc,
       if (memberColorOverrides != null) 'memberColorOverrides': memberColorOverrides,
       if (complementTheme != null) 'complementTheme': complementTheme,
+      if (memberPatternOverrides != null)
+        'memberPatternOverrides': memberPatternOverrides!.map(
+          (k, v) => MapEntry(k, v.toJson()),
+        ),
     };
   }
 
@@ -726,6 +867,30 @@ class SyncCommand {
 
   /// Check if this command uses Complement Mode.
   bool get isComplementMode => syncType == SyncType.complement;
+
+  /// Check if this command has per-house pattern assignments.
+  bool get hasPerHouseAssignments =>
+      memberPatternOverrides != null && memberPatternOverrides!.isNotEmpty;
+
+  /// Get the full pattern assignment for a specific member.
+  /// Returns the per-house override if set, otherwise builds from global fields.
+  SyncPatternAssignment getPatternForMember(String memberId) {
+    if (memberPatternOverrides != null &&
+        memberPatternOverrides!.containsKey(memberId)) {
+      return memberPatternOverrides![memberId]!;
+    }
+    return SyncPatternAssignment(
+      name: patternName ?? 'Sync Pattern',
+      effectId: effectId,
+      colors: getColorsForMember(memberId),
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
+    );
+  }
 }
 
 /// Status of a member in the neighborhood sync.
@@ -986,5 +1151,161 @@ class ComplementThemes {
     } catch (_) {
       return null;
     }
+  }
+}
+
+/// A pattern assignment for use in Neighborhood Sync Custom Mode.
+///
+/// Captures all the WLED parameters needed to reproduce a selected pattern
+/// from the Explore Patterns library or manual configuration.
+class SyncPatternAssignment {
+  final String name;
+  final int effectId;
+  final List<int> colors; // Raw color ints (0xRRGGBB)
+  final int speed;
+  final int intensity;
+  final int brightness;
+
+  /// WLED palette id. Defaults to 5 ("Colors Only"), matching the catalog
+  /// invariant (GradientPattern.toWledPayload / generatePatternsForNode). This
+  /// MUST survive into the applied seg — omitting it makes WLED fall back to
+  /// its default rainbow palette, which overrides the selected [colors] in
+  /// [col] and produces chaotic multi-color flashing on hardware.
+  final int pal;
+
+  /// WLED segment grouping (`grp`). Default 1 = no grouping (neutral).
+  final int grp;
+
+  /// WLED segment spacing (`spc`). Default 0 = no spacing (neutral).
+  final int spc;
+
+  /// Optional full WLED payload for advanced patterns.
+  final Map<String, dynamic>? wledPayload;
+
+  const SyncPatternAssignment({
+    required this.name,
+    required this.effectId,
+    required this.colors,
+    this.speed = 128,
+    this.intensity = 128,
+    this.brightness = 200,
+    this.pal = 5,
+    this.grp = 1,
+    this.spc = 0,
+    this.wledPayload,
+  });
+
+  /// Create from a PatternItem's wledPayload.
+  factory SyncPatternAssignment.fromWledPayload({
+    required String name,
+    required Map<String, dynamic> payload,
+    int brightness = 200,
+  }) {
+    int effectId = 0;
+    int speed = 128;
+    int intensity = 128;
+    // Default to the catalog invariant so a payload that omits these still
+    // applies "Colors Only" rather than the rainbow default.
+    int pal = 5;
+    int grp = 1;
+    int spc = 0;
+    final colors = <int>[];
+
+    final seg = payload['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final firstSeg = seg.first;
+      if (firstSeg is Map) {
+        effectId = (firstSeg['fx'] as int?) ?? 0;
+        speed = (firstSeg['sx'] as int?) ?? 128;
+        intensity = (firstSeg['ix'] as int?) ?? 128;
+        // Preserve the source design's palette/grouping/spacing so a catalog
+        // PatternItem's pal:5 (and any special palette like pal:6) survives the
+        // round-trip into the applied sync payload.
+        pal = (firstSeg['pal'] as int?) ?? pal;
+        grp = (firstSeg['grp'] as int?) ?? grp;
+        spc = (firstSeg['spc'] as int?) ?? spc;
+
+        final col = firstSeg['col'];
+        if (col is List) {
+          for (final c in col) {
+            if (c is List && c.length >= 3) {
+              colors.add((c[0] << 16) | (c[1] << 8) | c[2]);
+            }
+          }
+        }
+      }
+    }
+
+    if (colors.isEmpty) colors.add(0xFFFFFF);
+
+    return SyncPatternAssignment(
+      name: name,
+      effectId: effectId,
+      colors: colors,
+      speed: speed,
+      intensity: intensity,
+      brightness: (payload['bri'] as int?) ?? brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
+      wledPayload: payload,
+    );
+  }
+
+  /// Create from a LibraryNode palette (theme colors + suggested effect).
+  factory SyncPatternAssignment.fromLibraryNode({
+    required String name,
+    required List<Color> themeColors,
+    int effectId = 0,
+    int speed = 128,
+    int intensity = 128,
+    int brightness = 200,
+    int pal = 5,
+    int grp = 1,
+    int spc = 0,
+  }) {
+    return SyncPatternAssignment(
+      name: name,
+      effectId: effectId,
+      colors: themeColors.map((c) => c.value & 0xFFFFFF).toList(),
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+      pal: pal,
+      grp: grp,
+      spc: spc,
+    );
+  }
+
+  /// Convert colors to Flutter Color objects.
+  List<Color> get colorObjects =>
+      colors.map((c) => Color(c | 0xFF000000)).toList();
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'effectId': effectId,
+        'colors': colors,
+        'speed': speed,
+        'intensity': intensity,
+        'brightness': brightness,
+        'pal': pal,
+        'grp': grp,
+        'spc': spc,
+      };
+
+  factory SyncPatternAssignment.fromJson(Map<String, dynamic> json) {
+    return SyncPatternAssignment(
+      name: json['name'] ?? 'Unknown',
+      effectId: json['effectId'] ?? 0,
+      colors: List<int>.from(json['colors'] ?? [0xFFFFFF]),
+      speed: json['speed'] ?? 128,
+      intensity: json['intensity'] ?? 128,
+      brightness: json['brightness'] ?? 200,
+      // Legacy commands (written before pal/grp/spc shipped) omit these keys;
+      // default to the catalog invariant so they no longer rainbow-flash.
+      pal: json['pal'] ?? 5,
+      grp: json['grp'] ?? 1,
+      spc: json['spc'] ?? 0,
+    );
   }
 }

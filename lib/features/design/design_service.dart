@@ -1,10 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for managing custom designs in Firestore.
 class DesignService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  DesignService({FirebaseFirestore? firestore})
+      : _firestore = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _firestore;
 
   /// Gets the designs collection reference for a user
   CollectionReference<Map<String, dynamic>> _designsRef(String userId) {
@@ -14,7 +18,7 @@ class DesignService {
   /// Creates a new design in Firestore
   Future<String> createDesign(String userId, CustomDesign design) async {
     try {
-      final docRef = await _designsRef(userId).add(design.toFirestore());
+      final docRef = await _designsRef(userId).add(UserService.sanitizeForFirestore(design.toFirestore()));
       debugPrint('Created design: ${docRef.id}');
       return docRef.id;
     } catch (e) {
@@ -26,7 +30,7 @@ class DesignService {
   /// Updates an existing design
   Future<void> updateDesign(String userId, CustomDesign design) async {
     try {
-      final data = design.copyWith(updatedAt: DateTime.now()).toFirestore();
+      final data = UserService.sanitizeForFirestore(design.copyWith(updatedAt: DateTime.now()).toFirestore());
       await _designsRef(userId).doc(design.id).update(data);
       debugPrint('Updated design: ${design.id}');
     } catch (e) {

@@ -1,13 +1,23 @@
 /// Current status of a game.
+///
+/// `unknown` is the safe-fallback bucket for any ESPN status string outside
+/// the known set (`scheduled`, `inProgress`, `halftime`, `final_`) — typically
+/// transient states like `postponed`, `cancelled`, `delayed`, or `suspended`.
+/// Downstream phase machines treat `unknown` as "neither in-progress nor
+/// final" — they take no action and wait for the next poll.
 enum GameStatus {
   scheduled,
   inProgress,
   halftime,
-  final_;
+  final_,
+  unknown;
 
   factory GameStatus.fromJson(String json) {
     if (json == 'final_' || json == 'final') return GameStatus.final_;
-    return GameStatus.values.firstWhere((e) => e.name == json);
+    return GameStatus.values.firstWhere(
+      (e) => e.name == json,
+      orElse: () => GameStatus.unknown,
+    );
   }
 
   String toJson() => name;
@@ -66,6 +76,32 @@ class GameState {
 
     final minutes = int.tryParse(parts[0]) ?? 0;
     return minutes < 2;
+  }
+
+  /// NCAA MBB clutch time: last 5 minutes of 2nd half or overtime,
+  /// with a margin of 8 points or fewer.
+  bool get isCollegeBasketballClutchTime {
+    if (status != GameStatus.inProgress) return false;
+
+    final p = period;
+    if (p == null) return false;
+
+    final periodNum = int.tryParse(p);
+    // 2nd half = 2, overtime periods = 3+
+    final isLateGame = (periodNum != null && periodNum >= 2);
+    if (!isLateGame) return false;
+
+    final margin = (homeScore - awayScore).abs();
+    if (margin > 8) return false;
+
+    final c = clock;
+    if (c == null) return true;
+
+    final parts = c.split(':');
+    if (parts.length != 2) return true;
+
+    final minutes = int.tryParse(parts[0]) ?? 0;
+    return minutes < 5;
   }
 
   GameState copyWith({

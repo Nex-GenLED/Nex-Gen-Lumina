@@ -48,32 +48,55 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_wled._tcp</string>
+		<string>_http._tcp</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nex-Gen needs this to find your lights</string>
-    <!-- Location usage for geofence monitoring -->
+    <!-- Location usage: required by iOS to read WiFi SSID for home-network
+         detection, and to configure the Welcome Home geofence. -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>We use your location to configure the Welcome Home geofence.</string>
+    <string>Lumina uses your location to detect the WiFi network you are connected to (so it knows when you are on your home network) and to configure the Welcome Home geofence.</string>
+    <!-- ITMS-90683: this key exists SOLELY because the geolocator plugin binary
+         references the Always location API, and Apple's static scanner rejects
+         the build (ITMS-90683) if a referenced API has no usage string. Lumina
+         makes ONLY a When-In-Use (whileInUse) request in Dart and never asks for
+         Always/background authorization — the copy is foreground-honest to match.
+         Do NOT re-add the 'location' UIBackgroundMode: there is no background
+         location capability. -->
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Always Allow enables reliable geofence triggers even when the app is closed.</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Your location is used to detect when you arrive home so we can welcome you with lights.</string>
+    <string>Lumina uses your location only while you are using the app — to detect your home WiFi network and set up the Welcome Home geofence. It does not track your location in the background.</string>
     <key>UIBackgroundModes</key>
     <array>
-        <string>location</string>
         <string>fetch</string>
         <string>processing</string>
+        <string>remote-notification</string>
     </array>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>com.nexgenled.lumina.sportscheck</string>
+        <string>com.nexgenled.lumina.syncEventCheck</string>
     </array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required for AR spatial mapping of your lights.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access is needed for voice-to-text control with Lumina.</string>
+	<string>Microphone access enables voice-to-text control and audio-reactive lighting in Nex-Gen.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lumina uses speech recognition to enable voice control of your lighting system.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Lumina needs access to your photo library to select a photo of your home for your lighting dashboard.</string>
+	<key>NSPhotoLibraryAddOnlyUsageDescription</key>
+	<string>Lumina needs permission to save lighting design photos to your library.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Nex-Gen uses Bluetooth to find and setup your lighting controller.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>Nex-Gen uses Bluetooth to pair with your lighting controller during setup.</string>
     <!-- URL Scheme for Siri Shortcuts and deep linking -->
     <key>CFBundleURLTypes</key>
     <array>

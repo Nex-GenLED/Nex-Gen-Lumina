@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -48,7 +47,9 @@ class DdpService {
     _running = false;
     try {
       _socket?.close();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in DDP service closing socket: $e');
+    }
     _socket = null;
     debugPrint('DDP: stopped');
   }

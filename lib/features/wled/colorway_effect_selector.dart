@@ -5,27 +5,89 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart' show WledStateModel;
+import 'package:nexgen_command/features/wled/wled_repository.dart' show WledRepository;
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+
+/// Compose a richer Now Playing label for the Colorway / Architectural
+/// Apply path. Stopgap for the current single-string `activePresetLabelProvider`
+/// model — the systemic fix (NowPlayingContext struct + migration of all
+/// 12 Apply paths) is tracked as Item #81 for v1.0.1.
+///
+/// Returns `"{parent name} {parent description}, {palette name}"` when the
+/// parent has both, or `"{parent name}, {palette name}"` when description is
+/// null/empty. Falls back to the bare palette name when the parent is null
+/// or has an empty name.
+@visibleForTesting
+String composeColorwayLabel(LibraryNode paletteNode, LibraryNode? parentNode) {
+  final paletteName = paletteNode.name;
+  if (parentNode == null || parentNode.name.isEmpty) return paletteName;
+  final desc = parentNode.description;
+  final parentLabel = (desc != null && desc.isNotEmpty)
+      ? '${parentNode.name} $desc'
+      : parentNode.name;
+  return '$parentLabel, $paletteName';
+}
+
+/// A design chosen from the library in SELECTION mode — returned to the caller
+/// (e.g. the schedule "choose a pattern" flow) instead of being applied. Same
+/// shape the legacy schedule picker returned (`PatternSelection`): the caller
+/// maps it straight into whatever it stores. [wledPayload] is the RAW design
+/// payload (pre channel-filter), matching `GradientPattern.toWledPayload()` /
+/// `CustomDesign.toWledPayload()` so it round-trips into a ScheduleItem.
+class LibraryDesignSelection {
+  final String id;
+  final String name;
+  final String imageUrl;
+  final Map<String, dynamic> wledPayload;
+  const LibraryDesignSelection({
+    required this.id,
+    required this.name,
+    required this.wledPayload,
+    this.imageUrl = '',
+  });
+}
 
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final LibraryNode paletteNode;
 
+  /// When non-null, this selector is operating inside the Game Day
+  /// picker. Committing a pattern (via [_applyPattern]) will persist
+  /// the design to the team's GameDayAutopilotConfig via saveDesign.
+  /// Preview-apply (the debounced [_sendToWled] path) is intentionally
+  /// NOT wired to saveDesign — that path fires on every knob twist
+  /// and would otherwise spam Firestore with intermediate states.
+  final String? teamSlug;
+
+  /// When non-null, this selector is in SELECTION mode (e.g. the schedule
+  /// pattern picker): committing RETURNS the chosen design via this callback
+  /// instead of applying to lights or persisting to Game Day. Null (the
+  /// default) preserves the normal apply-on-tap behavior byte-for-byte.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
+    this.teamSlug,
+    this.onDesignSelected,
   });
 
   @override
@@ -37,18 +99,70 @@ class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
   Timer? _debounceTimer;
 
+  /// SELECTION MODE only. The pre-preview device look, snapshotted on entry
+  /// (see [initState]) so both exits — Save ("Set design") and Cancel (backing
+  /// out / dispose) — can RESTORE it. The live preview writes to the real
+  /// lights on every adjustment ([_sendToWled]); but choosing a pattern for a
+  /// SCHEDULE must not leave it applied now, so we undo the preview on exit.
+  ///
+  /// This is [WledStateModel] — the freshest app-side device model (polled
+  /// ~1.5s by WledNotifier) — not a byte-exact external device snapshot; the
+  /// app only holds what this model can express (accepted trade-off). Restore
+  /// re-applies it via [WledRepository.applyJson], the SAME mechanism the
+  /// preview uses (no config/preset write). Null once restored/consumed so we
+  /// never restore twice.
+  WledStateModel? _capturedLook;
+
+  // ── Restore cache (selection mode) ──────────────────────────────────────
+  // The CANCEL exit runs in [dispose], where flutter_riverpod forbids `ref`.
+  // So we snapshot everything the restore write needs — the repository, the
+  // demo-mode flag, and the fully channel-filtered restore payload — while
+  // `ref` is live (on entry and refreshed each build via [_refreshRestoreCache]).
+  // [_restoreCapturedLook] then touches ONLY these fields, never `ref`, so it
+  // is safe to fire from dispose().
+  WledRepository? _restoreRepo;
+  bool _restoreDemoMode = false;
+  Map<String, dynamic>? _restorePayload;
+
   List<Color> get _paletteColors =>
       widget.paletteNode.themeColors ?? [Colors.white];
 
   @override
   void initState() {
     super.initState();
-    // Initialize selector state with defaults
+    // CAPTURE-ON-ENTRY (selection mode): snapshot the pre-preview device look
+    // now, before any [_sendToWled] preview write can fire. Read synchronously
+    // from the polled wledStateProvider so it reflects the device state the
+    // user is leaving — held in a local field, NOT re-read later (the poll
+    // would pick up our own preview writes and pollute it).
+    if (widget.onDesignSelected != null) {
+      _capturedLook = ref.read(wledStateProvider);
+      _refreshRestoreCache();
+    }
+    // Initialize selector state from palette metadata (architectural patterns
+    // store grouping/spacing here) or fall back to defaults.
+    final meta = widget.paletteNode.metadata;
+    final initGrouping = (meta?['grouping'] as int?) ?? (meta?['bandWidth'] as int?) ?? 1;
+    final initSpacing = (meta?['spacing'] as int?) ?? 0;
+    final isBrGradient = meta?['type'] == 'brightness_gradient';
+    // Resolve initial gradient preset index from node ID suffix
+    int initPreset = 0;
+    if (isBrGradient) {
+      final nodeId = widget.paletteNode.id;
+      final suffix = nodeId.contains('_gradients_') ? nodeId.split('_gradients_').last : '';
+      final presets = PatternRepository.brightnessGradientPresets;
+      for (var pi = 0; pi < presets.length; pi++) {
+        if (presets[pi].id == suffix) { initPreset = pi; break; }
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(selectorEffectIdProvider.notifier).state = 0;
-      ref.read(selectorSpeedProvider.notifier).state = 128;
+      ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state = 128;
-      ref.read(selectorColorGroupProvider.notifier).state = 1;
+      ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
+      ref.read(selectorSpacingProvider.notifier).state = initSpacing;
+      ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
+      ref.read(selectorBreathingProvider.notifier).state = false;
       ref.read(selectorMotionTypeProvider.notifier).state = null;
       ref.read(selectorColorBehaviorProvider.notifier).state = null;
     });
@@ -57,38 +171,173 @@ class _ColorwayEffectSelectorPageState
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    // CANCEL exit (selection mode): if a pre-preview look was captured and NOT
+    // yet consumed by a Save, the user is backing out of the effect editor
+    // (the parent LibraryBrowserScreen owns the back button, so its pop
+    // disposes us) — restore the device now. Fire-and-forget and ref-free:
+    // [_restoreCapturedLook] uses only the cached repo/payload (dispose cannot
+    // touch `ref`). A failed write is benign — the next apply self-corrects.
+    if (_capturedLook != null) {
+      _restoreCapturedLook();
+    }
     super.dispose();
+  }
+
+  /// Snapshot everything the restore write needs while `ref` is live: the
+  /// repository, the demo-mode flag, and the fully channel-filtered restore
+  /// payload built from [_capturedLook]. Called on entry and refreshed on each
+  /// build so the CANCEL path (dispose, where `ref` is forbidden) has a current
+  /// cache. No-op outside selection mode / once the look is consumed.
+  void _refreshRestoreCache() {
+    final look = _capturedLook;
+    if (look == null) return;
+    _restoreDemoMode = ref.read(demoModeProvider);
+    _restoreRepo = ref.read(wledRepositoryProvider);
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      _restorePayload = null; // U1 gate not satisfied yet — nothing to send
+      return;
+    }
+    _restorePayload = applyChannelFilter(
+      _buildLookPayload(look),
+      channels,
+      ref.read(deviceChannelsProvider),
+    );
+  }
+
+  /// Build the raw (pre channel-filter) WLED payload that reproduces [look] —
+  /// the app-expressible restore of the pre-preview state. Palette is restored
+  /// verbatim (not effect-derived) so the prior look round-trips as closely as
+  /// the app holds.
+  Map<String, dynamic> _buildLookPayload(WledStateModel look) {
+    final List<List<int>> cols = look.colorSequence.isNotEmpty
+        ? look.colorSequence
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(),
+                (c.b * 255).round(), forceZeroWhite: true))
+            .toList()
+        : [
+            rgbToRgbw((look.color.r * 255).round(), (look.color.g * 255).round(),
+                (look.color.b * 255).round(), forceZeroWhite: true)
+          ];
+    return <String, dynamic>{
+      'on': look.isOn,
+      'bri': look.brightness,
+      'seg': [
+        {
+          'fx': look.effectId,
+          'sx': look.speed,
+          'ix': look.intensity,
+          'pal': look.paletteId,
+          'grp': look.colorGroupSize,
+          'spc': look.spacing,
+          'col': cols,
+        }
+      ],
+    };
+  }
+
+  /// Restore the pre-preview device look captured on entry ([_capturedLook]),
+  /// undoing the live preview. Uses ONLY the cached repo/payload (never `ref`),
+  /// so it is safe to fire from [dispose]. Same mechanism as the preview —
+  /// [WledRepository.applyJson] through the channel-filter chokepoint — NOT a
+  /// config/preset write.
+  ///
+  /// Returns true only when the restore write actually succeeds. On failure
+  /// (off-LAN, dropped, U1 gate) it does NOT clear [_capturedLook] and does NOT
+  /// report success, leaving the snapshot in place so the next [_sendToWled] or
+  /// manual apply corrects the device (per the locked no-cross-death-persistence
+  /// decision — leftover preview is a benign, self-correcting state).
+  Future<bool> _restoreCapturedLook() async {
+    if (_capturedLook == null) return true; // nothing to restore / consumed
+    if (_restoreDemoMode) {
+      _capturedLook = null; // demo: no device, nothing to undo
+      return true;
+    }
+    final repo = _restoreRepo;
+    final payload = _restorePayload;
+    if (repo == null || payload == null) {
+      return false; // no device / U1 gate — keep snapshot for a later retry
+    }
+    try {
+      final ok = await repo.applyJson(payload);
+      if (ok) _capturedLook = null; // consumed — never restore twice
+      return ok;
+    } catch (e) {
+      debugPrint('Selection-mode restore failed (device offline?): $e');
+      return false; // keep snapshot; next apply self-corrects
+    }
+  }
+
+  /// Whether this palette node carries architectural spacing metadata.
+  bool get _isArchitectural =>
+      widget.paletteNode.metadata?['grouping'] != null &&
+      widget.paletteNode.metadata?['spacing'] != null;
+
+  /// Whether this palette node is a brightness gradient pattern.
+  bool get _isBrightnessGradient =>
+      widget.paletteNode.metadata?['type'] == 'brightness_gradient';
+
+  /// Compute gradient colors from the base (100%) color and preset steps.
+  List<Color> _gradientColorsForPreset(int presetIndex) {
+    final presets = PatternRepository.brightnessGradientPresets;
+    final preset = presets[presetIndex.clamp(0, presets.length - 1)];
+    final baseColor = widget.paletteNode.themeColors!.first;
+    final r = (baseColor.r * 255).round();
+    final g = (baseColor.g * 255).round();
+    final b = (baseColor.b * 255).round();
+    return preset.steps
+        .map((pct) => Color.fromARGB(
+              255,
+              (r * pct).round().clamp(0, 255),
+              (g * pct).round().clamp(0, 255),
+              (b * pct).round().clamp(0, 255),
+            ))
+        .toList();
   }
 
   /// Returns the effective WLED effect ID. When effect 0 (Solid) is selected
   /// with multiple palette colors, substitutes effect 83 (Solid Pattern)
   /// which distributes colors in repeating blocks using `grp`.
+  /// Architectural patterns keep effect 0 — their spacing comes from grp/spc,
+  /// not from multi-color distribution.
   int _effectiveEffectId(int selectedId) {
-    if (selectedId == 0 && _paletteColors.length > 1) return 83;
+    if (selectedId == 0 && _paletteColors.length > 1 && !_isArchitectural) return 83;
     return selectedId;
   }
 
   void _sendToWled() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 150), () async {
-      final effectId = ref.read(selectorEffectIdProvider);
-      final speed = ref.read(selectorSpeedProvider);
-      final intensity = ref.read(selectorIntensityProvider);
-      final colorGroup = ref.read(selectorColorGroupProvider);
       final demoMode = ref.read(demoModeProvider);
-
       if (demoMode) return;
 
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
 
-      // Build WLED payload
-      final cols = _paletteColors
-          .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-          .toList();
-      if (cols.isEmpty) {
-        cols.add(rgbToRgbw(255, 255, 255));
+      final colorGroup = ref.read(selectorColorGroupProvider);
+      final spacing = ref.read(selectorSpacingProvider);
+
+      // For brightness gradients, derive colors and effect from gradient state
+      final List<List<int>> cols;
+      final int fxId;
+      final int speed;
+      if (_isBrightnessGradient) {
+        final presetIdx = ref.read(selectorGradientPresetProvider);
+        final breathing = ref.read(selectorBreathingProvider);
+        final gradColors = _gradientColorsForPreset(presetIdx);
+        cols = PatternRepository.colorsToWledCol(gradColors);
+        fxId = breathing ? 2 : 83;
+        speed = breathing ? 100 : 0;
+      } else {
+        final effectId = ref.read(selectorEffectIdProvider);
+        cols = _paletteColors
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+            .toList();
+        if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+        fxId = _effectiveEffectId(effectId);
+        speed = ref.read(selectorSpeedProvider);
       }
 
       var payload = <String, dynamic>{
@@ -96,11 +345,18 @@ class _ColorwayEffectSelectorPageState
         'bri': 255,
         'seg': [
           {
-            'fx': _effectiveEffectId(effectId),
+            'fx': fxId,
             'sx': speed,
-            'ix': intensity,
-            'pal': 5, // "Colors Only" palette
+            'ix': ref.read(selectorIntensityProvider),
+            // Palette by effect color-behavior, NOT a blanket pal:5 — palette-
+            // driven effects (Rainbow, Colorwaves, Aurora, Plasma…) sweep a
+            // gradient of the USER's colors (pal:4); col-based effects keep
+            // discrete user colors ("Colors Only", pal:5). Single source of
+            // truth in WledEffectsCatalog; also enforced at the apply chokepoint
+            // (normalizeWledPayload) for stored/legacy payloads.
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
             'grp': colorGroup,
+            'spc': spacing,
             'col': cols,
           }
         ]
@@ -108,32 +364,57 @@ class _ColorwayEffectSelectorPageState
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      if (channels.isEmpty) {
+        debugPrint('ColorwayEffectSelector preview apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
 
       await repo.applyJson(payload);
     });
   }
 
   Future<void> _applyPattern() async {
-    final effectId = ref.read(selectorEffectIdProvider);
-    final speed = ref.read(selectorSpeedProvider);
-    final intensity = ref.read(selectorIntensityProvider);
     final colorGroup = ref.read(selectorColorGroupProvider);
+    final spacing = ref.read(selectorSpacingProvider);
+    final intensity = ref.read(selectorIntensityProvider);
 
-    final effectName = WledEffectsCatalog.getName(effectId);
-    final notifier = ref.read(wledStateProvider.notifier);
+    // Resolve effect, speed, and colors depending on pattern type
+    final int fxId;
+    final int speed;
+    final List<Color> previewColors;
+    final String effectName;
+    if (_isBrightnessGradient) {
+      final breathing = ref.read(selectorBreathingProvider);
+      final presetIdx = ref.read(selectorGradientPresetProvider);
+      previewColors = _gradientColorsForPreset(presetIdx);
+      fxId = breathing ? 2 : 83;
+      speed = breathing ? 100 : 0;
+      effectName = breathing ? 'Breathing' : 'Static';
+    } else {
+      final effectId = ref.read(selectorEffectIdProvider);
+      previewColors = _paletteColors;
+      fxId = _effectiveEffectId(effectId);
+      speed = ref.read(selectorSpeedProvider);
+      effectName = WledEffectsCatalog.getName(effectId);
+    }
+
     final currentState = ref.read(wledStateProvider);
     bool appliedToDevice = false;
 
     // Try to send to device
     final repo = ref.read(wledRepositoryProvider);
     if (repo != null) {
-      final cols = _paletteColors
-          .take(3)
-          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-          .toList();
-      if (cols.isEmpty) {
-        cols.add(rgbToRgbw(255, 255, 255));
+      final List<List<int>> cols;
+      if (_isBrightnessGradient) {
+        cols = PatternRepository.colorsToWledCol(previewColors);
+      } else {
+        final raw = previewColors
+            .take(3)
+            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+            .toList();
+        if (raw.isEmpty) raw.add(rgbToRgbw(255, 255, 255));
+        cols = raw;
       }
 
       var payload = <String, dynamic>{
@@ -141,42 +422,134 @@ class _ColorwayEffectSelectorPageState
         'bri': 255,
         'seg': [
           {
-            'fx': _effectiveEffectId(effectId),
+            'fx': fxId,
             'sx': speed,
             'ix': intensity,
-            'pal': 5,
+            // Palette by effect color-behavior (see _sendToWled). Keeps the
+            // payload persisted to Game Day saveDesign correct at rest.
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
             'grp': colorGroup,
+            'spc': spacing,
             'col': cols,
           }
         ]
       };
 
-      // Apply channel filter so all targeted segments receive the pattern
-      final channels = ref.read(effectiveChannelIdsProvider);
-      debugPrint('🎯 Apply pattern: effectiveChannels=$channels');
-      if (channels.isNotEmpty) {
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      } else {
-        debugPrint('⚠️ Apply pattern: No channels found — payload goes to default segment only');
+      // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
+      // preview HAS been applying to the lights on each adjustment; committing
+      // "Set design" must (1) hand the chosen design's RAW payload back to the
+      // caller for the schedule to store, and (2) RESTORE the pre-preview look
+      // — setting a design for a SCHEDULE must not leave it applied now. Do NOT
+      // apply the selection to the lights and do NOT persist to Game Day.
+      // Returned shape mirrors the legacy _PatternPickerSheet's PatternSelection.
+      if (widget.onDesignSelected != null) {
+        final selection = LibraryDesignSelection(
+          id: widget.paletteNode.id,
+          name: '${widget.paletteNode.name} - $effectName',
+          wledPayload: payload,
+        );
+        // Undo the preview via the same applyJson mechanism (see
+        // _restoreCapturedLook). Await so the restore write lands before the
+        // callback tears down the picker stack. A failed restore is benign and
+        // self-correcting — it must NOT lose the user's selection, so we hand
+        // back the design regardless.
+        await _restoreCapturedLook();
+        if (!mounted) return;
+        widget.onDesignSelected!(selection);
+        return;
       }
 
+      // Apply channel filter so all targeted segments receive the pattern
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isEmpty) {
+        debugPrint('ColorwayEffectSelector apply: skip (U1 gate)');
+        return;
+      }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+
       try {
-        debugPrint('📤 Apply pattern payload: $payload');
         await repo.applyJson(payload);
         appliedToDevice = currentState.connected;
       } catch (e) {
         debugPrint('Pattern apply failed (device offline?): $e');
       }
+
+      // Game Day persistence — when teamSlug is set, this selector is
+      // operating as a Game Day design picker, so persist the choice
+      // to the team's GameDayAutopilotConfig via the existing
+      // saveDesign provider method. The displayed design name matches
+      // the local-preview label used below ("<palette> - <effect>") so
+      // the Game Day card label is consistent with what the user just
+      // saw committed.
+      if (widget.teamSlug != null) {
+        try {
+          final designName = '${widget.paletteNode.name} - $effectName';
+          await ref
+              .read(gameDayAutopilotNotifierProvider.notifier)
+              .saveDesign(
+                teamSlug: widget.teamSlug!,
+                designName: designName,
+                wledPayload: payload,
+                effectId: fxId,
+                speed: speed,
+                intensity: intensity,
+                brightness: (payload['bri'] as num?)?.toInt() ?? 200,
+              );
+        } catch (e, st) {
+          // A failed save must LOOK failed — persisting the design IS the
+          // point of the Game Day picker's Apply (BUG-GD-PICKER-1 item 4).
+          // Surface the error instead of swallowing it, and skip the success
+          // snackbar / preview-sync below so the UI never implies the design
+          // stuck. Post-fix this path is essentially unreachable (jsonEncode
+          // makes the write succeed); it now fires only on a genuine Firestore
+          // error or a future nested-array regression the sanitizer rejects.
+          debugPrint('[GameDayPicker/Colorway] saveDesign failed: $e\n$st');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  "Applied to your lights, but couldn't save this design "
+                  'for Game Day. Please try again.',
+                ),
+                backgroundColor: Colors.red.shade800,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+      }
     }
 
-    // Always update local preview state so roofline shows on house image
-    notifier.applyLocalPreview(
-      colors: _paletteColors,
-      effectId: effectId,
+    // Always update local preview AND Explore hero from the as-sent payload.
+    // Single chokepoint also arms poll-overwrite suppression so the home
+    // dashboard preview doesn't snap back to the device's (lossy) echo.
+    ref.read(wledStateProvider.notifier).applyPreviewSync(
+      colors: previewColors,
+      effectId: fxId,
       speed: speed,
       intensity: intensity,
       effectName: '${widget.paletteNode.name} - $effectName',
+      colorGroupSize: colorGroup,
+      spacing: spacing,
     );
+
+    // Write the Now Playing label so displayPatternNameProvider's Priority 2
+    // wins over Priority 3 (the WledStateModel.effectName leak above, which
+    // shows "1 On 2 Off - Solid" instead of richer context). The leaf node
+    // name alone (e.g. "1 On 2 Off") is uninformative without the parent
+    // kelvin/color folder, so compose "<parent>, <leaf>" — e.g.
+    // "3500K Soft White, 1 On 2 Off". Item #81 (v1.0.1) replaces this with
+    // a structured NowPlayingContext for all Apply paths.
+    final parentId = widget.paletteNode.parentId;
+    LibraryNode? parentNode;
+    if (parentId != null) {
+      parentNode = await ref.read(patternRepositoryProvider).getNodeById(parentId);
+    }
+    final composedLabel = composeColorwayLabel(widget.paletteNode, parentNode);
+    ref
+        .read(activePresetLabelProvider.notifier)
+        .setLabelWithFingerprint(composedLabel, ref.read(wledStateProvider));
 
     // Show feedback with offline awareness
     if (mounted) {
@@ -194,10 +567,13 @@ class _ColorwayEffectSelectorPageState
         ),
       );
     }
+    if (appliedToDevice) maybeShowManualApplyOffWarning(ref);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Keep the ref-free restore cache current for the CANCEL (dispose) path.
+    if (_capturedLook != null) _refreshRestoreCache();
     final effectId = ref.watch(selectorEffectIdProvider);
     final speed = ref.watch(selectorSpeedProvider);
     final intensity = ref.watch(selectorIntensityProvider);
@@ -205,16 +581,25 @@ class _ColorwayEffectSelectorPageState
     final motionFilter = ref.watch(selectorMotionTypeProvider);
     final colorFilter = ref.watch(selectorColorBehaviorProvider);
 
-    final effect = WledEffectsCatalog.getById(effectId);
-    // Show color layout when the effect natively supports it, OR when
-    // Solid (effect 0) is selected with multiple palette colors — the user
-    // needs to choose how colors are distributed (we'll use Solid Pattern
-    // under the hood to make it work).
-    final hasMultipleColors = _paletteColors.length > 1;
-    final showColorLayout =
-        (effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors);
+    // For brightness gradient patterns, derive preview colors from the active preset
+    final gradientPresetIdx = ref.watch(selectorGradientPresetProvider);
+    final breathing = ref.watch(selectorBreathingProvider);
+    final gradientPreviewColors = _isBrightnessGradient
+        ? _gradientColorsForPreset(gradientPresetIdx)
+        : _paletteColors;
+    final gradientPreviewFx = _isBrightnessGradient
+        ? (breathing ? 2 : 83)
+        : effectId;
+    final gradientPreviewSpeed = _isBrightnessGradient
+        ? (breathing ? 100 : 0)
+        : speed;
 
-    // Build filtered effect list
+    final effect = WledEffectsCatalog.getById(effectId);
+    final hasMultipleColors = _paletteColors.length > 1;
+    final showColorLayout = !_isBrightnessGradient &&
+        ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
+
+    // Build filtered effect list (only used for non-gradient patterns)
     final bool showingTopPicks = motionFilter == null && colorFilter == null;
     final List<WledEffect> displayEffects = showingTopPicks
         ? WledEffectsCatalog.topPicks
@@ -223,162 +608,380 @@ class _ColorwayEffectSelectorPageState
             colorBehavior: colorFilter,
           );
 
-    // This widget is embedded in the library browser, so no Scaffold needed
-    return Column(
-      children: [
-        // Channel/Area selector — lets user choose which areas receive the pattern
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: ChannelSelectorBar(),
+    return CustomScrollView(
+      slivers: [
+        // Channel/Area selector
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: ChannelSelectorBar(),
+          ),
         ),
 
         // Apply button row
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              // Color palette preview
-              Expanded(
-                child: Row(
-                  children: [
-                    for (final color in _paletteColors.take(3))
-                      Container(
-                        width: 24,
-                        height: 24,
-                        margin: const EdgeInsets.only(right: 4),
-                        decoration: BoxDecoration(
-                          color: color,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: NexGenPalette.line),
+        SliverToBoxAdapter(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                // Color palette preview
+                Expanded(
+                  child: Row(
+                    children: [
+                      for (final color in gradientPreviewColors.take(3))
+                        Container(
+                          width: 24,
+                          height: 24,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: NexGenPalette.line),
+                          ),
                         ),
-                      ),
-                  ],
-                ),
-              ),
-              // Open in full pattern editor
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: IconButton(
-                  onPressed: () {
-                    final effectId = ref.read(selectorEffectIdProvider);
-                    final speed = ref.read(selectorSpeedProvider);
-                    final intensity = ref.read(selectorIntensityProvider);
-                    final pattern = EditablePattern.fromGradientColors(
-                      id: widget.paletteNode.id,
-                      name: widget.paletteNode.name,
-                      colors: _paletteColors,
-                      effectId: effectId,
-                      speed: speed,
-                      intensity: intensity,
-                    );
-                    context.push(AppRoutes.editPattern, extra: pattern);
-                  },
-                  icon: const Icon(Icons.tune, size: 22),
-                  tooltip: 'Open in Pattern Editor',
-                  style: IconButton.styleFrom(
-                    foregroundColor: NexGenPalette.textMedium,
+                    ],
                   ),
                 ),
-              ),
-              // Apply button
-              ElevatedButton.icon(
-                onPressed: _applyPattern,
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text('Apply'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NexGenPalette.cyan,
-                  foregroundColor: NexGenPalette.matteBlack,
-                  minimumSize: const Size(0, 40),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Roofline preview (house image + LED pixel overlay)
-        _buildRooflinePreview(effectId, speed),
-
-        const SizedBox(height: 8),
-
-        // Color layout selector (conditional)
-        if (showColorLayout) _buildColorLayoutSelector(colorGroup),
-
-        // Speed slider
-        _buildSlider(
-          label: 'Speed',
-          value: speed,
-          onChanged: (v) {
-            ref.read(selectorSpeedProvider.notifier).state = v.round();
-            _sendToWled();
-          },
-        ),
-
-        // Intensity slider
-        _buildSlider(
-          label: 'Intensity',
-          value: intensity,
-          onChanged: (v) {
-            ref.read(selectorIntensityProvider.notifier).state = v.round();
-            _sendToWled();
-          },
-        ),
-
-        const SizedBox(height: 8),
-
-        // Motion type filter chips
-        _buildMotionFilterRow(motionFilter),
-
-        const SizedBox(height: 6),
-
-        // Color behavior filter chips
-        _buildColorFilterRow(colorFilter),
-
-        const SizedBox(height: 8),
-
-        // Section header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Text(
-                showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
-                style: TextStyle(
-                  color: NexGenPalette.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              if (!showingTopPicks) ...[
-                const Spacer(),
-                GestureDetector(
-                  onTap: () {
-                    ref.read(selectorMotionTypeProvider.notifier).state = null;
-                    ref.read(selectorColorBehaviorProvider.notifier).state = null;
-                  },
-                  child: Text(
-                    'Clear filters',
-                    style: TextStyle(
-                      color: NexGenPalette.cyan,
-                      fontSize: 11,
+                // Open in full pattern editor (not applicable for gradients)
+                if (!_isBrightnessGradient)
+                  SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: IconButton(
+                      onPressed: () {
+                        final effectId = ref.read(selectorEffectIdProvider);
+                        final speed = ref.read(selectorSpeedProvider);
+                        final intensity = ref.read(selectorIntensityProvider);
+                        final pattern = EditablePattern.fromGradientColors(
+                          id: widget.paletteNode.id,
+                          name: widget.paletteNode.name,
+                          colors: _paletteColors,
+                          effectId: effectId,
+                          speed: speed,
+                          intensity: intensity,
+                        );
+                        context.push(AppRoutes.editPattern, extra: pattern);
+                      },
+                      icon: const Icon(Icons.tune, size: 22),
+                      tooltip: 'Open in Pattern Editor',
+                      style: IconButton.styleFrom(
+                        foregroundColor: NexGenPalette.textMedium,
+                      ),
                     ),
+                  ),
+                // Apply button — in SELECTION mode this commits the choice back
+                // to the caller (the schedule) and restores the pre-preview
+                // look rather than applying now, so it reads "Set design".
+                ElevatedButton.icon(
+                  onPressed: _applyPattern,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: Text(
+                      widget.onDesignSelected != null ? 'Set design' : 'Apply'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: NexGenPalette.matteBlack,
+                    minimumSize: const Size(0, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
 
-        const SizedBox(height: 6),
+        // Roofline preview
+        SliverToBoxAdapter(child: _buildRooflinePreview(gradientPreviewFx, gradientPreviewSpeed)),
 
-        // Effect grid
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+        // ---- Brightness Gradient controls ----
+        if (_isBrightnessGradient) ...[
+          SliverToBoxAdapter(child: _buildGradientPresetSelector(gradientPresetIdx)),
+          const SliverToBoxAdapter(child: SizedBox(height: 4)),
+          SliverToBoxAdapter(child: _buildBandWidthSelector(colorGroup)),
+          const SliverToBoxAdapter(child: SizedBox(height: 4)),
+          SliverToBoxAdapter(child: _buildBreathingToggle(breathing)),
+          SliverPadding(padding: EdgeInsets.only(bottom: navBarTotalHeight(context))),
+        ],
+
+        // ---- Standard effect controls ----
+        if (!_isBrightnessGradient) ...[
+          // Color layout selector (conditional)
+          if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+
+          // Speed slider
+          SliverToBoxAdapter(
+            child: EffectSpeedSlider(
+              rawSpeed: speed,
+              effectId: effectId,
+              onChanged: (raw) {
+                ref.read(selectorSpeedProvider.notifier).state = raw;
+                _sendToWled();
+              },
+            ),
+          ),
+
+          // Intensity slider
+          SliverToBoxAdapter(
+            child: _buildSlider(
+              label: 'Intensity',
+              value: intensity,
+              onChanged: (v) {
+                ref.read(selectorIntensityProvider.notifier).state = v.round();
+                _sendToWled();
+              },
+            ),
+          ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+          // Motion type filter chips
+          SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 6)),
+
+          // Color behavior filter chips
+          SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+          // Section header
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Text(
+                    showingTopPicks ? 'TOP PICKS' : '${displayEffects.length} EFFECTS',
+                    style: TextStyle(
+                      color: NexGenPalette.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  if (!showingTopPicks) ...[
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        ref.read(selectorMotionTypeProvider.notifier).state = null;
+                        ref.read(selectorColorBehaviorProvider.notifier).state = null;
+                      },
+                      child: Text(
+                        'Clear filters',
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 6)),
+
+          // Effect list
+          SliverPadding(
+            padding: EdgeInsets.only(left: 16, right: 16, bottom: navBarTotalHeight(context)),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final effect = displayEffects[index];
+                  final isSelected = effect.id == effectId;
+                  return _buildEffectTile(effect, isSelected);
+                },
+                childCount: displayEffects.length,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Brightness Gradient Controls
+  // ---------------------------------------------------------------------------
+
+  /// CONTROL 1 — Gradient Preset Selector (horizontal pill chips)
+  Widget _buildGradientPresetSelector(int activeIndex) {
+    final presets = PatternRepository.brightnessGradientPresets;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Brightness Pattern',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: List.generate(presets.length, (i) {
+              final preset = presets[i];
+              final isSelected = i == activeIndex;
+              return GestureDetector(
+                onTap: () {
+                  ref.read(selectorGradientPresetProvider.notifier).state = i;
+                  _sendToWled();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                        : NexGenPalette.gunmetal,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    preset.name,
+                    style: TextStyle(
+                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 8),
+          // LED dot preview showing the brightness gradient pattern
+          _buildGradientDotPreview(activeIndex, ref.watch(selectorColorGroupProvider)),
+        ],
+      ),
+    );
+  }
+
+  /// Shows a row of LED dots at varying brightness levels for the active preset.
+  Widget _buildGradientDotPreview(int presetIndex, int bandWidth) {
+    final colors = _gradientColorsForPreset(presetIndex);
+    final dots = <Widget>[];
+    for (int i = 0; i < 18; i++) {
+      final colorIdx = (i ~/ bandWidth) % colors.length;
+      dots.add(Container(
+        width: 14,
+        height: 14,
+        margin: const EdgeInsets.only(right: 2),
+        decoration: BoxDecoration(
+          color: colors[colorIdx],
+          shape: BoxShape.circle,
+          border: Border.all(color: NexGenPalette.line, width: 0.5),
+        ),
+      ));
+    }
+    return Row(
+      children: [
+        Text('Pattern:', style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 11)),
+        const SizedBox(width: 8),
         Expanded(
-          child: _buildEffectGrid(displayEffects, effectId),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: dots),
+          ),
         ),
       ],
+    );
+  }
+
+  /// CONTROL 2 — Band Width Selector (1 LED or 2 LED per brightness step)
+  Widget _buildBandWidthSelector(int activeBandWidth) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'LEDs per Step',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
+          ),
+          const Spacer(),
+          for (final bw in [1, 2]) ...[
+            if (bw == 2) const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                ref.read(selectorColorGroupProvider.notifier).state = bw;
+                _sendToWled();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: activeBandWidth == bw
+                      ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                      : NexGenPalette.gunmetal,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.line,
+                    width: activeBandWidth == bw ? 2 : 1,
+                  ),
+                ),
+                child: Text(
+                  '$bw LED',
+                  style: TextStyle(
+                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.textMedium,
+                    fontSize: 13,
+                    fontWeight: activeBandWidth == bw ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// CONTROL 3 — Breathing Toggle
+  Widget _buildBreathingToggle(bool isBreathing) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'Breathing',
+            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 13),
+          ),
+          const Spacer(),
+          Switch(
+            value: isBreathing,
+            onChanged: (v) {
+              ref.read(selectorBreathingProvider.notifier).state = v;
+              _sendToWled();
+            },
+            activeThumbColor: NexGenPalette.cyan,
+            activeTrackColor: NexGenPalette.cyan.withValues(alpha: 0.3),
+            inactiveThumbColor: NexGenPalette.textSecondary,
+            inactiveTrackColor: NexGenPalette.gunmetal,
+          ),
+        ],
+      ),
     );
   }
 
@@ -437,12 +1040,16 @@ class _ColorwayEffectSelectorPageState
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   return AnimatedRooflineOverlay(
-                    previewColors: _paletteColors,
+                    previewColors: _isBrightnessGradient
+                        ? _gradientColorsForPreset(ref.watch(selectorGradientPresetProvider))
+                        : _paletteColors,
                     previewEffectId: effectId,
                     previewSpeed: speed,
                     forceOn: true,
                     targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
                     useBoxFitCover: true,
+                    colorGroupSize: ref.watch(selectorColorGroupProvider),
+                    spacing: ref.watch(selectorSpacingProvider),
                   );
                 },
               ),
@@ -571,34 +1178,6 @@ class _ColorwayEffectSelectorPageState
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Effect Grid
-  // ---------------------------------------------------------------------------
-
-  Widget _buildEffectGrid(List<WledEffect> effects, int selectedEffectId) {
-    if (effects.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'No effects match these filters',
-            style: TextStyle(color: NexGenPalette.textSecondary),
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.only(left: 16, right: 16, bottom: kBottomNavBarPadding),
-      itemCount: effects.length,
-      itemBuilder: (context, index) {
-        final effect = effects[index];
-        final isSelected = effect.id == selectedEffectId;
-        return _buildEffectTile(effect, isSelected);
-      },
-    );
-  }
-
   Widget _buildEffectTile(WledEffect effect, bool isSelected) {
     // Color behavior badge text
     final badgeText = effect.colorBehavior.shortName;
@@ -612,6 +1191,9 @@ class _ColorwayEffectSelectorPageState
     return InkWell(
       onTap: () {
         ref.read(selectorEffectIdProvider.notifier).state = effect.id;
+        // Reset speed to this effect's profile default for best experience
+        ref.read(selectorSpeedProvider.notifier).state =
+            getSpeedProfile(effect.id).rawDefault;
         _sendToWled();
       },
       borderRadius: BorderRadius.circular(10),
@@ -762,16 +1344,25 @@ class _ColorwayEffectSelectorPageState
   Widget _buildColorLayoutPreview(int colorGroup) {
     final colors = _paletteColors.take(3).toList();
     if (colors.isEmpty) colors.add(Colors.white);
+    final spc = ref.watch(selectorSpacingProvider);
+    final cycle = colorGroup + spc;
 
     final dots = <Widget>[];
     for (int i = 0; i < 18; i++) {
-      final colorIndex = (i ~/ colorGroup) % colors.length;
+      final bool lit = spc == 0 || cycle == 0 || (i % cycle) < colorGroup;
+      final Color dotColor;
+      if (lit) {
+        final colorIndex = (i ~/ colorGroup) % colors.length;
+        dotColor = colors[colorIndex];
+      } else {
+        dotColor = colors.first.withValues(alpha: 0.10);
+      }
       dots.add(Container(
         width: 14,
         height: 14,
         margin: const EdgeInsets.only(right: 2),
         decoration: BoxDecoration(
-          color: colors[colorIndex],
+          color: dotColor,
           shape: BoxShape.circle,
           border: Border.all(
             color: NexGenPalette.line,

@@ -10,9 +10,7 @@ import 'package:nexgen_command/models/user_model.dart';
 /// - Brightness limits during late hours
 /// - Vibe level restrictions
 class HoaComplianceService {
-  final Ref _ref;
-
-  HoaComplianceService(this._ref);
+  HoaComplianceService();
 
   /// Check if a light change is allowed at the given time.
   ///
@@ -294,5 +292,5 @@ class HoaComplianceStatus {
 
 /// Provider for the HOA compliance service.
 final hoaComplianceServiceProvider = Provider<HoaComplianceService>(
-  (ref) => HoaComplianceService(ref),
+  (ref) => HoaComplianceService(),
 );

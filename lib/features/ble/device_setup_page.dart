@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/features/ble/provisioning_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:go_router/go_router.dart';
@@ -13,9 +15,9 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:network_info_plus/network_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
@@ -35,8 +37,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   bool _connected = false;
 
   BluetoothDevice? _device;
-  BluetoothCharacteristic? _improvChar;
-  BluetoothCharacteristic? _improvResultChar; // Optional: RPC Result characteristic
   StreamSubscription<List<int>>? _notifySub;
 
   // Provisioning form state
@@ -75,6 +75,8 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
 
   /// Verify the current user has permission to add new controllers.
   /// Only primary users and installers can pair new devices.
+  /// Anonymous users are always allowed through — they entered via the
+  /// installer PIN flow and have already been authenticated.
   Future<void> _checkPairingPermission() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -86,6 +88,13 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       }
       return;
     }
+
+    // If there's an active installer session (the user authenticated via
+    // the staff PIN flow), they're a verified installer regardless of
+    // what their Firestore user doc says. This covers both anonymous
+    // users (no doc at all) and real users whose doc has a non-installer
+    // role (e.g. 'unlinked').
+    if (ref.read(installerModeActiveProvider)) return;
 
     try {
       final userDoc = await FirebaseFirestore.instance
@@ -126,8 +135,69 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     }
   }
 
+  /// Request the platform-specific runtime Bluetooth permissions
+  /// required for BLE scanning. Android 12+ needs BLUETOOTH_SCAN +
+  /// BLUETOOTH_CONNECT (separate from the legacy BLUETOOTH/
+  /// BLUETOOTH_ADMIN flags declared in the manifest for ≤ API 30).
+  /// iOS 13+ needs Permission.bluetooth. Returns true only if every
+  /// required permission is granted.
+  Future<bool> _ensureBluetoothPermissions() async {
+    try {
+      final List<Permission> required;
+      if (Platform.isAndroid) {
+        required = [
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+        ];
+      } else if (Platform.isIOS) {
+        required = [Permission.bluetooth];
+      } else {
+        return true;
+      }
+
+      // Check current statuses first to avoid re-prompting if already granted.
+      final Map<Permission, PermissionStatus> statuses = {};
+      for (final p in required) {
+        statuses[p] = await p.status;
+      }
+      final missing = statuses.entries
+          .where((e) => !e.value.isGranted)
+          .map((e) => e.key)
+          .toList();
+
+      if (missing.isEmpty) return true;
+
+      final results = await missing.request();
+      return results.values.every((s) => s.isGranted);
+    } catch (e) {
+      debugPrint('Bluetooth permission check failed: $e');
+      return false;
+    }
+  }
+
   Future<void> _startScan() async {
     try {
+      // Request runtime Bluetooth permissions BEFORE attempting to scan.
+      // On Android 12+ FlutterBluePlus.startScan silently fails (no
+      // throw, no results) if BLUETOOTH_SCAN/BLUETOOTH_CONNECT haven't
+      // been granted at runtime. The welcome wizard does not request
+      // these, so the installer flow that drops directly into this
+      // screen would otherwise hit a black hole at the customer's
+      // house. iOS requires Permission.bluetooth on iOS 13+.
+      if (!kIsWeb && !kSimulationMode) {
+        final granted = await _ensureBluetoothPermissions();
+        if (!granted) {
+          if (mounted) {
+            setState(() {
+              _isScanning = false;
+              _statusText =
+                  'Bluetooth permission denied. Open Settings → Apps → Lumina → Permissions to enable Nearby devices, then return here.';
+            });
+          }
+          return;
+        }
+      }
+
       setState(() => _isScanning = true);
       await FlutterBluePlus.stopScan();
       // Filter by the Improv service UUID; some devices mask it, so we will also apply a name fallback in onData.
@@ -227,20 +297,19 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
           }
         }
         // Fallback: pick first writable as command
-        writeChar ??= improvService.characteristics.firstWhere(
-          (c) => (c.properties.write || c.properties.writeWithoutResponse),
-          orElse: () => improvService.characteristics.first,
-        );
+        if (writeChar == null && improvService.characteristics.isNotEmpty) {
+          writeChar = improvService.characteristics.firstWhere(
+            (c) => (c.properties.write || c.properties.writeWithoutResponse),
+            orElse: () => improvService.characteristics.first,
+          );
+        }
 
         _device = device;
-        _improvChar = writeChar;
-        _improvResultChar = resultChar;
       }
 
       if (!mounted) return;
       if (kIsWeb || kSimulationMode) {
         _device = device;
-        _improvChar = null; // no real BLE on web
       }
       setState(() {
         _connected = true;
@@ -352,20 +421,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     }
   }
 
-  // Attempt to read optional RPC Result characteristic for error code diagnostics
-  Future<void> _readRpcResult() async {
-    final c = _improvResultChar;
-    if (c == null || kIsWeb || kSimulationMode) return;
-    try {
-      final value = await c.read();
-      if (value.isEmpty) return;
-      final code = value.first;
-      debugPrint('Improv RPC Result code: 0x${code.toRadixString(16)} (len=${value.length})');
-    } catch (e) {
-      debugPrint('Failed to read RPC Result characteristic: $e');
-    }
-  }
-
   Future<void> _loadCurrentWifiSsid() async {
     try {
       // On mobile, reading SSID requires location permission.
@@ -376,8 +431,12 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       if (perm == LocationPermission.deniedForever) {
         debugPrint('Location permission permanently denied; cannot read SSID');
       }
-      final info = NetworkInfo();
-      final ssid = await info.getWifiName();
+      // Route through ConnectivityService.getCurrentSsid so the iOS
+      // Core Location warm-up applies here too — without it,
+      // NEHotspotNetwork.fetchCurrent returns nil on iOS 14+ even with
+      // permissions granted (same root cause as remote_access_screen).
+      final ssid =
+          await ref.read(connectivityServiceProvider).getCurrentSsid();
       if (!mounted) return;
       setState(() => _currentSsid = ssid);
     } catch (e) {

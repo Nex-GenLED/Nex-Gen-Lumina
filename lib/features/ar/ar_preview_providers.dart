@@ -1,12 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/features/wled/effect_database.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
 import 'package:nexgen_command/models/roofline_mask.dart';
+import 'package:nexgen_command/models/roofline_segment.dart';
 
 /// Provider for the user's roofline mask configuration.
 /// Returns the mask from the user's profile, or null if not set.
+///
+/// In demo mode, synthesizes a mask from the first demo segment's points
+/// so legacy consumers (AnimatedRooflineOverlay fallback path) render
+/// correctly without an authenticated user profile.
 final rooflineMaskProvider = Provider<RooflineMask?>((ref) {
+  // DEMO MODE: synthesize a mask from the first demo segment's points.
+  final isDemo = ref.watch(demoExperienceActiveProvider);
+  if (isDemo) {
+    final demoConfig = ref.watch(demoRooflineConfigProvider);
+    if (demoConfig == null || demoConfig.segments.isEmpty) {
+      return null;
+    }
+    RooflineSegment firstWithPoints;
+    try {
+      firstWithPoints =
+          demoConfig.segments.firstWhere((s) => s.points.length >= 2);
+    } catch (_) {
+      return null;
+    }
+    return RooflineMask(
+      points: firstWithPoints.points,
+      isManuallyDrawn: true,
+    );
+  }
+
+  // PRODUCTION: read from user profile.
   final profile = ref.watch(currentUserProfileProvider).maybeWhen(
     data: (u) => u,
     orElse: () => null,
@@ -62,106 +90,6 @@ final hasCustomHouseImageProvider = Provider<bool>((ref) {
   return housePhotoUrl != null && housePhotoUrl.isNotEmpty;
 });
 
-/// State for AR preview mode (used in Lumina chat)
-class ARPreviewState {
-  final List<Color> colors;
-  final int effectId;
-  final int speed;
-  final int intensity;
-  final bool isActive;
-
-  const ARPreviewState({
-    this.colors = const [],
-    this.effectId = 0,
-    this.speed = 128,
-    this.intensity = 128,
-    this.isActive = false,
-  });
-
-  ARPreviewState copyWith({
-    List<Color>? colors,
-    int? effectId,
-    int? speed,
-    int? intensity,
-    bool? isActive,
-  }) {
-    return ARPreviewState(
-      colors: colors ?? this.colors,
-      effectId: effectId ?? this.effectId,
-      speed: speed ?? this.speed,
-      intensity: intensity ?? this.intensity,
-      isActive: isActive ?? this.isActive,
-    );
-  }
-
-  static const ARPreviewState inactive = ARPreviewState();
-}
-
-/// Notifier for managing AR preview state
-class ARPreviewNotifier extends Notifier<ARPreviewState> {
-  @override
-  ARPreviewState build() => ARPreviewState.inactive;
-
-  /// Start previewing a pattern
-  void startPreview({
-    required List<Color> colors,
-    int effectId = 0,
-    int speed = 128,
-    int intensity = 128,
-  }) {
-    state = ARPreviewState(
-      colors: colors,
-      effectId: effectId,
-      speed: speed,
-      intensity: intensity,
-      isActive: true,
-    );
-  }
-
-  /// Update preview colors
-  void updateColors(List<Color> colors) {
-    state = state.copyWith(colors: colors);
-  }
-
-  /// Update preview effect
-  void updateEffect(int effectId, {int? speed, int? intensity}) {
-    state = state.copyWith(
-      effectId: effectId,
-      speed: speed,
-      intensity: intensity,
-    );
-  }
-
-  /// Stop preview mode
-  void stopPreview() {
-    state = ARPreviewState.inactive;
-  }
-}
-
-/// Provider for AR preview state (used when Lumina suggests patterns)
-final arPreviewProvider = NotifierProvider<ARPreviewNotifier, ARPreviewState>(() {
-  return ARPreviewNotifier();
-});
-
-/// Convenience provider to check if preview mode is active
-final isPreviewModeProvider = Provider<bool>((ref) {
-  return ref.watch(arPreviewProvider).isActive;
-});
-
-/// Provider for current preview colors (or null if not in preview mode)
-final previewColorsProvider = Provider<List<Color>?>((ref) {
-  final state = ref.watch(arPreviewProvider);
-  if (!state.isActive) return null;
-  return state.colors;
-});
-
-/// Provider for current preview effect ID (or null if not in preview mode)
-final previewEffectIdProvider = Provider<int?>((ref) {
-  final state = ref.watch(arPreviewProvider);
-  if (!state.isActive) return null;
-  return state.effectId;
-});
-
 /// Effect categories for determining animation style
 enum EffectCategory {
   solid,      // No animation, static color
@@ -178,36 +106,58 @@ enum EffectCategory {
   morphing,   // Morphing/color-shifting
 }
 
-/// Helper to categorize WLED effects by consulting EffectDatabase.
+/// Helper to categorize WLED effects for preview rendering.
+///
+/// Routes through [WledEffectsCatalog] — the single authoritative
+/// effect-id → category map shared by every preview surface (#6). This
+/// previously consulted the divergent `EffectDatabase`, whose id space
+/// disagreed with canonical WLED (e.g. id 37 = "Candle"/flickering there vs
+/// "Chase 2" in WLED), which made chases mis-render as flame on the roofline.
+/// Now the roofline, the tile preview, the theme-selection strip, and the
+/// chat strip all derive their render category from the same catalog category.
 EffectCategory categorizeEffect(int effectId) {
-  final meta = EffectDatabase.getEffect(effectId);
-  if (meta == null) return EffectCategory.chase;
+  final effect = WledEffectsCatalog.getById(effectId);
+  if (effect == null) return EffectCategory.chase;
 
-  // Effects that override user colors get the rainbow renderer
-  if (!meta.respectsColors) return EffectCategory.rainbow;
-
-  switch (meta.motionType) {
-    case MotionType.static:
+  switch (effect.category) {
+    case 'Basic':
+      // Basic spans static, breathe, and fade variants — sub-classify by id
+      // to mirror the tile preview (effect_preview_widget.getPreviewType).
+      if (effectId == 2 ||
+          effectId == 12 ||
+          effectId == 18 ||
+          effectId == 56 ||
+          effectId == 86 ||
+          effectId == 100) {
+        return EffectCategory.breathe;
+      }
       return EffectCategory.solid;
-    case MotionType.pulsing:
-      return EffectCategory.breathe;
-    case MotionType.flowing:
+    case 'Wipe':
+    case 'Ripple':
+    case 'Ambient':
       return EffectCategory.wave;
-    case MotionType.chasing:
+    case 'Chase':
+    case 'Meteor':
       return EffectCategory.chase;
-    case MotionType.twinkling:
-      return EffectCategory.twinkle;
-    case MotionType.flickering:
-      return EffectCategory.fire;
-    case MotionType.explosive:
-      return EffectCategory.explosive;
-    case MotionType.scanning:
+    case 'Scanner':
       return EffectCategory.scanning;
-    case MotionType.dripping:
-      return EffectCategory.dripping;
-    case MotionType.bouncing:
+    case 'Sparkle':
+    case 'Holiday':
+      return EffectCategory.twinkle;
+    case 'Fire':
+      return EffectCategory.fire;
+    case 'Fireworks':
+      return EffectCategory.explosive;
+    case 'Rainbow':
+      return EffectCategory.rainbow;
+    case 'Strobe':
+      return EffectCategory.breathe;
+    case 'Game':
       return EffectCategory.bouncing;
-    case MotionType.morphing:
+    case 'Noise':
+    case '2D':
+    case 'Audio':
+    default:
       return EffectCategory.morphing;
   }
 }

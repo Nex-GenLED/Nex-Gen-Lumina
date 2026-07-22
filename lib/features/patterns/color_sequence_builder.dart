@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/wled/widgets/neon_color_wheel.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -99,6 +100,10 @@ class _ColorSequenceBuilderState extends State<ColorSequenceBuilder> {
       context: context,
       backgroundColor: NexGenPalette.gunmetal90,
       isScrollControlled: true,
+      // #9: disable sheet drag-to-dismiss so a downward color-wheel drag isn't
+      // partially claimed by the sheet's pull-to-close recognizer. Cancel button
+      // + tap-outside still dismiss.
+      enableDrag: false,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _ColorPickerSheet(initialColor: initialColor),
     );
@@ -190,10 +195,9 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + navBarTotalHeight(context)),
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // Handle bar
@@ -316,7 +320,6 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
             ),
           ],
         ),
-      ),
     );
   }
 }

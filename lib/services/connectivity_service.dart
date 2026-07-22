@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 
@@ -13,9 +17,20 @@ class ConnectivityService {
   DateTime? _cacheTime;
   static const _cacheDuration = Duration(seconds: 30);
 
+  /// Last reason getCurrentSsid returned null / failed. The UI reads this
+  /// after a null result to surface the specific failure to the user — Tyler
+  /// has no Mac/Xcode console, so the reason MUST be visible in-app. Set on
+  /// every branch of getCurrentSsid (including success → null). Stable until
+  /// the next getCurrentSsid call.
+  String? _lastSsidFailureReason;
+  String? get lastSsidFailureReason => _lastSsidFailureReason;
+
   /// Get the current WiFi SSID (network name).
   /// Returns null if not connected to WiFi or permission denied.
   Future<String?> getCurrentSsid() async {
+    // Reset reason at the top of every call — stale values would lie.
+    _lastSsidFailureReason = null;
+
     // Return cached value if still valid
     if (_cachedSsid != null && _cacheTime != null) {
       if (DateTime.now().difference(_cacheTime!) < _cacheDuration) {
@@ -23,20 +38,113 @@ class ConnectivityService {
       }
     }
 
+    // iOS-only: CNCopyCurrentNetworkInfo (the API network_info_plus uses
+    // under the hood on iOS 14+) returns nil unless Core Location has an
+    // active session — even with the wifi-info entitlement AND location
+    // permission granted. permission_handler only READS / GRANTS the
+    // permission; it doesn't activate a CLLocationManager session.
+    //
+    // Three layers can each independently break SSID; the bare network_info
+    // null result can't tell them apart. Capture each so the UI can name
+    // the actual layer:
+    //   • LAYER 2 (permission) — Geolocator.checkPermission() at call time.
+    //     Catches the "Settings shows granted but runtime says denied" gap.
+    //   • LAYER 3 (Core Location dormant) — getLastKnownPosition then
+    //     getCurrentPosition. If neither yields a fix, Core Location is
+    //     dormant and CNCopyCurrentNetworkInfo will return nil regardless
+    //     of entitlement.
+    //   • LAYER 1 (entitlement) — only suspected when layers 2 + 3 are clean
+    //     AND getWifiName still returns null. That's the
+    //     entitlement-not-in-binary signal.
+    String? iosWarmupReason;
+    if (Platform.isIOS) {
+      // Layer 2: runtime permission state (not just Settings — we want what
+      // the Geolocator plugin sees at this instant).
+      final perm = await Geolocator.checkPermission();
+      debugPrint('SSID: checkPermission -> ${perm.name}');
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        iosWarmupReason = 'location_permission_${perm.name}';
+      }
+
+      // Layer 3: warmup — Core Location must be ACTIVELY in use for
+      // CNCopyCurrentNetworkInfo to return non-nil on iOS 14+. Stage 1 is
+      // the cached fix (instant). Stage 2 is a fresh fix (may time out
+      // indoors). Either succeeding is sufficient.
+      debugPrint('SSID: warmup START');
+      bool warmupOk = false;
+      String? warmupError;
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        debugPrint(
+            'SSID: getLastKnownPosition -> ${last == null ? "null" : "position"}');
+        if (last != null) warmupOk = true;
+      } catch (e) {
+        debugPrint('SSID: getLastKnownPosition threw $e');
+        warmupError = 'last_known:$e';
+      }
+      if (!warmupOk) {
+        try {
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.low,
+              timeLimit: Duration(seconds: 3),
+            ),
+          );
+          debugPrint('SSID: getCurrentPosition -> position');
+          warmupOk = true;
+        } on TimeoutException catch (_) {
+          debugPrint('SSID: getCurrentPosition -> timeout');
+          warmupError = 'current_position:timeout';
+        } catch (e) {
+          debugPrint('SSID: getCurrentPosition -> error:$e');
+          warmupError = 'current_position:$e';
+        }
+      }
+      // Only set the layer-3 signal if layer 2 is clean — don't overwrite
+      // a permission failure with a downstream warmup failure.
+      if (iosWarmupReason == null && !warmupOk) {
+        iosWarmupReason =
+            'corelocation_warmup_failed:${warmupError ?? "unknown"}';
+      }
+    }
+
     try {
       // On some platforms, SSID may include quotes - strip them
       String? ssid = await _networkInfo.getWifiName();
-      if (ssid != null) {
-        // Remove surrounding quotes if present (common on Android)
-        if (ssid.startsWith('"') && ssid.endsWith('"')) {
-          ssid = ssid.substring(1, ssid.length - 1);
+      if (ssid == null) {
+        debugPrint('SSID: getWifiName -> null');
+        // Layer-1 (entitlement) is implicated ONLY when both upstream
+        // layers were healthy. Otherwise propagate the actual upstream
+        // failure so the UI red bar names the real layer.
+        if (Platform.isIOS) {
+          _lastSsidFailureReason =
+              iosWarmupReason ?? 'getwifiname_null_entitlement_suspect';
+        } else {
+          _lastSsidFailureReason = 'getwifiname_null';
         }
+        _cachedSsid = null;
+        _cacheTime = DateTime.now();
+        return null;
       }
+      // Remove surrounding quotes if present (common on Android)
+      if (ssid.startsWith('"') && ssid.endsWith('"')) {
+        ssid = ssid.substring(1, ssid.length - 1);
+      }
+      if (ssid.isEmpty) {
+        debugPrint('SSID: getWifiName -> empty');
+        _lastSsidFailureReason = 'getwifiname_empty';
+        _cachedSsid = ssid;
+        _cacheTime = DateTime.now();
+        return ssid;
+      }
+      debugPrint('SSID: getWifiName -> "$ssid"');
       _cachedSsid = ssid;
       _cacheTime = DateTime.now();
       return ssid;
     } catch (e) {
-      debugPrint('ConnectivityService: Failed to get WiFi SSID: $e');
+      debugPrint('SSID: getWifiName threw $e');
+      _lastSsidFailureReason = 'getwifiname_exception:$e';
       return null;
     }
   }
@@ -67,27 +175,36 @@ class ConnectivityService {
 
     final currentSsid = await getCurrentSsid();
 
-    // If we can't determine current SSID, assume local to avoid breaking
-    // existing functionality
+    // If we can't determine current SSID (e.g. Android location permission
+    // not granted), assume LOCAL. Direct HTTP to the controller is the
+    // primary control path — defaulting to remote when SSID is unavailable
+    // breaks local control for users without location permission.
     if (currentSsid == null || currentSsid.isEmpty) {
       debugPrint('ConnectivityService: Cannot determine current SSID, assuming local');
       return true;
     }
 
     // SECURITY: Compare using hashed SSID
-    final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
-    debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
-    return isHome;
+    try {
+      final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
+      debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
+      return isHome;
+    } catch (e) {
+      debugPrint('ConnectivityService: SSID comparison failed ($e), assuming local');
+      return true;
+    }
   }
 
-  /// Check if device appears to have any network connectivity.
-  /// Note: This checks WiFi specifically, not cellular.
-  Future<bool> hasWifiConnection() async {
+  /// Check the device's active connection type using connectivity_plus.
+  ///
+  /// Returns the set of active connectivity results (wifi, mobile, etc.)
+  /// so callers can distinguish WiFi from cellular.
+  Future<List<ConnectivityResult>> getConnectivityTypes() async {
     try {
-      final ip = await _networkInfo.getWifiIP();
-      return ip != null && ip.isNotEmpty && ip != '0.0.0.0';
+      return await Connectivity().checkConnectivity();
     } catch (e) {
-      return false;
+      debugPrint('ConnectivityService: checkConnectivity failed ($e)');
+      return [];
     }
   }
 
@@ -98,16 +215,57 @@ class ConnectivityService {
   }
 
   /// Stream that emits connectivity status changes.
-  /// Polls every 10 seconds to detect network changes.
-  Stream<ConnectivityStatus> watchConnectivity(String? homeSsid) {
-    return Stream.periodic(const Duration(seconds: 10), (_) async {
-      final hasWifi = await hasWifiConnection();
-      if (!hasWifi) {
-        return ConnectivityStatus.offline;
-      }
-      final isHome = await isOnHomeNetwork(homeSsid);
-      return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
-    }).asyncMap((future) => future);
+  /// Emits immediately on subscription, then polls every 10 seconds.
+  Stream<ConnectivityStatus> watchConnectivity(String? homeSsid) async* {
+    // Emit immediately so callers don't wait 10s for the first value.
+    yield await _checkConnectivity(homeSsid);
+
+    // Then poll every 10 seconds.
+    await for (final status in Stream.periodic(
+      const Duration(seconds: 10),
+      (_) => _checkConnectivity(homeSsid),
+    ).asyncMap((future) => future)) {
+      yield status;
+    }
+  }
+
+  /// Single connectivity check (shared by initial + periodic emissions).
+  ///
+  /// Uses connectivity_plus to distinguish WiFi from cellular:
+  /// - No connection → offline
+  /// - Cellular (no WiFi) → remote (cellular is never the home LAN)
+  /// - WiFi → check home SSID hash to decide local vs remote
+  Future<ConnectivityStatus> _checkConnectivity(String? homeSsid) async {
+    final sw = Stopwatch()..start();
+    final types = await getConnectivityTypes();
+
+    // No active connection at all
+    if (types.isEmpty || types.every((t) => t == ConnectivityResult.none)) {
+      sw.stop();
+      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=N/A (no connection), '
+          'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+      return ConnectivityStatus.offline;
+    }
+
+    final hasWifi = types.contains(ConnectivityResult.wifi);
+
+    // Cellular / mobile data only (no WiFi) → always remote
+    if (!hasWifi) {
+      sw.stop();
+      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=false (cellular only), '
+          'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+      return ConnectivityStatus.remote;
+    }
+
+    // WiFi is active → check if it's the home network
+    final isHome = await isOnHomeNetwork(homeSsid);
+    sw.stop();
+    final checkMethod = (homeSsid == null || homeSsid.isEmpty)
+        ? 'no-hash-configured(assume-local)'
+        : 'ssid-hash-compare';
+    debugPrint('🔍 BridgeRouter: isOnHomeNetwork=$isHome, '
+        'source=$checkMethod, age=${sw.elapsedMilliseconds}ms');
+    return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
   }
 }
 

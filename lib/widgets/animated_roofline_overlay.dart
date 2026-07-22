@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
 import 'package:nexgen_command/widgets/roofline_light_painter.dart';
@@ -9,7 +10,12 @@ import 'package:nexgen_command/widgets/roofline_light_painter.dart';
 ///
 /// This widget manages its own animation controller and responds to:
 /// - Live WLED device state (colors, effects, brightness)
-/// - Preview state from Lumina AI suggestions
+/// - Per-instance preview overrides via the `previewColors` /
+///   `previewEffectId` / `previewSpeed` constructor parameters.
+///
+/// When a multi-segment RooflineConfiguration exists, renders each segment
+/// independently with per-channel color/effect support. Falls back to the
+/// single-path RooflineMask for legacy profiles.
 class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Optional override colors for preview mode
   final List<Color>? previewColors;
@@ -47,6 +53,9 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Number of consecutive LEDs per color group in repeating patterns.
   final int colorGroupSize;
 
+  /// Number of dark (off) LEDs after each lit group.
+  final int spacing;
+
   const AnimatedRooflineOverlay({
     super.key,
     this.previewColors,
@@ -60,6 +69,7 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
     this.useBoxFitCover = false,
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
+    this.spacing = 0,
   });
 
   @override
@@ -90,8 +100,11 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     // Get live WLED state
     final wledState = ref.watch(wledStateProvider);
 
-    // Get AR preview state (from Lumina AI)
-    final arPreview = ref.watch(arPreviewProvider);
+    // Get multi-segment configuration if available
+    final rooflineConfig = ref.watch(currentRooflineConfigProvider).valueOrNull;
+    final hasSegments = rooflineConfig != null &&
+        rooflineConfig.segments.isNotEmpty &&
+        rooflineConfig.segments.any((s) => s.points.length >= 2);
 
     // Determine effective values (preview overrides live state)
     List<Color> effectiveColors;
@@ -99,32 +112,22 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     int effectiveSpeed;
     int effectiveBrightness;
     bool isOn;
+    bool effectiveReverse = false;
 
     if (widget.previewColors != null) {
-      // Widget-level preview override
       effectiveColors = widget.previewColors!;
       effectiveEffectId = widget.previewEffectId ?? 0;
-      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
       final rawSpeed = widget.previewSpeed ?? 128;
       effectiveSpeed = (rawSpeed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? 255;
       isOn = widget.forceOn ?? true;
-    } else if (arPreview.isActive) {
-      // AR preview mode (from Lumina AI)
-      effectiveColors = arPreview.colors;
-      effectiveEffectId = arPreview.effectId;
-      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
-      effectiveSpeed = (arPreview.speed * 0.5).round().clamp(0, 150);
-      effectiveBrightness = widget.brightness ?? 255;
-      isOn = true;
     } else {
-      // Live WLED state
-      effectiveColors = [wledState.color];
+      effectiveColors = wledState.displayColors;
       effectiveEffectId = wledState.effectId;
-      // Significantly reduce speed for smoother preview experience (reduce by 50% and cap at 150)
       effectiveSpeed = (wledState.speed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? wledState.brightness;
       isOn = widget.forceOn ?? wledState.isOn;
+      effectiveReverse = wledState.reverse;
     }
 
     // Get mask from widget or provider
@@ -147,6 +150,20 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
       _controller.stop();
     }
 
+    // Build segment path data for the painter if multi-segment config exists
+    List<SegmentPathData>? segmentPaths;
+    if (hasSegments) {
+      segmentPaths = rooflineConfig.segments
+          .where((s) => s.points.length >= 2)
+          .map((s) => SegmentPathData(
+                points: s.points,
+                channelIndex: s.channelIndex,
+                isConnectedToPrevious: s.isConnectedToPrevious,
+                overrideColor: s.overrideColor,
+              ))
+          .toList();
+    }
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -156,7 +173,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             animationPhase: needsAnimation ? _controller.value : 0.0,
             effectId: effectiveEffectId,
             speed: effectiveSpeed,
-            intensity: 128, // Default intensity
+            intensity: 128,
             mask: mask,
             isOn: isOn,
             brightness: effectiveBrightness,
@@ -165,6 +182,9 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             useBoxFitCover: widget.useBoxFitCover,
             backgroundColor: widget.backgroundColor,
             colorGroupSize: widget.colorGroupSize,
+            spacing: widget.spacing,
+            reverse: effectiveReverse,
+            segmentPaths: segmentPaths,
           ),
           size: Size.infinite,
         );
@@ -196,7 +216,7 @@ class StaticRooflineOverlay extends StatelessWidget {
       painter: RooflineLightPainter(
         colors: colors,
         animationPhase: 0.0,
-        effectId: 0, // Solid
+        effectId: 0,
         mask: mask,
         isOn: true,
         brightness: brightness,

@@ -1,3 +1,16 @@
+import 'dart:ui';
+
+/// Channel colors for visual identification in the trace UI.
+/// channel 0 = cyan, 1 = orange, 2 = purple, 3 = green, 4 = pink, 5 = yellow
+const List<Color> kChannelColors = [
+  Color(0xFF00E5FF), // cyan
+  Color(0xFFFF9800), // orange
+  Color(0xFF9C27B0), // purple
+  Color(0xFF4CAF50), // green
+  Color(0xFFE91E63), // pink
+  Color(0xFFFFEB3B), // yellow
+];
+
 /// Architectural role of a segment for natural language control.
 ///
 /// Allows users to say "light up the peaks" or "chase the eaves"
@@ -517,6 +530,20 @@ class RooflineSegment {
   /// Used for commands like "light up all second story segments"
   final int level;
 
+  /// Normalized 0.0–1.0 coordinates relative to the home photo.
+  /// Defines the spatial path of this segment on the image overlay.
+  /// Empty if this segment has not been traced on a photo yet.
+  final List<Offset> points;
+
+  /// Which WLED/controller channel this segment belongs to (0-based).
+  /// Maps to hardware bus index — channel 0 = bus 0, channel 1 = bus 1, etc.
+  final int channelIndex;
+
+  /// Optional per-segment color override.
+  /// When non-null, this segment renders with this color instead of
+  /// following the channel's active color/pattern.
+  final Color? overrideColor;
+
   const RooflineSegment({
     required this.id,
     required this.name,
@@ -537,6 +564,9 @@ class RooflineSegment {
     this.isProminent = false,
     this.isConnectedToPrevious = true,
     this.level = 1,
+    this.points = const [],
+    this.channelIndex = 0,
+    this.overrideColor,
   });
 
   /// Global pixel index of the last LED in this segment (inclusive)
@@ -638,6 +668,10 @@ class RooflineSegment {
     bool? isProminent,
     bool? isConnectedToPrevious,
     int? level,
+    List<Offset>? points,
+    int? channelIndex,
+    Color? overrideColor,
+    bool clearOverrideColor = false,
   }) {
     return RooflineSegment(
       id: id ?? this.id,
@@ -659,6 +693,9 @@ class RooflineSegment {
       isProminent: isProminent ?? this.isProminent,
       isConnectedToPrevious: isConnectedToPrevious ?? this.isConnectedToPrevious,
       level: level ?? this.level,
+      points: points ?? this.points,
+      channelIndex: channelIndex ?? this.channelIndex,
+      overrideColor: clearOverrideColor ? null : (overrideColor ?? this.overrideColor),
     );
   }
 
@@ -691,6 +728,22 @@ class RooflineSegment {
       isProminent: json['is_prominent'] as bool? ?? false,
       isConnectedToPrevious: json['is_connected_to_previous'] as bool? ?? true,
       level: json['level'] as int? ?? 1,
+      points: (json['points'] as List<dynamic>?)
+              ?.map((p) {
+                if (p is Map<String, dynamic>) {
+                  return Offset(
+                    (p['x'] as num?)?.toDouble() ?? 0.0,
+                    (p['y'] as num?)?.toDouble() ?? 0.0,
+                  );
+                }
+                return Offset.zero;
+              })
+              .toList() ??
+          const [],
+      channelIndex: json['channel_index'] as int? ?? 0,
+      overrideColor: json['override_color'] != null
+          ? Color(json['override_color'] as int)
+          : null,
     );
   }
 
@@ -716,8 +769,16 @@ class RooflineSegment {
       'is_prominent': isProminent,
       'is_connected_to_previous': isConnectedToPrevious,
       'level': level,
+      if (points.isNotEmpty)
+        'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+      'channel_index': channelIndex,
+      if (overrideColor != null) 'override_color': overrideColor!.toARGB32(),
     };
   }
+
+  /// The display color for this segment in the trace UI, based on its channel.
+  Color get channelDisplayColor =>
+      kChannelColors[channelIndex % kChannelColors.length];
 
   @override
   String toString() {
@@ -725,7 +786,8 @@ class RooflineSegment {
         'startPixel: $startPixel, type: ${type.name}, direction: ${direction.name}, '
         'anchors: $anchorPixels, anchorLedCount: $anchorLedCount, '
         'architecturalRole: ${architecturalRole?.name}, location: $location, '
-        'isConnectedToPrevious: $isConnectedToPrevious, level: $level)';
+        'isConnectedToPrevious: $isConnectedToPrevious, level: $level, '
+        'channelIndex: $channelIndex, points: ${points.length})';
   }
 
   @override
@@ -743,7 +805,8 @@ class RooflineSegment {
         other.direction == direction &&
         other.isPrimary == isPrimary &&
         other.isConnectedToPrevious == isConnectedToPrevious &&
-        other.level == level;
+        other.level == level &&
+        other.channelIndex == channelIndex;
   }
 
   @override
@@ -761,6 +824,7 @@ class RooflineSegment {
       isPrimary,
       isConnectedToPrevious,
       level,
+      channelIndex,
     );
   }
 }

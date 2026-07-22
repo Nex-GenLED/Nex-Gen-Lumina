@@ -35,11 +35,11 @@ class DemoProgressBar extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(4),
                   color: isActive
                       ? NexGenPalette.cyan
-                      : NexGenPalette.line.withOpacity(0.3),
+                      : NexGenPalette.line.withValues(alpha: 0.3),
                   boxShadow: isCurrent
                       ? [
                           BoxShadow(
-                            color: NexGenPalette.cyan.withOpacity(0.4),
+                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
                             blurRadius: 8,
                             spreadRadius: 1,
                           ),
@@ -69,7 +69,7 @@ class DemoProgressBar extends ConsumerWidget {
           child: LinearProgressIndicator(
             value: progress,
             minHeight: 4,
-            backgroundColor: NexGenPalette.line.withOpacity(0.2),
+            backgroundColor: NexGenPalette.line.withValues(alpha: 0.2),
             valueColor: const AlwaysStoppedAnimation<Color>(NexGenPalette.cyan),
           ),
         ),
@@ -91,7 +91,7 @@ class DemoProgressIndicator extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal.withOpacity(0.8),
+        color: NexGenPalette.gunmetal.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: NexGenPalette.line),
       ),
@@ -165,7 +165,7 @@ class DemoProgressHeader extends ConsumerWidget {
                     onPressed: onBack,
                     icon: const Icon(Icons.arrow_back_ios, size: 20),
                     style: IconButton.styleFrom(
-                      backgroundColor: NexGenPalette.gunmetal.withOpacity(0.5),
+                      backgroundColor: NexGenPalette.gunmetal.withValues(alpha: 0.5),
                       padding: const EdgeInsets.all(8),
                     ),
                   )

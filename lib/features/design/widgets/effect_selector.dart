@@ -19,9 +19,9 @@ class EffectSelector extends ConsumerWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.03),
+          color: Colors.white.withValues(alpha: 0.03),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
         child: const Center(
           child: Text(
@@ -32,6 +32,10 @@ class EffectSelector extends ConsumerWidget {
       );
     }
 
+    if (design.channels.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     final channel = design.channels.firstWhere(
       (ch) => ch.channelId == selectedChannelId,
       orElse: () => design.channels.first,
@@ -39,9 +43,9 @@ class EffectSelector extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -78,9 +82,9 @@ class EffectSelector extends ConsumerWidget {
                 const SizedBox(height: 8),
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int>(
@@ -198,7 +202,7 @@ class _EffectSlider extends StatelessWidget {
             min: 0,
             max: 255,
             activeColor: color,
-            inactiveColor: Colors.white.withOpacity(0.1),
+            inactiveColor: Colors.white.withValues(alpha: 0.1),
             onChanged: (v) => onChanged(v.round()),
           ),
         ),
@@ -316,7 +320,7 @@ class _QuickActionButton extends StatelessWidget {
       label: Text(label),
       style: OutlinedButton.styleFrom(
         foregroundColor: Colors.white70,
-        side: BorderSide(color: Colors.white.withOpacity(0.2)),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
     );

@@ -1,22 +1,22 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
-import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
-import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 
 /// Full-screen Edit Pattern screen modeled after the native controller app.
 ///
@@ -86,41 +86,72 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     final totalPixels = await repo.getTotalLedCount() ?? 150;
     var payload = _pattern.toWledPayload(totalPixels);
     final channels = ref.read(effectiveChannelIdsProvider);
-    if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-    await repo.applyJson(payload);
+    if (channels.isEmpty) {
+      debugPrint('EditPattern apply: skip (U1 gate)');
+      return;
+    }
+    payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+    final ok = await repo.applyJson(payload);
+    if (!ok || !mounted) return;
+    // Drive the dashboard hero preview and Explore hero from the as-sent
+    // pattern so navigating home shows the new look immediately, without
+    // waiting for the next poll. Also arms poll-overwrite suppression so
+    // the just-applied colors don't snap to the device's lossy echo.
+    ref.read(wledStateProvider.notifier).applyPreviewSync(
+      colors: _pattern.actionColors,
+      effectId: _pattern.effectId,
+      effectName: _pattern.name,
+      speed: _pattern.speed,
+      intensity: _pattern.intensity,
+      brightness: _pattern.brightness,
+      colorGroupSize: _pattern.colorGroupSize,
+    );
   }
 
-  Future<void> _savePattern() async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
+  /// Saves the current pattern as a WLED preset on the physical controller
+  /// (HTTP `psave`, not a firmware change). App-side persistence is handled
+  /// separately by the FavoriteHeartButton (writes to /favorites/, a read
+  /// surface). This intentionally does NOT write to Firestore: the old
+  /// /users/{uid}/patterns/ write had zero readers and produced a
+  /// false-success (#85 W2).
+  Future<void> _saveToDevice() async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No device connected'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+      return;
+    }
 
     final updatedPattern = _pattern.copyWith(name: _nameController.text.trim());
 
     try {
-      await FirebaseFirestore.instance
-          .doc('users/${user.uid}/patterns/${updatedPattern.id}')
-          .set(updatedPattern.toJson(), SetOptions(merge: true));
+      final totalPixels = await repo.getTotalLedCount() ?? 150;
+      final presetId = presetIdForUserPattern(updatedPattern.id);
+      final ok = await repo.savePreset(
+        presetId: presetId,
+        state: updatedPattern.toWledPayload(totalPixels),
+        presetName: updatedPattern.name,
+      );
 
-      // Also save as WLED preset if possible
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        final totalPixels = await repo.getTotalLedCount() ?? 150;
-        await repo.savePreset(
-          presetId: updatedPattern.id.hashCode.abs() % 250 + 1,
-          state: updatedPattern.toWledPayload(totalPixels),
-          presetName: updatedPattern.name,
-        );
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Saved: ${updatedPattern.name}'),
-            backgroundColor: NexGenPalette.gunmetal,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        ok
+            ? SnackBar(
+                content: Text('Saved to device: ${updatedPattern.name}'),
+                backgroundColor: NexGenPalette.gunmetal,
+                duration: const Duration(seconds: 2),
+              )
+            : SnackBar(
+                content: const Text('Failed to save to device'),
+                backgroundColor: Colors.red.shade800,
+              ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -144,9 +175,9 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: _savePattern,
+            onPressed: _saveToDevice,
             child: Text(
-              'SAVE',
+              'SAVE TO DEVICE',
               style: TextStyle(
                 color: NexGenPalette.cyan,
                 fontWeight: FontWeight.w700,
@@ -851,13 +882,13 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   }
 
   Widget _buildSpeedSlider() {
-    return _buildParameterSlider(
-      icon: Icons.bolt,
-      label: 'SPEED',
-      value: _pattern.speed.toDouble(),
-      max: 255,
-      displayValue: '${(_pattern.speed / 255 * 10).round()}',
-      onChanged: (v) => _updatePattern(_pattern.copyWith(speed: v.round())),
+    return EffectSpeedSlider(
+      rawSpeed: _pattern.speed,
+      effectId: _pattern.effectId,
+      initialExtended: getSpeedProfile(_pattern.effectId)
+          .mapRawToSlider(_pattern.speed)
+          .needsExtended,
+      onChanged: (raw) => _updatePattern(_pattern.copyWith(speed: raw)),
     );
   }
 

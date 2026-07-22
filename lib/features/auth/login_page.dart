@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:ui';
 
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -27,14 +29,76 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
+  bool _obscurePassword = true;
+
+  // ── Hidden gestures ────────────────────────────────────────────────────
+  //
+  // Two completely separate invisible 5-tap targets on the login screen.
+  // Both are intentionally unlabeled, no visual feedback during the
+  // sequence, no counter display, no haptics. A casual observer should
+  // see nothing.
+  //
+  // 1. Lumina logo (Icon + LUMINA wordmark) → 5 taps inside a 3-second
+  //    sliding window → navigate to /staff/pin (the unified staff PIN
+  //    screen that handles Corporate / Sales / Installer modes).
+  //
+  // 2. "POWERED BY NEX-GEN" subtitle text → 5 taps with no time window
+  //    → reveal the App Store reviewer button (autofills the reviewer
+  //    test account email). This used to live on the logo; moved here
+  //    so the staff PIN gesture can own the logo unambiguously.
+
   int _logoTapCount = 0;
+  Timer? _logoTapResetTimer;
+  static const Duration _logoTapWindow = Duration(seconds: 3);
+  static const int _logoTapTarget = 5;
+
+  int _subtitleTapCount = 0;
   bool _showReviewerButton = false;
+  static const int _subtitleTapTarget = 5;
 
   @override
   void dispose() {
+    _logoTapResetTimer?.cancel();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Logo tap handler — staff PIN entry gesture ─────────────────────────
+  //
+  // Counts taps on the Lumina logo within a rolling 3-second window. Each
+  // tap resets the timer. After 5 taps inside the window, navigate to the
+  // staff PIN screen and reset the counter. After 3 seconds of no taps,
+  // the counter resets silently.
+
+  void _onLogoTap() {
+    _logoTapCount++;
+    _logoTapResetTimer?.cancel();
+
+    if (_logoTapCount >= _logoTapTarget) {
+      _logoTapCount = 0;
+      context.push(AppRoutes.staffPin);
+      return;
+    }
+
+    _logoTapResetTimer = Timer(_logoTapWindow, () {
+      _logoTapCount = 0;
+    });
+  }
+
+  // ── Subtitle tap handler — App Store reviewer reveal ──────────────────
+  //
+  // Counts taps on the "POWERED BY NEX-GEN" subtitle. Once revealed, the
+  // reviewer button stays visible (no auto-hide) so the App Store
+  // reviewer can use it without re-tapping. No time window — the
+  // reviewer flow doesn't need rate limiting.
+
+  void _onSubtitleTap() {
+    if (_showReviewerButton) return;
+    _subtitleTapCount++;
+    if (_subtitleTapCount >= _subtitleTapTarget) {
+      setState(() => _showReviewerButton = true);
+    }
   }
 
   Future<void> _handleSignIn() async {
@@ -45,6 +109,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _loading = true);
     try {
       await auth.signInWithEmailAndPassword(email, pass);
+      // Reviewer test account: seed the demo profile under the actual Auth
+      // UID so the reviewer lands in a fully configured account. No-op for
+      // any other user, and idempotent on repeat logins.
+      final signedIn = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (ReviewerSeedService.isReviewer(signedIn)) {
+        await ReviewerSeedService.seedForUser(signedIn!);
+      }
       if (!mounted) return;
       context.go(AppRoutes.dashboard);
     } catch (e) {
@@ -231,26 +302,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  GestureDetector(
-                    onTap: () {
-                      _logoTapCount++;
-                      if (_logoTapCount >= 5 && !_showReviewerButton) {
-                        setState(() => _showReviewerButton = true);
-                      }
-                    },
-                    child: const Icon(Icons.hub, size: 60, color: Colors.cyanAccent),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'LUMINA',
-                    style: GoogleFonts.montserrat(
-                      fontSize: 40,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: 1.2,
+                  // Lumina logo cluster — Icon + LUMINA wordmark wrapped
+                  // in a single GestureDetector so the staff-PIN gesture
+                  // (5 taps inside 3 seconds) recognizes anywhere on the
+                  // visible logo, not just the Icon hitbox. Behavior is
+                  // invisible to a casual observer — no ripple, no
+                  // animation, no counter display.
+                  // NOTE: We use Listener(onPointerDown: ...) instead of
+                  // GestureDetector(onTap: ...) here because this widget
+                  // lives inside a SingleChildScrollView. With
+                  // GestureDetector the scroll view wins the gesture
+                  // arena on any tap that has the slightest finger
+                  // movement (logcat shows the scrollable receiving
+                  // 'on fling' events for what the user perceives as
+                  // pure taps), so onTap silently never fires. Listener
+                  // sits below the gesture arena and receives every
+                  // pointer-down event regardless of who eventually
+                  // wins the arena, which is exactly what we want for
+                  // a 5-tap counter.
+                  Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (_) => _onLogoTap(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.hub,
+                            size: 60, color: Colors.cyanAccent),
+                        const SizedBox(height: 12),
+                        Text(
+                          'LUMINA',
+                          style: GoogleFonts.montserrat(
+                            fontSize: 40,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  // Spacer bumped from 4 → 24 so the subtitle doesn't sit
+                  // inside the logo's tap target on iOS, where slight
+                  // safe-area shifts pushed taps intended for the LUMINA
+                  // wordmark into the subtitle's hit-rect.
+                  const SizedBox(height: 24),
+                  // "POWERED BY NEX-GEN" subtitle. The hidden 5-tap reviewer
+                  // reveal gesture used to live here but stole iOS taps from
+                  // the logo above; it now lives on the version line at the
+                  // bottom of the form.
                   Text(
                     'POWERED BY NEX-GEN',
                     style: GoogleFonts.montserrat(
@@ -304,7 +403,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         // Password
                         TextFormField(
                           controller: _passwordCtrl,
-                          obscureText: true,
+                          obscureText: _obscurePassword,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Password',
@@ -312,6 +411,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
                             prefixIcon: const Icon(Icons.lock_outline, color: Colors.cyanAccent),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off, color: Colors.cyanAccent),
+                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            ),
                             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
                             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.cyanAccent)),
                             errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.redAccent)),
@@ -399,6 +502,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ),
                         ),
+                        // Staff access (Installer / Dealer / Sales / Corporate)
+                        // is now reachable only via the hidden 5-tap gesture
+                        // on the Lumina logo above. No visible button.
                         if (_showReviewerButton)
                           Center(
                             child: TextButton(
@@ -420,6 +526,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             ),
                           ),
+                        // Version line — also hosts the hidden 5-tap App Store
+                        // reviewer reveal gesture (relocated from the LUMINA
+                        // subtitle to keep it well clear of the logo's
+                        // staff-PIN gesture). Listener sits below the gesture
+                        // arena, same pattern as the logo above. Non-tappable
+                        // text so no onPressed fights with the counter.
+                        const SizedBox(height: 8),
+                        Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (_) => _onSubtitleTap(),
+                          child: Center(
+                            child: Text(
+                              'v2.2.0',
+                              style: GoogleFonts.montserrat(
+                                color: Colors.white.withValues(alpha: 0.4),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w400,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
                       ]),
                     ),
                   ),

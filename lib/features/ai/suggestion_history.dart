@@ -5,24 +5,15 @@ import 'package:flutter/foundation.dart';
 /// For open-ended queries like "surprise me" or "give me a party", users expect
 /// variety. This service maintains a rolling history of recent suggestions so
 /// the AI can generate fresh alternatives instead of repeating the same pattern.
-///
-/// Key features:
-/// - Session-scoped (clears on app restart)
-/// - Rolling history with configurable max size
-/// - Provides context strings for AI prompt injection
-/// - Detects "open-ended" queries that should receive varied responses
 class SuggestionHistoryService {
   SuggestionHistoryService._();
   static final SuggestionHistoryService _instance = SuggestionHistoryService._();
   static SuggestionHistoryService get instance => _instance;
 
-  /// Maximum number of suggestions to remember
   static const int _maxHistorySize = 20;
 
-  /// Recent suggestions: stores pattern name/description and key attributes
   final List<_SuggestionEntry> _history = [];
 
-  /// Patterns that indicate a user wants something creative/varied
   static final List<RegExp> _openEndedPatterns = [
     RegExp(r'\bsurprise\s*(me|us)?\b', caseSensitive: false),
     RegExp(r'\bsomething\s+(different|new|else|random|fun|cool|interesting)\b', caseSensitive: false),
@@ -37,8 +28,6 @@ class SuggestionHistoryService {
     RegExp(r'\bimpress\s+me\b', caseSensitive: false),
   ];
 
-  /// Keywords that indicate a specific theme, overriding open-ended detection.
-  /// e.g. "give me a St. Patrick's Day design" is NOT open-ended.
   static final List<RegExp> _specificThemeIndicators = [
     RegExp(r"(st\.?\s*patrick|saint\s*patrick|shamrock)", caseSensitive: false),
     RegExp(r"(christmas|xmas|holiday\s+lights)", caseSensitive: false),
@@ -56,29 +45,23 @@ class SuggestionHistoryService {
     RegExp(r"(sunset|sunrise|ocean|forest|aurora|rainbow)", caseSensitive: false),
   ];
 
-  /// Checks if the query is open-ended and should receive varied responses.
-  /// Returns false if the query names a specific theme/holiday/team even when
-  /// it matches a broad pattern like "give me a...".
   static bool isOpenEndedQuery(String query) {
     final normalized = query.toLowerCase().trim();
-    final matchesOpenPattern = _openEndedPatterns.any((pattern) => pattern.hasMatch(normalized));
+    final matchesOpenPattern =
+        _openEndedPatterns.any((pattern) => pattern.hasMatch(normalized));
     if (!matchesOpenPattern) return false;
-
-    // If the query also names a specific theme, it's not truly open-ended
     if (_specificThemeIndicators.any((pattern) => pattern.hasMatch(normalized))) {
       return false;
     }
-
     return true;
   }
 
-  /// Records a suggestion in the history
   void recordSuggestion({
     required String patternName,
     List<String>? colorNames,
     int? effectId,
     String? effectName,
-    String? queryType, // e.g., 'party', 'celebration', 'surprise'
+    String? queryType,
   }) {
     final entry = _SuggestionEntry(
       patternName: patternName,
@@ -91,16 +74,14 @@ class SuggestionHistoryService {
 
     _history.add(entry);
 
-    // Trim to max size, keeping most recent
     if (_history.length > _maxHistorySize) {
       _history.removeAt(0);
     }
 
-    debugPrint('📝 Recorded suggestion: $patternName (history size: ${_history.length})');
+    debugPrint('📝 Recorded suggestion: $patternName '
+        '(type: ${queryType ?? "unclassified"}, history size: ${_history.length})');
   }
 
-  /// Gets recent suggestions as a context string for AI prompt injection
-  /// Returns null if no relevant history exists
   String? getAvoidanceContext({int limit = 5}) {
     if (_history.isEmpty) return null;
 
@@ -127,16 +108,22 @@ class SuggestionHistoryService {
     return buffer.toString();
   }
 
-  /// Gets a list of recent pattern names (useful for checking duplicates)
+  /// Count suggestions by query type.
+  ///
+  /// Used by [UserVarietyProfileAnalyzer] to detect open-ended vs consistency
+  /// preferences from real session history.
+  ///
+  /// Known types: 'open_ended', 'specific', 'scheduled', 'consistency'
+  int countByQueryType(String queryType) =>
+      _history.where((e) => e.queryType == queryType).length;
+
   List<String> get recentPatternNames =>
       _history.map((e) => e.patternName.toLowerCase()).toList();
 
-  /// Gets recent color combinations to avoid
   Set<String> get recentColorCombinations {
     final combos = <String>{};
     for (final entry in _history) {
       if (entry.colorNames.length >= 2) {
-        // Create a sorted key so [red, blue] == [blue, red]
         final sorted = List<String>.from(entry.colorNames)..sort();
         combos.add(sorted.join('|'));
       }
@@ -144,11 +131,9 @@ class SuggestionHistoryService {
     return combos;
   }
 
-  /// Gets recent effect IDs to potentially avoid
   Set<int> get recentEffectIds =>
       _history.where((e) => e.effectId != null).map((e) => e.effectId!).toSet();
 
-  /// Checks if a pattern name was recently suggested
   bool wasRecentlySuggested(String patternName) {
     final normalized = patternName.toLowerCase().trim();
     return _history.any((e) =>
@@ -157,16 +142,13 @@ class SuggestionHistoryService {
         normalized.contains(e.patternName.toLowerCase()));
   }
 
-  /// Gets the number of suggestions in history
   int get historySize => _history.length;
 
-  /// Clears all history (e.g., when user explicitly wants to reset)
   void clearHistory() {
     _history.clear();
     debugPrint('🗑️ Suggestion history cleared');
   }
 
-  /// Clears history for a specific query type
   void clearHistoryForType(String queryType) {
     _history.removeWhere((e) => e.queryType == queryType);
     debugPrint('🗑️ Cleared history for query type: $queryType');
@@ -191,5 +173,6 @@ class _SuggestionEntry {
   });
 
   @override
-  String toString() => 'SuggestionEntry($patternName, colors: $colorNames, effect: $effectName)';
+  String toString() =>
+      'SuggestionEntry($patternName, colors: $colorNames, effect: $effectName, type: $queryType)';
 }

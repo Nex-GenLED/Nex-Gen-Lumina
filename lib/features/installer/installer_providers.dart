@@ -1,10 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
+import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
+import 'package:nexgen_command/models/commercial/brand_library_entry.dart';
 
 /// Session timeout duration (30 minutes of inactivity)
 const Duration kInstallerSessionTimeout = Duration(minutes: 30);
@@ -53,6 +58,31 @@ class DealerInfo {
   );
 }
 
+/// The staff role an installer doc grants when its PIN is matched.
+///
+/// Mirrors `StaffRole` in functions/src/staffAuth.ts:148 — the wire values
+/// MUST stay identical, because mintStaffToken compares this field against
+/// `roleForMode(mode)` with a strict `!==` (staffAuth.ts:356-357).
+///
+/// `owner` is deliberately absent: it is mintable only from the master
+/// corporate PIN (staffAuth.ts:212), never from an installers doc.
+enum InstallerRole {
+  /// Sales-mode session. mintStaffToken mode 'sales' → role 'salesperson'.
+  salesperson,
+
+  /// Install-mode session. mode 'installer' → role 'installer'.
+  installer,
+
+  /// Dealer-admin session. mode 'admin' → role 'admin'.
+  admin,
+}
+
+extension InstallerRoleWire on InstallerRole {
+  /// The exact string persisted to `/installers/{id}.role` and compared by
+  /// staffAuth.ts:357. Do not localize or prettify.
+  String get wire => name;
+}
+
 /// Model representing a registered installer under a dealer
 class InstallerInfo {
   final String installerCode; // 2-digit code (00-99)
@@ -65,6 +95,29 @@ class InstallerInfo {
   final DateTime? registeredAt;
   final int totalInstallations;
 
+  /// The staff role this installer authenticates as.
+  ///
+  /// ## Why this field exists (C4)
+  ///
+  /// `toMap()` did not emit `role`, but mintStaffToken REQUIRES it:
+  ///
+  /// ```ts
+  /// const docRole = data.role as string | undefined;
+  /// if (docRole !== roleForMode(mode)) return null;   // staffAuth.ts:356-357
+  /// ```
+  ///
+  /// A missing `role` is a mismatch, so every installer the admin UI could
+  /// create was permanently unable to authenticate — the dealer could add
+  /// staff who could never sign in. The function's own comment
+  /// (staffAuth.ts:352-355) predicted this and asked for the writer to be
+  /// updated; that never happened, which is why the only working staff auth
+  /// today is the four master PINs (all hardwired to
+  /// MASTER_DEALER_CODE '55').
+  ///
+  /// Defaults to [InstallerRole.installer] — the overwhelmingly common case
+  /// and the least-privileged of the three.
+  final InstallerRole role;
+
   const InstallerInfo({
     required this.installerCode,
     required this.dealerCode,
@@ -74,6 +127,7 @@ class InstallerInfo {
     this.isActive = true,
     this.registeredAt,
     this.totalInstallations = 0,
+    this.role = InstallerRole.installer,
   }) : fullPin = '$dealerCode$installerCode';
 
   InstallerInfo.withFullPin({
@@ -86,6 +140,7 @@ class InstallerInfo {
     this.isActive = true,
     this.registeredAt,
     this.totalInstallations = 0,
+    this.role = InstallerRole.installer,
   });
 
   Map<String, dynamic> toMap() => {
@@ -98,7 +153,28 @@ class InstallerInfo {
     'isActive': isActive,
     'registeredAt': registeredAt != null ? Timestamp.fromDate(registeredAt!) : FieldValue.serverTimestamp(),
     'totalInstallations': totalInstallations,
+    // C4: REQUIRED by staffAuth.ts:357 — without it the doc can never
+    // authenticate. Wire value must match StaffRole (staffAuth.ts:148).
+    'role': role.wire,
   };
+
+  /// Tolerant read: legacy docs written before C4 carry no `role`, and
+  /// hand-seeded docs may carry an unrecognized one. Both fall back to
+  /// [InstallerRole.installer] rather than throwing — a staff-management
+  /// list must still render a doc that cannot authenticate, so the dealer
+  /// can see it and the backfill can find it.
+  ///
+  /// NOTE: this fallback is display-only. It does NOT make a legacy doc
+  /// authenticate — mintStaffToken reads Firestore directly and still sees
+  /// a missing `role` (staffAuth.ts:356). Only the backfill fixes that:
+  /// scripts/backfill_installer_roles.js.
+  static InstallerRole parseRole(Object? raw) {
+    if (raw is! String) return InstallerRole.installer;
+    for (final r in InstallerRole.values) {
+      if (r.wire == raw) return r;
+    }
+    return InstallerRole.installer;
+  }
 
   factory InstallerInfo.fromMap(Map<String, dynamic> map) {
     final dealerCode = map['dealerCode'] as String? ?? '';
@@ -113,8 +189,17 @@ class InstallerInfo {
       isActive: map['isActive'] as bool? ?? true,
       registeredAt: (map['registeredAt'] as Timestamp?)?.toDate(),
       totalInstallations: map['totalInstallations'] as int? ?? 0,
+      role: parseRole(map['role']),
     );
   }
+
+  /// True when this doc, as stored, can actually mint a staff token.
+  /// Mirrors the `docRole !== roleForMode(mode)` check at staffAuth.ts:357.
+  /// Useful for surfacing "this installer cannot sign in" in the UI and for
+  /// the backfill's dry-run census.
+  static bool canAuthenticate(Map<String, dynamic> map) =>
+      map['role'] is String &&
+      InstallerRole.values.any((r) => r.wire == map['role']);
 }
 
 /// Current session info when an installer is authenticated
@@ -123,10 +208,28 @@ class InstallerSession {
   final DealerInfo dealer;
   final DateTime authenticatedAt;
 
+  /// The custom token minted by `mintStaffToken` for this session.
+  ///
+  /// Cached so the session's staff claims (`role`, `dealerCode`) can be
+  /// RESTORED after the install flow creates the customer's Firebase Auth
+  /// account. `createUserWithEmailAndPassword` auto-signs-in as the new
+  /// customer, destroying the installer's claim-bearing session; the wizard
+  /// used to recover by signing in ANONYMOUSLY, so every remaining write ran
+  /// with no claims at all. That is the sole reason firestore.rules carried
+  /// `|| request.auth != null` on commercial_locations / brand_profile — the
+  /// banned outage-class fallback existed to admit an anonymous installer.
+  ///
+  /// Re-signing with this token restores the claims instead. Custom tokens are
+  /// valid for ONE HOUR from mint; past that, restoration fails and the caller
+  /// must surface it rather than silently continuing claim-less.
+  /// See installer_setup_wizard.dart `_restoreInstallerAuth`.
+  final String? staffToken;
+
   const InstallerSession({
     required this.installer,
     required this.dealer,
     required this.authenticatedAt,
+    this.staffToken,
   });
 
   /// Get a display string for the current session
@@ -156,104 +259,82 @@ class InstallerModeNotifier extends StateNotifier<bool> {
 
   InstallerModeNotifier(this._ref) : super(false);
 
-  /// Attempt to enter installer mode with the given 4-digit PIN
-  /// PIN format: [DD][II] where DD = dealer code, II = installer code
+  /// Attempt to enter installer mode with the given 4-digit PIN.
+  ///
+  /// Validation now runs server-side via the mintStaffToken Cloud
+  /// Function (functions/src/staffAuth.ts). The function returns a
+  /// Firebase Auth custom token whose claims (`role`, `dealerCode`,
+  /// `source`) are honored by firestore.rules `hasStaffClaim(...)`.
+  /// The previous in-process master-hash compare and installers/dealers
+  /// fallback queries are gone; the synthetic-master and real-installer
+  /// session shapes are reconstructed locally from the response.
   Future<bool> enterInstallerMode(String enteredPin) async {
     if (enteredPin.length != 4) {
       debugPrint('InstallerMode: PIN must be 4 digits');
       return false;
     }
 
-    final dealerCode = enteredPin.substring(0, 2);
-    // installerCode is extracted for documentation; we query by fullPin
-    // final installerCode = enteredPin.substring(2, 4);
-
     try {
-      // Look up the installer in Firestore
-      final installerDoc = await FirebaseFirestore.instance
-          .collection('installers')
-          .where('fullPin', isEqualTo: enteredPin)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('mintStaffToken');
+      final result = await callable.call<Map<String, dynamic>>({
+        'pin': enteredPin,
+        'mode': 'installer',
+      });
 
-      if (installerDoc.docs.isEmpty) {
-        debugPrint('InstallerMode: No active installer found for PIN $enteredPin');
-        return false;
-      }
+      final data = result.data;
+      final token = data['token'] as String;
+      final dealerCode = data['dealerCode'] as String;
+      final displayName = data['displayName'] as String;
+      final source = data['source'] as String;
 
-      final installerData = installerDoc.docs.first.data();
-      final installer = InstallerInfo.fromMap(installerData);
+      await FirebaseAuth.instance.signInWithCustomToken(token);
 
-      // Look up the dealer
-      final dealerDoc = await FirebaseFirestore.instance
-          .collection('dealers')
-          .where('dealerCode', isEqualTo: dealerCode)
-          .where('isActive', isEqualTo: true)
-          .limit(1)
-          .get();
+      // Reconstruct an InstallerSession with the same shape the rest of
+      // the app already consumes. companyName isn't returned by the
+      // callable, so fall back to a stable label per source — keeps the
+      // existing displayName getter ("name (companyName)") readable.
+      final installer = InstallerInfo.withFullPin(
+        installerCode:
+            enteredPin.length >= 4 ? enteredPin.substring(2, 4) : '00',
+        dealerCode: dealerCode,
+        fullPin: enteredPin,
+        name: displayName,
+      );
+      final dealer = DealerInfo(
+        dealerCode: dealerCode,
+        name: displayName,
+        companyName: source == 'master'
+            ? 'Nex-Gen LED Systems'
+            : 'Dealer $dealerCode',
+      );
 
-      if (dealerDoc.docs.isEmpty) {
-        debugPrint('InstallerMode: No active dealer found for code $dealerCode');
-        return false;
-      }
-
-      final dealerData = dealerDoc.docs.first.data();
-      final dealer = DealerInfo.fromMap(dealerData);
-
-      // Create session
       _ref.read(installerSessionProvider.notifier).state = InstallerSession(
         installer: installer,
         dealer: dealer,
         authenticatedAt: DateTime.now(),
+        // Cached so the wizard can restore these staff claims after customer
+        // account creation clobbers the session — see InstallerSession.staffToken.
+        staffToken: token,
       );
 
       state = true;
       _resetSessionTimer();
-      debugPrint('InstallerMode: Activated for ${installer.name} from ${dealer.companyName}');
+      debugPrint(
+          'InstallerMode: Activated for ${installer.name} (source=$source)');
       return true;
+    } on FirebaseFunctionsException catch (e) {
+      // permission-denied is the generic "no PIN match" response.
+      // Other Functions errors collapse to the same UX (Invalid PIN)
+      // but log separately so debug builds can tell them apart.
+      if (e.code == 'permission-denied') {
+        debugPrint('InstallerMode: PIN rejected by mintStaffToken');
+      } else {
+        debugPrint('InstallerMode: callable error ${e.code}: ${e.message}');
+      }
+      return false;
     } catch (e) {
-      debugPrint('InstallerMode: Error validating PIN: $e');
-      // Master admin PIN for Nex-Gen administrative access
-      if (enteredPin == '8817') {
-        debugPrint('InstallerMode: Using master admin PIN');
-        _ref.read(installerSessionProvider.notifier).state = InstallerSession(
-          installer: const InstallerInfo(
-            installerCode: '17',
-            dealerCode: '88',
-            name: 'Nex-Gen Administrator',
-          ),
-          dealer: const DealerInfo(
-            dealerCode: '88',
-            name: 'Nex-Gen Admin',
-            companyName: 'Nex-Gen LED Systems',
-          ),
-          authenticatedAt: DateTime.now(),
-        );
-        state = true;
-        _resetSessionTimer();
-        return true;
-      }
-      // For development/testing, allow a development master PIN
-      if (enteredPin == '0000') {
-        debugPrint('InstallerMode: Using development master PIN');
-        _ref.read(installerSessionProvider.notifier).state = InstallerSession(
-          installer: const InstallerInfo(
-            installerCode: '00',
-            dealerCode: '00',
-            name: 'Development Installer',
-          ),
-          dealer: const DealerInfo(
-            dealerCode: '00',
-            name: 'Development',
-            companyName: 'Nex-Gen Development',
-          ),
-          authenticatedAt: DateTime.now(),
-        );
-        state = true;
-        _resetSessionTimer();
-        return true;
-      }
+      debugPrint('InstallerMode: unexpected error: $e');
       return false;
     }
   }
@@ -264,6 +345,19 @@ class InstallerModeNotifier extends StateNotifier<bool> {
     _ref.read(installerSessionProvider.notifier).state = null;
     _cancelSessionTimer();
     debugPrint('InstallerMode: Deactivated');
+
+    // Roll the Firebase Auth session back to anonymous so subsequent
+    // staff-pin entries (or other anonymous-only flows) work. We do
+    // not attempt to restore a customer's prior session — see commit
+    // body for the trade-off.
+    () async {
+      try {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (e) {
+        debugPrint('InstallerMode: auth restore failed on exit: $e');
+      }
+    }();
   }
 
   /// Record activity to reset the session timer
@@ -333,6 +427,24 @@ class CustomerInfo {
   final String zipCode;
   final String notes;
 
+  /// Latitude resolved from the Google Places selection. Null when the
+  /// installer typed the address manually or the place-details fetch failed.
+  /// Consumed by [UserModel.latitude] writes and the installations doc.
+  final double? latitude;
+
+  /// Longitude resolved from the Google Places selection. Null in the same
+  /// fallback cases as [latitude].
+  final double? longitude;
+
+  /// Google Places placeId for the selected address. Retained for backfill
+  /// and re-fetch flows.
+  final String? placeId;
+
+  /// IANA timezone (e.g. "America/Chicago") sampled from the installer's
+  /// device at the moment of address selection. Null when
+  /// FlutterTimezone.getLocalTimezone() fails.
+  final String? ianaTimezone;
+
   const CustomerInfo({
     this.name = '',
     this.email = '',
@@ -342,6 +454,10 @@ class CustomerInfo {
     this.state = '',
     this.zipCode = '',
     this.notes = '',
+    this.latitude,
+    this.longitude,
+    this.placeId,
+    this.ianaTimezone,
   });
 
   CustomerInfo copyWith({
@@ -353,6 +469,10 @@ class CustomerInfo {
     String? state,
     String? zipCode,
     String? notes,
+    double? latitude,
+    double? longitude,
+    String? placeId,
+    String? ianaTimezone,
   }) {
     return CustomerInfo(
       name: name ?? this.name,
@@ -363,6 +483,10 @@ class CustomerInfo {
       state: state ?? this.state,
       zipCode: zipCode ?? this.zipCode,
       notes: notes ?? this.notes,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      placeId: placeId ?? this.placeId,
+      ianaTimezone: ianaTimezone ?? this.ianaTimezone,
     );
   }
 
@@ -376,6 +500,10 @@ class CustomerInfo {
       'state': state,
       'zipCode': zipCode,
       'notes': notes,
+      'latitude': latitude,
+      'longitude': longitude,
+      'placeId': placeId,
+      'ianaTimezone': ianaTimezone,
     };
   }
 
@@ -389,6 +517,10 @@ class CustomerInfo {
       state: map['state'] as String? ?? '',
       zipCode: map['zipCode'] as String? ?? '',
       notes: map['notes'] as String? ?? '',
+      latitude: (map['latitude'] as num?)?.toDouble(),
+      longitude: (map['longitude'] as num?)?.toDouble(),
+      placeId: map['placeId'] as String?,
+      ianaTimezone: map['ianaTimezone'] as String?,
     );
   }
 
@@ -398,11 +530,27 @@ class CustomerInfo {
 /// Provider for the current installer setup session's customer info
 final installerCustomerInfoProvider = StateProvider<CustomerInfo>((ref) => const CustomerInfo());
 
-/// Enum for tracking installer wizard progress
+/// Enum for tracking installer wizard progress.
+///
+/// `brandSetup` (Part 8) is positioned between `hardwareConfig` and
+/// `handoff`. It auto-advances for residential installs (no UI shown)
+/// and renders the commercial brand pre-seed flow for commercial
+/// installs. Drafts saved before this version with currentStepIndex=4
+/// (handoff) will now resolve to brandSetup; the auto-advance logic
+/// makes the residential resume harmless.
 enum InstallerWizardStep {
   customerInfo,
   controllerSetup,
+  connectionMethod,
   zoneConfiguration,
+  hardwareConfig,
+  // Design Studio Slice 2: pixel-walk roofline mapping. Positioned right after
+  // hardwareConfig, where per-channel bus.len counts are authoritative. Always
+  // SKIPPABLE ("Map later") — an install is never blocked by mapping. Old
+  // drafts with currentStepIndex 5/6 (brandSetup/handoff) now resolve to
+  // mapRoofline/brandSetup; harmless because mapRoofline is skippable.
+  mapRoofline,
+  brandSetup,
   handoff,
 }
 
@@ -491,8 +639,34 @@ final installerLinkedControllersProvider = StateProvider<Set<String>>((ref) => {
 /// Provider for installation photo URL
 final installerPhotoUrlProvider = StateProvider<String?>((ref) => null);
 
+/// Per-controller resolved [ConnectionMethod] for the connectionMethod
+/// wizard step. Keyed by controller doc id. Empty when the step opens;
+/// populated as the installer makes choices or as auto-probe completes.
+/// Persisted to Firestore by the screen when the installer continues.
+final installerConnectionMethodsProvider =
+    StateProvider<Map<String, ConnectionMethod>>((ref) => const {});
+
+/// Controllers the installer explicitly chose to skip on the
+/// connectionMethod step (left in dual-homed state). Kept separate from
+/// the resolved map so the Continue gate can distinguish "resolved to
+/// dual-homed by choice" from "not yet resolved."
+final installerConnectionMethodSkippedProvider =
+    StateProvider<Set<String>>((ref) => const {});
+
 /// Provider for the installer preference draft collected during handoff
 final installerPreferenceDraftProvider = StateProvider<InstallerPreferenceDraft?>((ref) => null);
+
+/// Provider for the brand-library entry the installer selected during the
+/// commercial brandSetup wizard step (Part 8). Held in transient state
+/// because the customer's UID isn't created until _completeSetup runs —
+/// the brand_profile + design-generation writes happen inside
+/// _completeSetup right after createUserWithEmailAndPassword resolves
+/// the new customer's uid.
+///
+/// Null when the installer skipped brand setup OR for residential
+/// installs (the brandSetup step auto-advances and never sets this).
+final installerSelectedBrandLibraryEntryProvider =
+    StateProvider<BrandLibraryEntry?>((ref) => null);
 
 /// Notifier for managing zones during Commercial mode setup
 class InstallerZonesNotifier extends StateNotifier<List<ZoneModel>> {
@@ -676,4 +850,9 @@ void resetInstallerWizardState(WidgetRef ref) {
   ref.read(installerLinkedControllersProvider.notifier).state = {};
   ref.read(installerZonesProvider.notifier).clear();
   ref.read(installerPhotoUrlProvider.notifier).state = null;
+  ref.read(installerSelectedBrandLibraryEntryProvider.notifier).state = null;
+  ref.read(installerConnectionMethodsProvider.notifier).state = const {};
+  ref.read(installerConnectionMethodSkippedProvider.notifier).state =
+      const {};
+  ref.read(rooflineCaptureProvider.notifier).reset();
 }

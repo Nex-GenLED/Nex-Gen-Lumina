@@ -1,17 +1,19 @@
 name: nexgen_command
-description: "A new Flutter project."
+description: "Nex-Gen Lumina – Premium mobile app for controlling permanent outdoor pixel LED systems powered by WLED."
 publish_to: "none"
 
-version: 2.0.0+1
+version: 2.5.10+50
 
 environment:
   sdk: ^3.6.0
 dependencies:
   geolocator: 13.0.4
   network_info_plus: ^7.0.0
+  connectivity_plus: ^6.1.4
   image_picker: '>=1.1.2'
   url_launcher: ^6.0.0
   flutter_local_notifications: ^17.2.2
+  flutter_svg: ^2.0.10
   google_maps_flutter: ^2.0.0
   flutter_blue_plus: ^2.0.0
   flutter_native_splash: ^2.0.0
@@ -33,24 +35,33 @@ dependencies:
   cloud_firestore: '>=5.5.0'
   cloud_functions: ^6.0.5
   firebase_storage: ^13.0.5
+  firebase_messaging: ^16.1.0
   app_links: ^6.0.0
   encrypt: ^5.0.3
   flutter_secure_storage: ^9.2.2
   crypto: ^3.0.3
   flutter_background_service: ^5.1.0
   flutter_background_service_android: ^6.3.1
+  pdf: ^3.11.1
+  printing: ^5.13.1
+  signature: ^5.4.0
+  syncfusion_flutter_signaturepad: ^24.1.41
   timezone: ^0.9.0
+  flutter_timezone: ^4.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.13.1
+  fake_cloud_firestore: ^4.1.0+1
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/icons/
+    - assets/demo/
 
 flutter_launcher_icons:
   android: true

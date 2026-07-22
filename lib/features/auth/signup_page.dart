@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/referrals/services/referral_attribution_service.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
@@ -22,9 +24,15 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _referralCodeController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
+
+  // Referral code validation state
+  String? _validatedReferrerUid;
+  bool _isValidatingCode = false;
+  bool? _codeValid; // null = not yet checked
 
   @override
   void dispose() {
@@ -32,7 +40,32 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _referralCodeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _validateReferralCode() async {
+    final code = _referralCodeController.text.trim();
+    if (code.isEmpty) {
+      setState(() { _codeValid = null; _validatedReferrerUid = null; });
+      return;
+    }
+    setState(() => _isValidatingCode = true);
+    try {
+      final service = ref.read(referralAttributionServiceProvider);
+      final uid = await service.validateCode(code);
+      if (mounted) {
+        setState(() {
+          _validatedReferrerUid = uid;
+          _codeValid = uid != null;
+          _isValidatingCode = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() { _codeValid = false; _validatedReferrerUid = null; _isValidatingCode = false; });
+      }
+    }
   }
 
   Future<void> _handleSignUp() async {
@@ -47,6 +80,23 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
         _passwordController.text,
         _nameController.text.trim(),
       );
+
+      // Attribute referral if a valid code was entered
+      if (_validatedReferrerUid != null) {
+        try {
+          final user = ref.read(authStateProvider).asData?.value;
+          if (user != null) {
+            final service = ref.read(referralAttributionServiceProvider);
+            await service.attributeReferral(
+              referrerUid: _validatedReferrerUid!,
+              prospectUid: user.uid,
+              prospectName: _nameController.text.trim(),
+            );
+          }
+        } catch (_) {
+          // Don't block signup if attribution fails
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -220,6 +270,54 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                             return null;
                           },
                         ),
+                        const SizedBox(height: 12),
+                        // Referral code (optional)
+                        TextFormField(
+                          controller: _referralCodeController,
+                          textCapitalization: TextCapitalization.characters,
+                          maxLength: 8,
+                          style: const TextStyle(color: Colors.white),
+                          onEditingComplete: _validateReferralCode,
+                          onChanged: (val) {
+                            // Reset validation state when user types
+                            if (_codeValid != null) {
+                              setState(() { _codeValid = null; _validatedReferrerUid = null; });
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Referral code (optional)',
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                            counterText: '',
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.06),
+                            prefixIcon: const Icon(Icons.card_giftcard, color: Colors.cyanAccent),
+                            suffixIcon: _isValidatingCode
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent)),
+                                  )
+                                : _codeValid == true
+                                    ? const Icon(Icons.check_circle, color: Colors.greenAccent)
+                                    : _codeValid == false
+                                        ? const Icon(Icons.cancel, color: Colors.redAccent)
+                                        : null,
+                            helperText: _codeValid == true
+                                ? 'Code accepted'
+                                : _codeValid == false
+                                    ? 'Code not found'
+                                    : 'e.g. LUM-A7X3',
+                            helperStyle: TextStyle(
+                              color: _codeValid == true
+                                  ? Colors.greenAccent
+                                  : _codeValid == false
+                                      ? Colors.redAccent
+                                      : Colors.white.withValues(alpha: 0.4),
+                            ),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.cyanAccent)),
+                            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.redAccent)),
+                          ),
+                        ),
                         const SizedBox(height: 18),
                         // CTA Button
                         Container(
@@ -242,6 +340,18 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           Text('Already have an account?', style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
                           TextButton(onPressed: () => context.pop(), child: const Text('Log In')),
                         ]),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () async {
+                            final uri = Uri.parse('https://nex-genled.com/privacy-policy');
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          },
+                          child: Text(
+                            'By creating an account, you agree to our Privacy Policy.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                          ),
+                        ),
                       ]),
                     ),
                   ),

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/voice/alexa_service.dart';
 import 'package:nexgen_command/features/voice/google_home_service.dart';
-import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
 import 'package:nexgen_command/features/voice/widgets/siri_button.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -57,7 +56,7 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
 
           // Home Assistant section (all platforms)
           _buildHomeAssistantSection(context),
-          const SizedBox(height: 80),
+          SizedBox(height: navBarTotalHeight(context)),
         ],
       ),
     );

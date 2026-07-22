@@ -174,7 +174,7 @@ extension ColorBehaviorDisplay on ColorBehavior {
       case ColorBehavior.generatesOwnColors:
         return 'This effect generates its own colors (your selection is ignored)';
       case ColorBehavior.usesPalette:
-        return 'This effect uses a WLED color palette';
+        return 'This effect uses a built-in color palette';
     }
   }
 }
@@ -252,7 +252,8 @@ class WledEffectsCatalog {
   ];
 
   /// Complete list of all WLED effects (0-186).
-  /// Skipped IDs: 48, 53, 114, 142, 151, 161, 169, 170, 171 (retired/unused).
+  /// Reserved (RSVD) slots in firmware: 53, 142, 151, 161, 169, 170, 171.
+  /// Verified against device /json/effects on WLED 0.15.1 (2026-05-29).
   ///
   /// ColorBehavior classifications:
   /// - usesSelectedColors: Effect displays your colors exactly (solid, chase, wipe)
@@ -400,6 +401,7 @@ class WledEffectsCatalog {
 
     // Game effects
     WledEffect(id: 44, name: 'Tetrix', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
+    WledEffect(id: 48, name: 'Rolling Balls', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 91, name: 'Bouncing Balls', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
     WledEffect(id: 95, name: 'Popcorn', category: 'Game', colorBehavior: ColorBehavior.usesSelectedColors),
 
@@ -407,6 +409,7 @@ class WledEffectsCatalog {
     WledEffect(id: 82, name: 'Halloween Eyes', category: 'Holiday', colorBehavior: ColorBehavior.usesSelectedColors),
 
     // 2D effects (require 2D matrix) - Mixed color behaviors
+    WledEffect(id: 114, name: 'Rotozoomer', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 118, name: 'Spaceships', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 119, name: 'Crazy Bees', category: '2D', requires2D: true, colorBehavior: ColorBehavior.usesPalette),
     WledEffect(id: 120, name: 'Ghost Rider', category: '2D', requires2D: true, colorBehavior: ColorBehavior.generatesOwnColors),
@@ -478,8 +481,27 @@ class WledEffectsCatalog {
     for (final e in allEffects) e.id: e,
   };
 
+  /// Map of lower-cased effect name to its 0.15.1 ID.
+  /// Source of truth for routing legacy maps by NAME → correct ID so they
+  /// can never drift from the device firmware again.
+  static final Map<String, int> _idByName = {
+    for (final e in allEffects) e.name.toLowerCase(): e.id,
+  };
+
   /// Get effect by ID. Returns null if not found.
   static WledEffect? getById(int id) => _effectsById[id];
+
+  /// Resolve a catalog effect NAME to its 0.15.1 ID. Case-insensitive.
+  /// Returns null if the name is not a real 0.15.1 effect (e.g. a legacy
+  /// effect that no longer exists — callers must omit those, not substitute).
+  static int? idForName(String name) => _idByName[name.toLowerCase()];
+
+  /// Resolve a list of catalog names to IDs, silently dropping any name that
+  /// is not a real 0.15.1 effect. Use to build menus/curated lists by name.
+  static List<int> idsForNames(Iterable<String> names) => [
+        for (final n in names)
+          if (_idByName[n.toLowerCase()] != null) _idByName[n.toLowerCase()]!,
+      ];
 
   /// Get effect name by ID. Returns 'Effect #id' if not found.
   static String getName(int id) => _effectsById[id]?.name ?? 'Effect #$id';
@@ -695,6 +717,32 @@ class WledEffectsCatalog {
 
   /// Check if an effect overrides/ignores user's color selection.
   static bool overridesUserColors(int id) => _effectsById[id]?.overridesColors ?? false;
+
+  /// Resolves the WLED `pal` (palette) value for [id] from its color behavior.
+  /// This is the SINGLE SOURCE OF TRUTH for how an effect applies the user's
+  /// colors — every apply path should use this instead of hardcoding a palette.
+  ///
+  /// Product rule: the user's chosen `col[]` colors are ALWAYS honored. An
+  /// effect never substitutes its own built-in palette over the user's colors.
+  /// The only difference is HOW the user's colors are applied:
+  ///
+  /// - Palette-driven / motion-sweep effects (generatesOwnColors / usesPalette —
+  ///   Rainbow, Colorwaves, Aurora, Plasma, Fire, the Noise family, Twinklefox,
+  ///   Colortwinkles, …) sweep/animate a smooth GRADIENT built from the user's
+  ///   `col[]` colors → `pal:4` ("Color Gradient"). NOT `pal:0` (that would use
+  ///   the effect's built-in palette, e.g. Rainbow → a hardcoded rainbow hue
+  ///   sweep, ignoring the user's colors) and NOT `pal:5` (that strips the
+  ///   sweep and makes them strobe/blend through discrete slots).
+  ///   Bench-confirmed on 192.168.1.250 (fw 0.15.1): col=blue+white →
+  ///   pal:4 sweeps blue↔white (0% foreign hues); pal:0 → 89% foreign (rainbow).
+  /// - Col-based effects (usesSelectedColors / blendsSelectedColors — Meteor,
+  ///   Chase, Wipe, Twinkle, Sparkle, Fairy, …) keep DISCRETE user colors →
+  ///   `pal:5` ("Colors Only"), so WLED renders exactly the chosen colors and
+  ///   does not bleed the default rainbow palette over them (load-bearing for
+  ///   layout/blend effects such as Spots Fade).
+  /// - Unknown ids fall back to 5 (matches [overridesUserColors]'s false
+  ///   default — preserves prior behavior for anything not in the catalog).
+  static int paletteForEffect(int id) => overridesUserColors(id) ? 4 : 5;
 
   /// Get effects grouped by color behavior (for UI display).
   static Map<ColorBehavior, List<WledEffect>> get effectsByColorBehavior {

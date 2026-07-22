@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
@@ -302,7 +304,13 @@ class Scene {
       'owner_id': ownerId,
       'created_at': Timestamp.fromDate(createdAt),
       'updated_at': Timestamp.fromDate(updatedAt),
-      'preview_colors': previewColors,
+      // #84: previewColors is List<List<int>> (arrays-of-arrays). The native
+      // iOS Firestore codec aborts on directly-nested arrays (SIGABRT), and
+      // UserService.sanitizeForFirestore THROWS on them — so a scene with any
+      // preview colors (every library/snapshot save) failed silently. Encode
+      // to an opaque String, exactly as wled_payload below and CustomDesign's
+      // composed_pattern already do. Decoded back in fromFirestore.
+      'preview_colors': jsonEncode(previewColors),
       'effect_id': effectId,
       'brightness': brightness,
       'tags': tags,
@@ -314,15 +322,41 @@ class Scene {
         'library_pattern': {
           'id': libraryPattern!.id,
           'name': libraryPattern!.name,
-          'colors': libraryPattern!.colors,
+          // #84: pattern colors are List<List<int>> too — same nested-array
+          // hazard. jsonEncode this leaf (the rest of the map is flat/safe).
+          'colors': jsonEncode(libraryPattern!.colors),
           'effect_id': libraryPattern!.effectId,
           'speed': libraryPattern!.speed,
           'intensity': libraryPattern!.intensity,
           'category': libraryPattern!.category,
         },
       if ((type == SceneType.system || type == SceneType.snapshot) && wledPayload != null)
-        'wled_payload': wledPayload,
+        'wled_payload': jsonEncode(wledPayload),
     };
+  }
+
+  /// Decode a `List<List<int>>` color matrix that may be stored either as a
+  /// jsonEncoded String (#84-safe, current writers) or as a raw nested List
+  /// (legacy docs written before the encode). Tolerates garbage → `[]`.
+  static List<List<int>> _decodeColorMatrix(dynamic raw) {
+    if (raw == null) return [];
+    List<dynamic>? outer;
+    if (raw is String) {
+      if (raw.isEmpty) return [];
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) outer = decoded;
+      } catch (_) {
+        return [];
+      }
+    } else if (raw is List) {
+      outer = raw;
+    }
+    if (outer == null) return [];
+    return outer
+        .whereType<List>()
+        .map((c) => c.whereType<num>().map((v) => v.toInt()).toList())
+        .toList();
   }
 
   /// Create from Firestore document
@@ -350,16 +384,19 @@ class Scene {
         id: patternData['id'] as String? ?? '',
         name: patternData['name'] as String? ?? '',
         description: '',
-        colors: (patternData['colors'] as List?)
-            ?.map((c) => (c as List).map((v) => v as int).toList())
-            .toList() ?? [],
+        // #84: colors written jsonEncoded (current) or raw nested List
+        // (legacy) — _decodeColorMatrix tolerates both.
+        colors: _decodeColorMatrix(patternData['colors']),
         effectId: patternData['effect_id'] as int? ?? 0,
         speed: patternData['speed'] as int? ?? 128,
         intensity: patternData['intensity'] as int? ?? 128,
         category: patternData['category'] as String? ?? '',
       );
     } else if (data['wled_payload'] != null) {
-      wledPayload = Map<String, dynamic>.from(data['wled_payload'] as Map);
+      final raw = data['wled_payload'];
+      wledPayload = raw is String
+          ? Map<String, dynamic>.from(jsonDecode(raw) as Map)
+          : Map<String, dynamic>.from(raw as Map);
     }
 
     return Scene(
@@ -371,9 +408,9 @@ class Scene {
       ownerId: data['owner_id'] as String? ?? '',
       createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updated_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      previewColors: (data['preview_colors'] as List?)
-          ?.map((c) => (c as List).map((v) => v as int).toList())
-          .toList() ?? [],
+      // #84: preview_colors written jsonEncoded (current) or raw nested List
+      // (legacy) — _decodeColorMatrix tolerates both.
+      previewColors: _decodeColorMatrix(data['preview_colors']),
       effectId: data['effect_id'] as int?,
       brightness: data['brightness'] as int? ?? 200,
       tags: (data['tags'] as List?)?.map((t) => t as String).toList() ?? [],
@@ -463,7 +500,7 @@ class SystemScenes {
     wledPayload: {
       'on': true,
       'bri': 180,
-      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 180, 100, 120]]}],
+      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 180, 100, 255]]}],
     },
     previewColors: [[255, 180, 100]],
     brightness: 180,
@@ -477,7 +514,7 @@ class SystemScenes {
     wledPayload: {
       'on': true,
       'bri': 255,
-      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[255, 255, 255, 255]]}],
+      'seg': [{'fx': 0, 'sx': 128, 'ix': 128, 'pal': 0, 'col': [[0, 0, 0, 255]]}],
     },
     previewColors: [[255, 255, 255]],
     brightness: 255,

@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/models/pattern_analytics_models.dart';
+import 'package:nexgen_command/services/user_service.dart';
 
 /// Service for recording and retrieving pattern analytics for global learning.
 ///
@@ -141,7 +142,7 @@ class PatternAnalyticsService {
         wledPayload: wledPayload,
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -189,7 +190,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -232,7 +233,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update aggregated analytics
       await _updateAggregatedAnalytics(
@@ -270,16 +271,16 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _feedbackCollection.add(event.toFirestore());
+      await _feedbackCollection.add(UserService.sanitizeForFirestore(event.toFirestore()));
 
       // Update refinement counts in analytics
       final docRef = _analyticsCollection.doc(queryHash);
-      await docRef.set({
+      await docRef.set(UserService.sanitizeForFirestore({
         'common_refinements': {
           refinementType: FieldValue.increment(1),
         },
         'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      }), SetOptions(merge: true));
 
       debugPrint('🔧 Recorded refinement: $queryHash - $refinementType');
     } catch (e) {
@@ -306,7 +307,7 @@ class PatternAnalyticsService {
         createdAt: DateTime.now(),
       );
 
-      await _vibeCorrectionsCollection.add(record.toFirestore());
+      await _vibeCorrectionsCollection.add(UserService.sanitizeForFirestore(record.toFirestore()));
       debugPrint('🎭 Recorded vibe correction: $detectedVibe → $desiredVibe');
     } catch (e) {
       debugPrint('Error recording vibe correction: $e');
@@ -358,7 +359,7 @@ class PatternAnalyticsService {
           uniqueUsers: userId != null ? 1 : 0,
         );
 
-        await docRef.set(analytics.toFirestore());
+        await docRef.set(UserService.sanitizeForFirestore(analytics.toFirestore()));
       } else {
         // Update existing entry
         final updates = <String, dynamic>{

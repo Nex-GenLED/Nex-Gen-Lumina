@@ -74,7 +74,7 @@ class _MemberPositionListState extends ConsumerState<MemberPositionList> {
 
   Widget _buildStreetVisualization() {
     return Container(
-      height: 80,
+      height: 96,
       decoration: BoxDecoration(
         color: Colors.grey.shade900,
         borderRadius: BorderRadius.circular(12),
@@ -104,7 +104,7 @@ class _MemberPositionListState extends ConsumerState<MemberPositionList> {
               children: [
                 Icon(
                   Icons.arrow_forward,
-                  color: Colors.cyan.withOpacity(0.7),
+                  color: Colors.cyan.withValues(alpha: 0.7),
                   size: 16,
                 ),
                 const SizedBox(width: 4),
@@ -142,8 +142,8 @@ class _MemberPositionListState extends ConsumerState<MemberPositionList> {
                         height: 32,
                         decoration: BoxDecoration(
                           color: isOnline
-                              ? Colors.cyan.withOpacity(0.2)
-                              : Colors.grey.withOpacity(0.2),
+                              ? Colors.cyan.withValues(alpha: 0.2)
+                              : Colors.grey.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isOnline ? Colors.cyan : Colors.grey,
@@ -245,7 +245,7 @@ class _MemberTile extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.grey.shade900.withOpacity(0.5),
+              color: Colors.grey.shade900.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.grey.shade800),
             ),
@@ -268,7 +268,7 @@ class _MemberTile extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: Colors.cyan.withOpacity(0.2),
+                    color: Colors.cyan.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -320,7 +320,7 @@ class _MemberTile extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: member.participationStatus.color.withOpacity(0.2),
+                      color: member.participationStatus.color.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -349,7 +349,7 @@ class _MemberTile extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: syncStatus.color.withOpacity(0.2),
+                      color: syncStatus.color.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -445,7 +445,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
     _nameController = TextEditingController(text: widget.member.displayName);
     _ledCountController = TextEditingController(text: '${widget.member.ledCount}');
     _rooflineController = TextEditingController(
-      text: widget.member.rooflineMeters.toStringAsFixed(1),
+      text: (widget.member.rooflineMeters * 3.28084).toStringAsFixed(1),
     );
     _rooflineDirection = widget.member.rooflineDirection;
     _participationStatus = widget.member.participationStatus;
@@ -515,8 +515,8 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: 'Roofline Length (meters)',
-                hintText: 'e.g., 15.0',
+                labelText: 'Roofline Length (feet)',
+                hintText: 'e.g., 50.0',
                 labelStyle: TextStyle(color: Colors.grey.shade500),
                 hintStyle: TextStyle(color: Colors.grey.shade700),
                 enabledBorder: OutlineInputBorder(
@@ -563,7 +563,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       decoration: BoxDecoration(
-                        color: isSelected ? Colors.cyan.withOpacity(0.2) : Colors.transparent,
+                        color: isSelected ? Colors.cyan.withValues(alpha: 0.2) : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -634,9 +634,9 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
@@ -689,7 +689,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? status.color.withOpacity(0.2) : Colors.transparent,
+            color: isSelected ? status.color.withValues(alpha: 0.2) : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
           ),
           child: Row(
@@ -733,7 +733,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
     final updatedMember = widget.member.copyWith(
       displayName: _nameController.text.trim(),
       ledCount: int.tryParse(_ledCountController.text) ?? widget.member.ledCount,
-      rooflineMeters: double.tryParse(_rooflineController.text) ?? widget.member.rooflineMeters,
+      rooflineMeters: ((double.tryParse(_rooflineController.text) ?? (widget.member.rooflineMeters * 3.28084)) / 3.28084),
       rooflineDirection: _rooflineDirection,
       participationStatus: _participationStatus,
     );

@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/premium_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,9 +19,9 @@ import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
+import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
-import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -60,7 +60,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
         children: [
           _UserProfileEntry(),
           // Keep spacing after profile entry
@@ -150,7 +150,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       child: TextField(
                         controller: _memberCtrl,
                         decoration: const InputDecoration(labelText: 'Add controller IP (e.g. 192.168.1.51)'),
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                          signed: false,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          LengthLimitingTextInputFormatter(15),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -225,59 +232,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
-class _ModeToggle extends StatelessWidget {
-  const _ModeToggle({required this.value, required this.onChanged});
-  final SiteMode value;
-  final ValueChanged<SiteMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final isRes = value == SiteMode.residential;
-    final isCom = value == SiteMode.commercial;
-    return Row(children: [
-      Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onChanged(SiteMode.residential),
-          child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: isRes ? NexGenPalette.cyan : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isRes ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withOpacity(0.6)),
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.home_outlined, color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Text('Residential', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: isRes ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant)),
-            ]),
-          ),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onChanged(SiteMode.commercial),
-          child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: isCom ? NexGenPalette.cyan : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isCom ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withOpacity(0.6)),
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.apartment_outlined, color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Text('Commercial', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: isCom ? Colors.black : Theme.of(context).colorScheme.onSurfaceVariant)),
-            ]),
-          ),
-        ),
-      ),
-    ]);
-  }
-}
-
 class _SystemManagementButton extends StatelessWidget {
   const _SystemManagementButton();
 
@@ -300,48 +254,6 @@ class _SystemManagementButton extends StatelessWidget {
   }
 }
 
-class _LinkedControllersTile extends ConsumerWidget {
-  const _LinkedControllersTile();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final linked = ref.watch(linkedControllersProvider);
-    return Card(
-      child: ListTile(
-        leading: Icon(Icons.hub_outlined, color: NexGenPalette.cyan),
-        title: const Text('Linked Controllers'),
-        subtitle: const Text('Sync multiple devices (e.g., Roof + Patio) to act as one system.'),
-        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (linked.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: NexGenPalette.cyan.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
-              ),
-              child: Text('${linked.length} linked', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan)),
-            ),
-          const SizedBox(width: 8),
-          Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ]),
-        onTap: () => _openMultiControllerSetupSheet(context),
-      ),
-    );
-  }
-
-  Future<void> _openMultiControllerSetupSheet(BuildContext context) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => const MultiControllerSetupSheet(),
-    );
-  }
-}
-
 class MultiControllerSetupSheet extends ConsumerWidget {
   const MultiControllerSetupSheet({super.key});
 
@@ -359,7 +271,7 @@ class MultiControllerSetupSheet extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Center(
-            child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999))),
+            child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999))),
           ),
           const SizedBox(height: 12),
           Row(children: [
@@ -418,48 +330,6 @@ class MultiControllerSetupSheet extends ConsumerWidget {
   }
 }
 
-class _ControllerHardwareTile extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(CupertinoIcons.device_laptop, color: NexGenPalette.violet),
-        title: const Text('Controller Hardware Setup'),
-        subtitle: const Text('Configure ports, pixel counts, and power.'),
-        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: NexGenPalette.cyan.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
-            ),
-            child: Text('Advanced', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan)),
-          ),
-          const SizedBox(width: 8),
-          Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ]),
-        onTap: () async {
-          final proceed = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Warning'),
-              content: const Text('Changing pixel counts will reset your current map. Proceed?'),
-              actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Continue')),
-              ],
-            ),
-          );
-          if (proceed == true && context.mounted) {
-            context.push(AppRoutes.hardwareConfig);
-          }
-        },
-      ),
-    );
-  }
-}
-
 class _UserProfileEntry extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -472,22 +342,6 @@ class _UserProfileEntry extends ConsumerWidget {
         subtitle: Text(email),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => context.push('/settings/profile'),
-      ),
-    );
-  }
-}
-
-class _ControllersTile extends StatelessWidget {
-  const _ControllersTile();
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(Icons.router_outlined, color: NexGenPalette.cyan),
-        title: const Text('Controllers & Devices'),
-        subtitle: const Text('Add, remove, and select your controllers.'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => context.push(AppRoutes.controllersSettings),
       ),
     );
   }
@@ -514,7 +368,7 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999)))),
+              Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999)))),
               const SizedBox(height: 12),
               Row(children: [
                 Icon(Icons.support_agent, color: NexGenPalette.cyan),
@@ -675,11 +529,40 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                   },
                 ),
                 const Divider(height: 1),
-                // Hidden Installer Mode entry - revealed by rapid taps
-                const _InstallerModeEntry(),
+                // Privacy Policy
+                ListTile(
+                  leading: Icon(Icons.privacy_tip_outlined, color: NexGenPalette.cyan),
+                  title: const Text('Privacy Policy'),
+                  trailing: Icon(Icons.open_in_new, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  onTap: () async {
+                    final uri = Uri.parse('https://nex-genled.com/privacy-policy');
+                    await _safeLaunch(context, uri);
+                  },
+                ),
                 const Divider(height: 1),
+                // Hidden Installer Mode entry - revealed by rapid taps
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _InstallerModeEntry();
+                }),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const Divider(height: 1);
+                }),
+                // Hidden Sales Mode entry - revealed by rapid taps
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _SalesModeEntry();
+                }),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const Divider(height: 1);
+                }),
                 // Hidden Admin Mode entry - revealed by rapid taps on copyright
-                const _AdminModeEntry(),
+                Consumer(builder: (context, ref, _) {
+                  if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
+                  return const _AdminModeEntry();
+                }),
               ]),
             ),
             crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
@@ -789,6 +672,106 @@ class _InstallerModeEntryState extends ConsumerState<_InstallerModeEntry> {
   }
 }
 
+/// Hidden sales mode entry - revealed by 6 rapid taps on "Powered by Nex-Gen" text
+class _SalesModeEntry extends ConsumerStatefulWidget {
+  const _SalesModeEntry();
+
+  @override
+  ConsumerState<_SalesModeEntry> createState() => _SalesModeEntryState();
+}
+
+class _SalesModeEntryState extends ConsumerState<_SalesModeEntry> {
+  bool _revealed = false;
+  int _tapCount = 0;
+  DateTime? _lastTap;
+
+  void _onTap() {
+    final now = DateTime.now();
+    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
+      _tapCount = 0;
+    }
+    _lastTap = now;
+    _tapCount++;
+
+    // Reveal after 6 rapid taps (different from installer's 5 and admin's 7)
+    if (_tapCount >= 6) {
+      setState(() => _revealed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSalesMode = ref.watch(salesModeActiveProvider);
+
+    if (isSalesMode) {
+      return ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Icon(Icons.storefront, color: NexGenPalette.cyan, size: 18),
+        ),
+        title: const Text('Sales Mode Active'),
+        subtitle: const Text('Tap to exit sales mode'),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.6)),
+          ),
+          child: Text(
+            'Active',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.cyan),
+          ),
+        ),
+        onTap: () {
+          ref.read(salesModeProvider.notifier).exitSalesMode();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sales mode deactivated')),
+          );
+        },
+      );
+    }
+
+    if (!_revealed) {
+      return GestureDetector(
+        onTap: _onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          child: Text(
+            'Powered by Nex-Gen',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+              fontSize: 11,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [NexGenPalette.cyan, NexGenPalette.violet],
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(Icons.storefront, color: Colors.white, size: 18),
+      ),
+      title: const Text('Sales Mode'),
+      subtitle: const Text('Field sales and estimate tools'),
+      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+      onTap: () => context.push(AppRoutes.salesPin),
+    );
+  }
+}
+
 /// Hidden admin mode entry - requires long press on installer mode entry to reveal
 class _AdminModeEntry extends ConsumerStatefulWidget {
   const _AdminModeEntry();
@@ -846,7 +829,7 @@ class _AdminModeEntryState extends ConsumerState<_AdminModeEntry> {
             style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.amber),
           ),
         ),
-        onTap: () => context.push(AppRoutes.adminDashboard),
+        onTap: () => context.push(AppRoutes.corporateDashboard),
       );
     }
 
@@ -1047,9 +1030,12 @@ class _SportsAlertsCard extends ConsumerWidget {
               ),
             )
           : null,
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SportsAlertsScreen()),
-      ),
+      // Use the system-shell child route so the back stack lives inside
+      // the System branch's navigator. Raw Navigator.push left the screen
+      // unreachable-to-back-out-of when the user switched bottom-nav
+      // tabs and returned. context.push() with a proper route also pairs
+      // with the BackButton added to SportsAlertsScreen's GlassAppBar.
+      onTap: () => context.push(AppRoutes.sportsAlerts),
     );
   }
 }
@@ -1474,7 +1460,7 @@ class _SupportRequestFormSheetState extends ConsumerState<SupportRequestFormShee
       child: Padding(
         padding: EdgeInsets.only(left: 16, right: 16, top: 12, bottom: bottomInset + 16),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3), borderRadius: BorderRadius.circular(999)))),
+          Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(999)))),
           const SizedBox(height: 12),
           Row(children: [
             Icon(Icons.assignment_outlined, color: NexGenPalette.cyan),

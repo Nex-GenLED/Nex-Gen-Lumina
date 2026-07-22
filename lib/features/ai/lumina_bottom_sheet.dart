@@ -9,15 +9,24 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart' show activePresetLabelProvider;
+import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
+import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
+import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent.dart';
+import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_waveform_painter.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/app_providers.dart' show selectedTabIndexProvider;
+import 'package:nexgen_command/app_providers.dart'
+    show selectedTabIndexProvider, authStateProvider;
+import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
+import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
+import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.dart';
 import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -540,6 +549,59 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         return;
       }
 
+      // ── Ephemeral session intent (Item #51) ────────────────────────────
+      // When the AI emits ephemeralSession (sports/team event + "after"
+      // state), apply the immediate WLED design AND wire up a one-shot
+      // session that auto-reverts at game end.
+      final ephemeralIntent = result.ephemeralSessionIntent;
+      if (ephemeralIntent != null && ephemeralIntent.isValid) {
+        await _handleEphemeralSession(ephemeralIntent, result, prompt);
+        return;
+      }
+
+      // ── Recurring sports autopilot (every game / all season) ──────────
+      // COMPACT rule → existing Game Day Autopilot enable path (idempotent
+      // per team, rolling 7-day materialize → ≤8 WLED timers via lease
+      // manager). Shared handler keeps this surface in lock-step with the
+      // full-screen chat.
+      final recurringSports = result.recurringSportsAutopilotIntent;
+      if (recurringSports != null && recurringSports.isValid) {
+        await handleRecurringSportsAutopilot(
+          ref: ref,
+          intent: recurringSports,
+          result: result,
+          onMessagePosted: _scrollToEnd,
+        );
+        return;
+      }
+
+      // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────
+      // The cloud parser canonicalizes both schema shapes into one typed
+      // List<SchedulingIntent> carried on result.schedulingIntents — read
+      // INDEPENDENT of wledPayload so the intents survive a null/absent
+      // top-level wled (#58b). The shared handler iterates the list and
+      // persists atomically via addAll. Same path on full-screen and
+      // bottom-sheet.
+      final intents = result.schedulingIntents ?? const <SchedulingIntent>[];
+      if (intents.isNotEmpty) {
+        LuminaPatternPreview? schedulePreview;
+        if (result.wledPayload != null) {
+          schedulePreview = _extractPreview(result.wledPayload!);
+        } else if (result.previewColors.isNotEmpty) {
+          schedulePreview =
+              LuminaPatternPreview(colors: result.previewColors);
+        }
+        await handleSchedulingIntents(
+          ref: ref,
+          context: context,
+          intents: intents,
+          result: result,
+          preview: schedulePreview,
+          onMessagePosted: _scrollToEnd,
+        );
+        return;
+      }
+
       // Apply WLED payload to lights if available
       LuminaPatternPreview? preview;
       if (result.wledPayload != null) {
@@ -547,7 +609,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         final repo = ref.read(wledRepositoryProvider);
         if (repo != null) {
           try {
-            final ok = await repo.applyJson(result.wledPayload!);
+            final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
             if (ok && mounted) {
               if (preview != null) {
                 ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -556,10 +618,14 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                       effectName: preview.effectName,
                     );
               }
-              final label = preview?.patternName ??
-                  result.command?.parameters['patternName'] as String? ??
-                  'Lumina Pattern';
-              ref.read(activePresetLabelProvider.notifier).state = label;
+              final aiName = preview?.patternName ??
+                  result.command?.parameters['patternName'] as String?;
+              final label = resolveLuminaDisplayName(aiName, prompt);
+              if (label != null) {
+                ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
+              } else {
+                ref.read(activePresetLabelProvider.notifier).clear();
+              }
             }
           } catch (e) {
             debugPrint('Apply from Lumina sheet failed: $e');
@@ -594,6 +660,98 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     _scrollToEnd();
   }
 
+  /// Item #51 Prompt 3 — applies the immediate WLED design then dispatches
+  /// the ephemeral session intent to [EphemeralSessionDispatcher]. Builds
+  /// a chat confirmation that augments the AI's response text with the
+  /// session details (or a no-game-found alternative offer).
+  Future<void> _handleEphemeralSession(
+    EphemeralSessionIntent intent,
+    LuminaCommandResult result,
+    String prompt,
+  ) async {
+    final controller = ref.read(luminaSheetProvider.notifier);
+
+    // 1. Apply the immediate WLED payload (the team design). Mirrors the
+    //    existing single-pattern apply so the user gets the design they
+    //    asked for regardless of the dispatch outcome.
+    LuminaPatternPreview? preview;
+    if (result.wledPayload != null) {
+      preview = _extractPreview(result.wledPayload!);
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo != null) {
+        try {
+          final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
+          if (ok && mounted) {
+            if (preview != null) {
+              ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+                    colorSequence: preview.colors,
+                    colorNames: preview.colorNames,
+                    effectName: preview.effectName,
+                  );
+            }
+            final aiName = preview?.patternName ??
+                result.command?.parameters['patternName'] as String?;
+            final label = resolveLuminaDisplayName(aiName, prompt);
+            if (label != null) {
+              ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
+            } else {
+              ref.read(activePresetLabelProvider.notifier).clear();
+            }
+          }
+        } catch (e) {
+          debugPrint('Apply (ephemeral) from Lumina sheet failed: $e');
+        }
+      }
+    }
+
+    // 2. Dispatch the ephemeral session intent.
+    var responseText = result.responseText;
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      debugPrint(
+          '[Lumina sheet] ephemeral session — no authenticated user; skipping dispatch');
+    } else {
+      final dispatchResult = await EphemeralSessionDispatcher.dispatch(
+        intent: intent,
+        ref: ref,
+        userId: user.uid,
+      );
+      final augmentation = _buildEphemeralAugmentation(dispatchResult);
+      if (augmentation != null) {
+        responseText = '$responseText\n\n$augmentation';
+      }
+    }
+
+    if (!mounted) return;
+    controller.addAssistantMessage(
+      responseText,
+      preview: preview,
+      wledPayload: result.wledPayload,
+    );
+  }
+
+  /// Builds the chat confirmation suffix appended to the AI's response
+  /// text after an ephemeral session dispatch. Returns null when there's
+  /// nothing to add (hard error or empty result).
+  String? _buildEphemeralAugmentation(DispatchResult dispatchResult) {
+    if (dispatchResult.noGameFoundMessage != null) {
+      return dispatchResult.noGameFoundMessage;
+    }
+    if (dispatchResult.createdSessionIds.isEmpty) {
+      debugPrint(
+          '[Lumina sheet] ephemeral dispatch returned no sessions and no message: ${dispatchResult.errorMessage}');
+      return null;
+    }
+    final labels = dispatchResult.sessionLabels;
+    if (labels.length == 1) {
+      return '✓ Will revert to ${dispatchResult.revertLabel} when ${labels.first} ends.';
+    }
+    return '✓ Will revert to ${dispatchResult.revertLabel} after each game ends: ${labels.join(', ')}.';
+  }
+
   /// Handles navigation commands by closing the sheet and navigating.
   void _handleNavigation(LuminaCommandResult result) {
     final params = result.command?.parameters ?? {};
@@ -608,11 +766,15 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     } else if (route != null && mounted) {
       // Use go() for within-shell routes so nav bar stays visible;
       // use push() for fullscreen/modal routes (outside shell).
+      // Note: '/dashboard/...' (nested home-branch routes like
+      // /dashboard/design-studio, /dashboard/my-designs, /dashboard/game-day)
+      // must also use go() so the home branch navigates to the nested path
+      // instead of pushing on the root navigator.
       final isShellRoute = route.startsWith('/explore') ||
           route.startsWith('/settings') ||
           route.startsWith('/schedule') ||
           route.startsWith('/wled/') ||
-          route == '/dashboard';
+          route.startsWith('/dashboard');
       if (isShellRoute) {
         context.go(route);
       } else {
@@ -1121,7 +1283,12 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                     preview: msg.preview,
                     wledPayload: msg.wledPayload,
                     onApply: msg.wledPayload != null
-                        ? () => _applyPattern(msg.wledPayload!, msg.preview)
+                        ? () => _applyPattern(
+                              msg.wledPayload!,
+                              msg.preview,
+                              originalPrompt:
+                                  _priorUserPrompt(sheetState.messages, i),
+                            )
                         : null,
                   );
                 case LuminaMessageRole.thinking:
@@ -1149,12 +1316,15 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
   }
 
   Future<void> _applyPattern(
-      Map<String, dynamic> wled, LuminaPatternPreview? preview) async {
+    Map<String, dynamic> wled,
+    LuminaPatternPreview? preview, {
+    String? originalPrompt,
+  }) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return;
 
     try {
-      final ok = await repo.applyJson(wled);
+      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(wled, labelHint: null);
       if (ok && mounted) {
         if (preview != null) {
           ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
@@ -1163,15 +1333,33 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                 effectName: preview.effectName,
               );
         }
-        final label = preview?.patternName ?? 'Lumina Pattern';
-        ref.read(activePresetLabelProvider.notifier).state = label;
+        final aiName = preview?.patternName ?? wled['patternName'] as String?;
+        final label = resolveLuminaDisplayName(aiName, originalPrompt);
+        if (label != null) {
+          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
+        } else {
+          ref.read(activePresetLabelProvider.notifier).clear();
+        }
+        final displayLabel = ref.read(displayPatternNameProvider);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$label applied!')),
+          SnackBar(content: Text('$displayLabel applied!')),
         );
       }
     } catch (e) {
       debugPrint('Apply from sheet failed: $e');
     }
+  }
+
+  /// Walks back from [assistantIndex] to find the prompt that produced the
+  /// bubble at that index. Used by the bubble-tap apply path.
+  String? _priorUserPrompt(List<LuminaMessage> messages, int assistantIndex) {
+    for (int i = assistantIndex - 1; i >= 0; i--) {
+      final m = messages[i];
+      if (m.role == LuminaMessageRole.user && m.text.trim().isNotEmpty) {
+        return m.text;
+      }
+    }
+    return null;
   }
 
   // -------------------------------------------------------------------------
@@ -1225,7 +1413,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                       color: _kFrost,
                     ),
                 decoration: InputDecoration(
-                  hintText: 'Ask Lumina anything...',
+                  hintText: LuminaBrain.contextualPlaceholder(),
                   hintStyle: TextStyle(
                     color: _kFrost.withValues(alpha: 0.3),
                   ),

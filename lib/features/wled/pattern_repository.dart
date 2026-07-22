@@ -8,7 +8,6 @@ import 'package:nexgen_command/features/wled/sports_library_builder.dart';
 import 'package:nexgen_command/data/holiday_palettes.dart';
 import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
-import 'package:nexgen_command/data/ncaa_conferences.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
 import 'package:flutter/material.dart';
@@ -114,7 +113,9 @@ class PatternRepository {
         final first = seg.first;
         if (first is Map && first['fx'] is int) return first['fx'] as int;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in PatternRepository effectIdFromPayload: $e');
+    }
     return null;
   }
 
@@ -145,18 +146,22 @@ class PatternRepository {
     91,  // Bouncing Balls
     96,  // Drip
     // Exotic Effects - Forward-thinking, visually impressive
-    46,  // Twinklefox - magical fairy-dust sparkle
-    52,  // Ripple - expanding ripple waves
-    65,  // Colorwaves - flowing color waves
-    69,  // Aurora - northern lights simulation
-    70,  // Lake - shimmering water reflection
-    73,  // Pacifica - ocean-inspired flowing
-    82,  // Plasma - plasma ball effect
-    89,  // Fireworks Starburst - explosive celebration
-    100, // Heartbeat - pulsing life rhythm
-    107, // Flow - smooth flowing motion
-    111, // Chunchun - unique flowing pattern
-    112, // Dancing Shadows - dramatic shadow play
+    // Re-numbered to fw 0.15.1 catalog IDs (these were pre-0.14 IDs that
+    // drifted — e.g. old 46 rendered Gradient, not Twinklefox). Verified
+    // against WledEffectsCatalog. _creativePatternName's switch below is
+    // updated to the same IDs so creative naming still matches.
+    80,  // Twinklefox - magical fairy-dust sparkle (was 46 = Gradient)
+    79,  // Ripple - expanding ripple waves (was 52 = Running Dual)
+    67,  // Colorwaves - flowing color waves (was 65 = Palette)
+    38,  // Aurora - northern lights simulation (was 69 = Fill Noise)
+    75,  // Lake - shimmering water reflection (was 70 = Noise 1)
+    101, // Pacifica - ocean-inspired flowing (was 73 = Noise 4)
+    97,  // Plasma - plasma ball effect (was 82 = Halloween Eyes)
+    89,  // Fireworks Starburst - explosive celebration (already correct)
+    100, // Heartbeat - pulsing life rhythm (already correct)
+    110, // Flow - smooth flowing motion (was 107 = Noise Pal)
+    111, // Chunchun - unique flowing pattern (already correct)
+    112, // Dancing Shadows - dramatic shadow play (already correct)
   ];
 
   /// Creative name templates for effects.
@@ -220,26 +225,26 @@ class PatternRepository {
         return 'Bouncing ${plural(baseName)}';
       case 96:  // Drip
         return '$baseName Drips';
-      // Exotic Effects
-      case 46:  // Twinklefox
+      // Exotic Effects (fw 0.15.1 catalog IDs — kept in sync with kColorwayEffectIds)
+      case 80:  // Twinklefox
         return '$baseName Stardust';
-      case 52:  // Ripple
+      case 79:  // Ripple
         return '$baseName Ripples';
-      case 65:  // Colorwaves
+      case 67:  // Colorwaves
         return 'Flowing ${plural(baseName)}';
-      case 69:  // Aurora
+      case 38:  // Aurora
         return '$baseName Aurora';
-      case 70:  // Lake
+      case 75:  // Lake
         return '$baseName Reflections';
-      case 73:  // Pacifica
+      case 101: // Pacifica
         return '$baseName Tides';
-      case 82:  // Plasma
+      case 97:  // Plasma
         return '$baseName Plasma';
       case 89:  // Fireworks Starburst
         return '$baseName Burst';
       case 100: // Heartbeat
         return '$baseName Pulse';
-      case 107: // Flow
+      case 110: // Flow
         return '$baseName Flow';
       case 111: // Chunchun
         return 'Dancing ${plural(baseName)}';
@@ -254,7 +259,9 @@ class PatternRepository {
     }
   }
 
-  static List<List<int>> _colorsToWledCol(List<Color> colors) {
+  /// Convert Flutter Colors to WLED RGBW col arrays (up to 3 slots).
+  /// Public so the adjustment panel can recompute colors for gradient presets.
+  static List<List<int>> colorsToWledCol(List<Color> colors) {
     // WLED col expects up to 3 color slots; keep first 3 theme colors
     // Force W=0 to keep saturated colors accurate - WLED handles GRB conversion
     // Also strip noise channels from dominant colors to prevent pink/magenta
@@ -301,7 +308,7 @@ class PatternRepository {
   /// Generate pattern items for a given sub-category using its theme palette.
   /// Uses creative naming combining the theme name with effect types.
   Future<List<PatternItem>> generatePatternsForTheme(SubCategory subCat) async {
-    final List<List<int>> col = _colorsToWledCol(subCat.themeColors);
+    final List<List<int>> col = colorsToWledCol(subCat.themeColors);
     // Determine a backdrop image based on parent category if possible
     final catImage = _categories.firstWhere((c) => c.id == subCat.parentCategoryId, orElse: () => _categories.first).imageUrl;
 
@@ -317,7 +324,11 @@ class PatternRepository {
             'col': col,
             'sx': adjustedSpeed,
             'ix': 128,
-            'pal': 5, // "Colors Only" - use segment colors only, no rainbow blending
+            // Palette by effect color-behavior — palette-driven effects
+            // (Rainbow, Colorwaves, Aurora, Plasma…) sweep a gradient of the
+            // user's colors (pal:4); col-based effects keep discrete user
+            // colors ("Colors Only", pal:5).
+            'pal': WledEffectsCatalog.paletteForEffect(fxId),
           }
         ]
       };
@@ -391,42 +402,18 @@ class PatternRepository {
 
   static const List<PatternCategory> _categories = [
     catArchitectural,
-    catHoliday,
     catSports,
-    catSeasonal,
-    catParty,
+    catHoliday,
     catMovies,
-    catSecurity,
     catNature,
+    catParty,
+    catSeasonal,
+    catSecurity,
   ];
 
   // ================= Sub-Categories (3-tier navigation) =================
   static final List<SubCategory> _subCategories = [
-    // Holidays
-    SubCategory(
-      id: 'sub_xmas',
-      name: 'Christmas',
-      themeColors: const [Color(0xFFFF0000), Color(0xFF00FF00), Colors.white], // Pure red & green
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_halloween',
-      name: 'Halloween',
-      themeColors: const [Color(0xFFFF8C00), Color(0xFF800080), Colors.black], // Pure orange, purple
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_july4',
-      name: '4th of July',
-      themeColors: const [Color(0xFFFF0000), Colors.white, Color(0xFF0000FF)], // Pure red, white, blue
-      parentCategoryId: catHoliday.id,
-    ),
-    SubCategory(
-      id: 'sub_easter',
-      name: 'Easter',
-      themeColors: const [Color(0xFFFFB6C1), Color(0xFFADD8E6), Color(0xFFBFFF00)], // Light pink, light blue, lime
-      parentCategoryId: catHoliday.id,
-    ),
+    // Holidays (chronological)
     SubCategory(
       id: 'sub_valentines',
       name: "Valentine's",
@@ -439,26 +426,32 @@ class PatternRepository {
       themeColors: const [Color(0xFF00FF00), Color(0xFF90EE90), Colors.white], // Pure green, light green
       parentCategoryId: catHoliday.id,
     ),
+    SubCategory(
+      id: 'sub_easter',
+      name: 'Easter',
+      themeColors: const [Color(0xFFFFB6C1), Color(0xFFADD8E6), Color(0xFFBFFF00)], // Light pink, light blue, lime
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_july4',
+      name: '4th of July',
+      themeColors: const [Color(0xFFFF0000), Colors.white, Color(0xFF0000FF)], // Pure red, white, blue
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_halloween',
+      name: 'Halloween',
+      themeColors: const [Color(0xFFFF8C00), Color(0xFF800080), Colors.black], // Pure orange, purple
+      parentCategoryId: catHoliday.id,
+    ),
+    SubCategory(
+      id: 'sub_xmas',
+      name: 'Christmas',
+      themeColors: const [Color(0xFFFF0000), Color(0xFF00FF00), Colors.white], // Pure red & green
+      parentCategoryId: catHoliday.id,
+    ),
 
     // Game Day - Using pure RGB colors for accurate LED display
-    SubCategory(
-      id: 'sub_kc',
-      name: 'Kansas City',
-      themeColors: const [Color(0xFFFF0000), Color(0xFFFFD700)], // Pure red, gold
-      parentCategoryId: catSports.id,
-    ),
-    SubCategory(
-      id: 'sub_seattle',
-      name: 'Seattle',
-      themeColors: const [Color(0xFF0000FF), Color(0xFF00FF00)], // Pure blue, pure green
-      parentCategoryId: catSports.id,
-    ),
-    SubCategory(
-      id: 'sub_rb_generic',
-      name: 'General Red/Blue',
-      themeColors: const [Color(0xFFFF0000), Color(0xFF0000FF), Colors.white], // Pure red, pure blue
-      parentCategoryId: catSports.id,
-    ),
     SubCategory(
       id: 'sub_gy_generic',
       name: 'General Green/Yellow',
@@ -471,8 +464,32 @@ class PatternRepository {
       themeColors: const [Color(0xFFFF8C00), Color(0xFF0000FF)], // Pure orange, pure blue
       parentCategoryId: catSports.id,
     ),
+    SubCategory(
+      id: 'sub_rb_generic',
+      name: 'General Red/Blue',
+      themeColors: const [Color(0xFFFF0000), Color(0xFF0000FF), Colors.white], // Pure red, pure blue
+      parentCategoryId: catSports.id,
+    ),
+    SubCategory(
+      id: 'sub_kc',
+      name: 'Kansas City',
+      themeColors: const [Color(0xFFFF0000), Color(0xFFFFD700)], // Pure red, gold
+      parentCategoryId: catSports.id,
+    ),
+    SubCategory(
+      id: 'sub_seattle',
+      name: 'Seattle',
+      themeColors: const [Color(0xFF0000FF), Color(0xFF00FF00)], // Pure blue, pure green
+      parentCategoryId: catSports.id,
+    ),
 
     // Seasonal - Using pure RGB colors for accurate LED display
+    SubCategory(
+      id: 'sub_autumn',
+      name: 'Autumn Harvest',
+      themeColors: const [Color(0xFFFF8C00), Color(0xFF8B4513), Color(0xFFFF0000)], // Orange, saddle brown, red
+      parentCategoryId: catSeasonal.id,
+    ),
     SubCategory(
       id: 'sub_spring',
       name: 'Spring Pastels',
@@ -486,12 +503,6 @@ class PatternRepository {
       parentCategoryId: catSeasonal.id,
     ),
     SubCategory(
-      id: 'sub_autumn',
-      name: 'Autumn Harvest',
-      themeColors: const [Color(0xFFFF8C00), Color(0xFF8B4513), Color(0xFFFF0000)], // Orange, saddle brown, red
-      parentCategoryId: catSeasonal.id,
-    ),
-    SubCategory(
       id: 'sub_winter',
       name: 'Winter Frost',
       themeColors: const [Color(0xFF708090), Color(0xFFADD8E6), Colors.white], // Slate gray, light blue, white
@@ -499,12 +510,6 @@ class PatternRepository {
     ),
 
     // Architectural - Warm tones use specific hex values for LED accuracy
-    SubCategory(
-      id: 'sub_warm_whites',
-      name: 'Warm Whites',
-      themeColors: const [Color(0xFFFFB347), Color(0xFFFF8C00), Colors.white], // Warm amber, orange, white
-      parentCategoryId: catArchitectural.id,
-    ),
     SubCategory(
       id: 'sub_cool_whites',
       name: 'Cool Whites',
@@ -523,8 +528,20 @@ class PatternRepository {
       themeColors: const [Colors.white],
       parentCategoryId: catArchitectural.id,
     ),
+    SubCategory(
+      id: 'sub_warm_whites',
+      name: 'Warm Whites',
+      themeColors: const [Color(0xFFFFB347), Color(0xFFFF8C00), Colors.white], // Warm amber, orange, white
+      parentCategoryId: catArchitectural.id,
+    ),
 
     // Party - Using pure RGB colors for accurate LED display
+    SubCategory(
+      id: 'sub_baby_shower',
+      name: 'Baby Shower',
+      themeColors: const [Color(0xFFADD8E6), Color(0xFFFFB6C1), Colors.white], // Light blue, light pink, white
+      parentCategoryId: catParty.id,
+    ),
     SubCategory(
       id: 'sub_birthday',
       name: 'Birthday Brights',
@@ -543,12 +560,6 @@ class PatternRepository {
       themeColors: const [Color(0xFF800080), Color(0xFF00FFFF), Color(0xFFFF69B4)], // Purple, cyan, hot pink
       parentCategoryId: catParty.id,
     ),
-    SubCategory(
-      id: 'sub_baby_shower',
-      name: 'Baby Shower',
-      themeColors: const [Color(0xFFADD8E6), Color(0xFFFFB6C1), Colors.white], // Light blue, light pink, white
-      parentCategoryId: catParty.id,
-    ),
   ];
 
   // Holiday items
@@ -564,10 +575,37 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 12, // Chase
+            'fx': 28, // Chase (was 12 = Fade on fw 0.15.1)
             'pal': 3, // Red/White
             'sx': 180,
             'ix': 200
+          }
+        ]
+      },
+    ),
+    PatternItem(
+      id: 'pat_easter_pastels',
+      name: 'Easter Pastels',
+      imageUrl: 'https://images.unsplash.com/photo-1522938974444-f12497b69347',
+      categoryId: catHoliday.id,
+      wledPayload: const {
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {
+            'id': 0,
+            'fx': 67, // Colorwaves (was 9 = Rainbow, which generates its own
+            // colors and ignored the pastel intent entirely)
+            'pal': 4, // Color Gradient of col[] below — honors the shipped
+            // pal:4 normalize convention so it sweeps the pastel colors
+            // instead of a built-in WLED palette.
+            'col': [
+              [255, 182, 193, 0], // Easter pink
+              [173, 216, 230, 0], // Easter blue
+              [255, 250, 205, 0], // Easter yellow
+            ],
+            'sx': 140,
+            'ix': 160
           }
         ]
       },
@@ -583,7 +621,8 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 120, // Sparkle
+            'fx': 20, // Sparkle (was 120 = Ghost Rider, a 2D matrix effect —
+            // rendered a single moving dot on the 1D rooflines, not a sparkle)
             'pal': 6, // Red/White/Blue
             'sx': 170,
             'ix': 180
@@ -602,29 +641,10 @@ class PatternRepository {
         'seg': [
           {
             'id': 0,
-            'fx': 76, // Lightning
+            'fx': 57, // Lightning (was 76 = Meteor on fw 0.15.1)
             'pal': 5, // Purple/Orange
             'sx': 210,
             'ix': 200
-          }
-        ]
-      },
-    ),
-    PatternItem(
-      id: 'pat_easter_pastels',
-      name: 'Easter Pastels',
-      imageUrl: 'https://images.unsplash.com/photo-1522938974444-f12497b69347',
-      categoryId: catHoliday.id,
-      wledPayload: const {
-        'on': true,
-        'bri': 200,
-        'seg': [
-          {
-            'id': 0,
-            'fx': 9, // Color Waves
-            'pal': 12, // Pastel-like
-            'sx': 140,
-            'ix': 160
           }
         ]
       },
@@ -839,6 +859,17 @@ class PatternRepository {
     (id: 'k6500', name: '6500K', desc: 'Moonlight', colors: [Color(0xFFFFFEFA), Color(0xFFEEF2FF)]),
   ];
 
+  /// Brightness gradient preset definitions.
+  /// Public so the adjustment panel can offer preset switching.
+  static const brightnessGradientPresets = [
+    (id: 'gentle',   name: 'Gentle Fade',   desc: 'Subtle brightness taper',         steps: [1.0, 0.85, 0.70]),
+    (id: 'medium',   name: 'Medium Fade',   desc: 'Balanced brightness falloff',     steps: [1.0, 0.75, 0.50]),
+    (id: 'deep',     name: 'Deep Fade',     desc: 'Dramatic brightness drop',        steps: [1.0, 0.60, 0.30]),
+    (id: 'stair',    name: 'Staircase',     desc: 'Even thirds brightness steps',    steps: [1.0, 0.66, 0.33]),
+    (id: 'duo',      name: 'Duo Alternate', desc: 'Two-step bright/dim alternation', steps: [1.0, 0.70]),
+    (id: 'pulse',    name: 'Soft Pulse',    desc: 'Rhythmic bright-dim-bright wave', steps: [1.0, 0.80, 1.0, 0.60]),
+  ];
+
   /// Galaxy & Starlight style definitions - combines with dim levels
   static const _galaxyDimLevels = [
     (level: 50, name: '50%', desc: 'Half brightness dim'),
@@ -909,10 +940,57 @@ class PatternRepository {
           patternIndex++;
         }
       }
+
+      // Brightness Gradients folder — appears first (sortOrder -1) before
+      // "All On" and the spacing patterns.
+      final gradientsFolderId = 'arch_${style.id}_gradients';
+      nodes.add(LibraryNode(
+        id: gradientsFolderId,
+        name: 'Brightness Gradients',
+        description: 'Graduated brightness patterns in ${style.desc.toLowerCase()}',
+        nodeType: LibraryNodeType.folder,
+        parentId: 'arch_${style.id}',
+        themeColors: style.colors,
+        sortOrder: -1,
+      ));
+
+      // Add gradient preset patterns inside the folder
+      final baseColor = style.colors[0];
+      final baseR = baseColor.red;
+      final baseG = baseColor.green;
+      final baseB = baseColor.blue;
+
+      for (var gi = 0; gi < brightnessGradientPresets.length; gi++) {
+        final preset = brightnessGradientPresets[gi];
+        final gradientColors = preset.steps
+            .map((pct) => Color.fromARGB(
+                  255,
+                  (baseR * pct).round(),
+                  (baseG * pct).round(),
+                  (baseB * pct).round(),
+                ))
+            .toList();
+
+        nodes.add(LibraryNode(
+          id: 'arch_${style.id}_gradients_${preset.id}',
+          name: preset.name,
+          description: preset.desc,
+          nodeType: LibraryNodeType.palette,
+          parentId: gradientsFolderId,
+          themeColors: gradientColors,
+          sortOrder: gi,
+          metadata: {
+            'type': 'brightness_gradient',
+            'gradientColors': gradientColors,
+            'bandWidth': 1,
+            'breathing': false,
+            'suggestedEffects': [83],
+          },
+        ));
+      }
     }
 
     // Add Galaxy & Starlight section
-    final styleCount = _archWhiteStyles.length;
     nodes.add(const LibraryNode(
       id: 'arch_galaxy',
       name: 'Galaxy & Starlight',
@@ -1134,7 +1212,7 @@ class PatternRepository {
     if (!node.isPalette) return [];
 
     final colors = node.themeColors!;
-    final col = _colorsToWledCol(colors);
+    final col = colorsToWledCol(colors);
 
     // Check for special pattern types
     final isGalaxyPattern = node.metadata?['isGalaxyPattern'] == true;
@@ -1151,6 +1229,11 @@ class PatternRepository {
     // Handle Twinkle patterns (bright + twinkling)
     if (isTwinklePattern) {
       return _generateTwinklePatterns(node, col);
+    }
+
+    // Handle Brightness Gradient patterns
+    if (node.metadata?['type'] == 'brightness_gradient') {
+      return _generateBrightnessGradientPatterns(node);
     }
 
     // For architectural spacing patterns, generate fewer effects focused on solid/simple
@@ -1170,17 +1253,21 @@ class PatternRepository {
       // Apply speed adjustment from catalog
       final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
 
-      // Build segment data
-      // CRITICAL: Set 'pal': 5 ("Colors Only" palette) to ensure effects use
-      // only the segment colors in 'col', not the rainbow default palette.
-      // This fixes issues with effects like Spots Fade, Twinkle Fox, etc.
-      // showing rainbow colors instead of the selected theme colors.
+      // Build segment data.
+      // Palette is resolved per effect color-behavior (see paletteForEffect):
+      // col-based effects get "Colors Only" (pal:5) so they show only the
+      // segment colors and not the default rainbow palette; palette-driven
+      // effects (Rainbow, Colorwaves, Aurora, Plasma…) get "Color Gradient"
+      // (pal:4) so they sweep a gradient built from the user's colors.
       final segData = <String, dynamic>{
         'fx': fxId,
         'col': col,
         'sx': adjustedSpeed,
         'ix': node.defaultIntensity,
-        'pal': 5, // "Colors Only" - prevents rainbow palette blending
+        // Palette by effect color-behavior — palette-driven effects keep their
+        // palette; col-based effects keep "Colors Only" (pal:5). Also enforced
+        // centrally at the apply chokepoint (normalizeWledPayload).
+        'pal': WledEffectsCatalog.paletteForEffect(fxId),
       };
 
       // Add grouping and spacing for architectural patterns
@@ -1202,6 +1289,87 @@ class PatternRepository {
         },
       ));
     }
+
+    return items;
+  }
+
+  /// Generate patterns for a brightness gradient palette node.
+  /// Produces a static variant and a breathing variant from the gradient metadata.
+  List<PatternItem> _generateBrightnessGradientPatterns(LibraryNode node) {
+    final gradientColors = (node.metadata?['gradientColors'] as List?)
+        ?.cast<Color>() ?? node.themeColors!;
+    final bandWidth = (node.metadata?['bandWidth'] as int?) ?? 1;
+    final col = colorsToWledCol(gradientColors);
+
+    // Extract the base color (full brightness) from the node's parent style.
+    // The first gradient color is always the 100% step, which IS the base color.
+    final baseColor = gradientColors.first;
+
+    // Determine which preset this node represents from its ID suffix
+    final nodeId = node.id;
+    final presetId = nodeId.contains('_gradients_')
+        ? nodeId.split('_gradients_').last
+        : 'gentle';
+
+    // Shared gradient metadata embedded in payload so the adjustment panel
+    // can detect gradient patterns and offer preset/bandWidth/breathing controls.
+    final gradientMeta = {
+      'isGradient': true,
+      'presetId': presetId,
+      'baseColorValue': baseColor.value,
+    };
+
+    final items = <PatternItem>[];
+    final categoryId = _findRootCategoryId(node.id);
+
+    // Static variant — Solid Pattern (fx 83)
+    // NOTE: pal omitted intentionally — testing whether pal: 5 was
+    // overriding the col array on fx 83 and causing the rendering to
+    // collapse to a uniform color. If this fix works, this comment
+    // becomes the documentation. If not, restore pal: 5 and try fx 84
+    // "Solid Pattern Tri" instead.
+    items.add(PatternItem(
+      id: 'gen_${node.id}_static',
+      name: '${node.name} – Static',
+      imageUrl: '',
+      categoryId: categoryId,
+      wledPayload: {
+        'on': true,
+        'bri': 200,
+        '_gradientMeta': gradientMeta,
+        'seg': [
+          {
+            'fx': 83,
+            'col': col,
+            'grp': bandWidth,
+            'spc': 0,
+            'sx': 0,
+          }
+        ],
+      },
+    ));
+
+    // Breathing variant — Breathe effect (fx 2)
+    items.add(PatternItem(
+      id: 'gen_${node.id}_breathe',
+      name: '${node.name} – Breathing',
+      imageUrl: '',
+      categoryId: categoryId,
+      wledPayload: {
+        'on': true,
+        'bri': 200,
+        '_gradientMeta': gradientMeta,
+        'seg': [
+          {
+            'fx': 2,
+            'col': col,
+            'grp': bandWidth,
+            'spc': 0,
+            'sx': 100,
+          }
+        ],
+      },
+    ));
 
     return items;
   }

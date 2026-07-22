@@ -1,7 +1,8 @@
 import 'dart:async';
-
+import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/holiday_seasons.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
@@ -9,7 +10,6 @@ import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_ser
 import 'package:nexgen_command/features/sports_alerts/services/game_schedule_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/models/autopilot_activity_entry.dart';
 import 'package:nexgen_command/models/autopilot_override.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
@@ -157,14 +157,22 @@ class AutopilotScheduler {
       return;
     }
 
-    // Restore captured state
+    // Restore captured state. Route through applyPayloadWithLabel with
+    // labelHint:null — the override flash kept the user's persistent
+    // label intact (transient writes don't touch Now Playing), so the
+    // restore must not touch it either. Bare repo.applyJson here would
+    // leave the roofline preview hero stuck on the captured-state's
+    // visual cache from before the override (sibling of the
+    // AUTOPILOT-CHANGE preview-bug).
     if (token.capturedState != null && token.capturedState!.isNotEmpty) {
       try {
-        final repo = _ref.read(wledRepositoryProvider);
-        if (repo != null) {
-          await repo.applyJson(token.capturedState!);
-          debugPrint('AutopilotScheduler: State restored after override');
-        }
+        await _ref
+            .read(wledStateProvider.notifier)
+            .applyPayloadWithLabel(
+              token.capturedState!,
+              labelHint: null,
+            );
+        debugPrint('AutopilotScheduler: State restored after override');
       } catch (e) {
         debugPrint('AutopilotScheduler: Failed to restore state: $e');
       }
@@ -211,11 +219,34 @@ class AutopilotScheduler {
       return;
     }
 
+    // Holiday-season awareness: log when today falls inside a recognized
+    // [HolidaySeason] so scheduling decisions for the next 7 days can fan
+    // out across the entire season range instead of only firing on the
+    // single holiday date itself.  CalendarEventService.getEventsForDateRange
+    // emits per-day season events that the generation service consumes.
+    final activeSeason = HolidaySeasons.activeSeasonForDate(DateTime.now());
+    if (activeSeason != null) {
+      debugPrint(
+        'AutopilotScheduler: Today is inside ${activeSeason.name} '
+        '(${activeSeason.start.toIso8601String().substring(0, 10)} → '
+        '${activeSeason.end.toIso8601String().substring(0, 10)})',
+      );
+    }
+
     // Check if we need to regenerate the schedule
     if (_needsRegeneration(profile)) {
       await _regenerateSchedule(profile);
     }
   }
+
+  /// Public accessor: returns the highest-priority [HolidaySeason] active
+  /// today, or null when today is not inside any named season.
+  ///
+  /// Used by the Lumina AI screen and the calendar UI to answer "are we
+  /// currently in a holiday stretch?" without re-implementing the date
+  /// math.
+  HolidaySeason? get currentHolidaySeason =>
+      HolidaySeasons.activeSeasonForDate(DateTime.now());
 
   /// Check if schedule regeneration is needed.
   bool _needsRegeneration(UserModel profile) {
@@ -297,6 +328,7 @@ class AutopilotScheduler {
             wledPayload: item.wledPayload,
             confidenceScore: item.confidenceScore,
             createdAt: item.createdAt,
+            message: item.message,
           ),
         );
       }
@@ -360,14 +392,17 @@ class AutopilotScheduler {
     debugPrint('AutopilotScheduler: Applying pattern "${item.patternName}"');
 
     try {
-      final repo = _ref.read(wledRepositoryProvider);
-      if (repo == null) {
-        debugPrint('AutopilotScheduler: No WLED repository available');
-        return;
-      }
-
-      // Apply the WLED payload
-      final success = await repo.applyJson(item.wledPayload);
+      // Route through the applyPayloadWithLabel chokepoint. The previous
+      // path called repo.applyJson directly + setLabelWithFingerprint
+      // manually, which left the visual cache stale — the
+      // AUTOPILOT-CHANGE bug (roofline preview showed the prior
+      // pattern's purple/white blend after a new item fired).
+      final success = await _ref
+          .read(wledStateProvider.notifier)
+          .applyPayloadWithLabel(
+            item.wledPayload,
+            labelHint: item.patternName,
+          );
 
       if (success) {
         debugPrint('AutopilotScheduler: Successfully applied ${item.patternName}');
@@ -576,7 +611,7 @@ class AutopilotScheduler {
         .recordPatternRejection(suggestion.patternName);
   }
 
-  /// Force regeneration of the schedule.
+/// Force regeneration of the schedule.
   Future<void> forceRegenerate() async {
     final profile = _getCurrentProfile();
     if (profile == null) return;
@@ -585,6 +620,149 @@ class AutopilotScheduler {
     _ref.read(autopilotSuggestionsProvider.notifier).clearAll();
 
     await _regenerateSchedule(profile);
+  }
+
+  /// Import a Lumina AI smart schedule plan into the autopilot system.
+  ///
+  /// Called from [LuminaAIScreen] immediately after the AI returns an
+  /// `isSchedule: true` payload. Each occurrence in the plan becomes an
+  /// [AutopilotScheduleItem] that is:
+  ///   - Added to [_activeSchedule] for the normal check loop
+  ///   - Surfaced as a suggestion OR auto-applied, based on [autonomyLevel]
+  ///
+  /// Night 1 is intentionally NOT applied here — [LuminaAIScreen] already
+  /// applied it as a live preview before calling this method.
+  Future<void> importSmartSchedule(Map<String, dynamic> payload) async {
+    final profile = _getCurrentProfile();
+    if (profile == null) {
+      debugPrint('AutopilotScheduler.importSmartSchedule: no profile');
+      return;
+    }
+
+    final scheduleList = payload['schedule'] as List<dynamic>?;
+    if (scheduleList == null || scheduleList.isEmpty) {
+      debugPrint('AutopilotScheduler.importSmartSchedule: empty schedule');
+      return;
+    }
+
+    final autonomyLevel = profile.autonomyLevel ?? 1;
+    final suggestionsNotifier = _ref.read(autopilotSuggestionsProvider.notifier);
+    const uuid = Uuid();
+
+    final newItems = <AutopilotScheduleItem>[];
+
+    for (int i = 0; i < scheduleList.length; i++) {
+      final entry = scheduleList[i] as Map<String, dynamic>;
+
+      final dateStr = entry['date'] as String?;
+      if (dateStr == null) continue;
+      final baseDate = DateTime.tryParse(dateStr);
+      if (baseDate == null) continue;
+
+      final startTriggerName = entry['startTrigger'] as String? ?? 'sunset';
+      final scheduledTime = _resolveScheduledTime(baseDate, startTriggerName);
+
+      final wled = entry['wled'] as Map<String, dynamic>? ?? {};
+      final effectName = entry['effectName'] as String? ?? 'Effect';
+      final patternName = entry['patternName'] as String? ?? 'Lumina $effectName';
+      final dayName = entry['dayName'] as String? ?? 'Night ${i + 1}';
+      final endTriggerName = entry['endTrigger'] as String? ?? 'sunrise';
+
+      final reason = 'Lumina AI: $effectName on $dayName '
+          '($startTriggerName → $endTriggerName)';
+
+      final item = AutopilotScheduleItem(
+        id: uuid.v4(),
+        scheduledTime: scheduledTime,
+        repeatDays: const [],
+        patternName: patternName,
+        reason: reason,
+        trigger: AutopilotTrigger.custom,
+        confidenceScore: 1.0,
+        wledPayload: wled,
+        createdAt: DateTime.now(),
+      );
+
+      newItems.add(item);
+    }
+
+    if (newItems.isEmpty) return;
+
+    // Night 0 was already applied as live preview — mark it approved so
+    // the check loop doesn't re-apply it.
+    final markedItems = newItems.asMap().entries.map((e) {
+      if (e.key == 0) {
+        return e.value.copyWith(isApproved: true, wasAutoApplied: true);
+      }
+      return e.value;
+    }).toList();
+
+    // Remove any existing Lumina-AI-imported items to avoid duplicates,
+    // then append the new plan.
+    _activeSchedule.removeWhere((s) => s.reason.startsWith('Lumina AI:'));
+    _activeSchedule.addAll(markedItems);
+
+    _addActivityLogEntry(AutopilotActivityEntry(
+      timestamp: DateTime.now(),
+      type: ActivityEntryType.patternApplied,
+      source: 'LuminaAI',
+      message: 'Smart schedule imported: ${markedItems.length} nights '
+          'of ${payload['themeName'] ?? 'theme'}',
+    ));
+
+    debugPrint(
+      'AutopilotScheduler: Imported ${markedItems.length} Lumina AI schedule '
+      'items (autonomyLevel=$autonomyLevel)',
+    );
+
+    // Night 1+ surface as suggestions or schedule for auto-apply
+    for (int i = 1; i < markedItems.length; i++) {
+      final item = markedItems[i];
+
+      if (autonomyLevel == 2) {
+        await _scheduleForApplication(item);
+      } else {
+        suggestionsNotifier.addSuggestion(
+          AutopilotSuggestion(
+            id: item.id,
+            patternName: item.patternName,
+            reason: item.reason,
+            scheduledTime: item.scheduledTime,
+            repeatDays: item.repeatDays,
+            wledPayload: item.wledPayload,
+            confidenceScore: item.confidenceScore,
+            createdAt: item.createdAt,
+            message: item.message,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Resolve a concrete [DateTime] from a date + trigger name.
+  ///
+  /// Uses fixed approximations until a solar time library is integrated.
+  ///   sunset  ≈ 20:00 local
+  ///   dusk    ≈ 20:30 local
+  ///   sunrise ≈ 06:00 local
+  ///   dawn    ≈ 05:30 local
+  ///   allDay  ≈ 00:00 local
+  ///
+  /// TODO: replace with actual solar time calculation using device location.
+  DateTime _resolveScheduledTime(DateTime baseDate, String triggerName) {
+    switch (triggerName.toLowerCase()) {
+      case 'sunset':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 20, 0);
+      case 'dusk':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 20, 30);
+      case 'sunrise':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 6, 0);
+      case 'dawn':
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 5, 30);
+      case 'allday':
+      default:
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, 0, 0);
+    }
   }
 
   /// Get the current active schedule.

@@ -2,54 +2,87 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart' show kEffectNames;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/dashboard/main_scaffold.dart' show showDemoExitSheet;
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
+import 'package:nexgen_command/features/game_day/live_scoring_prompt.dart';
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
+import 'package:nexgen_command/features/wled/pattern_repository.dart';
+import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
+    show LibraryDesignSelection;
+import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
 class LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
   final Color? parentAccent;
   final List<Color>? parentGradient;
+  /// Optional override for the empty-children placeholder. Defaults to a
+  /// generic "No items found" if null. Per-surface callers (e.g. the
+  /// my_designs drill-in) pass a more meaningful empty-state message.
+  final String? emptyMessage;
+  /// Override the default folder card aspect ratio (width / height).
+  /// Higher values produce shorter cards.
+  final double? folderAspectRatio;
+  /// When non-null, this grid is being rendered inside the Game Day
+  /// picker. Folder taps will push a new LibraryBrowserScreen via
+  /// the root Navigator (preserving the dashboard branch back stack)
+  /// and forward teamSlug into the constructor so the Game Day
+  /// persistence path continues working at depth.
+  final String? teamSlug;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient});
+  /// Selection mode (additive, mirrors [teamSlug]): when non-null, drill-down
+  /// pushes via the root navigator and forwards this callback so a design tap
+  /// at any depth RETURNS the design instead of applying/browsing.
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected});
 
   @override
   Widget build(BuildContext context) {
     if (children.isEmpty) {
       return Center(
-        child: Text(
-          'No items found',
-          style: TextStyle(color: NexGenPalette.textSecondary),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            emptyMessage ?? 'No items found',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: NexGenPalette.textSecondary),
+          ),
         ),
       );
     }
 
-    // Detect if this grid shows palettes → single-column list layout
-    final allPalettes = children.every((n) => n.isPalette);
+    // Detect if this grid is mostly palettes (e.g. architectural temp
+    // folder with spacing palettes + one Brightness Gradients folder).
+    // Use a compact single-column list for these mixed cases too.
+    final mostlyPalettes = children.where((n) => n.isPalette).length >
+        children.length / 2;
 
-    if (allPalettes) {
+    if (mostlyPalettes) {
       return ListView.builder(
-        padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
+        padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
         itemCount: children.length,
         itemBuilder: (context, index) {
           final node = children[index];
           return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
-              height: 56,
-              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient),
+              height: 44,
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected),
             ),
           );
         },
@@ -58,17 +91,17 @@ class LibraryNodeGrid extends StatelessWidget {
 
     // Folders: 2-column grid with hero cards
     return GridView.builder(
-      padding: const EdgeInsets.only(left: 16, top: 16, right: 16, bottom: kBottomNavBarPadding),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.4,
+        childAspectRatio: folderAspectRatio ?? 1.4,
       ),
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient);
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected);
       },
     );
   }
@@ -80,10 +113,21 @@ class LibraryNodeCard extends StatelessWidget {
   final int? index;
   final Color? parentAccent;
   final List<Color>? parentGradient;
+  /// Propagated from LibraryNodeGrid. When non-null, folder taps push
+  /// a new LibraryBrowserScreen via the root Navigator (preserving
+  /// the Game Day dashboard branch) and forward teamSlug so design
+  /// taps at depth continue to persist via saveDesign.
+  final String? teamSlug;
 
-  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient});
+  /// Selection mode (additive, mirrors [teamSlug]): see [LibraryNodeGrid].
+  final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
-  IconData _iconForNode() {
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
+
+  /// Per-id icon for a library category/folder/palette node. Public+static so
+  /// other surfaces (e.g. the Sync pattern picker's folder cards) reuse the same
+  /// iconography instead of rendering a blank card. (#7)
+  static IconData iconForNode(LibraryNode node) {
     final id = node.id;
 
     // Category icons
@@ -109,7 +153,8 @@ class LibraryNodeCard extends StatelessWidget {
     // Sports folders
     if (id == 'league_soccer' || id == 'league_mls' || id == 'league_nwsl' ||
         id == 'league_epl' || id == 'league_la_liga' || id == 'league_bundesliga' ||
-        id == 'league_serie_a' || id == 'league_ligue_1') return Icons.sports_soccer;
+        id == 'league_serie_a' || id == 'league_champions_league' ||
+        id == 'league_fifa_world_cup') return Icons.sports_soccer;
     if (id.startsWith('league_')) return Icons.sports;
     if (id.contains('ncaa')) return Icons.school_outlined;
     if (id.startsWith('conf_')) return Icons.groups_outlined;
@@ -157,8 +202,11 @@ class LibraryNodeCard extends StatelessWidget {
     return Icons.folder_outlined;
   }
 
-  /// Get themed color for folder nodes (static, not flowing gradient)
-  Color _getFolderThemeColor() {
+  /// Get themed color for folder nodes (static, not flowing gradient).
+  /// Public+static so other surfaces (e.g. the Sync pattern picker) reuse the
+  /// same per-category accent instead of falling back to blank grey. (#7)
+  /// [parentAccent] is an optional route-supplied fallback (null where unused).
+  static Color folderThemeColor(LibraryNode node, {Color? parentAccent}) {
     final id = node.id;
 
     // Category colors
@@ -193,7 +241,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const Color(0xFFFF6B35);
     if (id == 'league_bundesliga') return const Color(0xFFD4020D);
     if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
-    if (id == 'league_ligue_1') return const Color(0xFF003189);
+    if (id == 'league_champions_league') return const Color(0xFF0D47A1);
+    if (id == 'league_fifa_world_cup') return const Color(0xFFD4AF37);
 
     // Holiday colors
     if (id == 'holiday_christmas') return const Color(0xFFC62828);
@@ -218,9 +267,16 @@ class LibraryNodeCard extends StatelessWidget {
     // NCAA parent folder colors
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const Color(0xFF1A237E);
 
-    // Architectural Kelvin folders -- use the node's own theme color
+    // Architectural Kelvin folders -- use the warm end of the node's theme
+    // but enforce a minimum saturation so higher-K folders stay visible.
     if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.isNotEmpty) {
-      return node.themeColors!.first;
+      final c = node.themeColors!.first;
+      final hsl = HSLColor.fromColor(c);
+      if (hsl.saturation < 0.35) {
+        // Cool/daylight whites are too desaturated — boost saturation
+        return hsl.withSaturation(0.55).withLightness(hsl.lightness.clamp(0, 0.7)).toColor();
+      }
+      return c;
     }
 
     // Inherit color from parentId when direct ID doesn't match
@@ -262,7 +318,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const Color(0xFFFF6B35);
     if (id == 'league_bundesliga') return const Color(0xFFD4020D);
     if (id == 'league_serie_a') return const Color(0xFF1B4FBB);
-    if (id == 'league_ligue_1') return const Color(0xFF003189);
+    if (id == 'league_champions_league') return const Color(0xFF0D47A1);
+    if (id == 'league_fifa_world_cup') return const Color(0xFFD4AF37);
     if (id == 'league_mls') return const Color(0xFF005293);
     if (id == 'league_nwsl') return const Color(0xFF00A3AD);
     if (id.startsWith('league_')) return const Color(0xFF1976D2);
@@ -273,11 +330,11 @@ class LibraryNodeCard extends StatelessWidget {
   }
 
   /// Get gradient color pair for folder nodes, matching the visual style
-  /// used by _DesignLibraryCategoryCard and _SubCategoryCard.
+  /// used by the Design Library category cards.
   List<Color> _getGradientForNode() {
     final id = node.id;
 
-    // Category gradients (matching _DesignLibraryCategoryCard)
+    // Category gradients
     if (id == LibraryCategoryIds.architectural) return const [Color(0xFFFFB347), Color(0xFFFF7043)];
     if (id == LibraryCategoryIds.holidays) return const [Color(0xFFFF4444), Color(0xFFC2185B)];
     if (id == LibraryCategoryIds.sports) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
@@ -309,7 +366,8 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
     if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
     if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
-    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
+    if (id == 'league_champions_league') return const [Color(0xFF0D47A1), Color(0xFF1A237E)];
+    if (id == 'league_fifa_world_cup') return const [Color(0xFFD4AF37), Color(0xFF1565C0)];
 
     // Holiday gradients (matching _SubCategoryCard)
     if (id == 'holiday_christmas') return const [Color(0xFF2E7D32), Color(0xFFC62828)];
@@ -342,9 +400,17 @@ class LibraryNodeCard extends StatelessWidget {
     if (id.startsWith('ncaabb_')) return const [Color(0xFFFF8F00), Color(0xFFE65100)];
     if (id.startsWith('ncaa_') || id.startsWith('conf_')) return const [Color(0xFF3949AB), Color(0xFF1A237E)];
 
-    // Architectural Kelvin folders -- use the node's own theme colors
+    // Architectural Kelvin folders -- use the node's own theme colors but
+    // boost saturation for higher-K temperatures so the card gradient is visible.
     if (id.startsWith('arch_') && node.themeColors != null && node.themeColors!.length >= 2) {
-      return [node.themeColors![0], node.themeColors![1]];
+      Color boost(Color c) {
+        final hsl = HSLColor.fromColor(c);
+        if (hsl.saturation < 0.35) {
+          return hsl.withSaturation(0.50).withLightness(hsl.lightness.clamp(0, 0.75)).toColor();
+        }
+        return c;
+      }
+      return [boost(node.themeColors![0]), boost(node.themeColors![1])];
     }
 
     // Inherit gradient from parentId when direct ID doesn't match
@@ -358,7 +424,7 @@ class LibraryNodeCard extends StatelessWidget {
     if (parentGradient != null && parentGradient!.length >= 2) return parentGradient!;
 
     // Default: derive from theme color
-    final c = _getFolderThemeColor();
+    final c = folderThemeColor(node, parentAccent: parentAccent);
     return [c, c.withValues(alpha: 0.5)];
   }
 
@@ -401,30 +467,14 @@ class LibraryNodeCard extends StatelessWidget {
     if (id == 'league_la_liga') return const [Color(0xFFFF6B35), Color(0xFFCC4400)];
     if (id == 'league_bundesliga') return const [Color(0xFFD4020D), Color(0xFF8B0000)];
     if (id == 'league_serie_a') return const [Color(0xFF1B4FBB), Color(0xFF0D2D6B)];
-    if (id == 'league_ligue_1') return const [Color(0xFF003189), Color(0xFF001E55)];
+    if (id == 'league_champions_league') return const [Color(0xFF0D47A1), Color(0xFF1A237E)];
+    if (id == 'league_fifa_world_cup') return const [Color(0xFFD4AF37), Color(0xFF1565C0)];
     if (id.startsWith('league_')) return const [Color(0xFF1976D2), Color(0xFF0D47A1)];
     // Franchises
     if (id.startsWith('franchise_')) return const [Color(0xFFE040FB), Color(0xFF6A1B9A)];
     // NCAA
     if (id.startsWith('ncaa') || id.startsWith('conf_')) return const [Color(0xFF3949AB), Color(0xFF1A237E)];
     return null;
-  }
-
-  /// Expand a 2-color gradient pair into a richer multi-color list
-  /// for the mini pixel preview strip on folder cards.
-  static List<Color> _expandGradient(List<Color> pair) {
-    if (pair.length < 2) return pair;
-    final a = pair[0];
-    final b = pair[1];
-    return [
-      a,
-      Color.lerp(a, b, 0.25)!,
-      Color.lerp(a, b, 0.5)!,
-      Color.lerp(a, b, 0.75)!,
-      b,
-      Color.lerp(b, a, 0.3)!,
-      a,
-    ];
   }
 
   @override
@@ -434,31 +484,152 @@ class LibraryNodeCard extends StatelessWidget {
       // Only animate the first 8 visible palette cards
       final shouldAnimate = index == null || index! < 8;
       return _buildPaletteCard(context, animate: shouldAnimate);
+    } else if (node.parentId != null && node.parentId!.startsWith('arch_k')) {
+      // Compact folder card inside architectural temperature folders
+      return _buildCompactFolderCard(context);
     } else {
       return _buildFolderCard(context);
     }
   }
 
-  /// Build a subfolder card with gradient background, glow orb, icon, and pixel strip
-  Widget _buildFolderCard(BuildContext context) {
-    final gradientColors = _getGradientForNode();
-    final accentColor = _getFolderThemeColor();
-    final icon = _iconForNode();
-    final previewColors = node.themeColors ?? node.previewColors;
-    final stripColors = previewColors != null && previewColors.isNotEmpty
-        ? _expandGradient(previewColors.take(2).toList())
-        : _expandGradient(gradientColors);
+  /// Compact folder card for architectural sub-folders (e.g. Brightness Gradients
+  /// inside a Kelvin temperature folder). Renders as a row matching palette cards,
+  /// with an 8-dot gradient preview fading from full to ~30% brightness.
+  Widget _buildCompactFolderCard(BuildContext context) {
+    final accentColor = folderThemeColor(node, parentAccent: parentAccent);
+    final icon = iconForNode(node);
+    final colors = node.themeColors;
+    final baseColor = (colors != null && colors.isNotEmpty) ? colors.first : accentColor;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': accentColor.toARGB32(),
-            'gradient0': gradientColors[0].toARGB32(),
-            'gradient1': gradientColors[1].toARGB32(),
-          });
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator so it stays self-contained above any modal
+            // (dashboard back stack / Item #64), and forward teamSlug AND
+            // onDesignSelected so the persistence / selection path survives at
+            // depth. Both are additive: a plain Explore browse (both null)
+            // still uses the GoRouter path below, byte-identical.
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: accentColor,
+                  teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': accentColor.toARGB32(),
+            });
+          }
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: NexGenPalette.matteBlack,
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                accentColor.withValues(alpha: 0.12),
+                NexGenPalette.matteBlack,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: accentColor.withValues(alpha: 0.30), width: 0.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                // 8-dot gradient preview: full → dim → full
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(8, (i) {
+                    // Smooth fade: 1.0, 0.9, 0.7, 0.45, 0.3, 0.45, 0.7, 0.9
+                    const levels = [1.0, 0.9, 0.7, 0.45, 0.3, 0.45, 0.7, 0.9];
+                    final level = levels[i];
+                    final r = ((baseColor.r * 255).round() * level).round().clamp(0, 255);
+                    final g = ((baseColor.g * 255).round() * level).round().clamp(0, 255);
+                    final b = ((baseColor.b * 255).round() * level).round().clamp(0, 255);
+                    return Container(
+                      width: 8,
+                      height: 8,
+                      margin: EdgeInsets.only(right: i < 7 ? 3 : 0),
+                      decoration: BoxDecoration(
+                        color: Color.fromARGB(255, r, g, b),
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(width: 10),
+                Icon(icon, size: 14, color: accentColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: TextStyle(
+                      color: accentColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios, color: accentColor.withValues(alpha: 0.5), size: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Build a subfolder card with gradient background, glow orb, icon, and pixel strip
+  Widget _buildFolderCard(BuildContext context) {
+    final gradientColors = _getGradientForNode();
+    final accentColor = folderThemeColor(node, parentAccent: parentAccent);
+    final icon = iconForNode(node);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator so drill-down stays self-contained above any
+            // modal, and forward teamSlug AND onDesignSelected so the
+            // persistence / selection path survives at depth. Both additive:
+            // a plain Explore browse (both null) keeps the GoRouter path below.
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: accentColor,
+                  parentGradient: gradientColors,
+                  teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': accentColor.toARGB32(),
+              'gradient0': gradientColors[0].toARGB32(),
+              'gradient1': gradientColors[1].toARGB32(),
+            });
+          }
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
@@ -569,29 +740,49 @@ class LibraryNodeCard extends StatelessWidget {
     );
   }
 
-  /// Build a palette card with color dot indicators
+  /// Build a palette card with LED-pattern dot indicators
   Widget _buildPaletteCard(BuildContext context, {bool animate = true}) {
     final colors = node.themeColors;
     final hasColors = colors != null && colors.isNotEmpty;
     final primaryColor = hasColors ? colors.first : NexGenPalette.cyan;
 
-    // Limit to maximum 4 representative colors
-    final displayColors = hasColors
-        ? (colors.length <= 4 ? colors : colors.sublist(0, 4))
-        : <Color>[];
+    // Determine on/off dot pattern from architectural metadata
+    final grouping = node.metadata?['grouping'] as int?;
+    final spacing = node.metadata?['spacing'] as int?;
+    final hasSpacing = grouping != null && spacing != null;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          context.push('/explore/library/${node.id}', extra: {
-            'name': node.name,
-            'accentColor': primaryColor.toARGB32(),
-            'gradient0': primaryColor.toARGB32(),
-            'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
-          });
+          if (teamSlug != null || onDesignSelected != null) {
+            // Game Day OR selection mode (e.g. the schedule picker): push via
+            // the root navigator and forward teamSlug AND onDesignSelected so
+            // the persistence / selection path survives at depth. Additive:
+            // a plain Explore browse (both null) keeps the GoRouter path below.
+            final gradientSecond = (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6);
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (_) => LibraryBrowserScreen(
+                  nodeId: node.id,
+                  nodeName: node.name,
+                  parentAccent: primaryColor,
+                  parentGradient: [primaryColor, gradientSecond],
+                  teamSlug: teamSlug,
+                  onDesignSelected: onDesignSelected,
+                ),
+              ),
+            );
+          } else {
+            context.push('/explore/library/${node.id}', extra: {
+              'name': node.name,
+              'accentColor': primaryColor.toARGB32(),
+              'gradient0': primaryColor.toARGB32(),
+              'gradient1': (hasColors && colors.length > 1 ? colors[1] : primaryColor).withValues(alpha: 0.6).toARGB32(),
+            });
+          }
         },
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         splashColor: primaryColor.withValues(alpha: 0.08),
         highlightColor: primaryColor.withValues(alpha: 0.04),
         child: Container(
@@ -605,44 +796,57 @@ class LibraryNodeCard extends StatelessWidget {
                 NexGenPalette.matteBlack,
               ],
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: primaryColor.withValues(alpha: 0.20),
               width: 0.5,
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Row(
               children: [
-                // Color dots (1-4 max) with subtle glow
-                if (displayColors.isNotEmpty) ...[
+                // LED dot preview — 8 dots showing the on/off pattern
+                if (hasSpacing) ...[
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(8, (i) {
+                      final cycle = grouping + spacing;
+                      final lit = cycle == 0 || spacing == 0 || (i % cycle) < grouping;
+                      return Container(
+                        width: 8,
+                        height: 8,
+                        margin: EdgeInsets.only(right: i < 7 ? 3 : 0),
+                        decoration: BoxDecoration(
+                          color: lit
+                              ? primaryColor
+                              : primaryColor.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(width: 10),
+                ] else if (hasColors) ...[
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      for (var i = 0; i < displayColors.length; i++)
+                      for (var i = 0; i < (colors.length <= 4 ? colors.length : 4); i++)
                         Container(
-                          width: 10,
-                          height: 10,
-                          margin: EdgeInsets.only(right: i < displayColors.length - 1 ? 4 : 0),
+                          width: 8,
+                          height: 8,
+                          margin: EdgeInsets.only(right: i < 3 ? 3 : 0),
                           decoration: BoxDecoration(
-                            color: displayColors[i],
+                            color: colors[i],
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: displayColors[i].withValues(alpha: 0.6),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ],
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                 ] else ...[
-                  const Icon(Icons.palette_outlined, color: Colors.white24, size: 16),
-                  const SizedBox(width: 12),
+                  const Icon(Icons.palette_outlined, color: Colors.white24, size: 14),
+                  const SizedBox(width: 10),
                 ],
                 // Palette name
                 Expanded(
@@ -650,7 +854,7 @@ class LibraryNodeCard extends StatelessWidget {
                     node.name,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
                     maxLines: 1,
@@ -775,7 +979,7 @@ class PalettePatternGrid extends ConsumerWidget {
                       ),
                     )
                   : GridView.builder(
-                      padding: const EdgeInsets.only(left: 12, top: 12, right: 12, bottom: kBottomNavBarPadding),
+                      padding: EdgeInsets.only(left: 12, top: 12, right: 12, bottom: navBarTotalHeight(context)),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 4,
                         crossAxisSpacing: 8,
@@ -1082,15 +1286,34 @@ class _GlobalMoodChip extends StatelessWidget {
 }
 
 /// Individual pattern card with apply action
-class PatternCard extends ConsumerWidget {
+class PatternCard extends ConsumerStatefulWidget {
   final PatternItem pattern;
 
-  const PatternCard({required this.pattern});
+  const PatternCard({super.key, required this.pattern});
+
+  @override
+  ConsumerState<PatternCard> createState() => _PatternCardState();
+}
+
+class _PatternCardState extends ConsumerState<PatternCard> {
+  /// Indices into the original `_getColors()` list that the user has left
+  /// active. Default: every color active. State is local to this card —
+  /// never persisted, never mutates `widget.pattern.wledPayload`.
+  late Set<int> _activeColorIndices;
+
+  /// Block width for the WLED `grp` field at apply time. Range 1–10.
+  int _ledsPerColor = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeColorIndices = {for (var i = 0; i < _getColors().length; i++) i};
+  }
 
   /// Extract colors from wledPayload
   List<Color> _getColors() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1112,14 +1335,16 @@ class PatternCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getColors: $e');
+    }
     return [NexGenPalette.cyan, NexGenPalette.blue];
   }
 
   /// Extract effect ID from wledPayload
   int _getEffectId() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1128,21 +1353,159 @@ class PatternCard extends ConsumerWidget {
           if (fx is int) return fx;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getEffectId: $e');
+    }
     return 0;
   }
 
-  /// Get effect name from effect ID
-  String? _getEffectName() {
-    final effectId = _getEffectId();
-    return kEffectNames[effectId];
+  /// Check if this pattern is a brightness gradient and extract its colors.
+  List<Color>? _getGradientColors() {
+    final meta = widget.pattern.wledPayload['_gradientMeta'];
+    if (meta is! Map || meta['isGradient'] != true) return null;
+    // Gradient colors are stored in themeColors on the PatternItem's payload col
+    // Reconstruct from the payload col (RGBW) back to display colors — or use
+    // the theme colors directly since they're already Flutter Colors.
+    return _getColors();
+  }
+
+  int _getGradientBandWidth() {
+    try {
+      final seg = widget.pattern.wledPayload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        return (seg.first['grp'] as int?) ?? 1;
+      }
+    } catch (e) {
+      debugPrint('Error in pattern grid _getGradientBandWidth: $e');
+    }
+    return 1;
+  }
+
+  /// Build the active-color subset preserving the user's toggle order
+  /// (lowest index first). Always returns at least one color — single-color
+  /// patterns and any guard rails fall back to col[0].
+  List<Color> _activeColors(List<Color> all) {
+    if (all.isEmpty) return all;
+    final indices = _activeColorIndices.toList()..sort();
+    final filtered = [for (final i in indices) if (i < all.length) all[i]];
+    return filtered.isEmpty ? [all.first] : filtered;
+  }
+
+  /// Build the WLED payload that will actually be sent when the user taps
+  /// Apply. Substitutes a Solid Pattern variant when the original effect is
+  /// Solid (fx=0) and the user has more than one active color:
+  ///
+  ///   fx=83 (Solid Pattern, 2-color):
+  ///     lit band   = 1 + sx
+  ///     unlit band = 1 + ix
+  ///     equal bands → sx = ix = ledsPerColor - 1 (no upper cap from WLED)
+  ///
+  ///   fx=84 (Solid Pattern Tri, 3-color):
+  ///     band width = 1 + (ix >> 5), max 8 LEDs/band
+  ///     ix = (ledsPerColor - 1) * 32, clamped to 255 (silent cap at 8)
+  ///
+  /// Forces pal=5 ("Colors Only") so the substituted fx reads col[] directly
+  /// instead of pulling from the rainbow palette. For other multi-color
+  /// effects the original fx is kept and grp/spc are added so WLED groups
+  /// colors into bands of `_ledsPerColor`.
+  ///
+  /// Never mutates `rawPayload` — always returns a deep copy.
+  Map<String, dynamic> _preparePayload(
+    Map<String, dynamic> rawPayload,
+    List<Color> activeColors,
+    int ledsPerColor,
+  ) {
+    // Deep copy so the original PatternItem definition is never touched.
+    final payload = <String, dynamic>{
+      for (final entry in rawPayload.entries)
+        entry.key: _deepCopy(entry.value),
+    };
+
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return payload;
+
+    final s = Map<String, dynamic>.from(seg.first as Map);
+    final originalFx = s['fx'] as int? ?? 0;
+
+    // Build col[] from active colors only. Force W=0 — RGBW strips otherwise
+    // bleed white into saturated branded colors (red→pink, etc.).
+    final col = activeColors
+        .map<List<int>>((c) => [c.red, c.green, c.blue, 0])
+        .toList();
+    s['col'] = col;
+
+    if (activeColors.length > 1) {
+      if (originalFx == 0) {
+        final n = (ledsPerColor - 1).clamp(0, 255);
+        if (activeColors.length == 2) {
+          // fx=83 (Solid Pattern): sx controls lit band width, ix controls
+          // unlit band. Both = n gives equal-width alternating bands.
+          s['fx'] = 83;
+          s['sx'] = n;
+          s['ix'] = n;
+        } else {
+          // fx=84 (Solid Pattern Tri): cycles 3 colors. Band width =
+          // 1 + (ix >> 5), max 8 LEDs/band. Silent cap at 8 is acceptable
+          // behavior — Solid Pattern Tri itself caps there.
+          s['fx'] = 84;
+          s['ix'] = ((ledsPerColor - 1) * 32).clamp(0, 255);
+        }
+        // Force "Colors Only" palette so fx=83/84 reads col[] directly
+        // instead of pulling from the rainbow palette.
+        s['pal'] = 5;
+      }
+      // For all other multi-color effects, keep the original fx but force
+      // grouping so the device honors the user's ledsPerColor choice.
+      s['grp'] = ledsPerColor;
+      s['spc'] = 0;
+    } else {
+      // Single active color: collapse to plain Solid regardless of original.
+      // A multi-color effect with one color produces undefined results on
+      // many WLED effects, so this keeps the apply behavior predictable.
+      s['fx'] = 0;
+      s['grp'] = 1;
+      s['spc'] = 0;
+    }
+
+    seg[0] = s;
+    payload['seg'] = seg;
+    return payload;
+  }
+
+  /// Recursive deep-copy for JSON-shaped maps/lists so `_preparePayload`
+  /// can never mutate `widget.pattern.wledPayload`.
+  Object? _deepCopy(Object? v) {
+    if (v is Map) {
+      return {for (final e in v.entries) e.key: _deepCopy(e.value)};
+    }
+    if (v is List) {
+      return [for (final item in v) _deepCopy(item)];
+    }
+    return v;
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colors = _getColors();
     final effectId = _getEffectId();
-    final effectName = _getEffectName();
+    final gradientColors = _getGradientColors();
+    final isGradient = gradientColors != null;
+
+    final activeColors = _activeColors(colors);
+    // Preview should reflect what apply will produce. When the user has
+    // 2+ active colors and the source effect is Solid, the apply path
+    // substitutes fx=83 — the only honest preview for that is equal
+    // repeating bands of `_ledsPerColor` width, which `_GradientDotPreview`
+    // renders directly.
+    final usePreparedBandPreview = !isGradient &&
+        activeColors.length >= 2 &&
+        effectId == 0;
+
+    final showColorToggles = !isGradient && colors.length >= 2;
+    // Per FIX 4 confirmation: stepper visible for every multi-color
+    // non-gradient card, since `_preparePayload` writes `grp` in all those
+    // cases anyway.
+    final showLedStepper = !isGradient && activeColors.length >= 2;
 
     return GestureDetector(
       onTap: () async {
@@ -1160,17 +1523,34 @@ class PatternCard extends ConsumerWidget {
             // Animated effect preview - more prominent for compact cards
             Expanded(
               flex: 3,
-              child: EffectPreviewWidget(
-                effectId: effectId,
-                colors: colors,
-                borderRadius: 10,
-              ),
+              child: isGradient
+                  ? _GradientDotPreview(
+                      gradientColors: gradientColors,
+                      bandWidth: _getGradientBandWidth(),
+                      borderRadius: 10,
+                    )
+                  : usePreparedBandPreview
+                      ? _GradientDotPreview(
+                          gradientColors: activeColors,
+                          // fx=83 has no band-width cap; fx=84 caps at 8.
+                          // Mirror the apply-path cap so the preview matches
+                          // what WLED will actually render.
+                          bandWidth: activeColors.length == 2
+                              ? _ledsPerColor
+                              : _ledsPerColor.clamp(1, 8),
+                          borderRadius: 10,
+                        )
+                      : EffectPreviewWidget(
+                          effectId: effectId,
+                          colors: activeColors,
+                          borderRadius: 10,
+                        ),
             ),
             // Pattern info - compact for 4-column layout
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: Text(
-                pattern.name,
+                widget.pattern.name,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 9,
@@ -1181,9 +1561,110 @@ class PatternCard extends ConsumerWidget {
                 textAlign: TextAlign.center,
               ),
             ),
+            if (showColorToggles)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: _buildColorToggles(colors),
+              ),
+            if (showLedStepper)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _buildLedStepper(),
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildColorToggles(List<Color> colors) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (int i = 0; i < colors.length; i++)
+          GestureDetector(
+            // Absorb the tap so the parent card's onTap (apply) does not fire.
+            onTap: () => setState(() {
+              if (_activeColorIndices.contains(i)) {
+                // Don't allow deactivating all colors — keep at least one.
+                if (_activeColorIndices.length > 1) {
+                  _activeColorIndices.remove(i);
+                }
+              } else {
+                _activeColorIndices.add(i);
+              }
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _activeColorIndices.contains(i)
+                    ? colors[i]
+                    : NexGenPalette.gunmetal90,
+                border: Border.all(
+                  color: _activeColorIndices.contains(i)
+                      ? Colors.white.withValues(alpha: 0.4)
+                      : NexGenPalette.line,
+                  width: 1.2,
+                ),
+                boxShadow: _activeColorIndices.contains(i)
+                    ? [
+                        BoxShadow(
+                          color: colors[i].withValues(alpha: 0.5),
+                          blurRadius: 5,
+                        )
+                      ]
+                    : null,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLedStepper() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'LEDs/color (1–10, 1=alt):',
+          style: TextStyle(color: NexGenPalette.textMedium, fontSize: 9),
+        ),
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (_ledsPerColor > 1) _ledsPerColor--;
+          }),
+          child: Icon(
+            Icons.remove_circle_outline,
+            color: NexGenPalette.cyan,
+            size: 14,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '$_ledsPerColor',
+          style: TextStyle(
+            color: NexGenPalette.textHigh,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (_ledsPerColor < 10) _ledsPerColor++;
+          }),
+          child: Icon(
+            Icons.add_circle_outline,
+            color: NexGenPalette.cyan,
+            size: 14,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1204,22 +1685,37 @@ class PatternCard extends ConsumerWidget {
 
     try {
       // Extract effect ID and colors from payload to check for custom effects
-      final effectId = _getEffectId();
-      final colorsRgbw = _getColorsRgbw();
+      final originalFx = _getEffectId();
+      final allColors = _getColors();
+      final activeColors = _activeColors(allColors);
+      final colorsRgbw = activeColors
+          .map<List<int>>((c) => [c.red, c.green, c.blue, 0])
+          .toList();
 
-      // Check if this is a custom Lumina effect (ID >= 1000)
+      // Check if this is a custom Lumina effect (ID >= 1000). Custom effects
+      // bypass the fx-substitution path because they're rendered client-side.
       final isCustomEffect = await executeCustomEffectIfNeeded(
-        effectId: effectId,
+        effectId: originalFx,
         colors: colorsRgbw,
         repo: repo,
       );
 
+      // Build the prepared payload up front so both the apply call and the
+      // local-preview state agree on the same fx/grp/spc/col values.
+      final preparedPayload = _preparePayload(
+        widget.pattern.wledPayload,
+        activeColors,
+        _ledsPerColor,
+      );
+
       if (!isCustomEffect) {
-        // Standard WLED effect - apply the pattern's wledPayload directly
-        // Apply channel filter so only selected channels receive the pattern
-        var payload = pattern.wledPayload;
+        var payload = preparedPayload;
         final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        if (channels.isEmpty) {
+          debugPrint('PatternGrid apply: skip (no effective channels — U1 gate)');
+          return;
+        }
+        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
         final success = await repo.applyJson(payload);
 
         if (!success) {
@@ -1227,39 +1723,89 @@ class PatternCard extends ConsumerWidget {
         }
       }
 
-      // Update preview immediately so home screen roofline matches device
+      // Pull per-segment fields from the *prepared* payload (not the raw
+      // pattern definition) so the home dashboard roofline preview renders
+      // the same fx/grp/spc combination that the device received.
+      final segList = preparedPayload['seg'];
+      final firstSeg = (segList is List && segList.isNotEmpty && segList.first is Map)
+          ? (segList.first as Map)
+          : const <dynamic, dynamic>{};
+      final appliedFx = (firstSeg['fx'] as int?) ?? originalFx;
+      final patternSpeed = (firstSeg['sx'] as int?) ?? 128;
+      final patternIntensity = (firstSeg['ix'] as int?) ?? 128;
+      final patternGrp = (firstSeg['grp'] as int?) ?? 1;
+      final patternSpc = (firstSeg['spc'] as int?) ?? 0;
+
+      // Update preview immediately so home screen roofline AND Explore hero
+      // match the as-sent payload. Single chokepoint writes both sinks +
+      // arms poll-overwrite suppression so the next poll doesn't snap the
+      // visual fields back to the device's (lossy) echo of the same colors.
       try {
-        final colors = _getColors();
-        ref.read(wledStateProvider.notifier).applyLocalPreview(
-          colors: colors,
-          effectId: effectId,
-          speed: pattern.wledPayload['seg'] is List &&
-                  (pattern.wledPayload['seg'] as List).isNotEmpty
-              ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
-              : 128,
-          intensity: pattern.wledPayload['seg'] is List &&
-                  (pattern.wledPayload['seg'] as List).isNotEmpty
-              ? ((pattern.wledPayload['seg'] as List).first['ix'] as int?) ?? 128
-              : 128,
-          effectName: pattern.name,
+        ref.read(wledStateProvider.notifier).applyPreviewSync(
+          colors: activeColors,
+          effectId: appliedFx,
+          speed: patternSpeed,
+          intensity: patternIntensity,
+          effectName: widget.pattern.name,
+          brightness: preparedPayload['bri'] as int? ?? 255,
+          colorGroupSize: patternGrp,
+          spacing: patternSpc,
         );
-      } catch (_) {}
-      ref.read(activePresetLabelProvider.notifier).state = pattern.name;
-      // Update Explore page roofline preview
-      ref.read(explorePreviewProvider.notifier).state = ExplorePreviewState(
-        colors: _getColors(),
-        effectId: effectId,
-        speed: pattern.wledPayload['seg'] is List &&
-                (pattern.wledPayload['seg'] as List).isNotEmpty
-            ? ((pattern.wledPayload['seg'] as List).first['sx'] as int?) ?? 128
-            : 128,
-        brightness: pattern.wledPayload['bri'] as int? ?? 255,
-        name: pattern.name,
-      );
+      } catch (e) {
+        debugPrint('Error in pattern grid applyPreviewSync: $e');
+      }
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(widget.pattern.name, ref.read(wledStateProvider));
 
       if (context.mounted) {
         // Show pattern adjustment panel in a bottom sheet
         _showAdjustmentPanel(context, ref);
+
+        // If this is a team-associated pattern, check for a live/upcoming
+        // game and offer to enable live scoring celebrations.
+        maybePromptLiveScoring(
+          context: context,
+          ref: ref,
+          patternId: widget.pattern.id,
+        );
+
+        // Demo conversion nudge — once per session
+        if (ref.read(demoBrowsingProvider) &&
+            !ref.read(hasShownDemoNudgeProvider)) {
+          ref.read(hasShownDemoNudgeProvider.notifier).state = true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Love this look? Get it on your home.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      showDemoExitSheet(context, ref);
+                    },
+                    child: const Text(
+                      'Talk to us',
+                      style: TextStyle(
+                        color: Color(0xFF00D4FF),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFF111527),
+              duration: const Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (context.mounted) {
@@ -1274,10 +1820,13 @@ class PatternCard extends ConsumerWidget {
     }
   }
 
-  /// Extract colors as RGBW arrays for custom effect execution
+  /// Extract colors as RGBW arrays for custom effect execution.
+  /// Currently unused — `_applyPattern` derives the active-color RGBW list
+  /// inline so toggles are honored. Kept for any external callers.
+  // ignore: unused_element
   List<List<int>> _getColorsRgbw() {
     try {
-      final payload = pattern.wledPayload;
+      final payload = widget.pattern.wledPayload;
       final seg = payload['seg'];
       if (seg is List && seg.isNotEmpty) {
         final firstSeg = seg.first;
@@ -1299,20 +1848,24 @@ class PatternCard extends ConsumerWidget {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error in pattern grid _getColorsRgbw: $e');
+    }
     return [[255, 255, 255, 0]];
   }
 
   void _showAdjustmentPanel(BuildContext context, WidgetRef ref) {
-    // Extract pattern values from wledPayload
-    final payload = pattern.wledPayload;
+    // Extract pattern values from wledPayload. Pass the *active* colors and
+    // user-chosen ledsPerColor so the adjustment sheet starts from the same
+    // state the device just received, not the raw catalog definition.
+    final payload = widget.pattern.wledPayload;
     final seg = payload['seg'];
     int effectId = 0;
     int speed = 128;
     int intensity = 128;
-    int grouping = 1;
+    int grouping = _ledsPerColor;
     int spacing = 0;
-    List<Color> colors = _getColors();
+    final activeColors = _activeColors(_getColors());
 
     if (seg is List && seg.isNotEmpty) {
       final firstSeg = seg.first;
@@ -1320,24 +1873,35 @@ class PatternCard extends ConsumerWidget {
         effectId = (firstSeg['fx'] as int?) ?? 0;
         speed = (firstSeg['sx'] as int?) ?? 128;
         intensity = (firstSeg['ix'] as int?) ?? 128;
-        // WLED uses 'grp' and 'spc', but check old keys 'gp'/'sp' as fallback
-        grouping = (firstSeg['grp'] as int?) ?? (firstSeg['gp'] as int?) ?? 1;
-        spacing = (firstSeg['spc'] as int?) ?? (firstSeg['sp'] as int?) ?? 0;
+        // The card-level ledsPerColor stepper takes precedence over any
+        // grp/spc in the catalog payload — those are the pre-toggle defaults.
+        if (activeColors.length < 2) {
+          grouping = (firstSeg['grp'] as int?) ?? (firstSeg['gp'] as int?) ?? 1;
+          spacing = (firstSeg['spc'] as int?) ?? (firstSeg['sp'] as int?) ?? 0;
+        }
+        // Reflect the fx-substitution that _preparePayload would apply.
+        if (effectId == 0 && activeColors.length >= 2) {
+          effectId = 83;
+        }
       }
     }
+
+    // Detect brightness gradient patterns
+    final gradientMeta = payload['_gradientMeta'] as Map<String, dynamic>?;
 
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) => _PatternAdjustmentBottomSheet(
-        patternName: pattern.name,
+        patternName: widget.pattern.name,
         effectId: effectId,
         speed: speed,
         intensity: intensity,
         grouping: grouping,
         spacing: spacing,
-        colors: colors,
+        colors: activeColors,
+        gradientMeta: gradientMeta,
       ),
     );
   }
@@ -1353,6 +1917,10 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
   final int spacing;
   final List<Color> colors;
 
+  /// Non-null when the pattern is a brightness gradient.
+  /// Contains 'isGradient', 'presetId', 'baseColorValue'.
+  final Map<String, dynamic>? gradientMeta;
+
   const _PatternAdjustmentBottomSheet({
     required this.patternName,
     required this.effectId,
@@ -1361,6 +1929,7 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
     required this.grouping,
     required this.spacing,
     required this.colors,
+    this.gradientMeta,
   });
 
   @override
@@ -1376,6 +1945,13 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   late bool _reverse;
   Timer? _debounce;
 
+  // Brightness gradient state
+  late bool _isGradient;
+  String _gradientPresetId = 'gentle';
+  int _bandWidth = 1;
+  bool _breathing = false;
+  Color _gradientBaseColor = Colors.white;
+
   @override
   void initState() {
     super.initState();
@@ -1385,6 +1961,16 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _spacing = widget.spacing;
     _effectId = widget.effectId;
     _reverse = false;
+
+    // Initialise gradient state from metadata
+    final gm = widget.gradientMeta;
+    _isGradient = gm?['isGradient'] == true;
+    if (_isGradient) {
+      _gradientPresetId = (gm?['presetId'] as String?) ?? 'gentle';
+      _bandWidth = widget.grouping; // bandWidth was stored as grp
+      _breathing = _effectId == 2; // fx 2 = Breathe
+      _gradientBaseColor = Color(gm?['baseColorValue'] as int? ?? 0xFFFFFFFF);
+    }
   }
 
   @override
@@ -1397,18 +1983,65 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), () async {
       final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        var payload = <String, dynamic>{'seg': [segUpdate]};
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isNotEmpty) payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
+      if (repo == null) return;
+      var payload = <String, dynamic>{'seg': [segUpdate]};
+      final channels = ref.read(effectiveChannelIdsProvider);
+      if (channels.isEmpty) {
+        debugPrint('PatternGrid _applyChange: skip (U1 gate)');
+        return;
       }
+      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      await repo.applyJson(payload);
+    });
+  }
+
+  /// Recompute gradient colors from the current preset + base color and
+  /// send the full segment payload (col + fx + grp) to the device.
+  void _applyGradientChange() {
+    // Find the selected preset's brightness steps
+    final presets = PatternRepository.brightnessGradientPresets;
+    final preset = presets.firstWhere(
+      (p) => p.id == _gradientPresetId,
+      orElse: () => presets.first,
+    );
+
+    final r = _gradientBaseColor.red;
+    final g = _gradientBaseColor.green;
+    final b = _gradientBaseColor.blue;
+
+    final gradientColors = preset.steps
+        .map((pct) => Color.fromARGB(
+              255,
+              (r * pct).round(),
+              (g * pct).round(),
+              (b * pct).round(),
+            ))
+        .toList();
+
+    final col = PatternRepository.colorsToWledCol(gradientColors);
+    final fx = _breathing ? 2 : 83;
+    final sx = _breathing ? 100 : 0;
+
+    setState(() {
+      _effectId = fx;
+      _speed = sx;
+      _grouping = _bandWidth;
+    });
+
+    _applyChange({
+      'fx': fx,
+      'col': col,
+      'grp': _bandWidth,
+      'spc': 0,
+      'sx': sx,
+      'pal': 5,
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final isStatic = _effectId == 0;
+    // Solid (0) and non-breathing gradients (83) are static — hide speed/direction controls
+    final isStatic = _effectId == 0 || (_isGradient && !_breathing);
 
     return Container(
       decoration: BoxDecoration(
@@ -1473,7 +2106,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                           ),
                         ),
                         Text(
-                          widget.patternName,
+                          displayNameFor(widget.patternName),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -1492,18 +2125,113 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 ],
               ),
               const SizedBox(height: 20),
-              // Speed slider (hide for static effects)
+
+              // ── Brightness Gradient controls ──
+              if (_isGradient) ...[
+                // CONTROL 1 — Gradient Preset Selector
+                Row(
+                  children: [
+                    const Icon(Icons.gradient, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Gradient', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 34,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: PatternRepository.brightnessGradientPresets.map((preset) {
+                      final selected = preset.id == _gradientPresetId;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(
+                            preset.name,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: selected ? Colors.black : Colors.white70,
+                            ),
+                          ),
+                          selected: selected,
+                          selectedColor: NexGenPalette.cyan,
+                          backgroundColor: NexGenPalette.gunmetal90,
+                          side: BorderSide(
+                            color: selected ? NexGenPalette.cyan : NexGenPalette.line,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onSelected: (_) {
+                            setState(() => _gradientPresetId = preset.id);
+                            _applyGradientChange();
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // CONTROL 2 — Band Width Selector
+                Row(
+                  children: [
+                    const Icon(Icons.view_column, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('Band Width', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(value: 1, label: Text('1 LED', style: TextStyle(fontSize: 12))),
+                        ButtonSegment(value: 2, label: Text('2 LED', style: TextStyle(fontSize: 12))),
+                      ],
+                      selected: {_bandWidth},
+                      onSelectionChanged: (s) {
+                        setState(() => _bandWidth = s.first);
+                        _applyGradientChange();
+                      },
+                      style: ButtonStyle(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // CONTROL 3 — Breathing Toggle
+                Row(
+                  children: [
+                    const Icon(Icons.air, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('Breathing', style: TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    Switch(
+                      value: _breathing,
+                      activeColor: NexGenPalette.cyan,
+                      onChanged: (v) {
+                        setState(() => _breathing = v);
+                        _applyGradientChange();
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Speed slider with per-effect profile (hide for static effects)
               if (!isStatic) ...[
-                _buildSliderRow(
-                  icon: Icons.speed,
-                  label: 'Speed',
-                  value: _speed.toDouble(),
-                  onChanged: (v) {
-                    setState(() => _speed = v.round());
+                EffectSpeedSlider(
+                  rawSpeed: _speed,
+                  effectId: _effectId,
+                  initialExtended: getSpeedProfile(_effectId)
+                      .mapRawToSlider(_speed)
+                      .needsExtended,
+                  onChanged: (raw) {
+                    setState(() => _speed = raw);
                     _applyChange({'sx': _speed});
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
               ],
               // Intensity slider
               _buildSliderRow(
@@ -1544,49 +2272,55 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                 ),
                 const SizedBox(height: 16),
               ],
-              // Pixel layout section
-              Row(
-                children: [
-                  const Icon(Icons.grid_view, color: NexGenPalette.cyan, size: 20),
-                  const SizedBox(width: 8),
-                  Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Grouping slider
-              _buildSliderRow(
-                icon: Icons.blur_on,
-                label: 'Grouping',
-                value: _grouping.toDouble(),
-                min: 1,
-                max: 10,
-                divisions: 9,
-                onChanged: (v) {
-                  setState(() => _grouping = v.round());
-                  _applyChange({'grp': _grouping});
-                },
-              ),
-              const SizedBox(height: 8),
-              // Spacing slider
-              _buildSliderRow(
-                icon: Icons.space_bar,
-                label: 'Spacing',
-                value: _spacing.toDouble(),
-                min: 0,
-                max: 10,
-                divisions: 10,
-                onChanged: (v) {
-                  setState(() => _spacing = v.round());
-                  _applyChange({'spc': _spacing});
-                },
-              ),
-              const SizedBox(height: 16),
+              // Pixel layout section (hidden for gradient patterns — band width replaces it)
+              if (!_hidePixelLayout) ...[
+                Row(
+                  children: [
+                    const Icon(Icons.grid_view, color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Pixel Layout', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Grouping slider
+                _buildSliderRow(
+                  icon: Icons.blur_on,
+                  label: 'Grouping',
+                  value: _grouping.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  onChanged: (v) {
+                    setState(() => _grouping = v.round());
+                    _applyChange({'grp': _grouping});
+                  },
+                ),
+                const SizedBox(height: 8),
+                // Spacing slider
+                _buildSliderRow(
+                  icon: Icons.space_bar,
+                  label: 'Spacing',
+                  value: _spacing.toDouble(),
+                  min: 0,
+                  max: 10,
+                  divisions: 10,
+                  onChanged: (v) {
+                    setState(() => _spacing = v.round());
+                    _applyChange({'spc': _spacing});
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+
+  // Hide generic grouping/spacing sliders for gradient patterns — those are
+  // controlled by the dedicated Band Width selector above.
+  bool get _hidePixelLayout => _isGradient;
 
   Widget _buildSliderRow({
     required IconData icon,
@@ -1625,4 +2359,108 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
       ],
     );
   }
+}
+
+/// Pixel-dot preview that simulates a brightness gradient on a miniature LED strip.
+/// Each dot's color is determined by cycling through [gradientColors] at [bandWidth].
+class _GradientDotPreview extends StatelessWidget {
+  final List<Color> gradientColors;
+  final int bandWidth;
+  final double borderRadius;
+
+  const _GradientDotPreview({
+    required this.gradientColors,
+    required this.bandWidth,
+    this.borderRadius = 10,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(borderRadius),
+        topRight: Radius.circular(borderRadius),
+      ),
+      child: Container(
+        color: Colors.black,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            const dotSize = 6.0;
+            const spacing = 2.0;
+            const step = dotSize + spacing;
+            final cols = (constraints.maxWidth / step).floor().clamp(1, 100);
+            final rows = (constraints.maxHeight / step).floor().clamp(1, 20);
+
+            final bw = bandWidth.clamp(1, 4);
+            final stepCount = gradientColors.length;
+
+            return CustomPaint(
+              painter: _GradientDotPainter(
+                gradientColors: gradientColors,
+                bandWidth: bw,
+                stepCount: stepCount,
+                cols: cols,
+                rows: rows,
+                dotSize: dotSize,
+                spacing: spacing,
+              ),
+              size: Size(constraints.maxWidth, constraints.maxHeight),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _GradientDotPainter extends CustomPainter {
+  final List<Color> gradientColors;
+  final int bandWidth;
+  final int stepCount;
+  final int cols;
+  final int rows;
+  final double dotSize;
+  final double spacing;
+
+  _GradientDotPainter({
+    required this.gradientColors,
+    required this.bandWidth,
+    required this.stepCount,
+    required this.cols,
+    required this.rows,
+    required this.dotSize,
+    required this.spacing,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final step = dotSize + spacing;
+    // Centre the dot grid within the available space
+    final xOffset = (size.width - cols * step + spacing) / 2;
+    final yOffset = (size.height - rows * step + spacing) / 2;
+    final radius = dotSize / 2;
+    final paint = Paint();
+
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        final i = row * cols + col;
+        // bandWidth determines how many consecutive dots share a step
+        final colorIndex = (i ~/ bandWidth) % stepCount;
+        paint.color = gradientColors[colorIndex];
+
+        canvas.drawCircle(
+          Offset(xOffset + col * step + radius, yOffset + row * step + radius),
+          radius,
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GradientDotPainter old) =>
+      gradientColors != old.gradientColors ||
+      bandWidth != old.bandWidth ||
+      cols != old.cols ||
+      rows != old.rows;
 }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Nex-Gen Lumina** is a premium Flutter mobile app for controlling permanent outdoor pixel LED systems based on WLED. The app is transitioning from prototype (Dreamflow) to production launch candidate with local and remote access capabilities.
+**Nex-Gen Lumina** is a premium Flutter mobile app for controlling permanent outdoor pixel LED systems based on WLED. The app is a production launch candidate with local-network and remote (cloud relay) control paths. Originally ported from a Dreamflow prototype.
 
 **Package Name:** `nexgen_command`
 **SDK:** Flutter 3.6.0+
@@ -60,6 +60,7 @@ The app controls WLED devices (permanent LED light controllers) over HTTP and op
 **Firestore Collections:**
 - `/users/{uid}` - User profiles (see `UserModel` in [lib/models/user_model.dart](lib/models/user_model.dart))
 - `/users/{uid}/controllers` - User's registered WLED controllers
+- `/users/{uid}/properties` - User's properties/locations with linked controller IDs
 - `/users/{uid}/schedules` - Scheduled automations
 
 **Initialization:** Firebase is initialized in [lib/main.dart](lib/main.dart) with fallback handling for missing native config files.
@@ -118,6 +119,26 @@ Local network discovery via mDNS (see [lib/features/discovery/device_discovery.d
 - Returns list of `DiscoveredDevice` with IP addresses
 - Selected device IP is stored in `selectedDeviceIpProvider`
 
+### Property Management
+
+Users can manage multiple properties/locations (see [lib/features/properties/](lib/features/properties/)):
+
+- **Property model** ([lib/features/properties/property_models.dart](lib/features/properties/property_models.dart)): `Property` with name, address, icon, linked controller IDs, geofence config
+- **Providers** ([lib/features/properties/properties_providers.dart](lib/features/properties/properties_providers.dart)): `userPropertiesProvider` (stream), `selectedPropertyProvider`, `propertyManagerProvider`
+- **UI** ([lib/features/properties/my_properties_screen.dart](lib/features/properties/my_properties_screen.dart)): Property CRUD with controller linking via bottom sheet
+- Controllers are linked/unlinked to properties via `PropertyManager.linkController()` / `unlinkController()`
+- Firestore path: `/users/{uid}/properties/{propertyId}`
+
+### Address Autocomplete / Geocoding
+
+Address input uses Google Places Autocomplete (New) as primary, with Photon (OSM) as fallback (see [lib/features/schedule/geocoding_service.dart](lib/features/schedule/geocoding_service.dart)):
+
+- **Google Places API (New)** requires `places.googleapis.com` enabled in Google Cloud Console
+- API key is pulled from `DefaultFirebaseOptions` (platform-appropriate key)
+- Results are returned immediately from autocomplete without detail fetching for speed
+- **Photon** (komoot.io) fallback: free, no API key, OSM-based fuzzy matching
+- Widget: [lib/widgets/address_autocomplete.dart](lib/widgets/address_autocomplete.dart) — debounced overlay dropdown
+
 ### Geofencing
 
 Automated control based on location (see [lib/features/geofence/](lib/features/geofence/)):
@@ -151,11 +172,35 @@ flutter run -d android       # Android Emulator
 
 ### Build
 
+**Development / quick builds:**
 ```bash
 flutter build apk            # Android APK
 flutter build ipa            # iOS (requires macOS + Xcode)
 flutter build web            # Web build
 ```
+
+**Release builds with obfuscation (use these for store submissions):**
+```bash
+# Android — APK
+flutter build apk --release --obfuscate --split-debug-info=build/debug-info/android
+
+# Android — App Bundle (preferred for Play Store)
+flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android
+
+# iOS
+flutter build ios --release --obfuscate --split-debug-info=build/debug-info/ios
+```
+
+Or use the named targets in `build.sh`:
+```bash
+./build.sh build-android-release
+./build.sh build-ios-release
+./build.sh build-all-release
+```
+
+> **Important:** The `build/debug-info/` directory contains symbol files required
+> for crash symbolication. Keep these files — never commit them to source control
+> and never delete them after a release.
 
 ### Code Generation (if needed)
 
@@ -212,20 +257,20 @@ flutter run
   return await f.timeout(const Duration(seconds: 15));
   ```
 
-### 2. Remote Access Architecture (NOT YET IMPLEMENTED)
+### 2. Remote Access Architecture — SHIPPED
 
-**Current Limitation:** App only works on local Wi-Fi using direct IP addresses (e.g., `192.168.1.23`). When user leaves home network, all control fails.
+Remote control from off-home networks is implemented via the ESP32 Lumina Bridge and a Firestore command relay. Both transport paths are live:
 
-**Planned Solution:**
-1. Create a `ConnectivityService` to detect if user is on home Wi-Fi vs remote
-2. If local: use existing HTTP calls (current behavior)
-3. If remote: implement "Cloud Relay" via Firestore:
-   - App writes commands to `/commands` collection in Firestore
-   - Physical controller or local bridge device listens to this collection
-   - Commands are executed and status written back to Firestore
-4. Update `WledRepository` to transparently switch between local/remote modes
+- **Bridge Mode (default, dealer-installed):** App writes commands to `/users/{uid}/commands/{commandId}`. An ESP32 bridge on the customer's LAN polls Firestore and executes locally. No port forwarding required. Round-trip ~5–10s typical, 30–45s tail.
+- **Webhook Mode (DIY):** A Firebase Cloud Function forwards commands to a customer-supplied webhook URL. Requires DDNS + port forward.
 
-**Implementation Location:** Start in [lib/features/wled/wled_service.dart](lib/features/wled/wled_service.dart) or create new `lib/services/connectivity_service.dart`
+**Key code paths:**
+- [lib/features/wled/cloud_relay_repository.dart](lib/features/wled/cloud_relay_repository.dart) — `CloudRelayRepository` implements `WledRepository` for off-LAN control
+- [lib/services/bridge_api_client.dart](lib/services/bridge_api_client.dart), [bridge_health_service.dart](lib/services/bridge_health_service.dart), [bridge_discovery_service.dart](lib/services/bridge_discovery_service.dart) — bridge integration
+- [lib/features/site/remote_access_screen.dart](lib/features/site/remote_access_screen.dart) — user-facing setup UI
+- [esp32-bridge/](esp32-bridge/) — bridge firmware (PlatformIO)
+
+Routing matrix + per-command details: [docs/bridge_command_routing_context_2026-05-11.md](docs/bridge_command_routing_context_2026-05-11.md). User-facing setup: [docs/ESP32_Bridge_Setup_Guide.md](docs/ESP32_Bridge_Setup_Guide.md), [docs/Dealer_Installer_Setup_Guide.md](docs/Dealer_Installer_Setup_Guide.md) §9.
 
 ## Project Structure
 
@@ -239,17 +284,27 @@ lib/
 │   └── auth_manager.dart       # Firebase Auth abstraction
 ├── features/
 │   ├── ai/                     # Lumina AI chat integration
+│   ├── audio/                  # Audio-reactive mode (interface IN-PROGRESS; WLED hardware mic backend)
 │   ├── auth/                   # Login/signup screens
+│   ├── autopilot/              # Calendar-driven automation (Game Day, etc.)
 │   ├── ble/                    # BLE provisioning for new devices
+│   ├── commercial/             # Commercial-mode features
+│   ├── dashboard/              # Main dashboard surfaces
+│   ├── dealer/                 # Dealer-facing tools
+│   ├── design/                 # Design Studio
 │   ├── discovery/              # mDNS device discovery
 │   ├── geofence/               # Location-based automation
+│   ├── neighborhood/           # Neighborhood Sync engine
 │   ├── patterns/               # Pattern generation utilities
 │   ├── permissions/            # Welcome wizard (onboarding)
+│   ├── sales/                  # Sales pipeline (SalesJob)
+│   ├── scenes/                 # Scene model + management
 │   ├── schedule/               # Schedule CRUD + sync to WLED
-│   ├── site/                   # Property/zone management, settings
-│   └── wled/                   # WLED API integration (core)
+│   ├── site/                   # Property/zone management, settings, remote access UI
+│   ├── voice/                  # Alexa/Google/Siri integrations (ARCHITECTED — not yet verified end-to-end)
+│   └── wled/                   # WLED API integration (core) — incl. cloud_relay_repository.dart
 ├── models/                     # Shared data models
-├── services/                   # User service, notifications
+├── services/                   # Bridge client/health/discovery, user service, notifications
 ├── utils/                      # Sun time calculations
 └── widgets/                    # Reusable UI components
 ```
@@ -345,7 +400,7 @@ When porting features from the Dreamflow prototype:
 
 1. **Re-apply Stability Fixes:** Always increase HTTP timeouts to 15s and remove stale notifier references
 2. **Firebase Config:** Ensure `google-services.json` (Android) and `GoogleService-Info.plist` (iOS) are up to date
-3. **Remote Access:** Local-only architecture is insufficient for production. Implement cloud relay before launch.
+3. **Remote Access:** Cloud relay is shipped (ESP32 Bridge + Firestore command queue). When porting future Dreamflow features, route any new write paths through `WledRepository` so they work in both local and remote modes.
 4. **Error Handling:** Add user-friendly error messages and retry logic for all network operations
 5. **Logging:** Remove debug prints before production release (use `kDebugMode` guards if needed)
 

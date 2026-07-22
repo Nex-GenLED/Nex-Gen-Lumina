@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
+import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_activity_entry.dart';
+import 'package:nexgen_command/models/autopilot_event.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
 import 'package:nexgen_command/models/custom_holiday.dart';
@@ -20,6 +24,17 @@ final autopilotEnabledProvider = Provider<bool>((ref) {
   return profileAsync.maybeWhen(
     data: (profile) => profile?.autopilotEnabled ?? false,
     orElse: () => false,
+  );
+});
+
+/// Whether autopilot seeds the daily warm-white baseline. Pre-checked (true)
+/// by default; unchecking in autopilot setup persists and stops regeneration
+/// from re-adding it.
+final baselineWarmWhiteEnabledProvider = Provider<bool>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.autopilotBaselineEnabled ?? true,
+    orElse: () => true,
   );
 });
 
@@ -98,11 +113,63 @@ final autonomyLevelProvider = Provider<int>((ref) {
   );
 });
 
+/// How autopilot handles conflicts with user-set calendar entries.
+enum AutopilotConflictPolicy {
+  /// Always keep the user's manual entry — skip the autopilot event.
+  keepMine,
+  /// Always trust autopilot — overwrite the user's entry.
+  trustAutopilot,
+  /// Ask the user every time a conflict is detected.
+  ask;
+
+  static AutopilotConflictPolicy fromString(String? value) {
+    switch (value) {
+      case 'keep_mine':
+        return AutopilotConflictPolicy.keepMine;
+      case 'trust_autopilot':
+        return AutopilotConflictPolicy.trustAutopilot;
+      default:
+        return AutopilotConflictPolicy.ask;
+    }
+  }
+
+  String toJson() {
+    switch (this) {
+      case AutopilotConflictPolicy.keepMine:
+        return 'keep_mine';
+      case AutopilotConflictPolicy.trustAutopilot:
+        return 'trust_autopilot';
+      case AutopilotConflictPolicy.ask:
+        return 'ask';
+    }
+  }
+}
+
+/// Provider for the user's autopilot conflict resolution policy.
+final autopilotConflictPolicyProvider = Provider<AutopilotConflictPolicy>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) =>
+        AutopilotConflictPolicy.fromString(profile?.autopilotConflictPolicy),
+    orElse: () => AutopilotConflictPolicy.ask,
+  );
+});
+
 /// Provider for when the autopilot schedule was last generated.
 final autopilotLastGeneratedProvider = Provider<DateTime?>((ref) {
   final profileAsync = ref.watch(currentUserProfileProvider);
   return profileAsync.maybeWhen(
     data: (profile) => profile?.autopilotLastGenerated,
+    orElse: () => null,
+  );
+});
+
+/// Provider for when the Game Day autopilot calendar was last regenerated.
+/// Tracks its own weekly cadence separately from [autopilotLastGeneratedProvider].
+final gameDayLastGeneratedProvider = Provider<DateTime?>((ref) {
+  final profileAsync = ref.watch(currentUserProfileProvider);
+  return profileAsync.maybeWhen(
+    data: (profile) => profile?.gameDayLastGenerated,
     orElse: () => null,
   );
 });
@@ -118,6 +185,51 @@ final needsScheduleRegenerationProvider = Provider<bool>((ref) {
   final daysSince = DateTime.now().difference(lastGenerated).inDays;
   return daysSince >= 7; // Regenerate weekly
 });
+
+// ─── Generation lifecycle state ─────────────────────────────────────────────
+
+/// Lifecycle status of the autopilot schedule generation pipeline.
+enum AutopilotGenerationStatus { idle, loading, error }
+
+/// State for [autopilotGenerationStateProvider]. Tracks whether a schedule
+/// generation is currently running, and surfaces any error message that the
+/// UI should display alongside a retry affordance.
+class AutopilotGenerationState {
+  final AutopilotGenerationStatus status;
+  final String? errorMessage;
+
+  const AutopilotGenerationState({
+    this.status = AutopilotGenerationStatus.idle,
+    this.errorMessage,
+  });
+
+  bool get isLoading => status == AutopilotGenerationStatus.loading;
+  bool get hasError => status == AutopilotGenerationStatus.error;
+}
+
+/// Notifier driving the schedule-generation lifecycle. Owned by
+/// [AutopilotSettingsService.generateAndPopulateSchedules]; widgets read it
+/// to drive spinners, error UI, and retry buttons.
+class AutopilotGenerationStateNotifier
+    extends StateNotifier<AutopilotGenerationState> {
+  AutopilotGenerationStateNotifier() : super(const AutopilotGenerationState());
+
+  void setLoading() => state = const AutopilotGenerationState(
+        status: AutopilotGenerationStatus.loading,
+      );
+
+  void setError(String message) => state = AutopilotGenerationState(
+        status: AutopilotGenerationStatus.error,
+        errorMessage: message,
+      );
+
+  void setIdle() => state = const AutopilotGenerationState();
+}
+
+final autopilotGenerationStateProvider = StateNotifierProvider<
+    AutopilotGenerationStateNotifier, AutopilotGenerationState>(
+  (ref) => AutopilotGenerationStateNotifier(),
+);
 
 /// State notifier for managing autopilot suggestions.
 class AutopilotSuggestionsNotifier extends StateNotifier<List<AutopilotSuggestion>> {
@@ -173,6 +285,10 @@ class AutopilotSuggestion {
   final SuggestionStatus status;
   final DateTime createdAt;
 
+  /// Lumina's narrative voice for this suggestion.
+  /// e.g., "Thursday: Chiefs vs. Raiders kickoff — red and gold pulse at game time."
+  final String? message;
+
   const AutopilotSuggestion({
     required this.id,
     required this.patternName,
@@ -183,6 +299,7 @@ class AutopilotSuggestion {
     required this.confidenceScore,
     this.status = SuggestionStatus.pending,
     required this.createdAt,
+    this.message,
   });
 
   AutopilotSuggestion copyWith({
@@ -195,6 +312,7 @@ class AutopilotSuggestion {
     double? confidenceScore,
     SuggestionStatus? status,
     DateTime? createdAt,
+    String? message,
   }) {
     return AutopilotSuggestion(
       id: id ?? this.id,
@@ -206,8 +324,14 @@ class AutopilotSuggestion {
       confidenceScore: confidenceScore ?? this.confidenceScore,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      message: message ?? this.message,
     );
   }
+
+  /// UI-safe pattern name. Routes the stored [patternName] through the
+  /// centralized slug resolver so render sites can't leak snake_case
+  /// identifiers. Authored strings pass through unchanged.
+  String get displayName => displayNameFor(patternName);
 }
 
 enum SuggestionStatus { pending, applied, rejected, modified }
@@ -237,60 +361,196 @@ class AutopilotSettingsService {
   }
 
   /// Generate autopilot schedules and add them to the user's schedule list.
-  Future<void> generateAndPopulateSchedules() async {
-    final profileAsync = _ref.read(currentUserProfileProvider);
-    final profile = profileAsync.maybeWhen(
-      data: (p) => p,
-      orElse: () => null,
-    );
-    if (profile == null) {
-      debugPrint('AutopilotSettingsService: No profile found, cannot generate schedules');
+  ///
+  /// When [force] is true, the weekly refresh-gate check is skipped — the
+  /// generation runs unconditionally. Manual triggers (e.g. the
+  /// "Generate This Week's Schedule" button) should pass `force: true`.
+  /// Automatic timer-driven calls should leave it `false`.
+  ///
+  /// Wraps the entire pipeline with:
+  ///   - a re-entrancy guard (skips if a generation is already in flight)
+  ///   - a 30-second safety-net timeout
+  ///   - try/catch that surfaces errors via [autopilotGenerationStateProvider]
+  ///     so the UI can display a retry affordance instead of spinning forever.
+  Future<void> generateAndPopulateSchedules({bool force = false}) async {
+    final genState = _ref.read(autopilotGenerationStateProvider.notifier);
+
+    // Re-entrancy guard — Case C from the bug report. If a generation is
+    // already running, don't start a second one on top of it.
+    final currentStatus = _ref.read(autopilotGenerationStateProvider).status;
+    if (currentStatus == AutopilotGenerationStatus.loading) {
+      debugPrint(
+          'AutopilotSettingsService: Generation already in progress, skipping');
       return;
     }
 
-    debugPrint('AutopilotSettingsService: Generating autopilot schedules...');
+    // Refresh-gate guard — Case D from the bug report. Honor the weekly
+    // cadence for automatic calls but allow manual triggers to bypass it.
+    if (!force) {
+      final lastGenerated = _ref.read(autopilotLastGeneratedProvider);
+      if (lastGenerated != null) {
+        final daysSince = DateTime.now().difference(lastGenerated).inDays;
+        if (daysSince < 7) {
+          debugPrint(
+              'AutopilotSettingsService: Refresh gate not met ($daysSince days since last generation), skipping');
+          return;
+        }
+      }
+    }
+
+    genState.setLoading();
 
     try {
-      // Generate autopilot schedule items
+      // Try to get the profile, waiting for it if it's still loading
+      var profileAsync = _ref.read(currentUserProfileProvider);
+      var profile = profileAsync.maybeWhen(
+        data: (p) => p,
+        orElse: () => null,
+      );
+      if (profile == null) {
+        debugPrint('AutopilotSettingsService: Waiting for profile to load...');
+        profile = await _ref
+            .read(currentUserProfileProvider.future)
+            .timeout(const Duration(seconds: 10));
+      }
+      if (profile == null) {
+        debugPrint(
+            'AutopilotSettingsService: No profile found, cannot generate schedules');
+        genState.setError('No user profile found.');
+        return;
+      }
+
+      debugPrint('AutopilotSettingsService: Generating autopilot schedules...');
+
+      // Generate autopilot schedule items — wrapped in a 30s safety-net
+      // timeout so the UI can never be stuck on the spinner indefinitely
+      // even if the underlying AI call hangs.
       final generationService = _ref.read(autopilotGenerationServiceProvider);
-      final autopilotItems = await generationService.generateWeeklySchedule(
-        profile: profile,
+      final autopilotItems = await generationService
+          .generateWeeklySchedule(profile: profile)
+          .timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException(
+              'Schedule generation timed out after 30 seconds');
+        },
       );
 
-      debugPrint('AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
+      debugPrint(
+          'AutopilotSettingsService: Generated ${autopilotItems.length} autopilot items');
 
       // Convert to regular ScheduleItem format (using user's IANA timezone for display)
+      final tz = profile.timeZone;
+      final userTimeFormat = profile.timeFormat;
       final scheduleItems = autopilotItems
-          .map((item) => _convertToScheduleItem(item, ianaTimezone: profile.timeZone))
+          .map((item) => _convertToScheduleItem(
+                item,
+                ianaTimezone: tz,
+                timeFormat: userTimeFormat,
+              ))
           .toList();
 
-      // Add to user's schedules (merge with existing)
+      // Add to user's schedules (merge with existing). Pre-check: if every
+      // generated item already exists by content, skip the addAll entirely.
+      // This is a second line of defence against duplicate writes when two
+      // regen paths fire close together (boot-time regen vs the schedule
+      // page's force:true _maybeAutoTrigger). The data-layer dedup in
+      // SchedulesNotifier.mergeWithDedup catches duplicates too, but skipping early
+      // avoids burning an AI generation worth of work writing nothing.
       final schedulesNotifier = _ref.read(schedulesProvider.notifier);
-      await schedulesNotifier.addAll(scheduleItems);
+      final currentSchedules = _ref.read(schedulesProvider);
+      bool alreadyPresent(ScheduleItem item) => currentSchedules.any((e) =>
+          e.timeLabel == item.timeLabel &&
+          e.offTimeLabel == item.offTimeLabel &&
+          e.repeatDays.join(',') == item.repeatDays.join(',') &&
+          e.actionLabel == item.actionLabel &&
+          e.enabled == item.enabled);
+      final allAlreadyPresent =
+          scheduleItems.isNotEmpty && scheduleItems.every(alreadyPresent);
+      if (allAlreadyPresent) {
+        debugPrint(
+            'AutopilotSettingsService: ${scheduleItems.length} generated items already present, skipping mergeWithDedup');
+      } else {
+        await schedulesNotifier.mergeWithDedup(scheduleItems);
+      }
 
-      // Mark schedule as generated
+      // Mark schedule as generated (also moves the next-refresh window
+      // forward to seven days from now). Always run, even on the skip path,
+      // so the 7-day gate advances and we don't keep re-generating.
       await markScheduleGenerated();
 
       // Schedule the weekly brief notification
-      final notificationService = _ref.read(autopilotNotificationServiceProvider);
+      final notificationService =
+          _ref.read(autopilotNotificationServiceProvider);
       await notificationService.scheduleWeeklyBrief(
         profile: profile,
         schedule: autopilotItems,
       );
 
-      debugPrint('AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
+      debugPrint(
+          'AutopilotSettingsService: Added ${scheduleItems.length} schedules from Autopilot');
+
+      genState.setIdle();
+    } on TimeoutException catch (e, stack) {
+      debugPrint('AutopilotSettingsService: Generation timed out: $e\n$stack');
+      genState.setError(
+          'Schedule generation timed out. Tap "Generate This Week\u2019s Schedule" to try again.');
+    } catch (e, stack) {
+      debugPrint('AutopilotSettingsService: Failed to generate schedules: $e\n$stack');
+      genState.setError(
+          'Couldn\u2019t generate schedule. Tap to try again.');
+    }
+  }
+
+  /// Send a weekly brief notification for [AutopilotEvent] objects from the
+  /// new autopilot_events subcollection.  Delegates to the existing
+  /// notification service after converting event names to a human-readable
+  /// summary string.
+  Future<void> scheduleWeeklyBriefForEvents(
+      UserModel profile, List<AutopilotEvent> events) async {
+    try {
+      final notificationService =
+          _ref.read(autopilotNotificationServiceProvider);
+      // Re-use the existing scheduleWeeklyBrief by converting AutopilotEvents
+      // to AutopilotScheduleItems (minimal fields for notification body).
+      final now = DateTime.now();
+      final pseudoItems = events.map((e) => AutopilotScheduleItem(
+            id: e.id,
+            scheduledTime: e.startTime,
+            repeatDays: const [],
+            patternName: e.patternName,
+            reason: e.sourceDetail,
+            trigger: e.eventType == AutopilotEventType.game
+                ? AutopilotTrigger.gameDay
+                : e.eventType == AutopilotEventType.holiday
+                    ? AutopilotTrigger.holiday
+                    : AutopilotTrigger.sunset,
+            confidenceScore: e.confidenceScore,
+            wledPayload: e.wledPayload ?? const {},
+            eventName: e.sourceDetail,
+            createdAt: now,
+          )).toList();
+      await notificationService.scheduleWeeklyBrief(
+          profile: profile, schedule: pseudoItems);
     } catch (e) {
-      debugPrint('AutopilotSettingsService: Failed to generate schedules: $e');
+      debugPrint('scheduleWeeklyBriefForEvents failed: $e');
     }
   }
 
   /// Convert an AutopilotScheduleItem to a regular ScheduleItem.
-  ScheduleItem _convertToScheduleItem(AutopilotScheduleItem item, {String? ianaTimezone}) {
-    // Resolve display time in the user's timezone
-    final localTime = _toLocalTime(item.scheduledTime, ianaTimezone);
+  ScheduleItem _convertToScheduleItem(
+    AutopilotScheduleItem item, {
+    String? ianaTimezone,
+    String timeFormat = '12h',
+  }) {
+    // item.scheduledTime is already local — produced by SunUtils.sunsetLocal()
+    // / SunUtils.sunriseLocal() / AutopilotScheduler._resolveScheduledTime.
+    // _ensureLocal is a no-op for already-local values; we call it for
+    // defensive uniformity across all call sites (Item #79).
+    final localTime = _ensureLocal(item.scheduledTime, ianaTimezone);
 
     // Format time label
-    String timeLabel = _formatTime(localTime);
+    String timeLabel = _formatTime(localTime, timeFormat);
 
     // Add trigger context to time label for special triggers
     if (item.trigger == AutopilotTrigger.sunset) {
@@ -308,8 +568,13 @@ class AutopilotSettingsService {
     // Format repeat days
     List<String> repeatDays = item.repeatDays;
     if (repeatDays.isEmpty) {
-      // One-time event - use the date as the "repeat" indicator
-      repeatDays = [_formatDate(localTime)];
+      // One-time event: derive the WLED-recognizable weekday abbreviation from
+      // the event's date. The previous "Jul 6"-style date string is NOT a
+      // weekday, so wledDowMaskForDayList() returned 0 → a dead dow:0 timer
+      // that took a slot but never fired (and never matched in-app either).
+      // Autopilot regenerates this rolling window weekly, so weekly recurrence
+      // on the correct weekday is the intended cadence — and it actually arms.
+      repeatDays = [_weekdayAbbr(localTime)];
     }
 
     // Build action label
@@ -329,31 +594,32 @@ class AutopilotSettingsService {
     );
   }
 
-  /// Convert a UTC time to the user's IANA timezone, falling back to device local.
-  DateTime _toLocalTime(DateTime utcTime, String? ianaTimezone) {
-    if (ianaTimezone == null || ianaTimezone.isEmpty) return utcTime.toLocal();
-    try {
-      final location = tz.getLocation(ianaTimezone);
-      return tz.TZDateTime.from(utcTime, location);
-    } catch (_) {
-      // Invalid IANA identifier — fall back to device local
-      return utcTime.toLocal();
-    }
-  }
+  /// Returns a DateTime in the user's local timezone, regardless of whether
+  /// the input was already local or UTC. Delegates to the top-level
+  /// [ensureLocalTime] pure function so the logic is independently testable.
+  DateTime _ensureLocal(DateTime time, String? ianaTimezone) =>
+      ensureLocalTime(time, ianaTimezone);
 
-  /// Format time as "h:mm AM/PM"
-  String _formatTime(DateTime dt) {
+  /// Format time as "h:mm AM/PM" (12h) or "HH:mm" (24h).
+  String _formatTime(DateTime dt, String timeFormat) {
+    final minute = dt.minute.toString().padLeft(2, '0');
+    if (timeFormat == '24h') {
+      final hour = dt.hour.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
     final hour = dt.hour;
-    final minute = dt.minute;
     final period = hour >= 12 ? 'PM' : 'AM';
     final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+    return '$hour12:$minute $period';
   }
 
-  /// Format date as "Jan 21" style
-  String _formatDate(DateTime dt) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${months[dt.month - 1]} ${dt.day}';
+  /// Three-letter weekday abbreviation ("Mon".."Sun") for [dt]. Used to turn a
+  /// one-time autopilot event (empty repeatDays) into a WLED-armable recurring
+  /// entry — the value must be recognized by [wledDowMaskForDayList], so it
+  /// maps to a nonzero dow bit instead of the old dead date string.
+  String _weekdayAbbr(DateTime dt) {
+    const abbrs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return abbrs[dt.weekday - 1]; // DateTime.weekday: 1=Mon..7=Sun
   }
 
   /// Set the change tolerance level (0-5).
@@ -446,6 +712,17 @@ class AutopilotSettingsService {
         ));
   }
 
+  /// Enable or disable the daily warm-white baseline seed. Unchecking persists
+  /// (autopilotBaselineEnabled) so a future regeneration never re-adds the
+  /// baseline the user declined. Existing baseline schedules are left as-is —
+  /// they remain visible and deletable in My Schedule.
+  Future<void> setBaselineWarmWhite(bool enabled) async {
+    await _updateProfile((p) => p.copyWith(
+          autopilotBaselineEnabled: enabled,
+          updatedAt: DateTime.now(),
+        ));
+  }
+
   /// Record a pattern rejection and deprioritize after 3 rejections.
   Future<void> recordPatternRejection(String patternName) async {
     final profileAsync = _ref.read(currentUserProfileProvider);
@@ -508,22 +785,37 @@ class AutopilotSettingsService {
 
     final updated = updater(profile);
 
-    // Diff the old vs new toJson to find only changed fields
-    final oldJson = profile.toJson();
-    final newJson = updated.toJson();
-    final changedFields = <String, dynamic>{};
-    for (final key in newJson.keys) {
-      // Skip the schedules field — managed by SchedulesNotifier
-      if (key == 'schedules') continue;
-      if (newJson[key] != oldJson[key]) {
-        changedFields[key] = newJson[key];
-      }
-    }
+    final changedFields =
+        computeChangedProfileFields(profile.toJson(), updated.toJson());
 
     if (changedFields.isEmpty) return;
 
     final userService = _ref.read(userServiceProvider);
     await userService.updateUserProfile(profile.id, changedFields);
+  }
+
+  /// Diffs old→new profile JSON to the set of changed fields for a partial
+  /// Firestore `update`, DELIBERATELY excluding `schedules`.
+  ///
+  /// A-5 coherence pin: `schedules` is owned exclusively by SchedulesNotifier.
+  /// While the array↔subcollection dual-write is live, the profile snapshot's
+  /// copy of the array can lag SchedulesNotifier's latest writes, so folding it
+  /// into a profile-settings update would clobber schedules with stale data.
+  /// This skip must never be removed while dual-write is live — the pin test
+  /// asserts a differing `schedules` field is dropped from the diff.
+  @visibleForTesting
+  static Map<String, dynamic> computeChangedProfileFields(
+    Map<String, dynamic> oldJson,
+    Map<String, dynamic> newJson,
+  ) {
+    final changed = <String, dynamic>{};
+    for (final key in newJson.keys) {
+      if (key == 'schedules') continue; // owned by SchedulesNotifier
+      if (newJson[key] != oldJson[key]) {
+        changed[key] = newJson[key];
+      }
+    }
+    return changed;
   }
 }
 
@@ -567,3 +859,45 @@ final autopilotActivityLogProvider = Provider<List<AutopilotActivityEntry>>((ref
   final scheduler = ref.watch(autopilotSchedulerProvider);
   return scheduler.activityLog;
 });
+
+// ── Neighborhood Sync Event Integration ──────────────────────────────────
+
+/// Whether autopilot-triggered neighborhood sync events are enabled.
+final autopilotSyncEventsEnabledProvider = Provider<bool>((ref) {
+  final autopilotOn = ref.watch(autopilotEnabledProvider);
+  final autoDetectGames = ref.watch(autoDetectGameDaysProvider);
+  return autopilotOn && autoDetectGames;
+});
+
+// ── Timezone helper (Item #79) ───────────────────────────────────────────
+
+/// Returns a DateTime in the device's local timezone, regardless of whether
+/// the input was UTC or already local.
+///
+/// If [time] is already local (`isUtc == false`), it's returned unchanged —
+/// no conversion. The prior implementation incorrectly rebuilt local
+/// DateTimes as UTC via `DateTime.utc(...)` then converted back to local;
+/// that subtracted the timezone offset from every value and is the Item #79
+/// root cause. Do not restore that behavior.
+///
+/// If [time] is UTC, converts to local time using the provided IANA timezone
+/// if available, falling back to `DateTime.toLocal()` if the IANA name isn't
+/// recognized.
+///
+/// [ianaTimezone] is preserved as a hint for future integration with the
+/// `timezone` package; it's only consulted when [time] is UTC.
+@visibleForTesting
+DateTime ensureLocalTime(DateTime time, String? ianaTimezone) {
+  if (!time.isUtc) {
+    return time;
+  }
+  if (ianaTimezone == null || ianaTimezone.isEmpty) {
+    return time.toLocal();
+  }
+  try {
+    final location = tz.getLocation(ianaTimezone);
+    return tz.TZDateTime.from(time, location);
+  } catch (_) {
+    return time.toLocal();
+  }
+}

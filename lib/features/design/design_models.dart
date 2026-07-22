@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
 /// Represents a complete custom design that can be saved and applied to WLED devices.
@@ -35,6 +38,24 @@ class CustomDesign {
   /// Segment pattern configuration (anchor color, spacing, etc.)
   final Map<String, dynamic>? segmentPatternConfig;
 
+  /// AI source-of-truth from the Design Studio (#86 option-b).
+  ///
+  /// When this design was created by the AI Design Studio, this holds the
+  /// full `ComposedPattern.toJson()` — including the layered `sourceIntent`
+  /// (zones/colors/motion/ambiguity-resolutions) and the composed
+  /// `wled_payload`. `channels` (above) is a *derived denormalization* of
+  /// this, so legacy read paths (My Designs previews, `toWledPayload`) keep
+  /// working unchanged; this field is the additive AI layer that lets a
+  /// Studio design be re-opened and re-edited as an AI design later.
+  ///
+  /// `null` for every non-Studio design (manual editor, Now-Playing save,
+  /// brand seeds) — those behave exactly as before this field existed.
+  ///
+  /// Persisted jsonEncoded (see `toFirestore`/`fromFirestoreData`) because it
+  /// embeds arrays-of-arrays (`col:[[r,g,b,w]]`) that the native iOS Firestore
+  /// codec aborts on (#84). In-memory it is a decoded `Map`.
+  final Map<String, dynamic>? composedPattern;
+
   const CustomDesign({
     required this.id,
     required this.name,
@@ -50,6 +71,7 @@ class CustomDesign {
     this.templateType,
     this.segmentColorGroups,
     this.segmentPatternConfig,
+    this.composedPattern,
   });
 
   CustomDesign copyWith({
@@ -67,6 +89,7 @@ class CustomDesign {
     PatternTemplateType? templateType,
     List<LedColorGroup>? segmentColorGroups,
     Map<String, dynamic>? segmentPatternConfig,
+    Map<String, dynamic>? composedPattern,
   }) {
     return CustomDesign(
       id: id ?? this.id,
@@ -83,6 +106,7 @@ class CustomDesign {
       templateType: templateType ?? this.templateType,
       segmentColorGroups: segmentColorGroups ?? this.segmentColorGroups,
       segmentPatternConfig: segmentPatternConfig ?? this.segmentPatternConfig,
+      composedPattern: composedPattern ?? this.composedPattern,
     );
   }
 
@@ -118,6 +142,26 @@ class CustomDesign {
       );
     }
 
+    // #86 option-b: composed_pattern is stored jsonEncoded (a String) so its
+    // nested arrays-of-arrays never reach Firestore's native codec (#84).
+    // Decode back to a Map here. Legacy designs lack the field → null →
+    // behave exactly as before. Defensive: tolerate a raw Map too (in case a
+    // pre-encode write ever landed) and a corrupt/undecodable String → null.
+    Map<String, dynamic>? parsedComposedPattern;
+    final rawComposed = data['composed_pattern'];
+    if (rawComposed is String && rawComposed.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawComposed);
+        if (decoded is Map<String, dynamic>) {
+          parsedComposedPattern = decoded;
+        }
+      } catch (_) {
+        parsedComposedPattern = null;
+      }
+    } else if (rawComposed is Map) {
+      parsedComposedPattern = Map<String, dynamic>.from(rawComposed);
+    }
+
     return CustomDesign(
       id: id,
       name: data['name'] as String? ?? 'Untitled',
@@ -138,6 +182,7 @@ class CustomDesign {
               ?.map((g) => LedColorGroup.fromJson(g as Map<String, dynamic>))
               .toList(),
       segmentPatternConfig: data['segment_pattern_config'] as Map<String, dynamic>?,
+      composedPattern: parsedComposedPattern,
     );
   }
 
@@ -158,6 +203,13 @@ class CustomDesign {
       if (segmentColorGroups != null)
         'segment_color_groups': segmentColorGroups!.map((g) => g.toJson()).toList(),
       if (segmentPatternConfig != null) 'segment_pattern_config': segmentPatternConfig,
+      // #86 + #84: jsonEncode the composed pattern to a String. Its embedded
+      // wled_payload holds arrays-of-arrays (col:[[r,g,b,w]]) which the native
+      // iOS Firestore codec aborts on (SIGABRT). Encoding to a String renders
+      // it an opaque primitive to UserService.sanitizeForFirestore (which
+      // otherwise THROWS on nested lists) — mirrors logPatternUsage's
+      // 'wled': jsonEncode(wled). Decoded back in fromFirestoreData.
+      if (composedPattern != null) 'composed_pattern': jsonEncode(composedPattern),
     };
   }
 
@@ -179,13 +231,25 @@ class CustomDesign {
         colors.add([255, 255, 255, 0]);
       }
 
+      // When effect 0 (Solid) is used with multiple colors, substitute effect 83
+      // (Solid Pattern) which distributes colors in repeating blocks. Solid only
+      // shows the first color, losing the rest of the palette.
+      final fx = (channel.effectId == 0 && channel.colorGroups.length > 1)
+          ? 83
+          : channel.effectId;
+
       segments.add({
         'id': channel.channelId,
         'col': colors,
-        'fx': channel.effectId,
+        'fx': fx,
         'sx': channel.speed,
         'ix': channel.intensity,
-        'rev': channel.reverse,
+        // #4 (firmware-free half): emit 'rev' ONLY when the design explicitly
+        // reverses this channel. reverse defaults false, so always writing it
+        // forced rev:false on every apply — clobbering the device's manual
+        // per-segment direction. Omitting the key when false lets the apply
+        // PRESERVE the controller's current seg.rev instead of overriding it.
+        if (channel.reverse) 'rev': true,
       });
     }
 
@@ -389,23 +453,51 @@ class LedColorGroup {
   }
 }
 
-/// Common WLED effects with user-friendly names
-const Map<int, String> kDesignEffects = {
-  0: 'Solid',
-  1: 'Blink',
-  2: 'Breathe',
-  9: 'Rainbow',
-  12: 'Theater Chase',
-  28: 'Chase',
-  37: 'Candle',
-  38: 'Fire',
-  42: 'Fireworks',
-  44: 'Twinkle',
-  63: 'Colortwinkles',
-  74: 'Palette',
-  80: 'Ripple',
-  97: 'Pacifica',
+/// Curated Design-Studio effects, defined by their CATALOG NAME and resolved
+/// to the device's 0.15.1 fx ID via [WledEffectsCatalog]. Routing by name (not
+/// hardcoded numbers) keeps these in lockstep with the firmware and prevents the
+/// effect-ID drift that previously shipped wrong fx (e.g. Candle→Chase 2).
+///
+/// `[catalogName, userFacingLabel]`. The label may differ from the catalog name
+/// where the product wording differs (e.g. "Theater" → "Theater Chase",
+/// "Fire 2012" → "Fire").
+const List<List<String>> _kDesignEffectSpecs = [
+  ['Solid', 'Solid'],
+  ['Blink', 'Blink'],
+  ['Breathe', 'Breathe'],
+  ['Rainbow', 'Rainbow'],
+  ['Theater', 'Theater Chase'],
+  ['Chase', 'Chase'],
+  ['Candle', 'Candle'],
+  ['Fire 2012', 'Fire'],
+  ['Fireworks', 'Fireworks'],
+  ['Twinkle', 'Twinkle'],
+  ['Colortwinkles', 'Colortwinkles'],
+  ['Palette', 'Palette'],
+  ['Ripple', 'Ripple'],
+  ['Pacifica', 'Pacifica'],
+];
+
+/// Common WLED effects with user-friendly names, keyed by the real 0.15.1 fx ID.
+final Map<int, String> kDesignEffects = {
+  for (final spec in _kDesignEffectSpecs)
+    if (WledEffectsCatalog.idForName(spec[0]) != null)
+      WledEffectsCatalog.idForName(spec[0])!: spec[1],
 };
 
-/// Curated list of effect IDs for the design studio
-const List<int> kCuratedEffectIds = [0, 2, 9, 12, 28, 37, 44, 63, 74, 80, 97];
+/// Curated list of effect IDs for the design studio (resolved by name, in order).
+/// Intentionally a subset of [kDesignEffects] — omits Blink, Fire, Fireworks,
+/// matching the pre-drift curated selection.
+final List<int> kCuratedEffectIds = WledEffectsCatalog.idsForNames(const [
+  'Solid',
+  'Breathe',
+  'Rainbow',
+  'Theater',
+  'Chase',
+  'Candle',
+  'Twinkle',
+  'Colortwinkles',
+  'Palette',
+  'Ripple',
+  'Pacifica',
+]);

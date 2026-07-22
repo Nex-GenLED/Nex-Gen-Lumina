@@ -1,8 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
+import '../../widgets/glass_app_bar.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_providers.dart';
 import 'neighborhood_sync_engine.dart';
@@ -28,225 +31,94 @@ class NeighborhoodSyncScreen extends ConsumerStatefulWidget {
 class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen> {
   @override
   Widget build(BuildContext context) {
-    final groupsAsync = ref.watch(userNeighborhoodsProvider);
-
     // Activate the sync engine controller so this device listens for
     // incoming sync commands when belonging to an active group.
     ref.watch(syncEngineControllerProvider);
 
+    final groupsAsync = ref.watch(userNeighborhoodsProvider);
+    final onboardingAsync = ref.watch(neighborhoodSyncOnboardingCompleteProvider);
+
+    // Show loading shimmer while either check is in progress.
+    if (groupsAsync.isLoading || onboardingAsync.isLoading) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: _buildAppBar(context),
+        body: const _NeighborhoodLoadingShimmer(),
+      );
+    }
+
+    final groups = groupsAsync.valueOrNull ?? [];
+    final onboardingComplete = onboardingAsync.valueOrNull ?? false;
+
+    // Auto-migrate existing users: if they already have groups, silently mark
+    // onboarding complete so they never see onboarding screens again.
+    if (groups.isNotEmpty && !onboardingComplete) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) markNeighborhoodSyncOnboardingComplete();
+      });
+    }
+
+    final isReturningUser = onboardingComplete || groups.isNotEmpty;
+
+    if (isReturningUser) {
+      // Returning user — show group list view directly, no onboarding.
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: _buildAppBar(context),
+        body: _NeighborhoodGroupListView(
+          groups: groups,
+          onGroupTap: (group) {
+            ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+            _showGroupControlsSheet(groups);
+          },
+          onCreateGroup: _showCreateGroupDialog,
+          onJoinGroup: _showJoinGroupDialog,
+        ),
+      );
+    }
+
+    // New user — show 4-page onboarding. Mark complete when they tap any CTA.
     return Scaffold(
       backgroundColor: Colors.black,
+      appBar: _buildAppBar(context),
       body: Stack(
         children: [
-          // Base layer: Always show the onboarding/education content
           NeighborhoodOnboarding(
-            onCreateGroup: _showCreateGroupDialog,
-            onJoinGroup: _showJoinGroupDialog,
+            onCreateGroup: () {
+              markNeighborhoodSyncOnboardingComplete();
+              _showCreateGroupDialog();
+            },
+            onJoinGroup: () {
+              markNeighborhoodSyncOnboardingComplete();
+              _showJoinGroupDialog();
+            },
             onFindNearby: _showFindNearbyDialog,
           ),
-
-          // Top layer: Show group card if user has groups (or error banner)
-          SafeArea(
-            child: groupsAsync.when(
-              data: (groups) {
-                if (groups.isEmpty) {
-                  return const SizedBox.shrink(); // No card needed
-                }
-
-                // Auto-select first group if none selected
-                final activeId = ref.read(activeNeighborhoodIdProvider);
-                if (activeId == null && groups.isNotEmpty) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    ref.read(activeNeighborhoodIdProvider.notifier).state = groups.first.id;
-                  });
-                }
-
-                return _buildActiveGroupCard(groups);
-              },
-              loading: () => const SizedBox.shrink(), // Don't block while loading
-              error: (e, _) => _buildErrorBanner(),
-            ),
-          ),
+          if (groupsAsync.hasError)
+            SafeArea(child: _buildErrorBanner()),
         ],
       ),
     );
   }
 
-  /// Floating card at the top showing user's active sync crew
-  Widget _buildActiveGroupCard(List<NeighborhoodGroup> groups) {
-    final activeGroup = ref.watch(activeNeighborhoodProvider);
-
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: GestureDetector(
-        onTap: () => _showGroupControlsSheet(groups),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                NexGenPalette.gunmetal.withOpacity(0.95),
-                NexGenPalette.midnightBlue.withOpacity(0.95),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: NexGenPalette.cyan.withOpacity(0.4)),
-            boxShadow: [
-              BoxShadow(
-                color: NexGenPalette.cyan.withOpacity(0.2),
-                blurRadius: 20,
-                spreadRadius: 2,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  // Animated sync indicator
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [NexGenPalette.cyan, NexGenPalette.blue],
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.sync,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Text(
-                              'My Sync Crew',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            if (activeGroup.valueOrNull?.isActive == true)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.fiber_manual_record, color: Colors.green, size: 8),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      'LIVE',
-                                      style: TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        activeGroup.when(
-                          data: (group) => group != null
-                              ? Text(
-                                  group.name,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                )
-                              : const Text(
-                                  'Select a crew',
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                          loading: () => const Text(
-                            'Loading...',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                          error: (_, __) => const Text(
-                            'Error loading',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Members count
-                  activeGroup.when(
-                    data: (group) => group != null
-                        ? Column(
-                            children: [
-                              Text(
-                                '${group.memberCount}',
-                                style: const TextStyle(
-                                  color: NexGenPalette.cyan,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                'homes',
-                                style: TextStyle(
-                                  color: Colors.grey.shade500,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(),
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.keyboard_arrow_down,
-                    color: Colors.grey.shade400,
-                  ),
-                ],
-              ),
-              // Quick hint
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.touch_app, size: 14, color: Colors.grey.shade500),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Tap to open sync controls',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+  /// Shared GlassAppBar with a visible back button. The screen is now pushed
+  /// from the home dashboard inside the home shell branch, so context.pop()
+  /// returns to the dashboard with the bottom nav bar still visible.
+  PreferredSizeWidget _buildAppBar(BuildContext context) {
+    return GlassAppBar(
+      title: const Text('Neighborhood Sync'),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        tooltip: 'Back',
+        onPressed: () {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            // Fallback for deep-links / edge cases where there's nothing to
+            // pop within the home branch — return to the dashboard root.
+            context.go('/dashboard');
+          }
+        },
       ),
     );
   }
@@ -260,9 +132,9 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.15),
+            color: Colors.orange.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
           ),
           child: Row(
             children: [
@@ -299,11 +171,21 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
     );
   }
 
-  void _showCreateGroupDialog() {
-    showDialog(
+  Future<void> _showCreateGroupDialog() async {
+    final group = await showDialog<NeighborhoodGroup>(
       context: context,
       builder: (context) => const _CreateGroupDialog(),
     );
+
+    if (group != null && mounted) {
+      ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+      // Refresh the groups list then show controls
+      ref.invalidate(userNeighborhoodsProvider);
+      await ref.read(userNeighborhoodsProvider.future);
+      if (!mounted) return;
+      final groups = ref.read(userNeighborhoodsProvider).valueOrNull ?? [];
+      _showGroupControlsSheet(groups);
+    }
   }
 
   void _showJoinGroupDialog() {
@@ -320,7 +202,7 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.cyan.withOpacity(0.2),
+                color: Colors.cyan.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.login, color: Colors.cyan, size: 20),
@@ -458,6 +340,903 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Loading Shimmer — shown while checking onboarding flag + group membership
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NeighborhoodLoadingShimmer extends StatelessWidget {
+  const _NeighborhoodLoadingShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title shimmer
+            Container(height: 28, width: 220, decoration: _shimmerDecor()),
+            const SizedBox(height: 8),
+            Container(height: 16, width: 80, decoration: _shimmerDecor()),
+            const SizedBox(height: 28),
+            // Card shimmers
+            for (int i = 0; i < 3; i++) ...[
+              Container(
+                height: 88,
+                decoration: _shimmerDecor(radius: 16),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  BoxDecoration _shimmerDecor({double radius = 8}) => BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(radius),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Returning-User Group List View
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NeighborhoodGroupListView extends ConsumerStatefulWidget {
+  final List<NeighborhoodGroup> groups;
+  final void Function(NeighborhoodGroup) onGroupTap;
+  final VoidCallback onCreateGroup;
+  final VoidCallback onJoinGroup;
+
+  const _NeighborhoodGroupListView({
+    required this.groups,
+    required this.onGroupTap,
+    required this.onCreateGroup,
+    required this.onJoinGroup,
+  });
+
+  @override
+  ConsumerState<_NeighborhoodGroupListView> createState() =>
+      _NeighborhoodGroupListViewState();
+}
+
+class _NeighborhoodGroupListViewState
+    extends ConsumerState<_NeighborhoodGroupListView>
+    with TickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late AnimationController _waveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previousAsync = ref.watch(previousGroupsProvider);
+    final previousGroups = previousAsync.valueOrNull ?? [];
+
+    // Sort: active sessions first, then by member count
+    final sorted = [...widget.groups]..sort((a, b) {
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        return b.memberUids.length.compareTo(a.memberUids.length);
+      });
+
+    final anyActive = widget.groups.any((g) => g.isActive);
+    final subtitle = widget.groups.isEmpty
+        ? 'Your Sync Crews'
+        : widget.groups.length == 1
+            ? (anyActive ? '1 Active Group' : '1 Group')
+            : (anyActive
+                ? '${widget.groups.length} Groups Syncing'
+                : '${widget.groups.length} Groups');
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black,
+            NexGenPalette.midnightBlue.withValues(alpha: 0.8),
+            Colors.black,
+          ],
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            // ── Compact animated hero header ──────────────────────────────
+            _buildHeroHeader(subtitle),
+
+            // ── Group list / empty state ──────────────────────────────────
+            Expanded(
+              child: widget.groups.isEmpty
+                  ? _buildEmptyState(previousGroups)
+                  : ListView(
+                      padding: EdgeInsets.fromLTRB(
+                          16, 8, 16, navBarTotalHeight(context) + 88),
+                      children: [
+                        for (int i = 0; i < sorted.length; i++)
+                          _buildGroupCard(sorted[i], i + 1),
+                        if (previousGroups.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          _buildPreviousGroupsSection(previousGroups),
+                        ],
+                      ],
+                    ),
+            ),
+
+            // ── Bottom action buttons ─────────────────────────────────────
+            _buildActionButtons(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Hero header ────────────────────────────────────────────────────────────
+
+  Widget _buildHeroHeader(String subtitle) {
+    return Stack(
+      children: [
+        Column(
+          children: [
+            // Compact 120px animated hero (reuses NeighborhoodHeroPainter)
+            SizedBox(
+              height: 120,
+              width: double.infinity,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_pulseController, _waveController]),
+                builder: (context, child) => CustomPaint(
+                  size: const Size(double.infinity, 120),
+                  painter: NeighborhoodHeroPainter(
+                    pulseValue: _pulseController.value,
+                    waveValue: _waveController.value,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Gradient title
+            ShaderMask(
+              shaderCallback: (bounds) => const LinearGradient(
+                colors: [NexGenPalette.cyan, Colors.white, NexGenPalette.violet],
+              ).createShader(bounds),
+              child: const Text(
+                'Neighborhood Sync',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: NexGenPalette.cyan.withValues(alpha: 0.9),
+                fontWeight: FontWeight.w500,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+        ),
+        // "+" button top-right
+        Positioned(
+          top: 8,
+          right: 8,
+          child: GestureDetector(
+            onTap: () => _showAddMenu(context),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: NexGenPalette.cyan.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.35)),
+              ),
+              child: const Icon(Icons.add, color: NexGenPalette.cyan, size: 20),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Group card ─────────────────────────────────────────────────────────────
+
+  Widget _buildGroupCard(NeighborhoodGroup group, int rank) {
+    final colors = _syncTypeColors(group.activeSyncType);
+    final emoji = _syncTypeEmoji(group.activeSyncType);
+    final accent = colors[0];
+
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, child) {
+        final borderOpacity =
+            group.isActive ? 0.4 + _pulseController.value * 0.4 : 0.3;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: GestureDetector(
+            onTap: () => widget.onGroupTap(group),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withValues(alpha: 0.12),
+                    colors[1].withValues(alpha: 0.05),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: accent.withValues(alpha: borderOpacity)),
+                boxShadow: group.isActive
+                    ? [
+                        BoxShadow(
+                          color: accent.withValues(alpha: 
+                              0.18 + _pulseController.value * 0.14),
+                          blurRadius: 16,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Sync-mode icon container (onboarding card style)
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: colors),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child:
+                          Text(emoji, style: const TextStyle(fontSize: 22)),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+
+                  // Content
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                group.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            // LIVE chip — cyan styled (onboarding feature chip)
+                            if (group.isActive)
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: NexGenPalette.cyan.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: NexGenPalette.cyan
+                                          .withValues(alpha: 0.5)),
+                                ),
+                                child: const Text(
+                                  'LIVE',
+                                  style: TextStyle(
+                                    color: NexGenPalette.cyan,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+
+                        // Sync type pill + member count (sync mode card style)
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                group.activeSyncType.displayName,
+                                style: TextStyle(
+                                    color: Colors.grey.shade400,
+                                    fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(Icons.home,
+                                size: 12, color: Colors.grey.shade600),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${group.memberUids.length} '
+                              '${group.memberUids.length == 1 ? "home" : "homes"}',
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+
+                        // Animated status row
+                        _buildStatusRow(group),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // Rank badge + chevron (step-circle from onboarding)
+                  Column(
+                    children: [
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [NexGenPalette.cyan, NexGenPalette.blue],
+                          ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$rank',
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Icon(Icons.chevron_right,
+                          color: Colors.grey.shade600, size: 18),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatusRow(NeighborhoodGroup group) {
+    if (group.isActive) {
+      return AnimatedBuilder(
+        animation: _pulseController,
+        builder: (context, child) => Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: NexGenPalette.cyan
+                    .withValues(alpha: 0.5 + _pulseController.value * 0.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.5),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                group.activePatternName != null
+                    ? 'Syncing · ${group.activePatternName}'
+                    : 'Syncing Now',
+                style: const TextStyle(
+                  color: NexGenPalette.cyan,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+              shape: BoxShape.circle, color: Colors.grey.shade700),
+        ),
+        const SizedBox(width: 6),
+        Text('Idle',
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+      ],
+    );
+  }
+
+  // ── Empty state ─────────────────────────────────────────────────────────────
+
+  Widget _buildEmptyState(List<PreviousGroup> previousGroups) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, navBarTotalHeight(context) + 88),
+      children: [
+        // Animated glow circle (matches _buildGetStartedPage in onboarding)
+        Center(
+          child: AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, child) => Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    NexGenPalette.cyan
+                        .withValues(alpha: 0.3 + _pulseController.value * 0.2),
+                    NexGenPalette.cyan.withValues(alpha: 0.1),
+                    Colors.transparent,
+                  ],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NexGenPalette.cyan
+                        .withValues(alpha: 0.3 + _pulseController.value * 0.2),
+                    blurRadius: 30 + _pulseController.value * 10,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child:
+                  const Icon(Icons.celebration, size: 56, color: Colors.white),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 28),
+
+        const Center(
+          child: Text(
+            'Ready to Light Up\nYour Street?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              height: 1.2,
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Center(
+          child: Text(
+            "Create a new crew or join one that's already syncing nearby.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 14, color: Colors.grey.shade400, height: 1.5),
+          ),
+        ),
+
+        const SizedBox(height: 32),
+
+        // Setup steps (matching _buildSetupStep from onboarding)
+        _buildSetupStep(
+            1, 'Create or Join', 'Start a new sync group or enter an invite code'),
+        const SizedBox(height: 14),
+        _buildSetupStep(
+            2, 'Configure Your Home', 'Set your LED count and position on the street'),
+        const SizedBox(height: 14),
+        _buildSetupStep(
+            3, 'Sync & Celebrate', 'Pick a pattern and watch the magic happen'),
+
+        const SizedBox(height: 28),
+
+        // Pro tip callout (onboarding style)
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: NexGenPalette.cyan.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.lightbulb_outline,
+                  color: NexGenPalette.cyan, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Pro tip: Share your invite code via text or social media to grow your group quickly!',
+                  style:
+                      TextStyle(color: Colors.grey.shade300, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        if (previousGroups.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          _buildPreviousGroupsSection(previousGroups),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSetupStep(int number, String title, String subtitle) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: const BoxDecoration(
+            gradient:
+                LinearGradient(colors: [NexGenPalette.cyan, NexGenPalette.blue]),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number.toString(),
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15)),
+              Text(subtitle,
+                  style:
+                      TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Previous groups section ────────────────────────────────────────────────
+
+  Widget _buildPreviousGroupsSection(List<PreviousGroup> previousGroups) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.history,
+                size: 16, color: NexGenPalette.cyan.withValues(alpha: 0.7)),
+            const SizedBox(width: 8),
+            Text(
+              'Previous Groups',
+              style: TextStyle(
+                color: Colors.grey.shade400,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...previousGroups.map(
+          (prev) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              onTap: () async {
+                final group = await ref
+                    .read(neighborhoodNotifierProvider.notifier)
+                    .joinGroup(prev.inviteCode);
+                if (!context.mounted) return;
+                if (group != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Welcome back to ${group.name}!'),
+                    backgroundColor: Colors.green,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                } else {
+                  await removePreviousGroup(prev.id);
+                  ref.invalidate(previousGroupsProvider);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: const Text('This group no longer exists.'),
+                      backgroundColor: Colors.orange.shade700,
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  }
+                }
+              },
+              borderRadius: BorderRadius.circular(12),
+              // Use case card style from onboarding
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: NexGenPalette.cyan.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.cyan.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Text('🏘️', style: TextStyle(fontSize: 20)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        prev.name,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: NexGenPalette.cyan.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+                      ),
+                      child: const Text(
+                        'Rejoin',
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Action buttons ─────────────────────────────────────────────────────────
+
+  Widget _buildActionButtons() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          24, 12, 24, navBarTotalHeight(context) + 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.7),
+        border: Border(
+            top: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.1))),
+      ),
+      child: Row(
+        children: [
+          // Primary — matches "Start a Block Party" in onboarding
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: widget.onCreateGroup,
+              icon: const Icon(Icons.add_circle_outline, size: 20),
+              label: const Text(
+                'Start a Block Party',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                foregroundColor: Colors.black,
+                alignment: Alignment.center,
+                minimumSize: const Size.fromHeight(52),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                elevation: 8,
+                shadowColor:
+                    NexGenPalette.cyan.withValues(alpha: 0.4),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Secondary — matches "Join the Party" in onboarding
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: widget.onJoinGroup,
+              icon: const Icon(Icons.login, size: 20),
+              label: const Text(
+                'Join the Party',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: NexGenPalette.cyan,
+                side: const BorderSide(color: NexGenPalette.cyan),
+                alignment: Alignment.center,
+                minimumSize: const Size.fromHeight(52),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Add menu ───────────────────────────────────────────────────────────────
+
+  void _showAddMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade700,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.cyan.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child:
+                      const Icon(Icons.add_home, color: NexGenPalette.cyan),
+                ),
+                title: const Text('New Crew',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600)),
+                subtitle: Text('Start a new neighborhood sync group',
+                    style: TextStyle(
+                        color: Colors.grey.shade500, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onCreateGroup();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.login, color: Colors.green.shade400),
+                ),
+                title: const Text('Join Group',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                    'Enter an invite code to join an existing crew',
+                    style: TextStyle(
+                        color: Colors.grey.shade500, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onJoinGroup();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Sync type theming helpers ──────────────────────────────────────────────
+
+  List<Color> _syncTypeColors(SyncType type) {
+    switch (type) {
+      case SyncType.sequentialFlow:
+        return [NexGenPalette.cyan, NexGenPalette.blue];
+      case SyncType.simultaneous:
+        return [Colors.red.shade400, Colors.pink.shade300];
+      case SyncType.patternMatch:
+        return [Colors.green.shade400, Colors.teal.shade300];
+      case SyncType.complement:
+        return [Colors.purple.shade400, NexGenPalette.violet];
+    }
+  }
+
+  String _syncTypeEmoji(SyncType type) {
+    switch (type) {
+      case SyncType.sequentialFlow:
+        return '🌊';
+      case SyncType.simultaneous:
+        return '❤️';
+      case SyncType.patternMatch:
+        return '🔄';
+      case SyncType.complement:
+        return '🎨';
+    }
+  }
+}
+
 /// Full-screen bottom sheet with all group controls
 class _GroupControlsSheet extends ConsumerStatefulWidget {
   final List<NeighborhoodGroup> groups;
@@ -475,6 +1254,69 @@ class _GroupControlsSheet extends ConsumerStatefulWidget {
 }
 
 class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
+  /// True while an invite-code regeneration is in flight (creator action).
+  bool _regeneratingCode = false;
+
+  /// Creator-only: confirm, then rotate the invite code. Overwriting the group
+  /// doc's inviteCode instantly invalidates the old code (join validates by a
+  /// live query on the field; the code is not cached post-join), and the
+  /// watched group stream refreshes the displayed code. No function/rules
+  /// change — [regenerateInviteCode] already exists and is creator-gated
+  /// server-side.
+  Future<void> _confirmAndRegenerate() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A24),
+        title: const Text('Regenerate invite code?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Regenerating the code invalidates the current one. Anyone with the '
+          'old code can no longer join; share the new code with people you '
+          'want to add.',
+          style: TextStyle(color: Colors.grey.shade300),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey.shade400)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Regenerate', style: TextStyle(color: Colors.cyan)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _regeneratingCode = true);
+    final newCode = await ref
+        .read(neighborhoodNotifierProvider.notifier)
+        .regenerateInviteCode();
+    if (!mounted) return;
+    setState(() => _regeneratingCode = false);
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (newCode == null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text("Couldn't regenerate the code. Try again."),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } else {
+      // The watched group stream refreshes the code shown in the UI; confirm
+      // the new value here so the creator can share it immediately.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('New invite code: $newCode'),
+          backgroundColor: Colors.green.shade700,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeGroup = ref.watch(activeNeighborhoodProvider);
@@ -541,7 +1383,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               Expanded(
                 child: ListView(
                   controller: scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).padding.bottom + 88),
                   children: [
                     // Group selector (if multiple groups)
                     if (widget.groups.length > 1) ...[
@@ -672,7 +1514,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                  color: isActive ? Colors.cyan.withOpacity(0.2) : Colors.transparent,
+                  color: isActive ? Colors.cyan.withValues(alpha: 0.2) : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -699,12 +1541,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Colors.cyan.withOpacity(0.15),
-            Colors.purple.withOpacity(0.1),
+            Colors.cyan.withValues(alpha: 0.15),
+            Colors.purple.withValues(alpha: 0.1),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+        border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -712,7 +1554,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -754,7 +1596,7 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
+                          color: Colors.green.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -810,6 +1652,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
   }
 
   Widget _buildGroupActions(NeighborhoodGroup group) {
+    // Creator-only gate — same check the sheet uses elsewhere
+    // (group.creatorUid == current uid), via the tested model helper. Only the
+    // creator sees the rotate-code action.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final isCreator = group.isCreatedBy(uid);
+
     return Column(
       children: [
         // Share invite section
@@ -818,12 +1666,12 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.cyan.withOpacity(0.1),
-                Colors.purple.withOpacity(0.05),
+                Colors.cyan.withValues(alpha: 0.1),
+                Colors.purple.withValues(alpha: 0.05),
               ],
             ),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.cyan.withOpacity(0.2)),
+            border: Border.all(color: Colors.cyan.withValues(alpha: 0.2)),
           ),
           child: Column(
             children: [
@@ -864,6 +1712,34 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                   ),
                 ),
               ),
+              // Creator-only: rotate the invite code. A leaked code must be
+              // invalidatable (the open-join model's safeguard). Overwriting
+              // the group doc's inviteCode instantly invalidates the old code;
+              // the watched group stream refreshes the code shown above.
+              if (isCreator) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: _regeneratingCode ? null : _confirmAndRegenerate,
+                    icon: _regeneratingCode
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.grey,
+                            ),
+                          )
+                        : Icon(Icons.autorenew,
+                            size: 18, color: Colors.grey.shade400),
+                    label: Text(
+                      _regeneratingCode ? 'Regenerating…' : 'Regenerate code',
+                      style: TextStyle(color: Colors.grey.shade400),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -906,15 +1782,23 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
           ],
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
 
-        // Leave group
-        TextButton.icon(
-          onPressed: () => _showLeaveGroupDialog(group),
-          icon: Icon(Icons.logout, size: 16, color: Colors.grey.shade600),
-          label: Text(
-            'Leave Crew',
-            style: TextStyle(color: Colors.grey.shade600),
+        // Leave group — destructive but not irreversible, use red outline
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _showLeaveGroupDialog(group),
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('Leave Group'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red,
+              side: const BorderSide(color: Colors.red),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ),
       ],
@@ -929,38 +1813,222 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
   }
 
   void _showLeaveGroupDialog(NeighborhoodGroup group) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final isHost = uid != null && group.creatorUid == uid;
+
+    if (isHost) {
+      _showHostLeaveGroupDialog(group);
+    } else {
+      _showMemberLeaveGroupDialog(group);
+    }
+  }
+
+  void _showMemberLeaveGroupDialog(NeighborhoodGroup group) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: Colors.grey.shade900,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Leave Crew?',
-          style: TextStyle(color: Colors.white),
+        title: Text(
+          'Leave ${group.name}?',
+          style: const TextStyle(color: Colors.white),
         ),
         content: Text(
-          'Are you sure you want to leave "${group.name}"? You\'ll need an invite code to rejoin.',
+          'You\'ll stop receiving sync commands from this group. '
+          'You can rejoin anytime with the group code.',
           style: TextStyle(color: Colors.grey.shade400),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text(
               'Cancel',
               style: TextStyle(color: Colors.grey.shade500),
             ),
           ),
-          ElevatedButton(
+          TextButton(
             onPressed: () {
-              Navigator.pop(context); // Close dialog
-              Navigator.pop(context); // Close sheet
+              // Capture messenger before any pops — context is deactivated after sheet closes.
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext); // Close dialog
+              Navigator.pop(context);       // Close sheet
               ref.read(neighborhoodNotifierProvider.notifier).leaveCurrentGroup();
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text('You\'ve left ${group.name}'),
+                  backgroundColor: Colors.grey.shade800,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade700,
-              foregroundColor: Colors.white,
+            child: const Text(
+              'Leave Group',
+              style: TextStyle(color: Colors.red),
             ),
-            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHostLeaveGroupDialog(NeighborhoodGroup group) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Leave ${group.name}?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You\'ll stop receiving sync commands from this group. '
+              'You can rejoin anytime with the group code.',
+              style: TextStyle(color: Colors.grey.shade400),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'You\'re the host of this group. Leaving will end the group '
+                      'for all members unless you transfer ownership first.',
+                      style: TextStyle(color: Colors.orange.shade300, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _showTransferOwnershipDialog(group);
+            },
+            child: const Text(
+              'Transfer Ownership',
+              style: TextStyle(color: Colors.cyan),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              // Capture messenger before any pops — context is deactivated after sheet closes.
+              final messenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext); // Close dialog
+              Navigator.pop(context);       // Close sheet
+              final member = ref.read(currentUserMemberProvider);
+              ref.read(neighborhoodNotifierProvider.notifier).dissolveGroupAsHost(
+                hostDisplayName: member?.displayName ?? 'The host',
+              );
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text('You\'ve left ${group.name}'),
+                  backgroundColor: Colors.grey.shade800,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text(
+              'Leave Group',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTransferOwnershipDialog(NeighborhoodGroup group) {
+    final members = ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final otherMembers = members.where((m) => m.oderId != uid).toList();
+
+    if (otherMembers.isEmpty) {
+      // No other members to transfer to — just show leave dialog
+      _showMemberLeaveGroupDialog(group);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Transfer Ownership',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select the new host for ${group.name}:',
+                style: TextStyle(color: Colors.grey.shade400),
+              ),
+              const SizedBox(height: 16),
+              ...otherMembers.map((member) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: Colors.cyan.withValues(alpha: 0.2),
+                  child: const Icon(Icons.home, color: Colors.cyan, size: 20),
+                ),
+                title: Text(
+                  member.displayName,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {
+                  // Capture messenger before any pops — context is deactivated after sheet closes.
+                  final messenger = ScaffoldMessenger.of(context);
+                  Navigator.pop(dialogContext); // Close transfer dialog
+                  Navigator.pop(context);       // Close sheet
+                  ref.read(neighborhoodNotifierProvider.notifier)
+                      .transferOwnershipAndLeave(member.oderId);
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('You\'ve left ${group.name}'),
+                      backgroundColor: Colors.grey.shade800,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
           ),
         ],
       ),
@@ -1016,7 +2084,7 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.celebration, color: Colors.cyan, size: 20),
@@ -1125,9 +2193,9 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.cyan.withOpacity(0.1),
+                    color: Colors.cyan.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.cyan.withOpacity(0.3)),
+                    border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
@@ -1210,42 +2278,121 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
   }
 
   Future<void> _createGroup() async {
-    if (_groupNameController.text.trim().isEmpty) return;
+    debugPrint('🏘️ [NeighborhoodSync] Create group tapped');
+    final name = _groupNameController.text.trim();
+    debugPrint('🏘️ Group name: "$name"');
+
+    if (name.isEmpty) {
+      debugPrint('🏘️ ABORT: name is empty');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a name for your crew.'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    debugPrint('🏘️ Current user UID: ${user?.uid}');
+    debugPrint('🏘️ Current user null: ${user == null}');
+    debugPrint('🏘️ Current user anonymous: ${user?.isAnonymous}');
+    debugPrint('🏘️ Current user emailVerified: ${user?.emailVerified}');
+
+    if (user == null) {
+      debugPrint('🏘️ ERROR: user is null — aborting');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be signed in to create a group.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 
     double? latitude;
     double? longitude;
 
-    final group = await ref.read(neighborhoodNotifierProvider.notifier).createGroup(
-      _groupNameController.text.trim(),
-      displayName: _homeNameController.text.trim().isNotEmpty
-          ? _homeNameController.text.trim()
-          : null,
-      description: _descriptionController.text.trim().isNotEmpty
-          ? _descriptionController.text.trim()
-          : null,
-      streetName: _streetController.text.trim().isNotEmpty
-          ? _streetController.text.trim()
-          : null,
-      city: _cityController.text.trim().isNotEmpty
-          ? _cityController.text.trim()
-          : null,
-      isPublic: _isPublic,
-      latitude: latitude,
-      longitude: longitude,
-    );
+    try {
+      debugPrint('🏘️ Calling NeighborhoodNotifier.createGroup...');
+      debugPrint('🏘️   displayName: ${_homeNameController.text.trim()}');
+      debugPrint('🏘️   isPublic: $_isPublic');
+      debugPrint('🏘️   street/city: ${_streetController.text.trim()} / ${_cityController.text.trim()}');
 
-    if (mounted) {
-      Navigator.pop(context, group);
-      if (group != null) {
+      final group = await ref.read(neighborhoodNotifierProvider.notifier).createGroup(
+        name,
+        displayName: _homeNameController.text.trim().isNotEmpty
+            ? _homeNameController.text.trim()
+            : null,
+        description: _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
+            : null,
+        streetName: _streetController.text.trim().isNotEmpty
+            ? _streetController.text.trim()
+            : null,
+        city: _cityController.text.trim().isNotEmpty
+            ? _cityController.text.trim()
+            : null,
+        isPublic: _isPublic,
+        latitude: latitude,
+        longitude: longitude,
+      );
+
+      debugPrint('🏘️ Notifier returned: ${group == null ? "null (failed)" : "group ${group.id}"}');
+
+      if (!mounted) {
+        debugPrint('🏘️ Widget unmounted — bailing');
+        return;
+      }
+
+      if (group == null) {
+        // Notifier swallows exceptions and returns null on failure.
+        // Surface the underlying error so the user knows what happened.
+        final notifierState = ref.read(neighborhoodNotifierProvider);
+        final errorMsg = notifierState.hasError
+            ? 'Could not create your crew: ${notifierState.error}'
+            : 'Could not create your crew. Please try again.';
+        debugPrint('🏘️ ERROR: Block party creation failed: $errorMsg');
+        if (notifierState.hasError) {
+          debugPrint('🏘️ Notifier error stack: ${notifierState.stackTrace}');
+        }
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${group.name} is ready! Invite your neighbors!'),
-            backgroundColor: Colors.green,
+            content: Text(errorMsg),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
           ),
         );
+        return;
       }
+
+      debugPrint('🏘️ Write succeeded, popping dialog and navigating');
+      Navigator.pop(context, group);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${group.name} is ready! Invite your neighbors!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint('🏘️ ERROR during group creation: $e');
+      debugPrint('🏘️ Stack: $stack');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not create your crew: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 8),
+        ),
+      );
     }
   }
 }
@@ -1330,7 +2477,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.cyan.withOpacity(0.2),
+                      color: Colors.cyan.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.explore, color: Colors.cyan, size: 20),
@@ -1451,7 +2598,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.cyan.withOpacity(0.1),
+                  color: Colors.cyan.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.flag, color: Colors.cyan, size: 40),
@@ -1479,7 +2626,7 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
 
     return ListView.builder(
       controller: scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       itemCount: _nearbyGroups!.length,
       itemBuilder: (context, index) {
         final group = _nearbyGroups![index];
@@ -1592,7 +2739,7 @@ class _NearbyGroupTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900.withOpacity(0.5),
+        color: Colors.grey.shade900.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade800),
       ),
@@ -1602,7 +2749,7 @@ class _NearbyGroupTile extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.cyan.withOpacity(0.2),
+              color: Colors.cyan.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.home_work, color: Colors.cyan),

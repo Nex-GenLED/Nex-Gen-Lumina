@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart' hide ArchitecturalRole;
 
@@ -343,7 +344,6 @@ class PatternComposer {
     switch (spacingRule.type) {
       case SpacingType.pattern:
         // N on, M off repeating pattern
-        final cycleLength = spacingRule.onCount + spacingRule.offCount;
         int position = 0;
         bool isOn = spacingRule.startWithOn;
 
@@ -468,6 +468,8 @@ class PatternComposer {
     // Sort stops by position
     final sortedStops = List<GradientStop>.from(stops)
       ..sort((a, b) => a.position.compareTo(b.position));
+
+    if (sortedStops.isEmpty) return groups;
 
     for (int i = range.start; i <= range.end; i++) {
       final position = (i - range.start) / rangeLength;
@@ -678,18 +680,35 @@ class PatternComposer {
   }
 
   /// Generate payload for static patterns.
+  ///
+  /// Emits the CANONICAL nested `i` form ([start, stop, [r,g,b,w]] range
+  /// entries — stop exclusive), one entry per color group, with every color
+  /// routed through [rgbToRgbw] so the RGBW W-channel is set (not dropped) and
+  /// values are clamped. `fx: 0` (Solid) is required so the static paint
+  /// persists — a running effect would repaint over the `i` colors
+  /// (memory/project_blocks_boundary_blend_fix). The old flat
+  /// `[idx, r, g, b, …]` form was RGB-only AND misread by WLED (it treated the
+  /// r,g,b bytes as further indices) — Design Studio Slice 0.
   Map<String, dynamic> _generateStaticPayload({
     required List<LedColorGroup> groups,
     required GlobalSettings globalSettings,
     required int totalPixels,
   }) {
-    // Build individual LED array
-    final ledArray = <int>[];
+    final ledArray = <dynamic>[];
 
     for (final group in groups) {
-      for (int led = group.startLed; led <= group.endLed; led++) {
-        ledArray.add(led);
-        ledArray.addAll(group.color.take(3));
+      if (group.endLed < group.startLed) continue;
+      final c = group.color;
+      final rgbw = c.length >= 4
+          ? rgbToRgbw(c[0], c[1], c[2], explicitWhite: c[3])
+          : rgbToRgbw(c[0], c[1], c[2], forceZeroWhite: true);
+      if (group.startLed == group.endLed) {
+        ledArray.add(group.startLed);
+        ledArray.add(rgbw);
+      } else {
+        ledArray.add(group.startLed);
+        ledArray.add(group.endLed + 1); // WLED range stop is EXCLUSIVE
+        ledArray.add(rgbw);
       }
     }
 
@@ -704,6 +723,7 @@ class PatternComposer {
           'id': 0,
           'start': 0,
           'stop': totalPixels,
+          'fx': 0,
           'i': ledArray,
         }
       ],
