@@ -607,10 +607,12 @@ class WledService
       return null;
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      // Short timeouts (10s) keep verification polling responsive — a stalled
+      // controller should fail this fast so the next poll comes around, not hang.
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
       final req = await client.getUrl(_uri('/json/cfg'));
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
       client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -627,6 +629,26 @@ class WledService
       debugPrint('WledService.fetchTimerInstances exception: $e');
     }
     return null;
+  }
+
+  /// Cheap liveness probe used by the schedule cfg verification poll: is the
+  /// controller's web server answering yet? GET /json/state with a short (5s)
+  /// timeout, returns true only on a 2xx. Any error / timeout → false (still
+  /// stalled). Does not parse the body — reachability is all we need.
+  Future<bool> ping() async {
+    if (_simulate) return true;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(_uri('/json/state'));
+      req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      await res.drain<void>();
+      client.close(force: true);
+      return res.statusCode >= 200 && res.statusCode < 300;
+    } catch (e) {
+      debugPrint('WledService.ping: no response ($e)');
+      return false;
+    }
   }
 
   /// Clears the controller's WiFi station credentials and forces a reboot,

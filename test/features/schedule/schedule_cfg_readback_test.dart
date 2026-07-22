@@ -1,6 +1,10 @@
-// Unit tests for timersInsLanded — the readback comparator that decides whether
-// a schedule cfg write actually landed on the controller (used by the retry +
-// readback-verify hardening in ScheduleSyncService). Pure function, no I/O.
+// Unit tests for timersInsLanded — the CONTENT-match readback comparator that
+// decides whether a schedule cfg write landed on the controller.
+//
+// Bench-proven readback shape (WLED vid 2507300, SKIKBILY): the controller
+// echoes enabled real entries + 2 solar sentinels (hour:255) and DROPS disabled
+// padding stubs, so the array COMPACTS and reorders — sent-index ≠ readback-index.
+// The comparator matches by content anywhere in the array, not per index.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
@@ -15,9 +19,16 @@ Map<String, dynamic> _t({
 }) =>
     {'en': en, 'hour': hour, 'min': min, 'macro': macro, 'dow': dow, ...extra};
 
+// A disabled padding stub as buildCfgPayload emits it.
+Map<String, dynamic> _stub() => _t(en: 0);
+
+// The two solar sentinel entries the controller always echoes (hour:255).
+List<Map<String, dynamic>> _solarSentinels() =>
+    [_t(en: 1, hour: 255, macro: 0), _t(en: 1, hour: 255, macro: 0)];
+
 void main() {
-  group('timersInsLanded', () {
-    test('exact match (single enabled slot) → true', () {
+  group('timersInsLanded — content match', () {
+    test('exact match, single enabled real timer → true', () {
       final sent = [_t(en: 1, hour: 10, min: 40, macro: 12, dow: 127)];
       final back = [_t(en: 1, hour: 10, min: 40, macro: 12, dow: 127)];
       expect(timersInsLanded(sent, back), isTrue);
@@ -29,76 +40,102 @@ void main() {
       expect(timersInsLanded(sent, back), isTrue);
     });
 
-    test('controller returns extra keys (start/end/mon/day) → still matches on '
-        'the controlled fields', () {
+    test('controller returns extra keys (start/end/mon/day) → still matches', () {
       final sent = [_t(en: 1, hour: 22, min: 0, macro: 15, dow: 127)];
       final back = [
-        _t(
-          en: 1,
-          hour: 22,
-          min: 0,
-          macro: 15,
-          dow: 127,
-          extra: {'start': {'mon': 1, 'day': 1}, 'end': {'mon': 12, 'day': 31}},
-        )
+        _t(en: 1, hour: 22, min: 0, macro: 15, dow: 127, extra: {
+          'start': {'mon': 1, 'day': 1},
+          'end': {'mon': 12, 'day': 31},
+        })
       ];
       expect(timersInsLanded(sent, back), isTrue);
     });
 
-    test('disabled slot: enabled bit matches, other fields ignored → true', () {
-      // We sent a cleared stub (en:0); the controller still holds stale
-      // hour/macro under en:0. A disabled slot compares on the enabled bit only.
-      final sent = [_t(en: 0, hour: 0, min: 0, macro: 0, dow: 0)];
-      final back = [_t(en: 0, hour: 13, min: 30, macro: 9, dow: 64)];
+    test('COMPACTED readback: sent 8 (1 real + 7 stubs), device echoes 3 '
+        '(the real + 2 solar sentinels, stubs dropped) → true', () {
+      final sent = [
+        _t(en: 1, hour: 10, min: 40, macro: 12, dow: 127),
+        _stub(), _stub(), _stub(), _stub(), _stub(), _stub(), _stub(),
+      ];
+      final back = [
+        _t(en: 1, hour: 10, min: 40, macro: 12, dow: 127),
+        ..._solarSentinels(),
+      ];
       expect(timersInsLanded(sent, back), isTrue);
     });
 
-    test('mismatch on a controlled field (min) for an enabled slot → false', () {
+    test('solar sentinels present in readback are ignored → true', () {
+      final sent = [_t(en: 1, hour: 6, min: 30, macro: 11, dow: 127), _stub()];
+      final back = [..._solarSentinels(), _t(en: 1, hour: 6, min: 30, macro: 11, dow: 127)];
+      expect(timersInsLanded(sent, back), isTrue);
+    });
+
+    test('order shuffled: two real timers echoed in reverse order → true', () {
+      final a = _t(en: 1, hour: 6, min: 0, macro: 12, dow: 127);
+      final b = _t(en: 1, hour: 22, min: 0, macro: 2, dow: 127);
+      final sent = [a, b, _stub(), _stub()];
+      final back = [b, ..._solarSentinels(), a];
+      expect(timersInsLanded(sent, back), isTrue);
+    });
+
+    test('real timer echoed at a DIFFERENT index → true (index-independent)', () {
+      final real = _t(en: 1, hour: 19, min: 15, macro: 14, dow: 96);
+      final sent = [real, _stub(), _stub()];
+      final back = [_stub(), _stub(), _stub(), _stub(), _stub(), real]; // index 5
+      expect(timersInsLanded(sent, back), isTrue);
+    });
+
+    test('ON + OFF pair (OFF macro:2) both present → true', () {
+      final on = _t(en: 1, hour: 18, min: 0, macro: 12, dow: 127);
+      final off = _t(en: 1, hour: 23, min: 0, macro: 2, dow: 127);
+      final sent = [on, off, _stub()];
+      final back = [off, on, ..._solarSentinels()];
+      expect(timersInsLanded(sent, back), isTrue);
+    });
+
+    test('mismatch on a controlled field (min) → false', () {
       final sent = [_t(en: 1, hour: 10, min: 40, macro: 12, dow: 127)];
       final back = [_t(en: 1, hour: 10, min: 41, macro: 12, dow: 127)];
       expect(timersInsLanded(sent, back), isFalse);
     });
 
-    test('enabled bit differs (we sent enabled, device shows disabled) → false',
-        () {
+    test('a sent real timer is missing from the readback entirely → false', () {
+      final sent = [
+        _t(en: 1, hour: 6, min: 0, macro: 12, dow: 127),
+        _t(en: 1, hour: 22, min: 0, macro: 2, dow: 127),
+      ];
+      final back = [
+        _t(en: 1, hour: 6, min: 0, macro: 12, dow: 127), // only the ON echoed
+        ..._solarSentinels(),
+      ];
+      expect(timersInsLanded(sent, back), isFalse);
+    });
+
+    test('our real timer reads back DISABLED (en:0) → false', () {
       final sent = [_t(en: 1, hour: 10, min: 40, macro: 12, dow: 127)];
       final back = [_t(en: 0, hour: 10, min: 40, macro: 12, dow: 127)];
       expect(timersInsLanded(sent, back), isFalse);
     });
 
-    test('readback shorter than sent → false (cannot confirm the slot)', () {
-      final sent = [
-        _t(en: 1, hour: 6, min: 0, macro: 12, dow: 127),
-        _t(en: 1, hour: 22, min: 0, macro: 2, dow: 127),
-      ];
-      final back = [_t(en: 1, hour: 6, min: 0, macro: 12, dow: 127)];
-      expect(timersInsLanded(sent, back), isFalse);
-    });
+    group('cleared schedule (no real entries sent)', () {
+      test('readback has only solar sentinels → true (device cleared)', () {
+        final sent = [_stub(), _stub(), _stub()];
+        expect(timersInsLanded(sent, _solarSentinels()), isTrue);
+      });
 
-    test('padded stubs after a real timer: real matches, stubs disabled → true',
-        () {
-      final sent = [
-        _t(en: 1, hour: 10, min: 40, macro: 12, dow: 127),
-        _t(en: 0),
-        _t(en: 0),
-      ];
-      final back = [
-        _t(en: 1, hour: 10, min: 40, macro: 12, dow: 127),
-        _t(en: 0, hour: 5, min: 5, macro: 1, dow: 3), // stale under en:0 — ok
-        _t(en: 0),
-      ];
-      expect(timersInsLanded(sent, back), isTrue);
-    });
+      test('readback empty → true', () {
+        expect(timersInsLanded([_stub(), _stub()], const []), isTrue);
+      });
 
-    test('controller has MORE slots than we sent → compares only what we sent',
-        () {
-      final sent = [_t(en: 1, hour: 10, min: 40, macro: 12, dow: 127)];
-      final back = [
-        _t(en: 1, hour: 10, min: 40, macro: 12, dow: 127),
-        _t(en: 0),
-        _t(en: 0),
-      ];
-      expect(timersInsLanded(sent, back), isTrue);
+      test('readback still holds an enabled non-solar timer → false '
+          '(clear did not land)', () {
+        final sent = [_stub(), _stub()];
+        final back = [
+          _t(en: 1, hour: 8, min: 0, macro: 12, dow: 127),
+          ..._solarSentinels(),
+        ];
+        expect(timersInsLanded(sent, back), isFalse);
+      });
     });
   });
 }

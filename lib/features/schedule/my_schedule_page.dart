@@ -259,7 +259,17 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   .runSyncNow();
               if (!context.mounted) return;
               final messenger = ScaffoldMessenger.of(context);
-              if (result.deferredOffLan) {
+              if (result.verifying) {
+                // A sync is already in flight (verifying through the controller
+                // stall) and this re-press was dropped — do NOT start a second
+                // cfg write. Reassure, don't alarm; the in-flight one owns the
+                // status row.
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.summaryMessage),
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+                  duration: const Duration(seconds: 3),
+                ));
+              } else if (result.deferredOffLan) {
                 // Off-LAN: the schedule saved fine, it just can't reach the
                 // controller's timer table from here. Informational, not red.
                 messenger.showSnackBar(SnackBar(
@@ -688,9 +698,10 @@ class _SyncStatusRow extends ConsumerWidget {
     final IconData icon;
     final Color color;
     final String label;
-    if (last.retrying) {
-      // Interim: the cfg write is still being retried (a slow flash-save). Not
-      // an error — neutral, so it doesn't flash red before the write resolves.
+    if (last.verifying) {
+      // Interim: the write committed and we're verifying through the
+      // controller's post-commit stall (can take minutes). Not an error —
+      // neutral/cyan so it never flashes red while the controller recovers.
       icon = Icons.sync_rounded;
       color = NexGenPalette.cyan;
       label = last.summaryMessage;
