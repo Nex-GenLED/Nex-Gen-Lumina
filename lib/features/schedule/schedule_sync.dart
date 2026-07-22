@@ -776,16 +776,30 @@ class ScheduleSyncService {
         final presetId = effectiveSchedule.presetId ?? nextPresetId;
         if (effectiveSchedule.presetId == null) nextPresetId++;
 
-        // Idempotent: skip the psave when slot already holds this design, so a
-        // re-sync of an unchanged pattern schedule writes nothing (no flash).
-        // A genuinely new/changed design is the only case that writes — and
-        // that single write is undone visually by the capture/restore below.
-        final payload = effectiveSchedule.wledPayload!;
+        // Option A (2026-07-22): ALWAYS psave the schedule's design — no
+        // idempotent skip. The old fx+first-color skip (_scheduleDesignMatches)
+        // was structurally under-specified (ignored master on, bri, palette,
+        // per-seg on, and every segment past seg[0]), so it silently left stale
+        // presets un-repaired forever — bench: preset 10 held the right design
+        // but master on:false, so the schedule fired DARK, and Sync kept skipping
+        // the re-save. Drop the skip; the capture/restore below absorbs the
+        // live-output cost, and the settle + patient verify absorb the flash cost.
+        //
+        // Guarantee the ON-preset is never saved dark: a pattern/audio schedule
+        // is an ON action, so force on:true + an explicit bri into the saved
+        // state (OFF actions are payload-less and arm preset 2, handled above —
+        // never reach here — so this never disables an intended-off schedule).
+        final rawPayload = effectiveSchedule.wledPayload!;
+        final presetPayload = <String, dynamic>{
+          ...rawPayload,
+          'on': true,
+          'bri': (rawPayload['bri'] as num?)?.toInt() ?? 255,
+        };
         await psaveIfChanged(
           id: presetId,
-          state: payload,
+          state: presetPayload,
           name: effectiveSchedule.actionLabel,
-          isSatisfied: (d) => _scheduleDesignMatches(d, payload),
+          isSatisfied: (_) => false, // always write — see Option A above
         );
 
         updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
@@ -799,23 +813,24 @@ class ScheduleSyncService {
       }
     }
 
-    // ── Restore live output ──────────────────────────────────────────────
-    // Each psave above applied its inline state to the live strip (no
-    // non-applying save exists on this firmware for a differing preset). If we
-    // wrote at least one preset, re-apply the state captured before the batch
-    // so the lights end exactly where they started — saving/editing a schedule
-    // and navigating away must NOT turn the system on or change the look. A
-    // sync that wrote nothing (all presets already current) skips this, so the
-    // common path touches the strip zero times. This is purely a live-output
-    // restore; it never touches timers, so the two-timer ON/OFF boundary
-    // invariant is untouched — only the RTC fires boundaries.
+    // ── Restore live output (non-disruptive save) ────────────────────────
+    // Every psave above APPLIED its inline state to the live strip (this
+    // firmware has no non-applying save for a differing preset), and under the
+    // always-psave policy that now happens on EVERY Sync. Re-apply the state we
+    // captured BEFORE the batch so the strip ends EXACTLY where it started —
+    // pressing Sync, or saving/editing a schedule, must NEVER turn the system on
+    // or change the look. `transition:0` snaps it back with no visible fade.
+    // This runs before the cfg write + settle, so it is the last thing to touch
+    // live output. It never touches timers — the RTC owns the ON/OFF boundaries.
     if (didWriteAnyPreset && capturedLiveState != null) {
       final restore = <String, dynamic>{
+        'transition': 0,
         if (capturedLiveState['on'] != null) 'on': capturedLiveState['on'],
         if (capturedLiveState['bri'] != null) 'bri': capturedLiveState['bri'],
         if (capturedLiveState['seg'] != null) 'seg': capturedLiveState['seg'],
       };
-      if (restore.isNotEmpty) {
+      // >1 key means we captured real state (on/bri/seg), not just transition.
+      if (restore.length > 1) {
         final restored = await repo.applyJson(restore);
         if (!restored) {
           debugPrint(
@@ -1113,7 +1128,7 @@ class ScheduleSyncService {
     // Patient verify-poll — reached on (applyConfig==false) OR (2xx + null
     // readback) on the LAN service. Wait for the controller to answer again,
     // then content-match; NO re-POST unless it recovers and still mismatches.
-    final wledRepo = repo as WledService;
+    final wledRepo = repo; // promoted to WledService by the guards above
     ref.read(lastScheduleSyncResultProvider.notifier).state =
         ScheduleSyncResult.verifying();
 
@@ -1312,46 +1327,6 @@ class ScheduleSyncService {
       return true;
     }
     return def['on'] == false;
-  }
-
-  /// Best-effort match between a stored schedule preset and the [payload] we
-  /// would write — compares the first segment's effect id and primary color.
-  /// A false negative (treats a match as a mismatch) only costs one redundant
-  /// write, which the capture/restore in syncAll renders invisible; it never
-  /// produces a false positive that would leave a stale design armed.
-  static bool _scheduleDesignMatches(
-      Map<String, dynamic> def, Map<String, dynamic> payload) {
-    try {
-      final dSeg = def['seg'];
-      final pSeg = payload['seg'];
-      if (dSeg is! List || pSeg is! List || dSeg.isEmpty || pSeg.isEmpty) {
-        return false;
-      }
-      final d0 = dSeg.first;
-      final p0 = pSeg.first;
-      if (d0 is! Map || p0 is! Map) return false;
-      if (d0['fx'] != p0['fx']) return false;
-      final dCol = d0['col'];
-      final pCol = p0['col'];
-      if (dCol is! List || pCol is! List || dCol.isEmpty || pCol.isEmpty) {
-        return false;
-      }
-      return _sameColor(dCol.first, pCol.first);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Compares two WLED color arrays on their R/G/B channels (ignoring a
-  /// possibly-absent W channel and any normalization padding).
-  static bool _sameColor(dynamic a, dynamic b) {
-    if (a is! List || b is! List) return false;
-    for (var i = 0; i < 3; i++) {
-      final av = i < a.length && a[i] is num ? (a[i] as num).toInt() : 0;
-      final bv = i < b.length && b[i] is num ? (b[i] as num).toInt() : 0;
-      if (av != bv) return false;
-    }
-    return true;
   }
 }
 

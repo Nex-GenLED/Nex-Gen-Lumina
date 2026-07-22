@@ -32,6 +32,8 @@ class _FakeService extends WledService {
   final Map<String, dynamic>? state;
 
   final List<int> savedPresetIds = [];
+  final Map<int, Map<String, dynamic>> savedStates = {};
+  final List<String> callLog = []; // ordered: 'save:N' / 'applyJson'
   int applyJsonCalls = 0;
   int applyConfigCalls = 0;
   Map<String, dynamic>? _lastCfg;
@@ -62,12 +64,15 @@ class _FakeService extends WledService {
     String? presetName,
   }) async {
     savedPresetIds.add(presetId);
+    savedStates[presetId] = Map<String, dynamic>.from(state);
+    callLog.add('save:$presetId');
     return true;
   }
 
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     applyJsonCalls++;
+    callLog.add('applyJson');
     return true;
   }
 
@@ -114,7 +119,8 @@ ScheduleItem _patternItem() => const ScheduleItem(
 void main() {
   const svc = ScheduleSyncService();
 
-  test('idempotent: presets already current → zero writes, no restore', () async {
+  test('Option A: pattern preset ALWAYS re-saved (even when it matches); '
+      'system presets skip; save is non-disruptive', () async {
     // Controller already holds every preset the sync would write, named
     // correctly, preset 2 genuinely off, and slot 10 matching the design.
     final repo = _FakeService(
@@ -180,10 +186,18 @@ void main() {
     final result = await svc.syncAll(ref, [_patternItem()]);
 
     expect(result.success, isTrue);
-    expect(repo.savedPresetIds, isEmpty,
-        reason: 'no preset should be re-psaved when all already match');
-    expect(repo.applyJsonCalls, 0,
-        reason: 'no write happened, so live output must not be restored/touched');
+    // Option A: the schedule's pattern preset is ALWAYS re-saved (no fx+color
+    // skip), so a stale on:false / wrong-field preset can never survive. System
+    // presets 1-5 still skip by name.
+    expect(repo.savedPresetIds, [10],
+        reason: 'pattern preset always re-psaved; system presets match → skip');
+    // on:true is forced into the saved pattern preset so it can never be dark.
+    expect(repo.savedStates[10]?['on'], true,
+        reason: 'schedule ON-preset must be saved on:true');
+    // Non-disruptive: exactly one restore, and it runs AFTER the psave.
+    expect(repo.applyJsonCalls, 1);
+    expect(repo.callLog.last, 'applyJson',
+        reason: 'live-state restore is the last live-output touch (after psave)');
     expect(repo.applyConfigCalls, 1, reason: 'timers are still pushed');
   });
 
@@ -277,6 +291,49 @@ void main() {
     expect(result.success, isTrue);
     expect(repo.savedPresetIds, [2],
         reason: 'only the corrupted off-preset is rewritten');
+    expect(repo.savedStates[2]?['on'], false,
+        reason: 'OFF preset keeps its intended on:false — intent-based, not '
+            'blanket true');
     expect(repo.applyJsonCalls, 1, reason: 'the single repair write is restored');
+  });
+
+  test('on:true is INJECTED even when a pattern payload is dark/absent (BUG-1)',
+      () async {
+    // The reported repro: a schedule whose stored wledPayload is on:false (or
+    // omits on) was saved into a DARK preset, so firing the timer left the strip
+    // off. The pattern preset must be forced on:true (+ explicit bri).
+    final repo = _FakeService(
+      presets: const {},
+      state: {'on': true, 'bri': 100, 'seg': const []},
+    );
+    final h = _harness(repo);
+    final ref = h.container.read(_refProvider);
+
+    await svc.syncAll(ref, [
+      const ScheduleItem(
+        id: 'dark1',
+        timeLabel: '7:00 PM',
+        repeatDays: ['Mon'],
+        actionLabel: 'Pattern: Dark',
+        enabled: true,
+        presetId: 10,
+        wledPayload: {
+          'on': false, // ← dark design
+          'seg': [
+            {
+              'fx': 57,
+              'col': [
+                [10, 20, 30, 0]
+              ]
+            }
+          ]
+        },
+      ),
+    ]);
+
+    expect(repo.savedStates[10]?['on'], true,
+        reason: 'a dark design payload must be saved on:true so it lights up');
+    expect(repo.savedStates[10]?['bri'], isNotNull,
+        reason: 'an explicit bri is injected');
   });
 }
