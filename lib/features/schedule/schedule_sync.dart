@@ -685,9 +685,18 @@ class ScheduleSyncService {
     // they are never rewritten (this is what stops the every-sync storm).
     //   1 = On, 3/4/5 = Dim/Low/Medium brightness (referenced by
     //   _presetForAction; bri = round(pct*255/100): 20%→51, 40%→102, 60%→153).
+    // `ib: true` on every ON-preset makes WLED PERSIST the root master on/bri
+    // into the stored preset. Without it presets store SEGMENTS ONLY, so firing
+    // an ON-timer from a master-off state loads the design but leaves the master
+    // OFF → strip DARK. Bench-proven 2026-07-22 (vid 2507300): slot 250 (plain
+    // psave) → segments-only, load from master-off leaves master off; slot 249
+    // (psave + ib:true) → root {"on":true,"bri":255} persisted, load from
+    // master-off → master TRUE. So the ON-timer asserts master power at fire
+    // time via the preset itself. OFF preset 2 is intentionally left without ib
+    // (its lights-off is via seg.on:false — see below).
     await psaveIfChanged(
       id: 1,
-      state: {'on': true, 'bri': 200},
+      state: {'on': true, 'bri': 200, 'ib': true},
       name: 'NGL On',
       isSatisfied: (d) => _presetNamed(d, 'NGL On'),
     );
@@ -710,19 +719,19 @@ class ScheduleSyncService {
     );
     await psaveIfChanged(
       id: 3,
-      state: {'on': true, 'bri': 51},
+      state: {'on': true, 'bri': 51, 'ib': true},
       name: 'NGL Dim',
       isSatisfied: (d) => _presetNamed(d, 'NGL Dim'),
     );
     await psaveIfChanged(
       id: 4,
-      state: {'on': true, 'bri': 102},
+      state: {'on': true, 'bri': 102, 'ib': true},
       name: 'NGL Low',
       isSatisfied: (d) => _presetNamed(d, 'NGL Low'),
     );
     await psaveIfChanged(
       id: 5,
-      state: {'on': true, 'bri': 153},
+      state: {'on': true, 'bri': 153, 'ib': true},
       name: 'NGL Medium',
       isSatisfied: (d) => _presetNamed(d, 'NGL Medium'),
     );
@@ -794,6 +803,11 @@ class ScheduleSyncService {
           ...rawPayload,
           'on': true,
           'bri': (rawPayload['bri'] as num?)?.toInt() ?? 255,
+          // ib:true → WLED persists the root master on/bri (not just segments),
+          // so firing this ON-preset from a master-off state powers the strip on.
+          // Bench-proven (see the system-preset block above). normalizeWledPayload
+          // preserves this top-level key, so it reaches the psave wire.
+          'ib': true,
         };
         await psaveIfChanged(
           id: presetId,

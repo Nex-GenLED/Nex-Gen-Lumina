@@ -191,9 +191,13 @@ void main() {
     // presets 1-5 still skip by name.
     expect(repo.savedPresetIds, [10],
         reason: 'pattern preset always re-psaved; system presets match → skip');
-    // on:true is forced into the saved pattern preset so it can never be dark.
+    // on:true is forced into the saved pattern preset so it can never be dark,
+    // and ib:true makes WLED persist that master state (bench-proven: without
+    // ib the preset is segments-only and fires DARK from a master-off state).
     expect(repo.savedStates[10]?['on'], true,
         reason: 'schedule ON-preset must be saved on:true');
+    expect(repo.savedStates[10]?['ib'], true,
+        reason: 'ON-preset asserts master power via ib (persists root on/bri)');
     // Non-disruptive: exactly one restore, and it runs AFTER the psave.
     expect(repo.applyJsonCalls, 1);
     expect(repo.callLog.last, 'applyJson',
@@ -294,6 +298,9 @@ void main() {
     expect(repo.savedStates[2]?['on'], false,
         reason: 'OFF preset keeps its intended on:false — intent-based, not '
             'blanket true');
+    expect(repo.savedStates[2]?['ib'], isNot(true),
+        reason: 'OFF preset does NOT get ib — lights-off is via seg.on:false, '
+            'the ib master-assert is ON-presets only');
     expect(repo.applyJsonCalls, 1, reason: 'the single repair write is restored');
   });
 
@@ -335,5 +342,7 @@ void main() {
         reason: 'a dark design payload must be saved on:true so it lights up');
     expect(repo.savedStates[10]?['bri'], isNotNull,
         reason: 'an explicit bri is injected');
+    expect(repo.savedStates[10]?['ib'], true,
+        reason: 'ib persists the master on/bri so the ON-timer powers the strip');
   });
 }
