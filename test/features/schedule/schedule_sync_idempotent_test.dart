@@ -34,9 +34,23 @@ class _FakeService extends WledService {
   final List<int> savedPresetIds = [];
   int applyJsonCalls = 0;
   int applyConfigCalls = 0;
+  Map<String, dynamic>? _lastCfg;
 
   @override
   Future<Map<int, Map<String, dynamic>>> fetchPresets() async => presets;
+
+  // Model a healthy controller's readback: echo the timers we last wrote so the
+  // 2xx-path content-match confirms (no patient-verify poll). Without this the
+  // fake returns a null readback, which — post trust-2xx-close — drops syncAll
+  // into the real-time verify poll and hangs the test.
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    final ins = (_lastCfg?['timers'] as Map?)?['ins'];
+    if (ins is List) {
+      return ins.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    }
+    return null;
+  }
 
   @override
   Future<Map<String, dynamic>?> getState() async => state;
@@ -60,6 +74,7 @@ class _FakeService extends WledService {
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
     applyConfigCalls++;
+    _lastCfg = cfg;
     return true;
   }
 }
