@@ -140,9 +140,10 @@ void main() {
         .cast<Map<String, dynamic>>();
 
     expect(
-      ins.any((t) => t['hour'] == 10 && t['min'] == 40 && t['en'] == true),
+      ins.any((t) => t['hour'] == 10 && t['min'] == 40 && t['en'] == 1),
       isTrue,
-      reason: 'the translation itself was never the bug — proves it still works',
+      reason: 'the translation itself was never the bug — proves it still works '
+          '(en is int 1 — WLED type-strict, curl-proven 2026-07-22)',
     );
   });
 
