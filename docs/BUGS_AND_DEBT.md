@@ -90,19 +90,22 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `test/…/roofline*`.
 
 - [ ] **P1-10 — Design-name attribution: schedule fires**
-  - Status: OPEN · Evidence: reported
+  - Status: OPEN · Evidence: bench-proven (2026-07-23 12:56 OFF fire: `ps:-1` after timer-fired preset load)
   - After a timer fires, app shows raw WLED effect names ("Solid", "Running") instead of the
-    design name. **DIAGNOSTIC FIRST:** curl `/json/state` after a fire — if `ps` shows the
-    slot, this is pure app-side mapping (ps → app-owned slot → design name); if `ps:-1`, needs
-    P1-11's record.
-  - Files: state readback / name resolver — `lib/features/ai/pattern_label_resolver.dart`,
-    dashboard state display in `lib/nav.dart`.
+    design name. **Diagnostic ANSWERED (was "curl /json/state, is ps the slot?"):** firmware
+    does NOT leave `ps` pointing at the fired preset — `ps:-1` confirmed on the 12:56 fire. So
+    this CANNOT be solved by a `ps → app-owned slot → design name` lookup; it requires the same
+    "last applied design" record as P1-11.
+  - Files: `lib/features/ai/pattern_label_resolver.dart`, dashboard state display in
+    `lib/nav.dart`, + the persisted last-applied record shared with P1-11.
 
 - [ ] **P1-11 — Design-name attribution: Game Day / live applies (ps:-1)**
-  - Status: OPEN · Evidence: reported
-  - Same symptom for non-preset applies where `ps:-1`. Needs a "last applied design" record
-    written at apply time. **Rides with** the P0-1..P0-3 consolidation — instrument the
-    surviving write paths, not the doomed ones.
+  - Status: OPEN · Evidence: reported; `ps:-1` now bench-proven (2026-07-23) for timer fires too
+  - Non-preset applies report `ps:-1` — and, per the 12:56 bench finding, so do timer-fired
+    *preset* loads. So a "last applied design" record written at apply time is now REQUIRED for
+    BOTH the live-apply case AND the schedule-fire case (P1-10); neither can lean on `ps`.
+    **Rides with** the P0-1..P0-3 consolidation — instrument the surviving write paths, not the
+    doomed ones.
   - Files: surviving apply paths (post-consolidation) + a persisted last-applied record.
 
 - [ ] **P1-22 — My Designs apply + Now-Playing label (ex-#62/#81)**
@@ -142,6 +145,17 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `functions/src/` for WLED payload construction; ensure chokepoint parity.
   - Files: `functions/src/` (WLED payload builders), callers
     `game_day_autopilot_background_worker.dart`, `sync_event_background_worker.dart`.
+
+- [ ] **P1-42 — LED layout change staleness: presets render wrong until next Sync**
+  - Status: OPEN · Evidence: bench-proven (2026-07-23: channel-2 `hw.led` 30→73)
+  - Resizing a channel's pixel count (`hw.led`) leaves ALL stored presets rendering wrong on the
+    changed segments until the next Sync re-psaves them — presets bake segment geometry, so a
+    layout change silently orphans them. Fix: detect layout drift in the sync (compare
+    `hw.led.ins` against last-known) OR hook the layout-save flow to force a full preset re-save
+    + user notice. **Workaround until fixed: Sync after any layout change** — surface this to users.
+  - Files: `lib/features/schedule/schedule_sync.dart` (drift detect + re-psave), the
+    channel/segment layout-save flow, `lib/features/schedule/calendar_entry_lease_manager.dart`
+    (shares the psave path).
 
 ---
 
