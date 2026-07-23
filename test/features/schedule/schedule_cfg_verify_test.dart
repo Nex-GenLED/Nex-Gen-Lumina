@@ -121,4 +121,89 @@ void main() {
           reason: 'null readback keeps polling; it is not a mismatch');
     });
   });
+
+  // The 2xx-immediate readback path's race tolerance. The bench-proven false-red
+  // (192.168.1.150, 2026-07-23): heaviest sync → controller answered 2xx and the
+  // very next /json/cfg GET before its config state was consistent → transient
+  // mismatch → red, even though curl seconds later showed the timers landed. ONE
+  // delayed re-look absorbs the race; a genuine mismatch still hard-fails.
+  //
+  // (Test cases (a) stall→recovery→mismatch→match and (b) →mismatch are the
+  // verifyCfgAfterStall group above — mismatch→re-POST+settle+re-verify.)
+  group('verify2xxReadbackWithRetry (2xx readback race tolerance)', () {
+    test('first readback matches → confirmed immediately, no wait, one look',
+        () async {
+      var readbackCalls = 0;
+      var delayCalls = 0;
+      final r = await verify2xxReadbackWithRetry(
+        readbackMatch: () async {
+          readbackCalls++;
+          return true;
+        },
+        delay: (_) async => delayCalls++,
+      );
+      expect(r, isTrue);
+      expect(readbackCalls, 1, reason: 'a matching first look needs no re-look');
+      expect(delayCalls, 0, reason: 'no wait when the first readback matches');
+    });
+
+    // (c) 2xx → immediate mismatch → (delay) → match = confirmed, no red.
+    test('mismatch then match on the delayed re-look → confirmed', () async {
+      final readback = _sequence<bool?>([false, true]);
+      var readbackCalls = 0;
+      var delayCalls = 0;
+      final r = await verify2xxReadbackWithRetry(
+        readbackMatch: () async {
+          readbackCalls++;
+          return readback();
+        },
+        delay: (_) async => delayCalls++,
+      );
+      expect(r, isTrue, reason: 'the readback raced the commit; re-look matched');
+      expect(readbackCalls, 2, reason: 'exactly one re-look');
+      expect(delayCalls, 1, reason: 'exactly one settle before the re-look');
+    });
+
+    // (d) 2xx → immediate mismatch → mismatch = red (hard-fail preserved).
+    test('mismatch then STILL mismatch on the re-look → false (hard-fail)',
+        () async {
+      var readbackCalls = 0;
+      final r = await verify2xxReadbackWithRetry(
+        readbackMatch: () async {
+          readbackCalls++;
+          return false; // genuine mismatch — never resolves
+        },
+        delay: (_) async {},
+      );
+      expect(r, isFalse, reason: 'a persistent mismatch must still hard-fail red');
+      expect(readbackCalls, 2, reason: 'one retry, then give up — never a loop');
+    });
+
+    test('first readback null (unreadable) → null passthrough, no retry',
+        () async {
+      var readbackCalls = 0;
+      var delayCalls = 0;
+      final r = await verify2xxReadbackWithRetry(
+        readbackMatch: () async {
+          readbackCalls++;
+          return null;
+        },
+        delay: (_) async => delayCalls++,
+      );
+      expect(r, isNull, reason: 'null is inconclusive, not a mismatch');
+      expect(readbackCalls, 1, reason: 'null does not trigger the mismatch retry');
+      expect(delayCalls, 0);
+    });
+
+    test('mismatch then null on the re-look → null (caller falls to patient poll)',
+        () async {
+      final readback = _sequence<bool?>([false, null]);
+      final r = await verify2xxReadbackWithRetry(
+        readbackMatch: () async => readback(),
+        delay: (_) async {},
+      );
+      expect(r, isNull,
+          reason: 'became unreadable on the re-look → inconclusive, not red');
+    });
+  });
 }

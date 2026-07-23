@@ -731,14 +731,24 @@ class _SyncStatusRow extends ConsumerWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
+        // Top-align so the icon sits with the first line when the label wraps.
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: color),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 16, color: color),
+          ),
           const SizedBox(width: 6),
           Expanded(
+            // WRAP (no ellipsis) so the FULL text of every sync state is readable
+            // at any phone width. The firmware-mismatch / off-LAN / write-failed
+            // copy is long and was being cut off in a single ellipsized line
+            // (bench 2026-07-23: could not read past "reported different value").
+            // Applies to all status-row states, not just the error case.
             child: Text(
               label,
               style: TextStyle(fontSize: 12, color: color),
-              overflow: TextOverflow.ellipsis,
+              softWrap: true,
             ),
           ),
         ],
