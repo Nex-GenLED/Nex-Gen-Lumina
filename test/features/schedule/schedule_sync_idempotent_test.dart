@@ -32,8 +32,9 @@ class _FakeService extends WledService {
   final Map<String, dynamic>? state;
 
   final List<int> savedPresetIds = [];
+  final List<int> deletedPresetIds = [];
   final Map<int, Map<String, dynamic>> savedStates = {};
-  final List<String> callLog = []; // ordered: 'save:N' / 'applyJson'
+  final List<String> callLog = []; // ordered: 'save:N' / 'delete:N' / 'applyJson'
   int applyJsonCalls = 0;
   int applyConfigCalls = 0;
   Map<String, dynamic>? _lastCfg;
@@ -66,6 +67,13 @@ class _FakeService extends WledService {
     savedPresetIds.add(presetId);
     savedStates[presetId] = Map<String, dynamic>.from(state);
     callLog.add('save:$presetId');
+    return true;
+  }
+
+  @override
+  Future<bool> deletePreset(int presetId) async {
+    deletedPresetIds.add(presetId);
+    callLog.add('delete:$presetId');
     return true;
   }
 
@@ -145,6 +153,9 @@ void main() {
         },
         2: {
           'n': 'NGL Off',
+          // Already healed: carries root on:false (the ib-persisted master-off),
+          // so the OFF-preset self-heal skips it.
+          'on': false,
           'seg': [
             {'on': false}
           ]
@@ -298,9 +309,10 @@ void main() {
     expect(repo.savedStates[2]?['on'], false,
         reason: 'OFF preset keeps its intended on:false — intent-based, not '
             'blanket true');
-    expect(repo.savedStates[2]?['ib'], isNot(true),
-        reason: 'OFF preset does NOT get ib — lights-off is via seg.on:false, '
-            'the ib master-assert is ON-presets only');
+    expect(repo.savedStates[2]?['ib'], true,
+        reason: 'OFF preset asserts master-OFF via ib (root on:false persisted), '
+            'so loading it kills master power even for a multi-segment pattern — '
+            'the symmetric counterpart to the ON-preset ib master-assert');
     expect(repo.applyJsonCalls, 1, reason: 'the single repair write is restored');
   });
 
@@ -344,5 +356,108 @@ void main() {
         reason: 'an explicit bri is injected');
     expect(repo.savedStates[10]?['ib'], true,
         reason: 'ib persists the master on/bri so the ON-timer powers the strip');
+  });
+
+  test('OFF preset save asserts master-OFF: root on:false + ib:true, one off '
+      'segment per live segment (belt-and-braces for multi-segment)', () async {
+    // Live strip is a 2-segment pattern (the bench repro). The OFF preset must
+    // carry root on:false + ib (deterministic master kill) AND an off segment
+    // per live segment so a firmware that ignored root on still blanks the
+    // whole strip. Empty preset map → preset 2 is written this sync.
+    final repo = _FakeService(
+      state: {
+        'on': true,
+        'bri': 200,
+        'seg': [
+          {'id': 0, 'on': true},
+          {'id': 1, 'on': true},
+        ],
+      },
+      presets: const {},
+    );
+    final h = _harness(repo);
+    final ref = h.container.read(_refProvider);
+
+    await svc.syncAll(ref, [
+      const ScheduleItem(
+        id: 'off1',
+        timeLabel: '7:00 PM',
+        offTimeLabel: '11:00 PM',
+        repeatDays: ['Mon'],
+        actionLabel: 'Turn On',
+        enabled: true,
+      ),
+    ]);
+
+    expect(repo.savedStates[2]?['on'], false,
+        reason: 'OFF preset persists root on:false');
+    expect(repo.savedStates[2]?['ib'], true,
+        reason: 'ib persists that root master-off so loading kills master power');
+    final offSeg = repo.savedStates[2]?['seg'];
+    expect(offSeg, isA<List>());
+    expect((offSeg as List).length, 2,
+        reason: 'one off segment per live segment covers the full strip');
+    expect(offSeg.every((s) => (s as Map)['on'] == false), isTrue,
+        reason: 'every segment in the OFF preset is off');
+  });
+
+  test('slot hygiene: orphaned managed-range presets are deleted; owned and '
+      'out-of-range slots are never touched', () async {
+    // Device holds pattern presets from deleted schedules (11, 12, 25) plus a
+    // lease/user preset at 26 (outside the 10–25 managed range). Only slot 10
+    // is owned by a current schedule.
+    final repo = _FakeService(
+      state: {'on': true, 'bri': 128, 'seg': const []},
+      presets: {
+        10: {
+          'n': 'Pattern: Test',
+          'seg': [
+            {
+              'fx': 57,
+              'col': [
+                [10, 20, 30, 0]
+              ]
+            }
+          ]
+        },
+        11: {
+          'n': 'Evening Glow',
+          'seg': [
+            {'fx': 1}
+          ]
+        },
+        12: {
+          'n': 'Ghost',
+          'seg': [
+            {'fx': 2}
+          ]
+        },
+        25: {
+          'n': 'Old Pattern',
+          'seg': [
+            {'fx': 3}
+          ]
+        },
+        26: {
+          'n': 'Lease Slot', // unmanaged — must survive
+          'seg': [
+            {'fx': 4}
+          ]
+        },
+      },
+    );
+    final h = _harness(repo);
+    final ref = h.container.read(_refProvider);
+
+    await svc.syncAll(ref, [_patternItem()]); // owns slot 10
+
+    expect(repo.deletedPresetIds..sort(), [11, 12, 25],
+        reason: 'every managed-range (10–25) preset no current schedule owns is '
+            'purged so a stale macro cannot fire a ghost pattern');
+    expect(repo.deletedPresetIds, isNot(contains(10)),
+        reason: 'slot 10 is owned by a live schedule — never deleted');
+    expect(repo.deletedPresetIds, isNot(contains(26)),
+        reason: 'slot 26 is outside the app-managed range (lease/user) — '
+            'never touched');
   });
 }

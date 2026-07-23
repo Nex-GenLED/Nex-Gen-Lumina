@@ -1012,6 +1012,48 @@ class WledService
     return false;
   }
 
+  /// Delete a preset slot. WLED's preset-delete verb is `{"pdel":N}` POSTed to
+  /// /json/state (verified-by-bench on 0.15.1 vid 2507300: the slot vanished
+  /// from /presets.json). Used by schedule slot-hygiene to purge orphaned
+  /// managed-range presets so a stale timer macro can't fire a ghost pattern.
+  /// Same explicit Content-Length / non-chunked POST discipline as savePreset.
+  Future<bool> deletePreset(int presetId) async {
+    if (presetId < 1 || presetId > 250) {
+      debugPrint('deletePreset: Invalid preset ID $presetId (must be 1-250)');
+      return false;
+    }
+
+    if (_simulate) {
+      debugPrint('🗑️ WLED deletePreset (simulated): preset $presetId');
+      return true;
+    }
+
+    try {
+      final body = jsonEncode(<String, dynamic>{'pdel': presetId});
+      final bodyBytes = utf8.encode(body);
+
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(_uri('/json/state'));
+      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
+
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      await res.transform(utf8.decoder).join();
+      client.close(force: true);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        debugPrint('🗑️ WLED preset $presetId deleted');
+        _presetNamesCache = null;
+        return true;
+      }
+      debugPrint('❌ WLED deletePreset error ${res.statusCode}');
+    } catch (e) {
+      debugPrint('❌ WLED deletePreset exception: $e');
+    }
+    return false;
+  }
+
   @override
   Future<bool> loadPreset(int presetId) async {
     if (presetId < 1 || presetId > 250) {

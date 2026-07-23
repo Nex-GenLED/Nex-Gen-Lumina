@@ -700,22 +700,42 @@ class ScheduleSyncService {
       name: 'NGL On',
       isSatisfied: (d) => _presetNamed(d, 'NGL On'),
     );
-    // Preset 2 = Off. OFF timers fire `macro: 2`; a slot left holding an ON
-    // design (seen in the field — wrong-named/legacy writes) silently turns the
-    // lights ON at the OFF boundary instead of off. Repair it whenever the
-    // stored slot isn't actually off. We write seg.on:false explicitly so the
-    // _presetIsOff check is stable on the next sync (this firmware stores
-    // on-state per-segment, with no top-level `on` key).
+    // Preset 2 = Off. OFF timers fire `macro: 2`. `ib` is required on BOTH
+    // directions — ib persists WHATEVER master state is saved: ON presets
+    // persist root on:true, the OFF preset persists root on:false. The earlier
+    // no-ib decision guarded against the one dangerous case — an OFF preset
+    // accidentally saved with on:true — but the correct symmetric fix is to
+    // save it with on:false + ib so LOADING it deterministically KILLS master
+    // power, regardless of how many segments the prior pattern left running.
+    //
+    // Bench-proven 2026-07-22 (vid 2507300): a 2-segment pattern then macro:2
+    // with the OLD seg[0]-only preset turned seg0 off but left seg1 running and
+    // master ON (strip lit). With root on:false + ib, the load kills master →
+    // strip dark (direct ps load AND a curl timer both verified all-dark).
+    //
+    // Belt-and-braces: also write an off segment for EVERY live segment (WLED
+    // only stores off-segs for segments that exist at save time), so a firmware
+    // that ignored root `on` on load would still blank the whole strip. Non-
+    // disruptive: this psave is apply-then-snapshot and rides the same
+    // capture/restore below as every other psave. (bri:0 is intentionally NOT
+    // used — WLED preserves the last on-brightness when master is off, so it
+    // never persists; root on:false is the real kill.)
+    //
+    // isSatisfied requires the stored def to actually assert root on:false, not
+    // merely be seg-off — this self-heals legacy segments-only preset 2 (no root
+    // master state), forcing the ib re-save on the first Sync. (The ON presets
+    // 1/3/4/5 skip on name only and share this landmine; re-saving them is
+    // tracked separately as post-main queue item #3.)
     await psaveIfChanged(
       id: 2,
       state: {
         'on': false,
-        'seg': [
-          {'on': false}
-        ],
+        'ib': true,
+        'seg': _fullStripOffSegments(capturedLiveState),
       },
       name: 'NGL Off',
-      isSatisfied: (d) => _presetNamed(d, 'NGL Off') && _presetIsOff(d),
+      isSatisfied: (d) =>
+          _presetNamed(d, 'NGL Off') && d['on'] == false && _presetIsOff(d),
     );
     await psaveIfChanged(
       id: 3,
@@ -824,6 +844,30 @@ class ScheduleSyncService {
         // macro via _presetForAction to a real legacy preset 1–5 — all psaved
         // above — instead of a never-saved 10+ slot.
         updatedSchedules.add(effectiveSchedule.copyWith(clearPresetId: true));
+      }
+    }
+
+    // ── Slot hygiene: purge orphaned schedule presets ────────────────────
+    // A deleted schedule leaves its pattern preset stranded in the app-managed
+    // range (10–25). A stale ScheduleItem.presetId or a hand-set macro could
+    // still point a timer at one, firing a ghost pattern ("Evening Glow" from a
+    // long-deleted schedule was still loadable on the bench). After the current
+    // slot set is built, delete every managed-range preset the device still
+    // holds that no current schedule owns (owned = psaved this sync →
+    // savedPresetIds). Strictly bounded to 10–25, so lease slots (26/28/41) and
+    // user presets are never touched. `pdel` is WLED's preset-delete verb —
+    // POST {"pdel":N} to /json/state (verified-by-bench 2026-07-22 on .150: the
+    // slot vanished from presets.json). On-LAN only; cloud/mock can't enumerate
+    // or delete, and the guard mirrors the fetchPresets read above. pdel does
+    // NOT apply live state, so it never trips didWriteAnyPreset / restore.
+    if (activeRepo is WledService) {
+      for (var id = _firstSchedulePresetId; id <= _lastSchedulePresetId; id++) {
+        if (existingPresets.containsKey(id) && !savedPresetIds.contains(id)) {
+          final deleted = await activeRepo.deletePreset(id);
+          if (!deleted) {
+            debugPrint('ScheduleSync: failed to delete orphaned preset $id');
+          }
+        }
       }
     }
 
@@ -1327,6 +1371,32 @@ class ScheduleSyncService {
   /// True when the stored preset's name equals [name] (trimmed).
   static bool _presetNamed(Map<String, dynamic> def, String name) =>
       def['n'] is String && (def['n'] as String).trim() == name;
+
+  /// "All segments off" payload covering the full strip. A WLED preset load
+  /// only touches segments present in the preset, so a single seg[0]:off leaves
+  /// higher segments (multi-segment patterns) running — bench-proven the leak
+  /// that left a 2-segment pattern's seg1 lit after an OFF timer. Mirror the
+  /// controller's current segment layout — one {id, on:false} per live segment
+  /// — so the OFF preset blanks every segment the device actually has. (WLED
+  /// stores off-segs only for segments that exist at save time, so this must
+  /// track the live layout, not a fixed guess.) Falls back to a single off
+  /// segment when live state is unavailable (cloud/mock/getState failure).
+  static List<Map<String, dynamic>> _fullStripOffSegments(
+      Map<String, dynamic>? liveState) {
+    final seg = liveState?['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final out = <Map<String, dynamic>>[];
+      for (var i = 0; i < seg.length; i++) {
+        final s = seg[i];
+        final id = (s is Map && s['id'] is int) ? s['id'] as int : i;
+        out.add({'id': id, 'on': false});
+      }
+      return out;
+    }
+    return [
+      {'on': false}
+    ];
+  }
 
   /// True when the preset represents an OFF state. This firmware stores
   /// on-state per-segment (no top-level `on` key on saved presets), so a
