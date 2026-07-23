@@ -92,8 +92,11 @@ bool timersInsLanded(
 /// Flow: poll [liveness] every [pollInterval] for up to [maxWait]. On the first
 /// live response, [readbackMatch]:
 ///   - true  → verified (success).
-///   - false → the controller recovered but the timers aren't present: ONE
-///     [rePost], wait [repostSettle], then [readbackMatch] once more → its result.
+///   - false → recovered but the timers appear ABSENT. RULE OUT the post-commit
+///     readback RACE first: wait [repostSettle] and re-LOOK (no POST). Re-look
+///     match → confirmed (the first readback raced the commit); re-look null →
+///     keep polling; re-look STILL false → the genuine-drop remedy: ONE [rePost],
+///     wait [repostSettle], [readbackMatch] once more → its result.
 ///   - null  → couldn't read yet (half-recovered / cfg fetch failed); keep polling.
 /// Never answers within [maxWait] → false.
 ///
@@ -120,9 +123,20 @@ Future<bool> verifyCfgAfterStall({
     final matched = await readbackMatch();
     if (matched == true) return true; // recovered + confirmed
     if (matched == null) continue; // half-recovered; try again next poll
-    // Recovered but the timers are NOT present — one corrective re-POST, settle,
-    // and re-verify. (In practice unreached: the bench proves the write always
-    // commits, so the first post-recovery readback matches.)
+
+    // Recovered but the timers appear ABSENT. Before spending a WRITE, rule out
+    // the post-commit readback RACE (bench 2026-07-23): the controller answered
+    // liveness + this readback before its flash/config state settled, so a write
+    // that already landed can read back as a transient mismatch. Re-POSTing here
+    // is the wrong remedy — it re-triggers the stall and can turn a correct write
+    // red. Wait and LOOK once more (no POST) first.
+    await delay(repostSettle);
+    final reLook = await readbackMatch();
+    if (reLook == true) return true; // first readback raced the commit
+    if (reLook == null) continue; // controller dipped again — keep polling, not red
+
+    // Second look STILL mismatch → a GENUINE drop, not the race. NOW the
+    // corrective re-POST, settle, and re-verify — the original remedy, unchanged.
     await rePost();
     await delay(repostSettle);
     return (await readbackMatch()) == true;

@@ -47,9 +47,11 @@ void main() {
       expect(pollCount, 3, reason: 'two dead polls then the live one');
     });
 
-    test('stall-then-mismatch-then-repost-success: recovered but timers absent, '
-        'one re-POST + settle + re-verify → true', () async {
-      final readback = _sequence<bool?>([false, true]); // miss, then hit after repost
+    // (a) Race case: recovered, first readback MISMATCH, but a delayed re-LOOK
+    // matches → confirmed with ZERO writes (the first readback raced the commit).
+    // This is the bench-proven false-red the re-look-before-re-POST change fixes.
+    test('recovered-mismatch-then-reLOOK-match → confirmed, NO re-POST', () async {
+      final readback = _sequence<bool?>([false, true]); // race miss, then settled hit
       var rePostCalls = 0;
 
       final ok = await verifyCfgAfterStall(
@@ -63,9 +65,62 @@ void main() {
       );
 
       expect(ok, isTrue);
-      expect(rePostCalls, 1, reason: 'exactly one corrective re-POST');
+      expect(rePostCalls, 0,
+          reason: 'a transient race is answered with a second LOOK, not a WRITE');
     });
 
+    // (b) Genuine drop: recovered, mismatch, re-LOOK STILL mismatch → the
+    // corrective re-POST fires and its re-verify matches → confirmed. Exactly one
+    // re-POST from this fn (the initial cfg POST lived in _pushCfgWithVerify, so
+    // end-to-end that is the "two POSTs" of the genuine-drop path).
+    test('mismatch → reLOOK mismatch → re-POST → re-verify match → confirmed '
+        '(exactly one re-POST)', () async {
+      final readback = _sequence<bool?>([false, false, true]); // miss, miss, hit after repost
+      var rePostCalls = 0;
+
+      final ok = await verifyCfgAfterStall(
+        liveness: () async => true,
+        readbackMatch: () async => readback(),
+        rePost: () async {
+          rePostCalls++;
+          return true;
+        },
+        delay: (_) async {},
+      );
+
+      expect(ok, isTrue);
+      expect(rePostCalls, 1,
+          reason: 'genuine drop → exactly one corrective re-POST');
+    });
+
+    // (d) Recovered, mismatch, but the re-LOOK comes back NULL (controller dipped
+    // again mid-settle) → keep polling; never a re-POST, never red. A later poll
+    // reads the landed timers → confirmed.
+    test('mismatch → reLOOK null → poll continues (not red), later match → true',
+        () async {
+      final readback = _sequence<bool?>([false, null, true]); // miss, dip, then hit
+      var rePostCalls = 0;
+      var pollCount = 0;
+
+      final ok = await verifyCfgAfterStall(
+        liveness: () async => true,
+        readbackMatch: () async => readback(),
+        rePost: () async {
+          rePostCalls++;
+          return true;
+        },
+        delay: (_) async {},
+        onPoll: (_) => pollCount++,
+      );
+
+      expect(ok, isTrue);
+      expect(rePostCalls, 0, reason: 'a null re-look keeps polling, never writes');
+      expect(pollCount, greaterThanOrEqualTo(2),
+          reason: 'the null re-look continued the patient poll');
+    });
+
+    // (c) Genuine mismatch that never resolves: mismatch → reLOOK mismatch →
+    // re-POST → re-verify STILL mismatch → red (hard-fail reachable).
     test('recovered-mismatch-then-repost-STILL-mismatch → false', () async {
       var rePostCalls = 0;
       final ok = await verifyCfgAfterStall(
