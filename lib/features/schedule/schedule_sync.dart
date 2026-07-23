@@ -92,8 +92,11 @@ bool timersInsLanded(
 /// Flow: poll [liveness] every [pollInterval] for up to [maxWait]. On the first
 /// live response, [readbackMatch]:
 ///   - true  → verified (success).
-///   - false → the controller recovered but the timers aren't present: ONE
-///     [rePost], wait [repostSettle], then [readbackMatch] once more → its result.
+///   - false → recovered but the timers appear ABSENT. RULE OUT the post-commit
+///     readback RACE first: wait [repostSettle] and re-LOOK (no POST). Re-look
+///     match → confirmed (the first readback raced the commit); re-look null →
+///     keep polling; re-look STILL false → the genuine-drop remedy: ONE [rePost],
+///     wait [repostSettle], [readbackMatch] once more → its result.
 ///   - null  → couldn't read yet (half-recovered / cfg fetch failed); keep polling.
 /// Never answers within [maxWait] → false.
 ///
@@ -120,14 +123,56 @@ Future<bool> verifyCfgAfterStall({
     final matched = await readbackMatch();
     if (matched == true) return true; // recovered + confirmed
     if (matched == null) continue; // half-recovered; try again next poll
-    // Recovered but the timers are NOT present — one corrective re-POST, settle,
-    // and re-verify. (In practice unreached: the bench proves the write always
-    // commits, so the first post-recovery readback matches.)
+
+    // Recovered but the timers appear ABSENT. Before spending a WRITE, rule out
+    // the post-commit readback RACE (bench 2026-07-23): the controller answered
+    // liveness + this readback before its flash/config state settled, so a write
+    // that already landed can read back as a transient mismatch. Re-POSTing here
+    // is the wrong remedy — it re-triggers the stall and can turn a correct write
+    // red. Wait and LOOK once more (no POST) first.
+    await delay(repostSettle);
+    final reLook = await readbackMatch();
+    if (reLook == true) return true; // first readback raced the commit
+    if (reLook == null) continue; // controller dipped again — keep polling, not red
+
+    // Second look STILL mismatch → a GENUINE drop, not the race. NOW the
+    // corrective re-POST, settle, and re-verify — the original remedy, unchanged.
     await rePost();
     await delay(repostSettle);
     return (await readbackMatch()) == true;
   }
   return false; // never recovered within maxWait
+}
+
+/// Resolve a 2xx cfg write's readback, tolerating the bench-proven post-commit
+/// READBACK RACE with exactly ONE delayed re-look. On the heaviest syncs the
+/// controller answers the POST (2xx) and the very next `/json/cfg` GET before its
+/// flash/config state is fully consistent, so the first readback can report a
+/// TRANSIENT mismatch even though the timers landed perfectly (proven on
+/// 192.168.1.150, 2026-07-23 — curl seconds later matched the exact sent payload:
+/// 12:52 macro:10 / 12:56 macro:2, en:1, dow:8).
+///
+/// - first readback true  → true  (confirmed; no wait)
+/// - first readback null  → null  (unreadable — NOT a mismatch; caller decides,
+///   e.g. falls through to the patient stall poll)
+/// - first readback false → wait [retryDelay], read ONCE more:
+///     true  → true  (the race resolved on the second look)
+///     false → false (a GENUINE mismatch — the en:0 firmware class — hard-fail)
+///     null  → null  (became unreadable; caller falls to the patient poll)
+///
+/// Exactly one retry — never a loop; the hard-fail stays reachable. All waiting
+/// goes through [delay] so tests inject an instant clock. This is a TIMING
+/// tolerance only; it does not touch the content comparison ([timersInsLanded]).
+@visibleForTesting
+Future<bool?> verify2xxReadbackWithRetry({
+  required Future<bool?> Function() readbackMatch,
+  required Future<void> Function(Duration) delay,
+  Duration retryDelay = const Duration(seconds: 10),
+}) async {
+  final first = await readbackMatch();
+  if (first != false) return first; // true (confirmed) or null (unreadable)
+  await delay(retryDelay);
+  return readbackMatch(); // second look is authoritative: true / false / null
 }
 
 /// Outcome of the cfg push + verify (see [ScheduleSyncService._pushCfgWithVerify]).
@@ -1139,8 +1184,9 @@ class ScheduleSyncService {
   /// controller to come back and confirm by readback.
   ///
   /// Returns true iff the timers are confirmed on the controller.
-  /// - 2xx → immediate readback content-match. The 2xx is authoritative, so a
-  ///   readback mismatch is warned, not failed.
+  /// - 2xx → readback content-match, tolerating the post-commit READBACK RACE
+  ///   with ONE delayed re-look ([verify2xxReadbackWithRetry]); a mismatch that
+  ///   PERSISTS on the re-look fails loudly (firmware mismatch).
   /// - timeout / connection error → assume the post-commit stall and enter
   ///   patient verification ([verifyCfgAfterStall]); NO re-POST unless the
   ///   controller recovers and the timers still aren't there.
@@ -1154,14 +1200,24 @@ class ScheduleSyncService {
   ) async {
     final ok = await repo.applyConfig(payload);
     if (ok) {
-      // 2xx — the write reported success. Still readback-verify.
-      final verified = await _readbackTimersLanded(repo, ins);
+      // 2xx — the write reported success. Still readback-verify, but tolerate the
+      // post-commit READBACK RACE: a 2xx + immediate mismatch may be the GET
+      // catching the controller mid-commit (bench-proven 2026-07-23 — the timers
+      // HAD landed; a re-look seconds later matched). One 10s-delayed re-look
+      // before we ever go red. See [verify2xxReadbackWithRetry].
+      final verified = await verify2xxReadbackWithRetry(
+        readbackMatch: () => _readbackTimersLanded(repo, ins),
+        delay: (d) => Future<void>.delayed(d),
+      );
       if (verified == true) return _CfgPushOutcome.confirmed;
       if (verified == false) {
-        // Content-match already tolerates echo compaction + solar sentinels, so
-        // a genuine mismatch is a real defect (firmware stored our values wrong).
-        debugPrint('ScheduleSync: cfg 2xx but readback CONTENT-MISMATCH — the '
-            'controller stored different values; failing loudly');
+        // Content-match already tolerates echo compaction + solar sentinels, and
+        // the race is now ruled out by the delayed re-look — so a mismatch that
+        // persists is a real defect (firmware stored our values wrong, e.g. the
+        // en:0 class). Fail loudly.
+        debugPrint('ScheduleSync: cfg 2xx but readback CONTENT-MISMATCH persisted '
+            'on the delayed re-look — the controller stored different values; '
+            'failing loudly');
         return _CfgPushOutcome.mismatch;
       }
       // verified == null: the readback couldn't be fetched. On this hardware a
