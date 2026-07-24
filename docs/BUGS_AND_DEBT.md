@@ -413,6 +413,33 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `lib/features/site/site_providers.dart`, `lib/features/wled/ddp_service.dart`,
     `lib/features/wled/wled_service.dart` (configureSync*), `lib/services/wled_config_pusher.dart`.
 
+- [ ] **P2-46 — Remove vestigial Sports Alerts settings surface (orphaned pre-Game-Day UI)**
+  - Status: OPEN · Evidence: verified-by-source (audit 2026-07-24) · **Execute AFTER P0-3 lands — not now**
+  - Sports Alerts (System → Settings) is the superseded predecessor of Game Day score celebrations.
+    Its toggle reads/writes a SharedPreferences flag (`sports_alert_configs`, `ScoreAlertConfig.isEnabled`)
+    whose ONLY runtime reader is the **kill-switched** background service
+    (`kSportsBackgroundServiceEnabled=false` [sports_background_service.dart:29], "was already inert —
+    updateControllerIps never wired up"). The LIVE celebration path derives teams from
+    `game_day_autopilot` ∩ per-team `scoreCelebrationEnabled` and explicitly ignores this flag
+    ([foreground_celebration_providers.dart:98-105]; header :5-7 "NOT the dead direct-IP path"). It
+    does not share state with My Teams (Firestore `game_day_autopilot` + profile `sports_teams`) — the
+    only bridge is one-way and unrelated to the toggle ([live_scoring_prompt.dart:94-104]). This is the
+    remove-vs-wire "(a) dead UI" verdict.
+  - **DELETE set:** `lib/features/sports_alerts/ui/sports_alerts_screen.dart`, `.../ui/team_picker_screen.dart`,
+    `.../ui/zone_assignment_screen.dart`, `.../providers/sports_alert_providers.dart`,
+    `.../providers/sports_alert_notifier.dart`, `_SportsAlertsCard` + route in
+    `lib/features/site/settings_page.dart` (:1002-1007), `.../services/sports_background_service.dart`
+    + its `lib/services/autopilot_scheduler.dart:480` `startSportsService()` call, and the
+    `lib/features/game_day/live_scoring_prompt.dart:94-104` prefs write.
+  - **MUST-KEEP (reused by the LIVE foreground path — deleting breaks working celebrations):**
+    `lib/features/sports_alerts/models/score_alert_config.dart` (`ScoreAlertConfig`),
+    `.../services/score_monitor_service.dart`, `.../services/foreground_celebration_coordinator.dart`
+    (incl. `CelebrationTeam.toAlertConfig()` :67), `.../services/foreground_celebration_providers.dart`.
+  - **Coordinate with P2-17** (`_controllerIps` / `alert_trigger_service` — same dead pipeline).
+  - **(b) alternative — NOT this item:** if app-closed score celebrations are ever wanted, that is a
+    SEPARATE feature (re-enable the service + repoint it at `game_day_autopilot` instead of the prefs
+    store + wire `controllerIps` + Play FGS declaration), NOT a revival of this toggle.
+
 ---
 
 ## Features promised (post-cleanup)
