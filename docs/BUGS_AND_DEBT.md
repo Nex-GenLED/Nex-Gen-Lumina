@@ -157,6 +157,39 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     channel/segment layout-save flow, `lib/features/schedule/calendar_entry_lease_manager.dart`
     (shares the psave path).
 
+- [ ] **P1-43 — Per-channel power is master-global (both channels toggle together)**
+  - Status: FIX IMPLEMENTED (additive `setChannelPower` + per-chip power icon) — BENCH-VERIFY owed ·
+    Evidence: bench-proven (2026-07-23: curl seg-scoped on:false darkened ch1 only; app power toggles both)
+  - Firmware segment independence is confirmed
+    (`{"seg":[{"id":0,"on":false},{"id":1,"on":true}]}` darkens ch1, leaves ch2 lit). The app's
+    power path writes **top-level master `{"on":bool}`** regardless of the channel selector, so a
+    per-channel off hits the whole device. There is NO seg-scoped OFF primitive anywhere:
+    `applyChannelFilter` and `buildParticipatingSegArray` both force `on:true`; off is master-only
+    by construction.
+  - Wrong payload: `_postUpdate` sets `payload['on'] = on` top-level —
+    [wled_providers.dart:1530](lib/features/wled/wled_providers.dart#L1530) (`on` deliberately
+    excluded from `needsChannels` at :1494; never enters seg[] at :1547). Entry:
+    dashboard power circle [wled_dashboard_page.dart:956](lib/features/dashboard/wled_dashboard_page.dart#L956)
+    → `togglePower` [wled_providers.dart:1073](lib/features/wled/wled_providers.dart#L1073) → `_postUpdate(on:)`.
+  - Mapping (sound): channel id = bus index, `start/stop` from `hw.led.ins[]` via
+    `deviceChannelsFromConfig` [zone_providers.dart:83](lib/features/wled/zone_providers.dart#L83).
+    Staleness risk (see P1-42): `deviceHardwareConfigProvider` caches `/json/cfg`, invalidated only
+    at [system_management_screen.dart:238](lib/features/site/system_management_screen.dart#L238) or
+    app restart — so a seg-scoped off with stale bounds (ch2 73 vs 160) could leave the new pixels lit.
+  - Fix (additive, minimal): a seg-scoped per-channel power write
+    `{"seg":[{"id,start,stop,on:false"}]}` with NO top-level `on`, routed through `applyJson`, used
+    when a channel filter is active; force-refresh device config first (P1-43 depends on P1-42).
+    Add a seg-off primitive (both filter builders currently hardcode `on:true`).
+  - Master policy DECISION NEEDED: single-channel off must NOT write master; when the LAST lit
+    channel goes off, should master follow (`{"on":false}`) or stay on with all segs dark? (Confirm
+    with Tyler.) "All Channels On" recovery already exists
+    [channel_selector_bar.dart:272](lib/features/dashboard/widgets/channel_selector_bar.dart#L272).
+  - Blast radius — `togglePower` callers that legitimately want MASTER and must NOT change: dashboard
+    circle, voice ([voice_providers.dart:255](lib/features/voice/voice_providers.dart#L255)/:276,
+    [dashboard_voice_control.dart:126](lib/features/voice/dashboard_voice_control.dart#L126)/:137),
+    Game Day resume [game_day_autopilot_providers.dart:84](lib/features/autopilot/game_day_autopilot_providers.dart#L84),
+    Neighborhood resume. Fix must add a new seg-scoped action, not repoint `togglePower`.
+
 ---
 
 ## P2 — hardening & platform

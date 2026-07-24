@@ -102,6 +102,33 @@ final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
   return deviceChannelsFromConfig(hwConfig);
 });
 
+/// Live per-channel power state (P1-43 UI): channel (bus) id → whether that
+/// channel is currently LIT, read from `/json/state` seg[] on-flags gated by the
+/// device master. Reflects the device, not assumption. A one-shot read (the
+/// selector chips show it on open); `ref.invalidate` it after a per-channel
+/// toggle to refresh. Master-off ⇒ nothing lit regardless of seg flags.
+final channelPowerStatesProvider = FutureProvider<Map<int, bool>>((ref) async {
+  final repo = ref.watch(wledRepositoryProvider);
+  if (repo == null) return const <int, bool>{};
+  try {
+    final live = await repo.getState();
+    if (live == null) return const <int, bool>{};
+    final masterOn = live['on'] == true;
+    final result = <int, bool>{};
+    final segs = live['seg'];
+    if (segs is List) {
+      for (final s in segs) {
+        if (s is Map && s['id'] is int) {
+          result[s['id'] as int] = masterOn && s['on'] == true;
+        }
+      }
+    }
+    return result;
+  } catch (_) {
+    return const <int, bool>{};
+  }
+});
+
 /// Tracks which channel (bus) IDs the user has explicitly selected for
 /// receiving aesthetic commands (patterns, colors, effects, speed, intensity).
 ///

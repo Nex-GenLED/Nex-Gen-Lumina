@@ -1078,6 +1078,104 @@ class WledNotifier extends Notifier<WledStateModel> {
     await _postUpdate(on: value, isManualChange: isManualChange);
   }
 
+  /// PER-CHANNEL power (P1-43) — the ADDITIVE seg-scoped counterpart to the
+  /// whole-house master [togglePower]. Firmware segment independence is
+  /// bench-proven; the app previously had no way to express a per-seg off
+  /// (power was master-only). Reads LIVE device state (master + which channels'
+  /// segments are on) and force-refreshes the hardware config for fresh bounds,
+  /// then emits the policy payload from [buildChannelPowerPayload]. Routes
+  /// through applyJson (`/json/state` only — NO cfg writes). Leaves
+  /// [togglePower] and its master callers (dashboard circle, voice, Game Day /
+  /// Neighborhood resume) untouched.
+  Future<void> setChannelPower(int channelId, bool on,
+      {bool isManualChange = true}) async {
+    debugPrint('🔌 setChannelPower ch$channelId → $on');
+    final service = ref.read(wledRepositoryProvider);
+    if (service == null) {
+      if (state.connected) state = state.copyWith(connected: false);
+      return;
+    }
+
+    // 1. LIVE state — master + which channels' segments are currently on.
+    //    Never guess from cached UI state (per policy).
+    var masterOn = state.isOn;
+    final litChannelIds = <int>{};
+    try {
+      final live = await service.getState();
+      if (live != null) {
+        masterOn = live['on'] == true;
+        final segs = live['seg'];
+        if (segs is List) {
+          for (final s in segs) {
+            if (s is Map && s['on'] == true && s['id'] is int) {
+              litChannelIds.add(s['id'] as int);
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Fall back to cached master + empty lit set; better to act than stall.
+    }
+
+    // 2. FRESH BOUNDS (P1-42): invalidate + re-fetch the hardware config so a
+    //    physically-resized channel isn't re-bounded with stale start/stop.
+    //    Capture the cached channels first so case-3 enumeration still has ids
+    //    if the refresh fails. On failure → id-only seg entries (no bounds).
+    final cachedChannels = ref.read(deviceChannelsProvider);
+    List<DeviceChannel> channels;
+    bool withBounds;
+    try {
+      ref.invalidate(deviceHardwareConfigProvider);
+      final cfg = await ref
+          .read(deviceHardwareConfigProvider.future)
+          .timeout(const Duration(seconds: 3), onTimeout: () => null);
+      channels = deviceChannelsFromConfig(cfg);
+      withBounds = channels.isNotEmpty;
+    } catch (_) {
+      channels = const [];
+      withBounds = false;
+    }
+    if (channels.isEmpty) {
+      channels = cachedChannels; // ids only — NEVER trusted as fresh bounds
+      withBounds = false;
+    }
+
+    // 3. Build the policy payload.
+    final payload = buildChannelPowerPayload(
+      channelId: channelId,
+      on: on,
+      masterOn: masterOn,
+      litChannelIds: litChannelIds,
+      channels: channels,
+      withBounds: withBounds,
+    );
+
+    // 4. Optimistic master reflection: only the master-writing cases carry a
+    //    top-level `on`. Seg-scoped writes leave master as-is.
+    if (payload.containsKey('on')) {
+      state = state.copyWith(isOn: payload['on'] == true);
+    }
+
+    if (isManualChange) {
+      try {
+        ref.read(scheduleEnforcementServiceProvider).recordManualOverride();
+      } catch (e) {
+        debugPrint('Could not record manual override: $e');
+      }
+      SyncWarningDialog.autoPauseIfInSync(ref);
+    }
+
+    final ok = await service.applyJson(payload);
+    if (!ok) {
+      if (state.connected) {
+        state = state.copyWith(connected: false);
+        _scheduleNextPoll();
+      }
+      ref.read(wledCommandFailureProvider.notifier).state = WledCommandFailure(
+          "Couldn't reach your lights — check your connection");
+    }
+  }
+
   Future<void> setBrightness(int bri, {bool isManualChange = true}) async {
     _stateApplySeq++;
     state = state.copyWith(brightness: bri);

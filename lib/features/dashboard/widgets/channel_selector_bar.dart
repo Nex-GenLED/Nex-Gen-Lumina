@@ -175,6 +175,10 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
   ) {
     final isAllMode = selectedIds == null;
 
+    // P1-43: live per-channel lit state for the per-chip power icons.
+    final powerStates =
+        ref.watch(channelPowerStatesProvider).valueOrNull ?? const <int, bool>{};
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
       child: Column(
@@ -199,6 +203,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                 Builder(builder: (_) {
                   final isParticipating = participatingSet == null ||
                       participatingSet.contains(ch.id);
+                  final chOn = powerStates[ch.id];
                   return _buildChip(
                     label: zoneLabels[ch.id] ?? ch.name,
                     selected: isAllMode || selectedIds.contains(ch.id),
@@ -207,6 +212,17 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                         ? () => _toggleChannel(ch.id, channels, selectedIds)
                         : null,
                     channelColor: kChannelColors[ch.id % kChannelColors.length],
+                    channelOn: chOn,
+                    onPowerTap: isParticipating
+                        ? () async {
+                            final newOn = !(chOn ?? false);
+                            await ref
+                                .read(wledStateProvider.notifier)
+                                .setChannelPower(ch.id, newOn);
+                            // Refresh the chips from the device's new seg[] state.
+                            ref.invalidate(channelPowerStatesProvider);
+                          }
+                        : null,
                   );
                 }),
             ],
@@ -314,6 +330,11 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     required VoidCallback? onTap,
     Color? channelColor,
     bool disabled = false,
+    // P1-43: per-channel power. When [channelOn] is non-null a power icon is
+    // rendered as a SEPARATE tap target ([onPowerTap]) — it never overloads the
+    // selection tap. Reflects live seg[] state (channelPowerStatesProvider).
+    bool? channelOn,
+    VoidCallback? onPowerTap,
   }) {
     // Disabled (non-participating) chips render at low opacity, are not
     // tappable, and don't show the selected highlight even if some
@@ -376,6 +397,25 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                   decorationColor: Colors.white38,
                 ),
               ),
+              // Per-channel power toggle (P1-43): a distinct tap target so the
+              // chip body still selects/filters. Lit = cyan, dark = dim.
+              if (channelOn != null && onPowerTap != null && !disabled) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onPowerTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      Icons.power_settings_new,
+                      size: 14,
+                      color: channelOn
+                          ? NexGenPalette.cyan
+                          : Colors.white.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
