@@ -62,7 +62,14 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Status: OPEN · Evidence: bench-proven (symptom) / suspected (cause)
   - `gc.col` flipped 2.8→1 during the AI-command window; self-healed by the pusher on-connect.
     Source never found. Fold into the P0-1/P0-2 AI-path diagnostic.
-  - Files: AI apply path (see P0-1) + `light.gc` writer (gamma push on connect).
+  - NEW EVIDENCE 2026-07-24: `gc.col` observed 2.8 at ~10:40 and 1 at ~10:47. Only actions in the
+    window: P1-43 channel-power taps (`/json/state` only — CANNOT write cfg, so exonerated), app
+    connects (pusher ASSERTS 2.8 — the medic, not the culprit), and throwaway schedule CREATION
+    with a pattern + Sync. Sync itself was previously exonerated (gamma unchanged across multiple
+    syncs 2026-07-21) → prime suspect NARROWS to the **design/pattern-apply path** — consistent
+    with Symptom C's original AI-command window, which also applied a design. The caught-in-the-act
+    diagnostic should instrument pattern/design applies FIRST.
+  - Files: AI apply path (see P0-1) + design/pattern-apply path + `light.gc` writer (gamma push on connect).
 
 - [ ] **P1-6 — Unexplained en:1 evidence row (git archaeology)**
   - Status: OPEN · Evidence: reported (contradicts curl truth table)
@@ -157,9 +164,18 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     channel/segment layout-save flow, `lib/features/schedule/calendar_entry_lease_manager.dart`
     (shares the psave path).
 
-- [ ] **P1-43 — Per-channel power is master-global (both channels toggle together)**
-  - Status: FIX IMPLEMENTED (additive `setChannelPower` + per-chip power icon) — BENCH-VERIFY owed ·
-    Evidence: bench-proven (2026-07-23: curl seg-scoped on:false darkened ch1 only; app power toggles both)
+- [x] **P1-43 — Per-channel power is master-global (both channels toggle together)** — DONE `cdc436b`
+  - Status: DONE `cdc436b` (merged to main `ad6ae98`, tag `v2.5.10+53`) · Evidence: bench-proven
+  - BENCH-VERIFIED 2026-07-24 (192.168.1.150, build cdc436b/+53, 290 LEDs ch1=128/ch2=162): case 3
+    (critical) from master-off, front on → ONLY front lit, one POST — PASS; case 4 back on while
+    master on → seg-only, front undisturbed — PASS; case 1 front off → only front dies — PASS;
+    case 2 last lit channel off → master reads off — PASS. Two-boundary throwaway also passed
+    (curl /json/cfg 10:50 macro:10 / 10:55 macro:2, both en:1, dow:16; ON 10:50, OFF 10:55 fully
+    dark). Fix: additive `setChannelPower` (live getState + fresh-bounds cfg refresh, id-only
+    fallback) → `buildChannelPowerPayload` 4 shapes; per-chip power icon; `togglePower` + 5 master
+    callers untouched; `/json/state` only.
+  - Original diagnosis (bench-proven 2026-07-23: curl seg-scoped on:false darkened ch1 only; app
+    power toggled both):
   - Firmware segment independence is confirmed
     (`{"seg":[{"id":0,"on":false},{"id":1,"on":true}]}` darkens ch1, leaves ch2 lit). The app's
     power path writes **top-level master `{"on":bool}`** regardless of the channel selector, so a
