@@ -293,30 +293,32 @@ void main() {
     });
 
     test(
-        'applyConfig failure: savePreset preset still on controller '
-        '(orphan), lease registry NOT rolled back', () async {
+        'cfg write NOT verified (P0-3.3): preset saved but timer absent → '
+        'lease rolled back, surfaces writeFailed', () async {
+      // Post-hardening contract (replaces the old fire-and-forget "orphan kept"
+      // behavior): the cfg write is verified by readback. If it does not
+      // confirm, the lease is NOT armed, so the registry must roll back — a
+      // kept record would never re-arm (promotion skips registered dateKeys),
+      // which was the days-of-presets / zero-timers silent-failure bug.
       final h = buildIntegrationHarness();
-      h.service.simulateApplyConfigReturns = false;
       await h.manager.initialize();
-
-      h.service.lastSimulatedConfigPayload = null;
+      // Drive the hardened cfg push to a non-confirmed outcome synchronously
+      // (the stall / absent-timer case) — no real-time poll.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
       h.service.lastSimulatedPresetSave = null;
 
       final entry = insideWindowEntry();
       final result = await h.manager.handleEntryCreated(entry);
 
-      // Outcome is `leased` so caller can surface "saved" UX while
-      // the sweep retries the timer write in the background.
-      expect(result.outcome, LeaseOutcome.leased);
-      expect(h.manager.activeLeases.length, 1,
-          reason: 'Registry must NOT be rolled back on applyConfig '
-              'failure — preset is orphaned on controller, sweep retries');
-      // savePreset succeeded — the preset record landed.
+      expect(result.outcome, LeaseOutcome.writeFailed,
+          reason: 'an unverified cfg write must surface as writeFailed, not a '
+              'silent leased');
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'registry MUST roll back when the timer is not verified so '
+              'the next sweep re-promotes and re-arms it');
+      // savePreset still ran — the preset is orphaned on the controller until
+      // the re-arm overwrites it (expected, harmless).
       expect(h.service.lastSimulatedPresetSave, isNotNull);
-      expect(h.service.lastSimulatedPresetSave!.presetId,
-          h.manager.activeLeases.single.presetId);
-      // applyConfig was attempted (and failed per the injection).
-      expect(h.service.lastSimulatedConfigPayload, isNotNull);
     });
   });
 }

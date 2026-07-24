@@ -16,9 +16,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -1455,9 +1457,162 @@ void main() {
       expect(updaterCalls.single.id, 'expired');
     });
   });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: P0-3.3 — lease cfg write is VERIFIED (silent failure gone)
+  //   The lease arm now routes through the shared hardened pushCfgWithVerify.
+  //   Registration is conditional on a VERIFIED write; an unconfirmed write
+  //   rolls back so the next sweep re-arms (a kept record never re-arms — the
+  //   days-of-presets / zero-timers bug).
+  // ────────────────────────────────────────────────────────────────
+  group('P0-3.3 lease cfg write verification', () {
+    CalendarEntry todayEntry() => buildEntry(
+          dateKey: dateKeyFor(fixedNow),
+          onTime: '18:00',
+          offTime: '22:00',
+        );
+
+    test('verified write (confirmed) → lease registered, success', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      var calls = 0;
+      h.manager.cfgPushFn = (_, __, ___) async {
+        calls++;
+        return CfgPushOutcome.confirmed;
+      };
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.leased);
+      expect(calls, 1, reason: 'the arm goes through the hardened cfg push');
+      expect(h.manager.activeLeases.length, 1,
+          reason: 'a verified write keeps the lease registered');
+    });
+
+    test('2xx but readback shows nothing (notConfirmed) → surfaces failure '
+        'and does NOT register', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed,
+          reason: 'an unverified cfg write must not report success');
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'registry must roll back so the next sweep re-arms it');
+    });
+
+    test('firmware mismatch (2xx, wrong values stored) → not registered',
+        () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.mismatch;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed);
+      expect(h.manager.activeLeases, isEmpty);
+    });
+
+    test('update path: an unverified re-write DROPS the record (re-armed next '
+        'sweep), never a stale registry entry', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      // First arm succeeds and registers.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.confirmed;
+      await h.manager.handleEntryCreated(todayEntry());
+      expect(h.manager.activeLeases.length, 1);
+      // Re-create (update) with an unverified write.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed);
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'a failed update must not leave a stale armed record');
+    });
+
+    test('pushCfgWithVerify tolerates the readback race: first look absent, '
+        'delayed re-look present → confirmed (retry-then-succeed), no re-POST',
+        () async {
+      final sent = <Map<String, dynamic>>[
+        {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+      ];
+      final svc = _ScriptedVerifyService(
+        applyResult: true,
+        readbacks: [
+          const <Map<String, dynamic>>[], // first look: nothing yet (the race)
+          [
+            {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ], // delayed re-look: landed
+        ],
+      );
+
+      final outcome = await pushCfgWithVerify(
+        repo: svc,
+        payload: {
+          'timers': {'ins': sent}
+        },
+        ins: sent,
+        delay: (_) async {}, // instant clock — no real 10s wait
+      );
+
+      expect(outcome, CfgPushOutcome.confirmed);
+      expect(svc.applyCalls, 1,
+          reason: 'the retry is readback-only — never a second cfg POST');
+    });
+
+    test('readback comparison keys on en as INT 1: present+en:1 lands, '
+        'en:0 (stored-disabled — the bool-en fingerprint) does NOT', () {
+      final sent = <Map<String, dynamic>>[
+        {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+      ];
+      expect(
+          timersInsLanded(sent, [
+            {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ]),
+          isTrue);
+      expect(
+          timersInsLanded(sent, [
+            {'en': 0, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ]),
+          isFalse,
+          reason: 'a stored-disabled timer is NOT landed');
+    });
+  });
 }
 
 // ─── Test fixtures ──────────────────────────────────────────────────────────
+
+/// Minimal [WledService] subclass that scripts applyConfig + fetchTimerInstances
+/// so [pushCfgWithVerify] can be exercised (the 2xx readback-race retry) without
+/// a live controller. Returns [readbacks] in order, repeating the last.
+class _ScriptedVerifyService extends WledService {
+  _ScriptedVerifyService({required this.applyResult, required this.readbacks})
+      : super('http://mock');
+
+  final bool applyResult;
+  final List<List<Map<String, dynamic>>?> readbacks;
+  int _fetch = 0;
+  int applyCalls = 0;
+
+  @override
+  Future<bool> applyConfig(Map<String, dynamic> cfg) async {
+    applyCalls++;
+    return applyResult;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    final r = _fetch < readbacks.length ? readbacks[_fetch] : readbacks.last;
+    _fetch++;
+    return r;
+  }
+
+  @override
+  Future<bool> ping() async => true;
+}
 
 CalendarEntryLease _makeLease({
   required String dateKey,
