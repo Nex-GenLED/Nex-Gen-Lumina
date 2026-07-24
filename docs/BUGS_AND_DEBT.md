@@ -360,13 +360,23 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## Multiplier — do FIRST after main merge
 
-- [ ] **M-21 — `bench/` CLI harness**
-  - Status: OPEN · Evidence: n/a (tooling)
-  - Seed / sync-sim / verify / probe against the bench controller (`192.168.1.150`). Extract
-    from this week's proven curl loops: cfg write + readback assert, en truth-table check,
-    preset shape verify, timer-fire test, presets.json diff. Nearly every item above needs
-    bench verification; this makes each one cheaper.
-  - Files: new `bench/` dir (CLI scripts).
+- [x] **M-21 — `bench/` CLI harness** — DONE (inaugural all-green 2026-07-24, 21/21)
+  - Status: DONE · Evidence: bench-proven (`dart run bench/bin/bench.dart all` → 21/21, exit 0,
+    192.168.1.150, 2026-07-24)
+  - Pure-Dart CLI (`bench/bin/bench.dart`) with 9 subcommands: probe (+layout-drift vs
+    `known_layout.json`, P1-42), snapshot, cfg-truth (en int→1/bool→0, permanent regression
+    guard), preset-verify, sync-sim, fire-test, channel-power (P1-43 four shapes), restore, all.
+    REUSES the app's REAL builders via extraction to Flutter-free files (re-exported, app
+    unchanged): `buildCfgPayload`, `timersInsLanded`/`isRealEnabledTimer` (→ `timer_landing.dart`,
+    `cfg_payload_builder.dart`), `buildChannelPowerPayload` (→ `channel_power_payload.dart`),
+    `deviceChannelsFromConfig`/`DeviceChannel` (→ `device_channel.dart`),
+    `WledLedBus`/`WledHardwareConfig` (→ `wled_hardware_config.dart`). Discipline as code:
+    Content-Type + Content-Length on every POST (chunked is rejected by WLED — caught on the
+    inaugural run), capture/restore brackets, VERIFIED-BY-BENCH evidence, exit 0/1. Assertion/
+    diff logic unit-tested (`test/bench/bench_core_test.dart`, 19 tests). Extraction proven
+    behavior-preserving: full suite unchanged at 1746 pass / 2 pre-existing fail, 0 new lint.
+  - Files: `bench/` (bin/bench.dart, src/bench_core.dart, src/wled_client.dart, config.json,
+    known_layout.json, README.md) + the 5 extracted pure lib files above.
 
 ---
 

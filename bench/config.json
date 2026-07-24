@@ -1,0 +1,4 @@
+{
+  "controllerIp": "192.168.1.150",
+  "_comment": "Bench controller (WLED 0.15.1 vid 2507300, SKIKBILY ESP32_Ethernet). Override with --ip or by editing this file; never hardcoded in the CLI."
+}

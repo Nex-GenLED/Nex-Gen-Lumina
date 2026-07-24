@@ -1,0 +1,9 @@
+{
+  "_comment": "Last-confirmed hw.led layout for P1-42 drift detection. `bench probe` flags drift vs this; update it (probe --update) only after confirming a real physical change. Layout has changed 3x this week — treat as volatile.",
+  "confirmedAt": "2026-07-24",
+  "totalLeds": 290,
+  "buses": [
+    { "start": 0, "len": 128 },
+    { "start": 128, "len": 162 }
+  ]
+}
