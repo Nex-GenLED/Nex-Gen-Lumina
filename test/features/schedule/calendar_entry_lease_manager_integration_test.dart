@@ -137,7 +137,9 @@ void main() {
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
       expect(ins.length, ScheduleSyncService.kMaxWledTimers);
-      expect(ins.where((t) => (t as Map)['en'] == true).length, 1);
+      // P0-3.1: lease timer `en` is int 1 (was bool true — WLED stores a bool
+      // en as 0=disabled, so the pre-arm never fired). Padding stubs are en:0.
+      expect(ins.where((t) => (t as Map)['en'] == 1).length, 1);
       expect(ins.skip(1).every((t) => (t as Map)['en'] == 0), isTrue);
 
       // Pull onTime back out of the entry to verify hour/min mapping.
@@ -152,7 +154,7 @@ void main() {
       // hardcoded value would break the test on every other day of
       // the week.
       expect(timer['dow'], todayDowMask());
-      expect(timer['en'], isTrue);
+      expect(timer['en'], 1, reason: 'P0-3.1: int 1, not bool true');
     });
   });
 
@@ -258,7 +260,7 @@ void main() {
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
       expect(ins.length, ScheduleSyncService.kMaxWledTimers);
-      final real = ins.where((t) => (t as Map)['en'] == true).toList();
+      final real = ins.where((t) => (t as Map)['en'] == 1).toList(); // P0-3.1 int
       expect(real.length, 1);
       expect((real.first as Map)['macro'],
           h.manager.activeLeases.single.presetId);

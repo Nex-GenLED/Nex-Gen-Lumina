@@ -885,6 +885,11 @@ class CalendarEntryLeaseManager {
       return <String, dynamic>{
         'on': false,
         'bri': 0,
+        // Sibling instance of the missing-ib defect: without ib, psave
+        // stores segments only, so loading this off-lease from a master-on
+        // strip would NOT kill master power. ib persists root on:false.
+        // Mirrors the schedule OFF preset (schedule_sync.dart).
+        'ib': true,
       };
     }
 
@@ -899,6 +904,13 @@ class CalendarEntryLeaseManager {
     return <String, dynamic>{
       'on': true,
       'bri': bri,
+      // ib makes WLED persist the root master on/bri into the psaved preset
+      // (not just segments), so when the lease timer loads this macro from a
+      // master-off strip the master powers ON. Without ib the preset is
+      // segments-only and fires DARK — bench-proven on-device (preset 29 had
+      // only ['mainseg','seg','n']). Mirrors the schedule pattern-preset ib
+      // post-9158c00 (schedule_sync.dart).
+      'ib': true,
       'seg': [
         {
           'fx': 0,
@@ -1102,7 +1114,12 @@ class CalendarEntryLeaseManager {
         continue;
       }
       ins.add({
-        'en': true,
+        // WLED reads timer `en` TYPE-STRICT as an int — a JSON bool is
+        // silently stored as 0 (disabled), so a bool-`en` lease timer arms
+        // but never fires. Mirror the proven schedule path
+        // (schedule_sync.dart clock timer `'en': 1`). Curl-proven in the
+        // en saga (727ef0b); this lease writer predated that scrutiny.
+        'en': 1,
         'hour': lease.wledHour,
         'min': lease.wledMin,
         'macro': lease.presetId,

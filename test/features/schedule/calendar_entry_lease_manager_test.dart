@@ -569,6 +569,92 @@ void main() {
   });
 
   // ────────────────────────────────────────────────────────────────
+  // Group: P0-3.1 — lease pre-arm can actually fire
+  //   (a) cfg timer en must be int 1, not bool true (WLED stores a bool
+  //       en as 0 = disabled → the lease timer never fires)
+  //   (b) lease preset must carry ib so psave persists root on/bri and
+  //       loading it from a master-off state powers the strip on
+  // ────────────────────────────────────────────────────────────────
+  group('P0-3.1 lease pre-arm fixes (defects a + b)', () {
+    test('(a) emitted cfg timer en is int 1, not bool true', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      h.manager.injectLeaseForTest(_makeLease(
+        dateKey: '2026-07-24',
+        slotIndex: 0,
+        presetId: 29,
+        wledHour: 17,
+        wledMin: 10,
+        dowMask: 16, // Friday — must be non-zero or the timer is skipped
+      ));
+      final ins = ((h.manager.buildLeaseTimersPayloadForTest()['timers']
+          as Map)['ins'] as List);
+      expect(ins, hasLength(1));
+      final t = ins.first as Map;
+      expect(t['en'], isA<int>(),
+          reason: 'WLED reads timer en type-strict; a JSON bool is stored '
+              'as 0 (disabled). Mirrors schedule_sync.dart en:1.');
+      expect(t['en'], 1);
+      expect(t['en'], isNot(true), reason: 'must be int 1, never bool true');
+    });
+
+    test('(b) ON lease preset includes ib + root on/bri', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Royals Chase',
+        color: const Color(0xFF004687), // KC Royals royal blue
+        brightness: 100,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      expect(p['ib'], isTrue,
+          reason: 'ib makes WLED persist root on/bri into the preset — '
+              'mirrors schedule_sync.dart pattern-preset ib post-9158c00');
+      expect(p['on'], isTrue);
+      expect(p['bri'], isA<int>());
+      expect(p['bri'], greaterThan(0));
+    });
+
+    test('(b) regression: an ON lease preset carries the ib+on:true+bri trio '
+        'that powers master ON from an off state (9158c00 bench-proven; '
+        'device-level is the P0-3.1 bench step)', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Game Day',
+        color: const Color(0xFF004687),
+        brightness: 80,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      // The exact combination WLED needs to persist master-on through a
+      // psave and thus assert power when the timer loads the preset from
+      // a master-off strip.
+      expect(p['ib'], isTrue);
+      expect(p['on'], isTrue);
+      expect((p['bri'] as num) > 0, isTrue);
+    });
+
+    test('(b) OFF lease preset also carries ib so it asserts master OFF '
+        '(sibling instance of the missing-ib defect)', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Off',
+        color: null,
+        brightness: 0,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      expect(p['on'], isFalse);
+      expect(p['ib'], isTrue,
+          reason: 'ib persists root on:false so loading the off-lease kills '
+              'master power — mirrors the schedule OFF preset');
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
   // Group: handleEntryCreated outcomes
   // ────────────────────────────────────────────────────────────────
   group('handleEntryCreated outcomes', () {
