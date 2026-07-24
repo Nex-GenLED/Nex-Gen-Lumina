@@ -69,6 +69,13 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     syncs 2026-07-21) → prime suspect NARROWS to the **design/pattern-apply path** — consistent
     with Symptom C's original AI-command window, which also applied a design. The caught-in-the-act
     diagnostic should instrument pattern/design applies FIRST.
+  - NEIGHBORHOOD-AUDIT NOTE 2026-07-24: gamma `no-gc:false` (realtime/DDP gamma NOT bypassed) is
+    re-asserted on EVERY connect by the LAN-only watchdog/healer
+    ([controller_defaults_healer.dart:615-709](lib/features/wled/controller_defaults_healer.dart#L615),
+    readback-gated `pushGammaConfig`) — but LAN-ONLY: a fleet member controlled only via the remote
+    relay never gets the heal, so it could carry stale `no-gc:true` from a pre-fix provision.
+    Bench 192.168.1.150 verified `if.live.no-gc:false`, `light.gc {bri:1,col:2.8,val:2.8}` (correct).
+    Fleet-wide parity is unverifiable remotely — needs a per-controller LAN read.
   - Files: AI apply path (see P0-1) + design/pattern-apply path + `light.gc` writer (gamma push on connect).
 
 - [ ] **P1-6 — Unexplained en:1 evidence row (git archaeology)**
@@ -206,6 +213,24 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Game Day resume [game_day_autopilot_providers.dart:84](lib/features/autopilot/game_day_autopilot_providers.dart#L84),
     Neighborhood resume. Fix must add a new seg-scoped action, not repoint `togglePower`.
 
+- [ ] **P1-44 — Neighborhood Sync server-fanout path is DEAD in production (config/sync_fanout unreadable)**
+  - Status: OPEN · Evidence: verified-by-deployed-state (2026-07-24, project `icrt6menwsv2d8all8oijs021b06s5`)
+  - The foreground crew-fanout path (`NeighborhoodService.fanoutAdHocSync`
+    [neighborhood_service.dart:472] → CF `applySyncPattern`) is gated on
+    `config/sync_fanout.enabled` ([sync_fanout_feature_flag.dart]). DEPLOYED-STATE CHECK: (1) there
+    is **no `match /config/sync_fanout`** rule in the deployed ruleset OR the repo — default-deny;
+    (2) the **doc does not exist** (Firestore REST → 404). So the flag reader (client AND the CF's
+    own `readSyncFanoutEnabled`) always falls back to `false` → the fanout branch is unreachable.
+    Neighborhood Sync therefore runs ONLY via the default Firestore-broadcast + local `applyJson`
+    self-apply path (foreground) and the background-worker self-apply. **Decision needed:** is
+    fanout intentionally OFF (then this is expected — remove the dead foreground branch or document
+    it) or was it meant to ship? If meant to ship, needs BOTH a `config/sync_fanout` rule (mirror
+    `config/schedules_subcollection`, deployed) AND the bootstrap doc. This is the "skeleton (b)"
+    from launch — STILL PRESENT.
+  - Files: `firestore.rules` (no sync_fanout block ~line 1464 comment), `config/sync_fanout` (absent),
+    `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
+    `functions/src/applySyncPattern.ts:312-325`.
+
 ---
 
 ## P2 — hardening & platform
@@ -335,6 +360,29 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     rules → backfill → dual-write.
   - Files: `schedule_providers.dart`, `user_model.dart`, `firestore.rules`, all schedule R/W;
     flag `schedules_subcollection_feature_flag.dart`.
+
+- [ ] **P2-45 — Controller-native sync/realtime config is UNMANAGED (fleet-drift risk) + DDP/Zone scaffolding untested**
+  - Status: OPEN · Evidence: verified-by-source + verified-by-bench (2026-07-24)
+  - Neighborhood Sync does NOT use controller-native sync — it broadcasts via Firestore and each
+    member self-applies over HTTP `applyJson` (`neighborhood_sync_engine.dart:625-734`). So
+    `if.sync.*` / `if.live` / `udpn` are never touched by neighborhood code. Install disables native
+    UDP (`wled_config_pusher.dart:231` writes `udpn:{send:false,recv:false}`); the ONLY code that
+    ENABLES `udpn`/`ddp` is the SEPARATE Site/Zone DDP feature
+    (`DDPSyncController.applyZoneSync` [site_providers.dart:109], `WledService.configureSyncSender/Receiver`
+    [wled_service.dart:788-821], `DdpService` RawDatagramSocket:4048 [ddp_service.dart:20-63, has a
+    `DDP(sim)` simulate branch]), reachable ONLY from Site settings [settings_page.dart:215] and
+    UNTESTED (no DDP-transport test exists). Bench 192.168.1.150 live: `if.sync.send.en:false`,
+    `if.sync.recv` flags on (bri/col/fx/pal), `if.live.en:true` (realtime IN on, port 5568),
+    ports 21324/65506 (WLED defaults) — none of this is app-asserted, so it's whatever each
+    controller happens to carry (drift risk if any future path relies on it). WLED UDP-notifier
+    sync + E1.31 are not used by either feature.
+  - Decision: either (a) formally OWN a leader/member controller-sync policy (assert `if.sync`/
+    `udpn`/`if.live` per role on connect) if native sync is ever put on the Neighborhood path, or
+    (b) document that Neighborhood Sync is Firestore-only and treat the DDP/Zone feature as a
+    separate, test-owed surface. Today there is NO leader election (creator=admin, `isParticipating`
+    =per-member runtime gate) — every member self-applies.
+  - Files: `lib/features/site/site_providers.dart`, `lib/features/wled/ddp_service.dart`,
+    `lib/features/wled/wled_service.dart` (configureSync*), `lib/services/wled_config_pusher.dart`.
 
 ---
 
