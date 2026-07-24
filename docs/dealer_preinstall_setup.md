@@ -82,6 +82,54 @@ Controller hardware (per install plan / site survey):
 
 ## Section 2 — WLED controller pre-config
 
+### 2.0 Flash the PINNED WLED version FIRST (REQUIRED — do not skip)
+
+**Flashing method is right; "flash the latest" is wrong.** The standing rule is
+to flash via **quinled.info** — correct. But quinled.info's web flasher serves
+**the LATEST** WLED release, which today is **0.15.4**. A dealer who flashes
+"latest" to the letter produces a **stalling controller with no error surfaced
+anywhere** — it passes every other step in this SOP and ships broken.
+
+**Pin the version per board:**
+
+| Board / variant | WLED version to flash | Notes |
+|---|---|---|
+| **SKIKBILY 4-channel** (ESP32_Ethernet) | **0.15.1** | What the vendor ships and what is field-proven |
+| Dig-Octa 8-channel | 0.15.1 | Same family; pin the same until re-qualified |
+
+**Why 0.15.1 specifically (two independent reasons):**
+
+1. **A confirmed 0.15.4 stall regression on this exact board.** Field-measured
+   on two same-variant SKIKBILY 4-channel controllers (both `ESP32_Ethernet`),
+   with the WLED version as the *only* differing variable:
+   - **0.15.1** (vendor factory firmware) → **69–87 fps, rock-steady, no stall.**
+   - **0.15.4** (reflashed latest) → 170 fps between stalls, but **drops to 0 fps
+     for 4–6s every ~17s (~30% duty cycle)**, a both-core pause (HTTP goes
+     unreachable during the stall too). Ruled out by live data: realtime
+     (`live:false`), memory (heap flat), reboot (uptime monotonic), AudioReactive
+     (off), WiFi (rssi −30s, bssid fixed), the app (force-stopped, still stalls),
+     the bridge (unplugged), and other LAN nodes (none). Only the version differs.
+2. **The Lumina app's effect catalog is pinned to 0.15.1 fx IDs**
+   (`lib/features/patterns/canonical_palettes.dart`, `design_models.dart` — the
+   `WledEffectsCatalog` verified against a 0.15.1 device). A controller on a
+   different WLED build risks effect-ID drift, so the app would apply the wrong
+   effect. Matching the firmware to the catalog keeps effect selection correct.
+
+**After flashing, VERIFY the version (one command — makes this self-detecting):**
+
+```bash
+curl -s http://4.3.2.1/json/info | python3 -c "import sys,json;d=json.load(sys.stdin);print('release',d.get('release'),'| ver',d.get('ver'))"
+# SKIKBILY 4-channel MUST read:  release ESP32_Ethernet | ver 0.15.1
+```
+
+Confirm BOTH: `release` matches the board variant AND `ver` matches the pin. If
+`ver` reads 0.15.4 (or anything but the pin), re-flash the pinned version before
+continuing — every later step will otherwise "pass" on a controller that stalls.
+
+Treat this as a standing never-default of the flash procedure, same class as
+*erase flash first*, *ABL never default*, *disable AudioReactive* (§2.5), and
+*verify NTP actually synced*.
+
 ### 2.1 Bench power up
 
 1. Connect the controller to its 12V power supply (no LED strip needed yet — controller boots without LEDs attached).
@@ -144,11 +192,11 @@ This step makes the Lumina app's channel-aware features work correctly.
 
 ### 2.5 Disable the AudioReactive usermod (REQUIRED — do not skip)
 
-**The flash image ships this usermod ENABLED, and it stalls effects on every controller that has no microphone.** Our controllers are flashed with the AudioReactive build variant (the controller name ends in `-AR`, e.g. `Dig-Octa-ESP32-8L-Eth-AR`). That image is built with the usermod default-on and a digital mic pre-configured on **GPIO 32/15 — pins our hardware does not have**. The usermod's I2S read + FFT task then competes with the LED show task and **freezes motion and effects**.
+**The flash image ships this usermod ENABLED with a digital mic pre-configured on GPIO 32/15 — pins our hardware does not have — so disable it.** Our controllers flashed with the AudioReactive build variant (name ends in `-AR`, e.g. `Dig-Octa-ESP32-8L-Eth-AR`) build the usermod default-on. Its idle I2S/FFT path is needless overhead on a mic-less unit, so turning it off is correct housekeeping.
 
-This is confirmed on hardware, not theoretical: it was found on the bench controller *and* on a live customer install (Blue Line Bar, 417 LEDs). Disabling it cleared the freeze immediately in both cases.
+> **Correction (field finding):** AudioReactive was *originally* blamed for the periodic effect freeze, on the strength of a short symptom-free window after a manual disable. That was an over-conclusion — the freeze is **intermittent**, so a brief clean window proved nothing. The freeze was later traced to the **WLED 0.15.4 stall regression (see §2.0)**, reproduced with AudioReactive already OFF. So: still disable it (overhead), but it is **not** the freeze cause — the version pin in §2.0 is.
 
-Treat this as a standing never-default of the flash procedure, in the same class as *erase flash first*, *ABL never default*, and *NTP host → `time.google.com`*.
+Treat this as a standing never-default of the flash procedure, in the same class as *erase flash first*, *ABL never default*, *pin the WLED version* (§2.0), and *NTP host → `time.google.com`*.
 
 1. Navigate to `http://4.3.2.1` → **Config** → **Usermods**.
 2. Find the **AudioReactive** section.
@@ -462,4 +510,5 @@ Warranty + support contact: <dealer info>
 
 ## Change log
 
+- **2026-07-17**: Added §2.0 — **pin the WLED version** (SKIKBILY 4-channel → 0.15.1) with a post-flash `curl /json/info` verify. Field finding: WLED 0.15.4 (quinled.info "latest") has a periodic both-core stall regression on this board (~17s period, ~30% duty) that 0.15.1 does not; only the version differed across two same-variant units. Corrected §2.5 — AudioReactive is overhead to disable, but was wrongly blamed for the freeze; the freeze is the version regression, reproduced with AudioReactive off.
 - **2026-05-13**: Initial publication. Reflects firmware v1.2 (`POLL_INTERVAL_MS=1000`, item #76 fix), iOS Item #75 Podfile fix, and Now Playing fix bundle items #88a–e.
