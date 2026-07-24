@@ -213,23 +213,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Game Day resume [game_day_autopilot_providers.dart:84](lib/features/autopilot/game_day_autopilot_providers.dart#L84),
     Neighborhood resume. Fix must add a new seg-scoped action, not repoint `togglePower`.
 
-- [ ] **P1-44 — Neighborhood Sync server-fanout path is DEAD in production (config/sync_fanout unreadable)**
-  - Status: OPEN · Evidence: verified-by-deployed-state (2026-07-24, project `icrt6menwsv2d8all8oijs021b06s5`)
+- [ ] **P1-44 — Neighborhood Sync server-fanout path is DORMANT in production (config/sync_fanout unreadable)**
+  - Status: OPEN · DECISION: **keep the fanout code, mark DORMANT** pending a Neighborhood Sync
+    launch decision — DO NOT delete. Evidence: verified-by-deployed-state (2026-07-24, project
+    `icrt6menwsv2d8all8oijs021b06s5`)
   - The foreground crew-fanout path (`NeighborhoodService.fanoutAdHocSync`
     [neighborhood_service.dart:472] → CF `applySyncPattern`) is gated on
     `config/sync_fanout.enabled` ([sync_fanout_feature_flag.dart]). DEPLOYED-STATE CHECK: (1) there
     is **no `match /config/sync_fanout`** rule in the deployed ruleset OR the repo — default-deny;
     (2) the **doc does not exist** (Firestore REST → 404). So the flag reader (client AND the CF's
     own `readSyncFanoutEnabled`) always falls back to `false` → the fanout branch is unreachable.
-    Neighborhood Sync therefore runs ONLY via the default Firestore-broadcast + local `applyJson`
-    self-apply path (foreground) and the background-worker self-apply. **Decision needed:** is
-    fanout intentionally OFF (then this is expected — remove the dead foreground branch or document
-    it) or was it meant to ship? If meant to ship, needs BOTH a `config/sync_fanout` rule (mirror
-    `config/schedules_subcollection`, deployed) AND the bootstrap doc. This is the "skeleton (b)"
-    from launch — STILL PRESENT.
-  - Files: `firestore.rules` (no sync_fanout block ~line 1464 comment), `config/sync_fanout` (absent),
+  - **DOUBLE-DEAD finding (2026-07-24):** `bootstrapSyncFanoutFlagDoc()`
+    [sync_fanout_feature_flag.dart:71] is DEFINED but **NEVER CALLED** anywhere. So the doc is
+    double-dead: nothing creates it, and even if bootstrap ran, the missing rule would default-deny
+    the client create anyway. That is why it is 404.
+  - **ACTIVATION STEPS (future session, when a launch decision is made — deliberate, not accidental):**
+    (a) create `config/sync_fanout` with `enabled:false` — via a `bootstrapSyncFanoutFlagDoc()` call
+    at launch OR the console (needs a create-allowing rule first: mirror
+    `config/schedules_subcollection` [firestore.rules:1471], which allows create when
+    `enabled==false`); (b) verify the anti-strobe rate limiter `reserveFanoutSlot` is live
+    [applySyncPattern.ts:166]; (c) flip `enabled:true` in the console ONLY after (b) and a real-crew
+    test. NOTE: a READ-ONLY rule was added separately (see below) to stop the per-launch
+    permission-denied; that does NOT activate fanout (no doc, no create rule → flag stays false).
+  - **Five never-executed-in-production code paths (dormant, keep):**
+    1. Foreground fanout branch `broadcastSync` — [neighborhood_providers.dart:336-346]
+    2. `NeighborhoodService.fanoutAdHocSync` (HTTP POST, `fanout:true`) — [neighborhood_service.dart:472]
+    3. CF flag-gated fanout block — [applySyncPattern.ts:159-190]
+    4. `reserveFanoutSlot` (rate limit) + `fanoutToCrew` — [applySyncPattern.ts:166,180]
+    5. `bootstrapSyncFanoutFlagDoc()` (never called) — [sync_fanout_feature_flag.dart:71]
+  - **DONE (partial):** read-only `match /config/sync_fanout` rule added to `firestore.rules`
+    (hygiene — stops the fleet-wide per-launch permission-denied on the flag listen; flag stays
+    absent/false). NOT deployed (rules deploy authorized separately).
+  - Files: `firestore.rules` (read-only sync_fanout block added; create/flip still absent by design),
     `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
-    `functions/src/applySyncPattern.ts:312-325`.
+    `functions/src/applySyncPattern.ts:159-190,312-325`.
 
 ---
 
