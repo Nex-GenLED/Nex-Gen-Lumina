@@ -1461,13 +1461,11 @@ service cloud.firestore {
     // config/schedules_subcollection.enabled gates whether schedules persist
     // under /users/{uid}/schedules (default false → legacy array backend).
     //
-    // There is NO rule for config/sync_fanout (the Dart flag this one clones) —
-    // it is default-deny, so its reads only ever fall back to false. The
-    // existing config rules are all doc-specific, and the closest analog is
-    // config/calendar_leases (above): read open to any authenticated user so
-    // the StreamProvider picks up flips without a restart, bootstrap-only
-    // create with the safe default, console-only flips. Mirrored here so the
-    // flag is genuinely readable (rather than silently default-denied).
+    // The closest analog for these flag docs is config/calendar_leases (above):
+    // read open to any authenticated user so the StreamProvider picks up flips
+    // without a restart, bootstrap-only create with the safe default, and
+    // console-only flips. Mirrored here so the flag is genuinely readable
+    // (rather than silently default-denied).
     match /config/schedules_subcollection {
       allow read: if request.auth != null;
       // Bootstrap-only create with the safe default (enabled=false). Any
@@ -1475,6 +1473,20 @@ service cloud.firestore {
       allow create: if request.auth != null &&
                        request.resource.data.enabled == false;
       allow update, delete: if false;
+    }
+
+    // ── Neighborhood Sync Fanout Feature Flag (config/sync_fanout) ──
+    // READ-ONLY on purpose (P1-44): the client StreamProvider
+    // (sync_fanout_feature_flag.dart) subscribes to this doc on EVERY launch.
+    // With NO rule it was default-denied → a permission-denied error thrown and
+    // logged fleet-wide on each launch (caught; defaults to false). This read
+    // rule makes it a clean `false` with zero error. Deliberately NO create/
+    // update/delete: the doc stays ABSENT and the fanout flag stays false —
+    // ACTIVATING fanout is a separate, deliberate step (see ledger P1-44:
+    // add a create allowance + bootstrap the doc + console flip).
+    match /config/sync_fanout {
+      allow read: if request.auth != null;
+      allow write: if false; // no create/update/delete — flag stays absent/false
     }
 
     // ── Migration tracking (Item #72 and future migrations) ──
