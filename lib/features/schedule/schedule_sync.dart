@@ -15,6 +15,10 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart'
     show CfgWriteUnsupportedException, WledRepository;
 import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
+// P0-3.2: lease-timer provider so syncAll can MERGE active lease timers
+// (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show calendarLeaseActiveTimersProvider;
 
 /// A real, ENABLED timer entry — not a disabled/padding stub, not a solar
 /// sentinel: `en` is truthy (bool `true` or int `1`), `macro != 0`, `hour != 255`.
@@ -176,7 +180,7 @@ Future<bool?> verify2xxReadbackWithRetry({
 }
 
 /// Outcome of the cfg push + verify (see [ScheduleSyncService._pushCfgWithVerify]).
-enum _CfgPushOutcome {
+enum CfgPushOutcome {
   /// Timers confirmed on the controller (2xx + readback match, 2xx + unreadable,
   /// or verified after the post-commit stall).
   confirmed,
@@ -188,6 +192,114 @@ enum _CfgPushOutcome {
   /// The write was never confirmed — the controller never answered within the
   /// verification window, or a relay/webhook reported a plain failure.
   notConfirmed,
+}
+
+/// Shared hardened cfg-write-and-verify — the SINGLE implementation used by
+/// both [ScheduleSyncService.syncAll] and the CalendarEntry lease writer
+/// (calendar_entry_lease_manager.dart). Do NOT duplicate this logic.
+///
+/// Models the bench-proven post-commit stall: the POST /json/cfg COMMITS the
+/// timers to flash, but the commit can freeze the controller's web server for
+/// MINUTES (the LEDs keep running; it self-recovers — no crash, no power cycle).
+/// Re-POSTing into that blackout is harmful, so we do NOT retry the write — we
+/// wait for the controller to answer again and confirm by readback
+/// ([timersInsLanded]: every real timer we sent must appear with en==1). [ins]
+/// is the exact array sent (post-normalize). [onVerifying] fires once when the
+/// patient poll begins (schedule UI status hook; the lease path passes null).
+///
+/// Returns:
+/// - [CfgPushOutcome.confirmed]    timers verified present + enabled
+/// - [CfgPushOutcome.mismatch]     2xx but readback content differs and PERSISTS
+///                                 across the delayed re-look — the controller
+///                                 stored different values (e.g. the bool-en
+///                                 class that this very saga fixed)
+/// - [CfgPushOutcome.notConfirmed] never confirmed within the window / relay
+///                                 or webhook failure
+Future<CfgPushOutcome> pushCfgWithVerify({
+  required WledRepository repo,
+  required Map<String, dynamic> payload,
+  required List<Map<String, dynamic>> ins,
+  void Function()? onVerifying,
+  // Injectable clock — production uses real Future.delayed; tests pass an
+  // instant delay so the readback-race retry and stall poll don't sleep.
+  Future<void> Function(Duration)? delay,
+}) async {
+  final tick = delay ?? (d) => Future<void>.delayed(d);
+  // Readback content-match: does the controller's timer table CONTAIN every
+  // real timer we sent (en==1)? true=confirmed, false=recovered-but-absent,
+  // null=unreadable (relay/mock, fetch error, or still stalled) → inconclusive.
+  Future<bool?> readback() async {
+    if (repo is! WledService) return null; // cfg is not readable via the relay
+    final actual = await repo.fetchTimerInstances();
+    if (actual == null) return null;
+    return timersInsLanded(ins, actual);
+  }
+
+  final ok = await repo.applyConfig(payload);
+  if (ok) {
+    // 2xx — reported success. Still readback-verify, tolerating the post-commit
+    // READBACK RACE (bench 2026-07-23: the GET can catch the controller mid-
+    // commit; a re-look seconds later matched). One 10s-delayed re-look before
+    // we ever go red. See [verify2xxReadbackWithRetry].
+    final verified = await verify2xxReadbackWithRetry(
+      readbackMatch: readback,
+      delay: tick,
+    );
+    if (verified == true) return CfgPushOutcome.confirmed;
+    if (verified == false) {
+      // The race is ruled out by the delayed re-look, so a persisting mismatch
+      // is a real defect (firmware stored our values wrong, e.g. the en:0 bool
+      // class). Fail loudly.
+      debugPrint('CfgVerify: cfg 2xx but readback CONTENT-MISMATCH persisted on '
+          'the delayed re-look — the controller stored different values; '
+          'failing loudly');
+      return CfgPushOutcome.mismatch;
+    }
+    // verified == null: readback unavailable. On this hardware a null right
+    // after a 2xx means the controller is stalling on the post-commit flash
+    // save. DO NOT trust the 2xx — a disabled/rejected write (the bool-en bug)
+    // would slip through green. Fall to the patient poll. A relay/webhook can't
+    // be polled, so THERE a 2xx is trusted.
+    if (repo is! WledService) return CfgPushOutcome.confirmed;
+    debugPrint('CfgVerify: cfg 2xx but readback unavailable (controller likely '
+        'stalling) — verifying patiently, NOT trusting the 2xx');
+  } else {
+    // POST returned false. On the LAN service this is the post-commit stall (the
+    // flash write may have landed; the HTTP response never returned). For a
+    // relay/webhook a false is a genuine failure with no stall model — fail fast.
+    if (repo is! WledService) return CfgPushOutcome.notConfirmed;
+    debugPrint('CfgVerify: cfg POST returned false on LAN — assuming the '
+        'post-commit network stall; NOT re-POSTing, verifying patiently');
+  }
+
+  // Patient verify-poll — reached on (POST false) OR (2xx + null readback) on
+  // the LAN service. Wait for the controller to answer again, then content-
+  // match; NO re-POST unless it recovers and still genuinely mismatches.
+  final wledRepo = repo; // promoted to WledService by the guards above
+  onVerifying?.call();
+
+  final started = DateTime.now();
+  final confirmed = await verifyCfgAfterStall(
+    liveness: () => wledRepo.ping(),
+    readbackMatch: readback,
+    rePost: () async {
+      try {
+        return await wledRepo.applyConfig(payload);
+      } catch (_) {
+        return false;
+      }
+    },
+    delay: tick,
+  );
+  final stalledFor = DateTime.now().difference(started).inSeconds;
+  if (confirmed) {
+    debugPrint('CfgVerify: controller stalled ~${stalledFor}s after the cfg '
+        'commit; write VERIFIED on recovery');
+    return CfgPushOutcome.confirmed;
+  }
+  debugPrint('CfgVerify: controller did not confirm the cfg write within the '
+      '${stalledFor}s verification window');
+  return CfgPushOutcome.notConfirmed;
 }
 
 /// Service to map local schedules to WLED timer configuration and push in one batch.
@@ -277,7 +389,12 @@ class ScheduleSyncService {
   /// controller.
   static ({List<ScheduleItem> armed, bool overflowed}) splitByTimerCapacity(
       List<ScheduleItem> armable,
-      {bool solarEnabled = false}) {
+      {bool solarEnabled = false, int maxSlots = kMaxWledTimers}) {
+    // [maxSlots] is the GENERAL clock-slot budget available to schedules. It
+    // defaults to the full table but syncAll passes `kMaxWledTimers - leaseCount`
+    // so active lease timers (macro 26-41) keep their reserved slots — lease
+    // priority (P0-3.2). Clamped to a sane range.
+    final budget = maxSlots.clamp(0, kMaxWledTimers);
     final armed = <ScheduleItem>[];
     var slotsUsed = 0;
     var overflowed = false;
@@ -292,7 +409,7 @@ class ScheduleSyncService {
       // A clock ON needs a general slot; a solar ON does not. Only overflow on
       // a schedule that actually needs a general slot and has none left — a
       // solar-only schedule always fits (it uses slot 8/9).
-      if (!onSolar && slotsUsed >= kMaxWledTimers) {
+      if (!onSolar && slotsUsed >= budget) {
         overflowed = true;
         break;
       }
@@ -300,7 +417,7 @@ class ScheduleSyncService {
       if (s.hasOffTime &&
           s.offTimeLabel != null &&
           !offSolar &&
-          slotsUsed < kMaxWledTimers) {
+          slotsUsed < budget) {
         slotsUsed += 1; // clock OFF timer
       }
       armed.add(s);
@@ -1039,13 +1156,34 @@ class ScheduleSyncService {
       armable.add(s);
     }
 
-    // ── Slot capacity: which armable schedules actually fit the 8-slot table ─
+    // ── P0-3.2: preserve active lease timers (macro 26-41) ──────────────────
+    // The lease manager arms near-term dated leases in the high timer slots.
+    // syncAll MUST merge them into its cfg write — otherwise padTimersToMax
+    // stub-clobbers them (defect d: preset survives, lease timer never does).
+    // Source = the lease manager's own activeLeaseTimers() via a flag-gated
+    // provider (single source of truth; reuses _buildLeaseTimersPayload — no
+    // second merge impl). Returns [] when lease live-writes are off, so this is
+    // a no-op on the existing schedule-only path. Defensive: any read failure →
+    // schedule-only (never let a lease-read error break a schedule sync).
+    List<Map<String, dynamic>> leaseTimers;
+    try {
+      leaseTimers = ref.read(calendarLeaseActiveTimersProvider);
+    } catch (e) {
+      debugPrint('ScheduleSync: lease-timer read failed — $e '
+          '(proceeding schedule-only)');
+      leaseTimers = const [];
+    }
+    final leaseCount = leaseTimers.length;
+
+    // ── Slot capacity: which armable schedules actually fit the table ───────
     // buildCfgPayload truncates at kMaxWledTimers; mirror its slot accounting
     // here so we (a) surface a loud warning when schedules overflow and (b)
     // count only the schedules that armed — never claim success for one that
-    // silently fell off the controller.
-    final capacity =
-        splitByTimerCapacity(armable, solarEnabled: solarEnabled);
+    // silently fell off the controller. LEASE-PRIORITY (P0-3.2): the general
+    // budget is reduced by the active lease count so a schedule can never claim
+    // a lease-reserved slot; overflow schedules surface the existing 8/8 warning.
+    final capacity = splitByTimerCapacity(armable,
+        solarEnabled: solarEnabled, maxSlots: kMaxWledTimers - leaseCount);
     final armedSchedules = capacity.armed;
     if (capacity.overflowed) {
       presetErrors.add(
@@ -1055,15 +1193,20 @@ class ScheduleSyncService {
           'schedule(s) could not arm — WLED timer table full (8/8)');
     }
 
-    // Step 2: Build and push timer configuration. Clock timers fill slots 0-7;
-    // the array is padded so a vacated slot is overwritten with a disabled stub
-    // (slot reclaim — clears dow:0 / stale timers). When solar is enabled the
-    // push is a 10-entry array with the sunrise timer at slot 8 and sunset at
-    // slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
+    // Step 2: Build and push timer configuration. Clock timers fill the general
+    // slots; lease timers (macro 26-41) are MERGED in so the write preserves
+    // them; the array is padded so a vacated slot is overwritten with a disabled
+    // stub (slot reclaim — clears dow:0 / stale timers). When solar is enabled
+    // the push is a 10-entry array with the sunrise timer at slot 8 and sunset
+    // at slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
     final built =
         buildCfgPayload(armedSchedules, solarEnabled: solarEnabled);
     final builtIns = ((built['timers'] as Map)['ins'] as List)
         .cast<Map<String, dynamic>>();
+    // scheduleIns = SCHEDULE-derived timers only (for the empty-armed guard —
+    // preserved lease timers must NOT mask a schedules-produced-nothing bug).
+    // ins = the MERGED array actually written (schedules + leases).
+    final List<Map<String, dynamic>> scheduleIns;
     final List<Map<String, dynamic>> ins;
     if (solarEnabled) {
       final solar = solarTimerSlots(armedSchedules);
@@ -1075,22 +1218,28 @@ class ScheduleSyncService {
             'controller — "$who" was not armed.');
         debugPrint('ScheduleSync: solar slot already taken — dropped $who');
       }
-      ins = assembleSolarAwareIns(builtIns,
+      scheduleIns = assembleSolarAwareIns(builtIns,
+          sunrise: solar.sunrise, sunset: solar.sunset);
+      // Lease timers are CLOCK timers → merge into the general pool BEFORE solar
+      // assembly (solar entries own the dedicated slots 8/9).
+      ins = assembleSolarAwareIns([...builtIns, ...leaseTimers],
           sunrise: solar.sunrise, sunset: solar.sunset);
     } else {
-      ins = padTimersToMax(builtIns);
+      scheduleIns = builtIns;
+      ins = padTimersToMax([...builtIns, ...leaseTimers]);
     }
     final payload = <String, dynamic>{
       'timers': {'ins': ins},
     };
 
     // Empty-armed guard: armedSchedules passed every arm check, so they MUST
-    // have produced real timer entries. If the built payload has NONE (all
-    // stubs), something in the build/reader dropped them (e.g. an enabled flag
-    // that didn't survive the doc round-trip — the AI-doc class). The
-    // content-match comparator would then trivially pass on an all-stub payload
-    // and report a false green. Fail loudly; never POST a no-op that arms nothing.
-    if (armedSchedules.isNotEmpty && !ins.any(isRealEnabledTimer)) {
+    // have produced real timer entries. If the SCHEDULE-derived payload has NONE
+    // (all stubs), something in the build/reader dropped them (e.g. an enabled
+    // flag that didn't survive the doc round-trip — the AI-doc class). The
+    // content-match comparator would then trivially pass and report a false
+    // green. Checked on scheduleIns (NOT the merged ins) so preserved lease
+    // timers can't mask the bug. Fail loudly; never POST a no-op that arms nothing.
+    if (armedSchedules.isNotEmpty && !scheduleIns.any(isRealEnabledTimer)) {
       debugPrint('ScheduleSync: ABORT — ${armedSchedules.length} armable '
           'schedule(s) but the built payload has zero real timers (all stubs). '
           'Refusing to POST a no-op that would false-green.');
@@ -1130,7 +1279,7 @@ class ScheduleSyncService {
       // (see _pushCfgWithVerify). Three terminal outcomes → three results.
       final outcome = await _pushCfgWithVerify(ref, repo, payload, ins);
       switch (outcome) {
-        case _CfgPushOutcome.confirmed:
+        case CfgPushOutcome.confirmed:
           return finish(ScheduleSyncResult(
             success: true,
             presetErrors: presetErrors,
@@ -1138,7 +1287,7 @@ class ScheduleSyncService {
             // schedule dropped for a full table / dow:0 / bad time.
             schedulesWithPresets: armedSchedules,
           ));
-        case _CfgPushOutcome.mismatch:
+        case CfgPushOutcome.mismatch:
           // 2xx but the controller stored different values — a firmware-
           // compatibility signal, not a transient. Surface it, don't warn-away.
           return finish(ScheduleSyncResult(
@@ -1147,7 +1296,7 @@ class ScheduleSyncService {
             presetErrors: presetErrors,
             schedulesWithPresets: updatedSchedules,
           ));
-        case _CfgPushOutcome.notConfirmed:
+        case CfgPushOutcome.notConfirmed:
           return finish(ScheduleSyncResult(
             success: false,
             error: kScheduleCfgWriteFailed,
@@ -1192,97 +1341,24 @@ class ScheduleSyncService {
   ///   controller recovers and the timers still aren't there.
   /// A [CfgWriteUnsupportedException] propagates out (→ deferredOffLan in
   /// syncAll). [ins] is the exact array we sent (post-normalize).
-  Future<_CfgPushOutcome> _pushCfgWithVerify(
+  /// Thin wrapper over the shared [pushCfgWithVerify] that also surfaces the
+  /// interim "verifying…" status on the schedule UI during the patient poll.
+  /// See [pushCfgWithVerify] for the full stall / readback-race model.
+  /// [ins] is the exact array we sent (post-normalize).
+  Future<CfgPushOutcome> _pushCfgWithVerify(
     Ref ref,
     WledRepository repo,
     Map<String, dynamic> payload,
     List<Map<String, dynamic>> ins,
-  ) async {
-    final ok = await repo.applyConfig(payload);
-    if (ok) {
-      // 2xx — the write reported success. Still readback-verify, but tolerate the
-      // post-commit READBACK RACE: a 2xx + immediate mismatch may be the GET
-      // catching the controller mid-commit (bench-proven 2026-07-23 — the timers
-      // HAD landed; a re-look seconds later matched). One 10s-delayed re-look
-      // before we ever go red. See [verify2xxReadbackWithRetry].
-      final verified = await verify2xxReadbackWithRetry(
-        readbackMatch: () => _readbackTimersLanded(repo, ins),
-        delay: (d) => Future<void>.delayed(d),
-      );
-      if (verified == true) return _CfgPushOutcome.confirmed;
-      if (verified == false) {
-        // Content-match already tolerates echo compaction + solar sentinels, and
-        // the race is now ruled out by the delayed re-look — so a mismatch that
-        // persists is a real defect (firmware stored our values wrong, e.g. the
-        // en:0 class). Fail loudly.
-        debugPrint('ScheduleSync: cfg 2xx but readback CONTENT-MISMATCH persisted '
-            'on the delayed re-look — the controller stored different values; '
-            'failing loudly');
-        return _CfgPushOutcome.mismatch;
-      }
-      // verified == null: the readback couldn't be fetched. On this hardware a
-      // null right after a 2xx means the controller is stalling on the
-      // post-commit flash save (the GET returns an empty body). DO NOT trust the
-      // 2xx — a disabled/rejected write (e.g. the bool-en bug) would slip through
-      // green. Fall through to the patient verify-poll to wait for recovery and
-      // content-match. A relay/webhook can't be polled, so THERE a 2xx is trusted.
-      if (repo is! WledService) return _CfgPushOutcome.confirmed;
-      debugPrint('ScheduleSync: cfg 2xx but readback unavailable (controller '
-          'likely stalling) — verifying patiently, NOT trusting the 2xx');
-    } else {
-      // POST returned false. On the LAN service this is the post-commit stall:
-      // the flash write landed, but the HTTP response never came back before the
-      // web server froze. For a relay/webhook a false is a genuine failure with
-      // no stall model — fail fast (no minutes-long polling of a webhook).
-      if (repo is! WledService) return _CfgPushOutcome.notConfirmed;
-      debugPrint('ScheduleSync: cfg POST returned false on LAN — assuming the '
-          'post-commit network stall; NOT re-POSTing, verifying patiently');
-    }
-
-    // Patient verify-poll — reached on (applyConfig==false) OR (2xx + null
-    // readback) on the LAN service. Wait for the controller to answer again,
-    // then content-match; NO re-POST unless it recovers and still mismatches.
-    final wledRepo = repo; // promoted to WledService by the guards above
-    ref.read(lastScheduleSyncResultProvider.notifier).state =
-        ScheduleSyncResult.verifying();
-
-    final started = DateTime.now();
-    final confirmed = await verifyCfgAfterStall(
-      liveness: () => wledRepo.ping(),
-      readbackMatch: () => _readbackTimersLanded(wledRepo, ins),
-      rePost: () async {
-        try {
-          return await wledRepo.applyConfig(payload);
-        } catch (_) {
-          return false;
-        }
-      },
-      delay: (d) => Future<void>.delayed(d),
+  ) {
+    return pushCfgWithVerify(
+      repo: repo,
+      payload: payload,
+      ins: ins,
+      onVerifying: () =>
+          ref.read(lastScheduleSyncResultProvider.notifier).state =
+              ScheduleSyncResult.verifying(),
     );
-    final stalledFor = DateTime.now().difference(started).inSeconds;
-    if (confirmed) {
-      debugPrint('ScheduleSync: controller stalled ~${stalledFor}s after the cfg '
-          'commit; write VERIFIED on recovery');
-      return _CfgPushOutcome.confirmed;
-    }
-    debugPrint('ScheduleSync: controller did not confirm the cfg write within '
-        'the ${stalledFor}s verification window');
-    return _CfgPushOutcome.notConfirmed;
-  }
-
-  /// Readback content-match: does the controller's timer table CONTAIN the real
-  /// timers we [sent]? true = confirmed, false = recovered-but-not-present,
-  /// null = couldn't read (relay/mock, or fetch error / still stalled) →
-  /// inconclusive, never a false negative. Uses [timersInsLanded] (content, not
-  /// per-index — the controller compacts/reorders the array).
-  Future<bool?> _readbackTimersLanded(
-    WledRepository repo,
-    List<Map<String, dynamic>> sent,
-  ) async {
-    if (repo is! WledService) return null; // cfg is not readable via the relay
-    final actual = await repo.fetchTimerInstances();
-    if (actual == null) return null;
-    return timersInsLanded(sent, actual);
   }
 
   /// Legacy sync method for backward compatibility.

@@ -137,7 +137,9 @@ void main() {
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
       expect(ins.length, ScheduleSyncService.kMaxWledTimers);
-      expect(ins.where((t) => (t as Map)['en'] == true).length, 1);
+      // P0-3.1: lease timer `en` is int 1 (was bool true — WLED stores a bool
+      // en as 0=disabled, so the pre-arm never fired). Padding stubs are en:0.
+      expect(ins.where((t) => (t as Map)['en'] == 1).length, 1);
       expect(ins.skip(1).every((t) => (t as Map)['en'] == 0), isTrue);
 
       // Pull onTime back out of the entry to verify hour/min mapping.
@@ -152,7 +154,7 @@ void main() {
       // hardcoded value would break the test on every other day of
       // the week.
       expect(timer['dow'], todayDowMask());
-      expect(timer['en'], isTrue);
+      expect(timer['en'], 1, reason: 'P0-3.1: int 1, not bool true');
     });
   });
 
@@ -258,7 +260,7 @@ void main() {
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
       expect(ins.length, ScheduleSyncService.kMaxWledTimers);
-      final real = ins.where((t) => (t as Map)['en'] == true).toList();
+      final real = ins.where((t) => (t as Map)['en'] == 1).toList(); // P0-3.1 int
       expect(real.length, 1);
       expect((real.first as Map)['macro'],
           h.manager.activeLeases.single.presetId);
@@ -291,30 +293,32 @@ void main() {
     });
 
     test(
-        'applyConfig failure: savePreset preset still on controller '
-        '(orphan), lease registry NOT rolled back', () async {
+        'cfg write NOT verified (P0-3.3): preset saved but timer absent → '
+        'lease rolled back, surfaces writeFailed', () async {
+      // Post-hardening contract (replaces the old fire-and-forget "orphan kept"
+      // behavior): the cfg write is verified by readback. If it does not
+      // confirm, the lease is NOT armed, so the registry must roll back — a
+      // kept record would never re-arm (promotion skips registered dateKeys),
+      // which was the days-of-presets / zero-timers silent-failure bug.
       final h = buildIntegrationHarness();
-      h.service.simulateApplyConfigReturns = false;
       await h.manager.initialize();
-
-      h.service.lastSimulatedConfigPayload = null;
+      // Drive the hardened cfg push to a non-confirmed outcome synchronously
+      // (the stall / absent-timer case) — no real-time poll.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
       h.service.lastSimulatedPresetSave = null;
 
       final entry = insideWindowEntry();
       final result = await h.manager.handleEntryCreated(entry);
 
-      // Outcome is `leased` so caller can surface "saved" UX while
-      // the sweep retries the timer write in the background.
-      expect(result.outcome, LeaseOutcome.leased);
-      expect(h.manager.activeLeases.length, 1,
-          reason: 'Registry must NOT be rolled back on applyConfig '
-              'failure — preset is orphaned on controller, sweep retries');
-      // savePreset succeeded — the preset record landed.
+      expect(result.outcome, LeaseOutcome.writeFailed,
+          reason: 'an unverified cfg write must surface as writeFailed, not a '
+              'silent leased');
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'registry MUST roll back when the timer is not verified so '
+              'the next sweep re-promotes and re-arms it');
+      // savePreset still ran — the preset is orphaned on the controller until
+      // the re-arm overwrites it (expected, harmless).
       expect(h.service.lastSimulatedPresetSave, isNotNull);
-      expect(h.service.lastSimulatedPresetSave!.presetId,
-          h.manager.activeLeases.single.presetId);
-      // applyConfig was attempted (and failed per the injection).
-      expect(h.service.lastSimulatedConfigPayload, isNotNull);
     });
   });
 }

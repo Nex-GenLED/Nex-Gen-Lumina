@@ -16,9 +16,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -565,6 +567,92 @@ void main() {
       expect(rgbw[0], 0x00);
       expect(rgbw[1], 0x33);
       expect(rgbw[2], 0xA0);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: P0-3.1 — lease pre-arm can actually fire
+  //   (a) cfg timer en must be int 1, not bool true (WLED stores a bool
+  //       en as 0 = disabled → the lease timer never fires)
+  //   (b) lease preset must carry ib so psave persists root on/bri and
+  //       loading it from a master-off state powers the strip on
+  // ────────────────────────────────────────────────────────────────
+  group('P0-3.1 lease pre-arm fixes (defects a + b)', () {
+    test('(a) emitted cfg timer en is int 1, not bool true', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      h.manager.injectLeaseForTest(_makeLease(
+        dateKey: '2026-07-24',
+        slotIndex: 0,
+        presetId: 29,
+        wledHour: 17,
+        wledMin: 10,
+        dowMask: 16, // Friday — must be non-zero or the timer is skipped
+      ));
+      final ins = ((h.manager.buildLeaseTimersPayloadForTest()['timers']
+          as Map)['ins'] as List);
+      expect(ins, hasLength(1));
+      final t = ins.first as Map;
+      expect(t['en'], isA<int>(),
+          reason: 'WLED reads timer en type-strict; a JSON bool is stored '
+              'as 0 (disabled). Mirrors schedule_sync.dart en:1.');
+      expect(t['en'], 1);
+      expect(t['en'], isNot(true), reason: 'must be int 1, never bool true');
+    });
+
+    test('(b) ON lease preset includes ib + root on/bri', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Royals Chase',
+        color: const Color(0xFF004687), // KC Royals royal blue
+        brightness: 100,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      expect(p['ib'], isTrue,
+          reason: 'ib makes WLED persist root on/bri into the preset — '
+              'mirrors schedule_sync.dart pattern-preset ib post-9158c00');
+      expect(p['on'], isTrue);
+      expect(p['bri'], isA<int>());
+      expect(p['bri'], greaterThan(0));
+    });
+
+    test('(b) regression: an ON lease preset carries the ib+on:true+bri trio '
+        'that powers master ON from an off state (9158c00 bench-proven; '
+        'device-level is the P0-3.1 bench step)', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Game Day',
+        color: const Color(0xFF004687),
+        brightness: 80,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      // The exact combination WLED needs to persist master-on through a
+      // psave and thus assert power when the timer loads the preset from
+      // a master-off strip.
+      expect(p['ib'], isTrue);
+      expect(p['on'], isTrue);
+      expect((p['bri'] as num) > 0, isTrue);
+    });
+
+    test('(b) OFF lease preset also carries ib so it asserts master OFF '
+        '(sibling instance of the missing-ib defect)', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-07-24',
+        patternName: 'Off',
+        color: null,
+        brightness: 0,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      expect(p['on'], isFalse);
+      expect(p['ib'], isTrue,
+          reason: 'ib persists root on:false so loading the off-lease kills '
+              'master power — mirrors the schedule OFF preset');
     });
   });
 
@@ -1369,9 +1457,162 @@ void main() {
       expect(updaterCalls.single.id, 'expired');
     });
   });
+
+  // ────────────────────────────────────────────────────────────────
+  // Group: P0-3.3 — lease cfg write is VERIFIED (silent failure gone)
+  //   The lease arm now routes through the shared hardened pushCfgWithVerify.
+  //   Registration is conditional on a VERIFIED write; an unconfirmed write
+  //   rolls back so the next sweep re-arms (a kept record never re-arms — the
+  //   days-of-presets / zero-timers bug).
+  // ────────────────────────────────────────────────────────────────
+  group('P0-3.3 lease cfg write verification', () {
+    CalendarEntry todayEntry() => buildEntry(
+          dateKey: dateKeyFor(fixedNow),
+          onTime: '18:00',
+          offTime: '22:00',
+        );
+
+    test('verified write (confirmed) → lease registered, success', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      var calls = 0;
+      h.manager.cfgPushFn = (_, __, ___) async {
+        calls++;
+        return CfgPushOutcome.confirmed;
+      };
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.leased);
+      expect(calls, 1, reason: 'the arm goes through the hardened cfg push');
+      expect(h.manager.activeLeases.length, 1,
+          reason: 'a verified write keeps the lease registered');
+    });
+
+    test('2xx but readback shows nothing (notConfirmed) → surfaces failure '
+        'and does NOT register', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed,
+          reason: 'an unverified cfg write must not report success');
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'registry must roll back so the next sweep re-arms it');
+    });
+
+    test('firmware mismatch (2xx, wrong values stored) → not registered',
+        () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.mismatch;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed);
+      expect(h.manager.activeLeases, isEmpty);
+    });
+
+    test('update path: an unverified re-write DROPS the record (re-armed next '
+        'sweep), never a stale registry entry', () async {
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+      // First arm succeeds and registers.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.confirmed;
+      await h.manager.handleEntryCreated(todayEntry());
+      expect(h.manager.activeLeases.length, 1);
+      // Re-create (update) with an unverified write.
+      h.manager.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
+
+      final result = await h.manager.handleEntryCreated(todayEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed);
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'a failed update must not leave a stale armed record');
+    });
+
+    test('pushCfgWithVerify tolerates the readback race: first look absent, '
+        'delayed re-look present → confirmed (retry-then-succeed), no re-POST',
+        () async {
+      final sent = <Map<String, dynamic>>[
+        {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+      ];
+      final svc = _ScriptedVerifyService(
+        applyResult: true,
+        readbacks: [
+          const <Map<String, dynamic>>[], // first look: nothing yet (the race)
+          [
+            {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ], // delayed re-look: landed
+        ],
+      );
+
+      final outcome = await pushCfgWithVerify(
+        repo: svc,
+        payload: {
+          'timers': {'ins': sent}
+        },
+        ins: sent,
+        delay: (_) async {}, // instant clock — no real 10s wait
+      );
+
+      expect(outcome, CfgPushOutcome.confirmed);
+      expect(svc.applyCalls, 1,
+          reason: 'the retry is readback-only — never a second cfg POST');
+    });
+
+    test('readback comparison keys on en as INT 1: present+en:1 lands, '
+        'en:0 (stored-disabled — the bool-en fingerprint) does NOT', () {
+      final sent = <Map<String, dynamic>>[
+        {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+      ];
+      expect(
+          timersInsLanded(sent, [
+            {'en': 1, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ]),
+          isTrue);
+      expect(
+          timersInsLanded(sent, [
+            {'en': 0, 'hour': 17, 'min': 10, 'macro': 29, 'dow': 16},
+          ]),
+          isFalse,
+          reason: 'a stored-disabled timer is NOT landed');
+    });
+  });
 }
 
 // ─── Test fixtures ──────────────────────────────────────────────────────────
+
+/// Minimal [WledService] subclass that scripts applyConfig + fetchTimerInstances
+/// so [pushCfgWithVerify] can be exercised (the 2xx readback-race retry) without
+/// a live controller. Returns [readbacks] in order, repeating the last.
+class _ScriptedVerifyService extends WledService {
+  _ScriptedVerifyService({required this.applyResult, required this.readbacks})
+      : super('http://mock');
+
+  final bool applyResult;
+  final List<List<Map<String, dynamic>>?> readbacks;
+  int _fetch = 0;
+  int applyCalls = 0;
+
+  @override
+  Future<bool> applyConfig(Map<String, dynamic> cfg) async {
+    applyCalls++;
+    return applyResult;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    final r = _fetch < readbacks.length ? readbacks[_fetch] : readbacks.last;
+    _fetch++;
+    return r;
+  }
+
+  @override
+  Future<bool> ping() async => true;
+}
 
 CalendarEntryLease _makeLease({
   required String dateKey,
