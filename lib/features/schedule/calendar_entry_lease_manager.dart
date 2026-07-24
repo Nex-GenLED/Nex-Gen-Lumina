@@ -1215,6 +1215,15 @@ class CalendarEntryLeaseManager {
     };
   }
 
+  /// Public view of the active lease timers (macro 26-41), for the schedule sync
+  /// to MERGE so a schedule cfg write preserves leases instead of stub-clobbering
+  /// them (P0-3.2). Reuses the SAME [_buildLeaseTimersPayload] the lease
+  /// manager's own merged write uses — single source of truth, no second merge
+  /// implementation. Returns the unpadded real lease-timer list (may be empty).
+  List<Map<String, dynamic>> activeLeaseTimers() =>
+      ((_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List)
+          .cast<Map<String, dynamic>>();
+
   /// Build the full cfg.timers.ins payload merging:
   ///   1. ScheduleItem-driven timers (enabled, non-evicted) from
   ///      [ScheduleSyncService.buildCfgPayload]
@@ -1374,6 +1383,21 @@ final calendarEntryLeaseManagerProvider =
   });
 
   return manager;
+});
+
+/// Active lease timers (macro 26-41) for the SCHEDULE sync to merge so a
+/// schedule cfg write preserves them (P0-3.2 clobber fix). Flag-gated: returns
+/// `[]` unless lease live-writes are enabled — when off, the lease manager never
+/// armed lease timers on the controller, so there is nothing to preserve, and
+/// the manager is NOT instantiated (the short-circuit runs before reading it).
+/// This keeps existing schedule-sync tests (flag defaults false) behaving
+/// exactly as before: syncAll sees an empty list and its path is unchanged.
+final calendarLeaseActiveTimersProvider =
+    Provider<List<Map<String, dynamic>>>((ref) {
+  if (!ref.watch(calendarLeaseLiveWritesEnabledSyncProvider)) {
+    return const <Map<String, dynamic>>[];
+  }
+  return ref.watch(calendarEntryLeaseManagerProvider).activeLeaseTimers();
 });
 
 /// Internal result type from [CalendarEntryLeaseManager._writeLeaseToWled].

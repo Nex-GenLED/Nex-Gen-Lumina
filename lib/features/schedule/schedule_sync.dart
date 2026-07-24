@@ -15,6 +15,10 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart'
     show CfgWriteUnsupportedException, WledRepository;
 import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
+// P0-3.2: lease-timer provider so syncAll can MERGE active lease timers
+// (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show calendarLeaseActiveTimersProvider;
 
 /// A real, ENABLED timer entry — not a disabled/padding stub, not a solar
 /// sentinel: `en` is truthy (bool `true` or int `1`), `macro != 0`, `hour != 255`.
@@ -385,7 +389,12 @@ class ScheduleSyncService {
   /// controller.
   static ({List<ScheduleItem> armed, bool overflowed}) splitByTimerCapacity(
       List<ScheduleItem> armable,
-      {bool solarEnabled = false}) {
+      {bool solarEnabled = false, int maxSlots = kMaxWledTimers}) {
+    // [maxSlots] is the GENERAL clock-slot budget available to schedules. It
+    // defaults to the full table but syncAll passes `kMaxWledTimers - leaseCount`
+    // so active lease timers (macro 26-41) keep their reserved slots — lease
+    // priority (P0-3.2). Clamped to a sane range.
+    final budget = maxSlots.clamp(0, kMaxWledTimers);
     final armed = <ScheduleItem>[];
     var slotsUsed = 0;
     var overflowed = false;
@@ -400,7 +409,7 @@ class ScheduleSyncService {
       // A clock ON needs a general slot; a solar ON does not. Only overflow on
       // a schedule that actually needs a general slot and has none left — a
       // solar-only schedule always fits (it uses slot 8/9).
-      if (!onSolar && slotsUsed >= kMaxWledTimers) {
+      if (!onSolar && slotsUsed >= budget) {
         overflowed = true;
         break;
       }
@@ -408,7 +417,7 @@ class ScheduleSyncService {
       if (s.hasOffTime &&
           s.offTimeLabel != null &&
           !offSolar &&
-          slotsUsed < kMaxWledTimers) {
+          slotsUsed < budget) {
         slotsUsed += 1; // clock OFF timer
       }
       armed.add(s);
@@ -1147,13 +1156,34 @@ class ScheduleSyncService {
       armable.add(s);
     }
 
-    // ── Slot capacity: which armable schedules actually fit the 8-slot table ─
+    // ── P0-3.2: preserve active lease timers (macro 26-41) ──────────────────
+    // The lease manager arms near-term dated leases in the high timer slots.
+    // syncAll MUST merge them into its cfg write — otherwise padTimersToMax
+    // stub-clobbers them (defect d: preset survives, lease timer never does).
+    // Source = the lease manager's own activeLeaseTimers() via a flag-gated
+    // provider (single source of truth; reuses _buildLeaseTimersPayload — no
+    // second merge impl). Returns [] when lease live-writes are off, so this is
+    // a no-op on the existing schedule-only path. Defensive: any read failure →
+    // schedule-only (never let a lease-read error break a schedule sync).
+    List<Map<String, dynamic>> leaseTimers;
+    try {
+      leaseTimers = ref.read(calendarLeaseActiveTimersProvider);
+    } catch (e) {
+      debugPrint('ScheduleSync: lease-timer read failed — $e '
+          '(proceeding schedule-only)');
+      leaseTimers = const [];
+    }
+    final leaseCount = leaseTimers.length;
+
+    // ── Slot capacity: which armable schedules actually fit the table ───────
     // buildCfgPayload truncates at kMaxWledTimers; mirror its slot accounting
     // here so we (a) surface a loud warning when schedules overflow and (b)
     // count only the schedules that armed — never claim success for one that
-    // silently fell off the controller.
-    final capacity =
-        splitByTimerCapacity(armable, solarEnabled: solarEnabled);
+    // silently fell off the controller. LEASE-PRIORITY (P0-3.2): the general
+    // budget is reduced by the active lease count so a schedule can never claim
+    // a lease-reserved slot; overflow schedules surface the existing 8/8 warning.
+    final capacity = splitByTimerCapacity(armable,
+        solarEnabled: solarEnabled, maxSlots: kMaxWledTimers - leaseCount);
     final armedSchedules = capacity.armed;
     if (capacity.overflowed) {
       presetErrors.add(
@@ -1163,15 +1193,20 @@ class ScheduleSyncService {
           'schedule(s) could not arm — WLED timer table full (8/8)');
     }
 
-    // Step 2: Build and push timer configuration. Clock timers fill slots 0-7;
-    // the array is padded so a vacated slot is overwritten with a disabled stub
-    // (slot reclaim — clears dow:0 / stale timers). When solar is enabled the
-    // push is a 10-entry array with the sunrise timer at slot 8 and sunset at
-    // slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
+    // Step 2: Build and push timer configuration. Clock timers fill the general
+    // slots; lease timers (macro 26-41) are MERGED in so the write preserves
+    // them; the array is padded so a vacated slot is overwritten with a disabled
+    // stub (slot reclaim — clears dow:0 / stale timers). When solar is enabled
+    // the push is a 10-entry array with the sunrise timer at slot 8 and sunset
+    // at slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
     final built =
         buildCfgPayload(armedSchedules, solarEnabled: solarEnabled);
     final builtIns = ((built['timers'] as Map)['ins'] as List)
         .cast<Map<String, dynamic>>();
+    // scheduleIns = SCHEDULE-derived timers only (for the empty-armed guard —
+    // preserved lease timers must NOT mask a schedules-produced-nothing bug).
+    // ins = the MERGED array actually written (schedules + leases).
+    final List<Map<String, dynamic>> scheduleIns;
     final List<Map<String, dynamic>> ins;
     if (solarEnabled) {
       final solar = solarTimerSlots(armedSchedules);
@@ -1183,22 +1218,28 @@ class ScheduleSyncService {
             'controller — "$who" was not armed.');
         debugPrint('ScheduleSync: solar slot already taken — dropped $who');
       }
-      ins = assembleSolarAwareIns(builtIns,
+      scheduleIns = assembleSolarAwareIns(builtIns,
+          sunrise: solar.sunrise, sunset: solar.sunset);
+      // Lease timers are CLOCK timers → merge into the general pool BEFORE solar
+      // assembly (solar entries own the dedicated slots 8/9).
+      ins = assembleSolarAwareIns([...builtIns, ...leaseTimers],
           sunrise: solar.sunrise, sunset: solar.sunset);
     } else {
-      ins = padTimersToMax(builtIns);
+      scheduleIns = builtIns;
+      ins = padTimersToMax([...builtIns, ...leaseTimers]);
     }
     final payload = <String, dynamic>{
       'timers': {'ins': ins},
     };
 
     // Empty-armed guard: armedSchedules passed every arm check, so they MUST
-    // have produced real timer entries. If the built payload has NONE (all
-    // stubs), something in the build/reader dropped them (e.g. an enabled flag
-    // that didn't survive the doc round-trip — the AI-doc class). The
-    // content-match comparator would then trivially pass on an all-stub payload
-    // and report a false green. Fail loudly; never POST a no-op that arms nothing.
-    if (armedSchedules.isNotEmpty && !ins.any(isRealEnabledTimer)) {
+    // have produced real timer entries. If the SCHEDULE-derived payload has NONE
+    // (all stubs), something in the build/reader dropped them (e.g. an enabled
+    // flag that didn't survive the doc round-trip — the AI-doc class). The
+    // content-match comparator would then trivially pass and report a false
+    // green. Checked on scheduleIns (NOT the merged ins) so preserved lease
+    // timers can't mask the bug. Fail loudly; never POST a no-op that arms nothing.
+    if (armedSchedules.isNotEmpty && !scheduleIns.any(isRealEnabledTimer)) {
       debugPrint('ScheduleSync: ABORT — ${armedSchedules.length} armable '
           'schedule(s) but the built payload has zero real timers (all stubs). '
           'Refusing to POST a no-op that would false-green.');
