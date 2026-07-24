@@ -19,7 +19,10 @@
 ///      Title Case fallback for remaining chunks.
 library;
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+// (Was `import 'package:flutter/foundation.dart' show visibleForTesting;` — dropped
+// so this util stays pure Dart: it's imported by schedule_models.dart, which the
+// pure-Dart bench harness pulls in. The three debug*ForTest getters below are
+// test-only by naming convention; the annotation was only a lint hint.)
 
 /// Two- and three-letter chunks that should preserve uppercase when they
 /// appear in a pattern slug. Explicit allowlist (per Item #88c spec):
@@ -203,13 +206,10 @@ String teamShortName(String officialName) {
   return officialName.split(' ').last;
 }
 
-@visibleForTesting
+// test-only helpers (by naming convention — see note at top of file)
 Map<String, String> get debugAllSlugOverridesForTest =>
     Map<String, String>.unmodifiable(_slugOverrides);
 
-@visibleForTesting
-Map<String, String> get debugTeamShortNamesForTest =>
-    _kTeamShortNames;
+Map<String, String> get debugTeamShortNamesForTest => _kTeamShortNames;
 
-@visibleForTesting
 Set<String> get debugAcronymsForTest => _kAcronyms;

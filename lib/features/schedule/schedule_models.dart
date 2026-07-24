@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Represents a single automation schedule for lights/patterns.
@@ -195,5 +194,8 @@ class ScheduleItem {
   }
 
   @override
-  String toString() => describeIdentity(this);
+  // describeIdentity equivalent without a flutter/foundation dependency (this
+  // model is imported by the pure-Dart bench harness — no dart:ui).
+  String toString() =>
+      '$runtimeType#${identityHashCode(this).toRadixString(16)}';
 }
