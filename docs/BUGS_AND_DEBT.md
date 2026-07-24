@@ -248,6 +248,18 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
     `functions/src/applySyncPattern.ts:159-190,312-325`.
 
+- [ ] **P1-46 — MAIN suite is RED (2 pre-existing failures) — masks regressions (green-main gate)**
+  - Status: OPEN · Evidence: reported (verified on main + every build branch, 2026-07-24)
+  - `main` (and every branch off it) fails exactly 2 tests: `cloud_ai_processor_normalize`
+    ('Sunset') and `schedule_sync_time_parse` (solar). Because the suite is ALWAYS red, a NEW
+    regression is invisible — you can't tell "2 failing" (known) from "3 failing" (a fresh break)
+    at a glance, and any green-gate on PRs is unusable. Fix = repair or explicitly quarantine
+    (skip-with-reason) the 2 so `main` goes GREEN; thereafter red==real regression and the suite
+    can gate merges. This is the release-gate/trust framing of the SAME two tests tracked by
+    **P1-8** (fix-or-delete the stale tests) — resolve together; P1-8 is the mechanism, P1-46 is
+    the "keep main green" outcome + gate.
+  - Files: `test/…/cloud_ai_processor_normalize*`, `test/…/schedule_sync_time_parse*` (see P1-8).
+
 ---
 
 ## P2 — hardening & platform
