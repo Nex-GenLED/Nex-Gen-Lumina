@@ -62,7 +62,21 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Status: OPEN · Evidence: bench-proven (symptom) / suspected (cause)
   - `gc.col` flipped 2.8→1 during the AI-command window; self-healed by the pusher on-connect.
     Source never found. Fold into the P0-1/P0-2 AI-path diagnostic.
-  - Files: AI apply path (see P0-1) + `light.gc` writer (gamma push on connect).
+  - NEW EVIDENCE 2026-07-24: `gc.col` observed 2.8 at ~10:40 and 1 at ~10:47. Only actions in the
+    window: P1-43 channel-power taps (`/json/state` only — CANNOT write cfg, so exonerated), app
+    connects (pusher ASSERTS 2.8 — the medic, not the culprit), and throwaway schedule CREATION
+    with a pattern + Sync. Sync itself was previously exonerated (gamma unchanged across multiple
+    syncs 2026-07-21) → prime suspect NARROWS to the **design/pattern-apply path** — consistent
+    with Symptom C's original AI-command window, which also applied a design. The caught-in-the-act
+    diagnostic should instrument pattern/design applies FIRST.
+  - NEIGHBORHOOD-AUDIT NOTE 2026-07-24: gamma `no-gc:false` (realtime/DDP gamma NOT bypassed) is
+    re-asserted on EVERY connect by the LAN-only watchdog/healer
+    ([controller_defaults_healer.dart:615-709](lib/features/wled/controller_defaults_healer.dart#L615),
+    readback-gated `pushGammaConfig`) — but LAN-ONLY: a fleet member controlled only via the remote
+    relay never gets the heal, so it could carry stale `no-gc:true` from a pre-fix provision.
+    Bench 192.168.1.150 verified `if.live.no-gc:false`, `light.gc {bri:1,col:2.8,val:2.8}` (correct).
+    Fleet-wide parity is unverifiable remotely — needs a per-controller LAN read.
+  - Files: AI apply path (see P0-1) + design/pattern-apply path + `light.gc` writer (gamma push on connect).
 
 - [ ] **P1-6 — Unexplained en:1 evidence row (git archaeology)**
   - Status: OPEN · Evidence: reported (contradicts curl truth table)
@@ -157,9 +171,18 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     channel/segment layout-save flow, `lib/features/schedule/calendar_entry_lease_manager.dart`
     (shares the psave path).
 
-- [ ] **P1-43 — Per-channel power is master-global (both channels toggle together)**
-  - Status: FIX IMPLEMENTED (additive `setChannelPower` + per-chip power icon) — BENCH-VERIFY owed ·
-    Evidence: bench-proven (2026-07-23: curl seg-scoped on:false darkened ch1 only; app power toggles both)
+- [x] **P1-43 — Per-channel power is master-global (both channels toggle together)** — DONE `cdc436b`
+  - Status: DONE `cdc436b` (merged to main `ad6ae98`, tag `v2.5.10+53`) · Evidence: bench-proven
+  - BENCH-VERIFIED 2026-07-24 (192.168.1.150, build cdc436b/+53, 290 LEDs ch1=128/ch2=162): case 3
+    (critical) from master-off, front on → ONLY front lit, one POST — PASS; case 4 back on while
+    master on → seg-only, front undisturbed — PASS; case 1 front off → only front dies — PASS;
+    case 2 last lit channel off → master reads off — PASS. Two-boundary throwaway also passed
+    (curl /json/cfg 10:50 macro:10 / 10:55 macro:2, both en:1, dow:16; ON 10:50, OFF 10:55 fully
+    dark). Fix: additive `setChannelPower` (live getState + fresh-bounds cfg refresh, id-only
+    fallback) → `buildChannelPowerPayload` 4 shapes; per-chip power icon; `togglePower` + 5 master
+    callers untouched; `/json/state` only.
+  - Original diagnosis (bench-proven 2026-07-23: curl seg-scoped on:false darkened ch1 only; app
+    power toggled both):
   - Firmware segment independence is confirmed
     (`{"seg":[{"id":0,"on":false},{"id":1,"on":true}]}` darkens ch1, leaves ch2 lit). The app's
     power path writes **top-level master `{"on":bool}`** regardless of the channel selector, so a
@@ -189,6 +212,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     [dashboard_voice_control.dart:126](lib/features/voice/dashboard_voice_control.dart#L126)/:137),
     Game Day resume [game_day_autopilot_providers.dart:84](lib/features/autopilot/game_day_autopilot_providers.dart#L84),
     Neighborhood resume. Fix must add a new seg-scoped action, not repoint `togglePower`.
+
+- [ ] **P1-44 — Neighborhood Sync server-fanout path is DORMANT in production (config/sync_fanout unreadable)**
+  - Status: OPEN · DECISION: **keep the fanout code, mark DORMANT** pending a Neighborhood Sync
+    launch decision — DO NOT delete. Evidence: verified-by-deployed-state (2026-07-24, project
+    `icrt6menwsv2d8all8oijs021b06s5`)
+  - The foreground crew-fanout path (`NeighborhoodService.fanoutAdHocSync`
+    [neighborhood_service.dart:472] → CF `applySyncPattern`) is gated on
+    `config/sync_fanout.enabled` ([sync_fanout_feature_flag.dart]). DEPLOYED-STATE CHECK: (1) there
+    is **no `match /config/sync_fanout`** rule in the deployed ruleset OR the repo — default-deny;
+    (2) the **doc does not exist** (Firestore REST → 404). So the flag reader (client AND the CF's
+    own `readSyncFanoutEnabled`) always falls back to `false` → the fanout branch is unreachable.
+  - **DOUBLE-DEAD finding (2026-07-24):** `bootstrapSyncFanoutFlagDoc()`
+    [sync_fanout_feature_flag.dart:71] is DEFINED but **NEVER CALLED** anywhere. So the doc is
+    double-dead: nothing creates it, and even if bootstrap ran, the missing rule would default-deny
+    the client create anyway. That is why it is 404.
+  - **ACTIVATION STEPS (future session, when a launch decision is made — deliberate, not accidental):**
+    (a) create `config/sync_fanout` with `enabled:false` — via a `bootstrapSyncFanoutFlagDoc()` call
+    at launch OR the console (needs a create-allowing rule first: mirror
+    `config/schedules_subcollection` [firestore.rules:1471], which allows create when
+    `enabled==false`); (b) verify the anti-strobe rate limiter `reserveFanoutSlot` is live
+    [applySyncPattern.ts:166]; (c) flip `enabled:true` in the console ONLY after (b) and a real-crew
+    test. NOTE: a READ-ONLY rule was added separately (see below) to stop the per-launch
+    permission-denied; that does NOT activate fanout (no doc, no create rule → flag stays false).
+  - **Five never-executed-in-production code paths (dormant, keep):**
+    1. Foreground fanout branch `broadcastSync` — [neighborhood_providers.dart:336-346]
+    2. `NeighborhoodService.fanoutAdHocSync` (HTTP POST, `fanout:true`) — [neighborhood_service.dart:472]
+    3. CF flag-gated fanout block — [applySyncPattern.ts:159-190]
+    4. `reserveFanoutSlot` (rate limit) + `fanoutToCrew` — [applySyncPattern.ts:166,180]
+    5. `bootstrapSyncFanoutFlagDoc()` (never called) — [sync_fanout_feature_flag.dart:71]
+  - **DONE (partial):** read-only `match /config/sync_fanout` rule added to `firestore.rules`
+    (hygiene — stops the fleet-wide per-launch permission-denied on the flag listen; flag stays
+    absent/false). NOT deployed (rules deploy authorized separately).
+  - Files: `firestore.rules` (read-only sync_fanout block added; create/flip still absent by design),
+    `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
+    `functions/src/applySyncPattern.ts:159-190,312-325`.
+
+- [ ] **P1-46 — MAIN suite is RED (2 pre-existing failures) — masks regressions (green-main gate)**
+  - Status: OPEN · Evidence: reported (verified on main + every build branch, 2026-07-24)
+  - `main` (and every branch off it) fails exactly 2 tests: `cloud_ai_processor_normalize`
+    ('Sunset') and `schedule_sync_time_parse` (solar). Because the suite is ALWAYS red, a NEW
+    regression is invisible — you can't tell "2 failing" (known) from "3 failing" (a fresh break)
+    at a glance, and any green-gate on PRs is unusable. Fix = repair or explicitly quarantine
+    (skip-with-reason) the 2 so `main` goes GREEN; thereafter red==real regression and the suite
+    can gate merges. This is the release-gate/trust framing of the SAME two tests tracked by
+    **P1-8** (fix-or-delete the stale tests) — resolve together; P1-8 is the mechanism, P1-46 is
+    the "keep main green" outcome + gate.
+  - Files: `test/…/cloud_ai_processor_normalize*`, `test/…/schedule_sync_time_parse*` (see P1-8).
 
 ---
 
@@ -320,6 +390,56 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `schedule_providers.dart`, `user_model.dart`, `firestore.rules`, all schedule R/W;
     flag `schedules_subcollection_feature_flag.dart`.
 
+- [ ] **P2-45 — Controller-native sync/realtime config is UNMANAGED (fleet-drift risk) + DDP/Zone scaffolding untested**
+  - Status: OPEN · Evidence: verified-by-source + verified-by-bench (2026-07-24)
+  - Neighborhood Sync does NOT use controller-native sync — it broadcasts via Firestore and each
+    member self-applies over HTTP `applyJson` (`neighborhood_sync_engine.dart:625-734`). So
+    `if.sync.*` / `if.live` / `udpn` are never touched by neighborhood code. Install disables native
+    UDP (`wled_config_pusher.dart:231` writes `udpn:{send:false,recv:false}`); the ONLY code that
+    ENABLES `udpn`/`ddp` is the SEPARATE Site/Zone DDP feature
+    (`DDPSyncController.applyZoneSync` [site_providers.dart:109], `WledService.configureSyncSender/Receiver`
+    [wled_service.dart:788-821], `DdpService` RawDatagramSocket:4048 [ddp_service.dart:20-63, has a
+    `DDP(sim)` simulate branch]), reachable ONLY from Site settings [settings_page.dart:215] and
+    UNTESTED (no DDP-transport test exists). Bench 192.168.1.150 live: `if.sync.send.en:false`,
+    `if.sync.recv` flags on (bri/col/fx/pal), `if.live.en:true` (realtime IN on, port 5568),
+    ports 21324/65506 (WLED defaults) — none of this is app-asserted, so it's whatever each
+    controller happens to carry (drift risk if any future path relies on it). WLED UDP-notifier
+    sync + E1.31 are not used by either feature.
+  - Decision: either (a) formally OWN a leader/member controller-sync policy (assert `if.sync`/
+    `udpn`/`if.live` per role on connect) if native sync is ever put on the Neighborhood path, or
+    (b) document that Neighborhood Sync is Firestore-only and treat the DDP/Zone feature as a
+    separate, test-owed surface. Today there is NO leader election (creator=admin, `isParticipating`
+    =per-member runtime gate) — every member self-applies.
+  - Files: `lib/features/site/site_providers.dart`, `lib/features/wled/ddp_service.dart`,
+    `lib/features/wled/wled_service.dart` (configureSync*), `lib/services/wled_config_pusher.dart`.
+
+- [ ] **P2-46 — Remove vestigial Sports Alerts settings surface (orphaned pre-Game-Day UI)**
+  - Status: OPEN · Evidence: verified-by-source (audit 2026-07-24) · **Execute AFTER P0-3 lands — not now**
+  - Sports Alerts (System → Settings) is the superseded predecessor of Game Day score celebrations.
+    Its toggle reads/writes a SharedPreferences flag (`sports_alert_configs`, `ScoreAlertConfig.isEnabled`)
+    whose ONLY runtime reader is the **kill-switched** background service
+    (`kSportsBackgroundServiceEnabled=false` [sports_background_service.dart:29], "was already inert —
+    updateControllerIps never wired up"). The LIVE celebration path derives teams from
+    `game_day_autopilot` ∩ per-team `scoreCelebrationEnabled` and explicitly ignores this flag
+    ([foreground_celebration_providers.dart:98-105]; header :5-7 "NOT the dead direct-IP path"). It
+    does not share state with My Teams (Firestore `game_day_autopilot` + profile `sports_teams`) — the
+    only bridge is one-way and unrelated to the toggle ([live_scoring_prompt.dart:94-104]). This is the
+    remove-vs-wire "(a) dead UI" verdict.
+  - **DELETE set:** `lib/features/sports_alerts/ui/sports_alerts_screen.dart`, `.../ui/team_picker_screen.dart`,
+    `.../ui/zone_assignment_screen.dart`, `.../providers/sports_alert_providers.dart`,
+    `.../providers/sports_alert_notifier.dart`, `_SportsAlertsCard` + route in
+    `lib/features/site/settings_page.dart` (:1002-1007), `.../services/sports_background_service.dart`
+    + its `lib/services/autopilot_scheduler.dart:480` `startSportsService()` call, and the
+    `lib/features/game_day/live_scoring_prompt.dart:94-104` prefs write.
+  - **MUST-KEEP (reused by the LIVE foreground path — deleting breaks working celebrations):**
+    `lib/features/sports_alerts/models/score_alert_config.dart` (`ScoreAlertConfig`),
+    `.../services/score_monitor_service.dart`, `.../services/foreground_celebration_coordinator.dart`
+    (incl. `CelebrationTeam.toAlertConfig()` :67), `.../services/foreground_celebration_providers.dart`.
+  - **Coordinate with P2-17** (`_controllerIps` / `alert_trigger_service` — same dead pipeline).
+  - **(b) alternative — NOT this item:** if app-closed score celebrations are ever wanted, that is a
+    SEPARATE feature (re-enable the service + repoint it at `game_day_autopilot` instead of the prefs
+    store + wire `controllerIps` + Play FGS declaration), NOT a revival of this toggle.
+
 ---
 
 ## Features promised (post-cleanup)
@@ -344,13 +464,23 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## Multiplier — do FIRST after main merge
 
-- [ ] **M-21 — `bench/` CLI harness**
-  - Status: OPEN · Evidence: n/a (tooling)
-  - Seed / sync-sim / verify / probe against the bench controller (`192.168.1.150`). Extract
-    from this week's proven curl loops: cfg write + readback assert, en truth-table check,
-    preset shape verify, timer-fire test, presets.json diff. Nearly every item above needs
-    bench verification; this makes each one cheaper.
-  - Files: new `bench/` dir (CLI scripts).
+- [x] **M-21 — `bench/` CLI harness** — DONE (inaugural all-green 2026-07-24, 21/21)
+  - Status: DONE · Evidence: bench-proven (`dart run bench/bin/bench.dart all` → 21/21, exit 0,
+    192.168.1.150, 2026-07-24)
+  - Pure-Dart CLI (`bench/bin/bench.dart`) with 9 subcommands: probe (+layout-drift vs
+    `known_layout.json`, P1-42), snapshot, cfg-truth (en int→1/bool→0, permanent regression
+    guard), preset-verify, sync-sim, fire-test, channel-power (P1-43 four shapes), restore, all.
+    REUSES the app's REAL builders via extraction to Flutter-free files (re-exported, app
+    unchanged): `buildCfgPayload`, `timersInsLanded`/`isRealEnabledTimer` (→ `timer_landing.dart`,
+    `cfg_payload_builder.dart`), `buildChannelPowerPayload` (→ `channel_power_payload.dart`),
+    `deviceChannelsFromConfig`/`DeviceChannel` (→ `device_channel.dart`),
+    `WledLedBus`/`WledHardwareConfig` (→ `wled_hardware_config.dart`). Discipline as code:
+    Content-Type + Content-Length on every POST (chunked is rejected by WLED — caught on the
+    inaugural run), capture/restore brackets, VERIFIED-BY-BENCH evidence, exit 0/1. Assertion/
+    diff logic unit-tested (`test/bench/bench_core_test.dart`, 19 tests). Extraction proven
+    behavior-preserving: full suite unchanged at 1746 pass / 2 pre-existing fail, 0 new lint.
+  - Files: `bench/` (bin/bench.dart, src/bench_core.dart, src/wled_client.dart, config.json,
+    known_layout.json, README.md) + the 5 extracted pure lib files above.
 
 ---
 

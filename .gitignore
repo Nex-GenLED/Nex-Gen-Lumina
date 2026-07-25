@@ -154,6 +154,7 @@ scripts/diag-firestore-*.json
 scripts/_diag_*.js
 scripts/_monitor_*.js
 scripts/_test_rules_block.js
+scripts/_test_sync_fanout_rule.js
 
 # Catalog seeder — run once to seed the canonical SKU list, then forget.
 # Per Tyler's request, kept out of source control to discourage re-runs.

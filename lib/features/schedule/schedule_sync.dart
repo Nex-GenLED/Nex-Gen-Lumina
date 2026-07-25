@@ -19,74 +19,16 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show WledService
 // (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
     show calendarLeaseActiveTimersProvider;
+// Pure-Dart extractions (bench/ CLI imports these without dart:ui). Imported for
+// internal use AND re-exported so existing importers of schedule_sync.dart still
+// resolve timersInsLanded / isRealEnabledTimer.
+import 'package:nexgen_command/features/schedule/timer_landing.dart';
+export 'package:nexgen_command/features/schedule/timer_landing.dart'
+    show isRealEnabledTimer, timersInsLanded;
+import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart' as cfg;
 
-/// A real, ENABLED timer entry — not a disabled/padding stub, not a solar
-/// sentinel: `en` is truthy (bool `true` or int `1`), `macro != 0`, `hour != 255`.
-/// Shared by the readback comparator ([timersInsLanded]) and syncAll's
-/// empty-armed guard so both agree on what "an armable timer" is.
-@visibleForTesting
-bool isRealEnabledTimer(Map<String, dynamic> t) {
-  final en = t['en'];
-  final enOn = en == true || en == 1;
-  final macro = (t['macro'] is num) ? (t['macro'] as num).toInt() : 0;
-  final hour = (t['hour'] is num) ? (t['hour'] as num).toInt() : -1;
-  return enOn && macro != 0 && hour != 255;
-}
-
-/// CONTENT-match readback comparison for the schedule cfg write: does the
-/// controller's timer table CONTAIN the real timers we sent, regardless of
-/// position?
-///
-/// Bench-proven readback shape (WLED vid 2507300, SKIKBILY): the controller
-/// echoes the enabled real entries + the two solar sentinel entries (hour:255)
-/// and DROPS disabled padding stubs — so the array COMPACTS and sent-index ≠
-/// readback-index. Per-index comparison is therefore invalid; we match by
-/// content anywhere in the array.
-///
-/// Semantics:
-/// - From [sent], consider only ENABLED REAL entries: `en==1 && macro!=0 &&
-///   hour!=255` (this drops disabled/padding stubs and solar sentinels).
-/// - Each such entry must have SOME entry in [readback] with `en==1` and
-///   matching hour/min/macro/dow (order-independent).
-/// - If [sent] has no real entries (schedule cleared), the write is confirmed
-///   iff [readback] contains NO enabled NON-solar entries (hour!=255) — the
-///   controller's real timers were cleared; its solar sentinels are ignored.
-/// - `en` is normalized (bool/int → int); solar entries (hour==255) and any
-///   readback entries that don't match a sent real entry are ignored.
-///
-/// Field-level, not raw-JSON equality: WLED returns extra keys (start/end/
-/// mon/day) and reorders, so only the fields we control are compared.
-@visibleForTesting
-bool timersInsLanded(
-  List<Map<String, dynamic>> sent,
-  List<Map<String, dynamic>> readback,
-) {
-  int en(Object? v) => (v == true || v == 1) ? 1 : 0;
-  int fld(Map<String, dynamic> m, String k) =>
-      (m[k] is num) ? (m[k] as num).toInt() : -1;
-
-  final sentReal = sent.where(isRealEnabledTimer).toList();
-
-  if (sentReal.isEmpty) {
-    // Cleared schedule: the controller must show no enabled non-solar timers.
-    return !readback
-        .any((r) => en(r['en']) == 1 && fld(r, 'hour') != 255);
-  }
-
-  // Every real timer we sent must appear somewhere in the readback (en==1,
-  // matching controlled fields). Solar sentinels and unrelated readback entries
-  // are ignored implicitly — they won't match a non-255 sent hour.
-  for (final s in sentReal) {
-    final present = readback.any((r) =>
-        en(r['en']) == 1 &&
-        fld(r, 'hour') == fld(s, 'hour') &&
-        fld(r, 'min') == fld(s, 'min') &&
-        fld(r, 'macro') == fld(s, 'macro') &&
-        fld(r, 'dow') == fld(s, 'dow'));
-    if (!present) return false;
-  }
-  return true;
-}
+// isRealEnabledTimer + timersInsLanded moved to timer_landing.dart (pure Dart)
+// and are re-exported above.
 
 /// Patient verification of a cfg write that hit the controller's post-commit
 /// network stall (see [ScheduleSyncService._pushCfgWithVerify]). The write is
@@ -556,156 +498,12 @@ class ScheduleSyncService {
   Map<String, dynamic> buildCfgPayload(
     List<ScheduleItem> schedules, {
     bool solarEnabled = false,
-  }) {
-    // Eviction (Item #61 Workstream B): items soft-evicted by a
-    // CalendarEntry lease are filtered here so the freed slot is
-    // genuinely free on the controller side. Re-enable is automatic —
-    // the CalendarEntryLeaseManager periodic sweep clears the field
-    // once disabledUntil passes.
-    final enabled = schedules
-        .where((s) => s.enabled && !s.isCurrentlyEvicted)
-        .toList(growable: false);
-
-    // SCHEDULE BOUNDARY INVARIANT — do not violate:
-    // Each boundary of a recurring schedule (ON at sunset, OFF at sunrise) is an
-    // INDEPENDENT entry in the controller's timers.ins[], fired by the WLED RTC.
-    // A boundary MUST fire at its trigger time regardless of the currently-applied
-    // design. A manual override changes applied state only; it must never void a
-    // pending boundary. If schedule firing is ever moved off the controller RTC
-    // into an in-app or server-side applier, each boundary must STILL be evaluated
-    // independently at its trigger time — NEVER gate the OFF boundary on an "is the
-    // schedule still the active design" check. Doing so reintroduces the
-    // manual-override-survives-all-day bug that the RTC two-timer model avoids.
-    final List<Map<String, dynamic>> timers = [];
-
-    for (final s in enabled) {
-      if (timers.length >= kMaxWledTimers) break;
-
-      final dow = _computeDowMask(s.repeatDays);
-
-      // Defense in depth (never emit a dead timer): an empty or
-      // all-unrecognized repeatDays yields an all-zero WLED dow mask, which the
-      // firmware reads as "no days" — the timer takes a slot but NEVER fires.
-      // syncAll's arm-boundary guard already refuses these with a loud warning;
-      // skip here too so NO path can write a dow:0 orphan. Policy: refuse, never
-      // silently normalize to daily.
-      if (dow == 0) {
-        debugPrint('ScheduleSync: skipped dow:0 timer for "${s.actionLabel}" '
-            '(repeatDays=${s.repeatDays})');
-        continue;
-      }
-
-      final onSolar = _isSolarLabel(s.timeLabel);
-      final offSolar = s.hasOffTime &&
-          s.offTimeLabel != null &&
-          _isSolarLabel(s.offTimeLabel!);
-
-      if (!solarEnabled) {
-        // FLAG OFF (production / default): solar never fires under the old
-        // hour:24/25 encoding, so refuse the WHOLE schedule (a half-solar
-        // schedule is still broken). syncAll's arm guard warns the user; this
-        // covers the lease-manager path that bypasses those guards. See
-        // memory/project_solar_schedules_never_fire.
-        if (onSolar || offSolar) {
-          debugPrint('ScheduleSync: skipped solar timer for "${s.actionLabel}" '
-              '(on=${s.timeLabel} off=${s.offTimeLabel}) — solar disabled '
-              '(solar_scheduling flag off / bench gate)');
-          continue;
-        }
-      }
-      // FLAG ON: a solar boundary is OMITTED from the general 0-7 timers here
-      // and encoded into its dedicated slot 8/9 by [solarTimerSlots] +
-      // [assembleSolarAwareIns]. The CLOCK boundary of a mixed schedule (e.g.
-      // clock ON + sunrise OFF) still lands in slots 0-7 below.
-
-      // Determine preset ID: use assigned presetId if available, else fall back to legacy behavior
-      final presetId = s.presetId ?? _presetForAction(s.actionLabel);
-
-      // ON timer (clock only — a solar ON is placed positionally at slot 8/9)
-      if (!onSolar) {
-        final onTimer = _buildTimerEntry(
-          timeLabel: s.timeLabel,
-          dow: dow,
-          macro: presetId,
-        );
-        if (onTimer != null) {
-          timers.add(onTimer);
-        }
-      }
-
-      // OFF timer (clock only; if schedule has an off time)
-      if (s.hasOffTime &&
-          s.offTimeLabel != null &&
-          !offSolar &&
-          timers.length < kMaxWledTimers) {
-        final offTimer = _buildTimerEntry(
-          timeLabel: s.offTimeLabel!,
-          dow: dow,
-          macro: 2, // Preset 2 = off state (convention)
-        );
-        if (offTimer != null) {
-          timers.add(offTimer);
-        }
-      }
-    }
-
-    // Return the REAL timers only — deliberately UNPADDED. Callers that push
-    // this to the controller (syncAll, CalendarEntryLeaseManager) merge in any
-    // lease timers and THEN pad the combined array to kMaxWledTimers via
-    // [padTimersToMax], so vacated slots get zeroed on the controller. Padding
-    // here would corrupt that merge (stubs would land between real timers), and
-    // the eviction/time-parse tests assert the exact real-timer count.
-    return {
-      'timers': {
-        'ins': timers,
-      },
-    };
-  }
-
-  /// Builds a single timer entry from a time label.
-  /// Returns null if the time label cannot be parsed.
-  Map<String, dynamic>? _buildTimerEntry({
-    required String timeLabel,
-    required int dow,
-    required int macro,
-  }) {
-    final tl = timeLabel.trim().toLowerCase();
-
-    // Handle solar events (sunrise/sunset)
-    if (tl == 'sunrise' || tl == 'sunset') {
-      final isSunrise = tl == 'sunrise';
-      return {
-        // WLED cfg parser is type-strict: en MUST be a JSON INT (1/0). A bool is
-        // silently stored as 0 (disabled). Curl-proven 2026-07-22 on vid 2507300
-        // (`{"en":true}`→en:0; `{"en":1}`→en:1). DO NOT change to a bool.
-        'en': 1,
-        'hour': isSunrise ? 24 : 25, // 24=sunrise, 25=sunset
-        'min': 0, // offset from sunrise/sunset
-        'macro': macro,
-        'dow': dow,
-      };
-    }
-
-    // Handle specific time
-    final parsed = _parseTimeLabel(timeLabel);
-    if (parsed == null) {
-      // Unparseable clock time. NEVER fall back to midnight — that armed a
-      // phantom 00:00 timer. Return null so buildCfgPayload drops this entry;
-      // syncAll's pre-arm guard surfaces a warning so the schedule is flagged
-      // rather than silently firing at the wrong time.
-      debugPrint(
-          'ScheduleSync: unparseable time label "$timeLabel" — timer not built');
-      return null;
-    }
-    return {
-      // Type-strict INT (see the solar branch above). DO NOT change to a bool.
-      'en': 1,
-      'hour': parsed.hour,
-      'min': parsed.minute,
-      'macro': macro,
-      'dow': dow,
-    };
-  }
+  }) =>
+      // Delegates to the pure-Dart builder (single source of truth — the bench/
+      // CLI imports the SAME function). App path logs via debugPrint; the
+      // extracted _buildTimerEntry / consts live in cfg_payload_builder.dart.
+      cfg.buildCfgPayload(schedules,
+          solarEnabled: solarEnabled, debug: debugPrint);
 
   /// Pushes all schedules to the currently selected WLED device.
   ///
@@ -1370,66 +1168,19 @@ class ScheduleSyncService {
 
   // Helpers
 
-  /// Parses a clock-time label into hour/minute for a WLED timer.
-  ///
-  /// Accepts both 12-hour ("7:05 PM", "12:00 AM") and bare 24-hour
-  /// ("10:11", "23:30", "0:05") formats. Sunrise/sunset are resolved by
-  /// [_buildTimerEntry] before this is reached; the keyword branch here is
-  /// purely defensive and never arms a clock time.
-  ///
-  /// Returns `null` for a genuinely unrecognized label. Callers MUST treat
-  /// null as "do not arm". The pre-fix behavior silently fell back to 00:00,
-  /// so a bare malformed label (or an un-suffixed 24-hour time that didn't
-  /// match the am/pm regex) armed a phantom MIDNIGHT timer with no warning.
-  /// Never default an unparseable time to midnight.
-  _ParsedTime? _parseTimeLabel(String label) {
-    final l = label.trim().toLowerCase();
-    // Sunrise/sunset are handled separately by _buildTimerEntry; defensive.
-    if (l == 'sunrise' || l == 'sunset') {
-      return const _ParsedTime(hour: 0, minute: 0);
-    }
-    // 12-hour: "7:05 PM" / "12:00 AM"
-    final ampm = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
-    final m = ampm.firstMatch(l);
-    if (m != null) {
-      var hh = int.tryParse(m.group(1)!) ?? -1;
-      final mm = int.tryParse(m.group(2)!) ?? -1;
-      final ap = m.group(3)!.toLowerCase();
-      if (hh < 1 || hh > 12 || mm < 0 || mm > 59) return null;
-      if (ap == 'pm' && hh != 12) hh += 12;
-      if (ap == 'am' && hh == 12) hh = 0;
-      return _ParsedTime(hour: hh, minute: mm);
-    }
-    // 24-hour: "10:11" / "23:30" / "0:05"
-    final h24 = RegExp(r'^(\d{1,2}):(\d{2})$');
-    final m24 = h24.firstMatch(l);
-    if (m24 != null) {
-      final hh = int.tryParse(m24.group(1)!);
-      final mm = int.tryParse(m24.group(2)!);
-      if (hh == null || mm == null || hh > 23 || mm > 59) return null;
-      return _ParsedTime(hour: hh, minute: mm);
-    }
-    // Genuinely unparseable — do NOT default to midnight. Return null so the
-    // caller leaves the schedule unarmed and flags it.
-    return null;
-  }
+  // _parseTimeLabel moved to cfg_payload_builder.dart (pure Dart, as
+  // parseTimeLabel); its only callers were _buildTimerEntry (also moved) and
+  // _isArmableTimeLabel (now delegates below).
 
   /// True when [label] is a time WLED can actually arm: a solar keyword or a
-  /// clock time [_parseTimeLabel] recognizes. Used by [syncAll] to refuse
+  /// clock time [parseTimeLabel] recognizes. Used by [syncAll] to refuse
   /// arming a timer that would otherwise silently fire at midnight.
-  bool _isArmableTimeLabel(String label) {
-    final l = label.trim().toLowerCase();
-    if (l == 'sunrise' || l == 'sunset') return true;
-    return _parseTimeLabel(label) != null;
-  }
+  bool _isArmableTimeLabel(String label) => cfg.isArmableTimeLabel(label);
 
   /// True for the two solar keywords the app (wrongly) maps to WLED hour 24/25.
   /// Used by the Option-A refuse guards until solar is re-encoded correctly —
   /// see memory/project_solar_schedules_never_fire.
-  static bool _isSolarLabel(String label) {
-    final l = label.trim().toLowerCase();
-    return l == 'sunrise' || l == 'sunset';
-  }
+  static bool _isSolarLabel(String label) => cfg.isSolarLabel(label);
 
   /// Compute the WLED dow bitmask for a list of weekday names.
   /// Delegates to the centralized [wledDowMaskForDayList] helper.
@@ -1450,37 +1201,7 @@ class ScheduleSyncService {
   ///
   /// For now we use simple conventions. Future improvement: let users
   /// select which preset to trigger per schedule item.
-  int _presetForAction(String actionLabel) {
-    final a = actionLabel.toLowerCase();
-    // "Turn Off" triggers preset that sets on=false
-    // WLED doesn't have a built-in "off" preset, so we use preset 2
-    // which users should configure as an "off" state
-    if (a.contains('turn off') || a.contains('off')) return 2;
-    // "Turn On" triggers preset 1 (default on state)
-    if (a.contains('turn on') || a.contains('on')) return 1;
-
-    // Brightness level presets (parse percentage from label)
-    // "Brightness: 20%" → preset 3 (dim)
-    // "Brightness: 40%" → preset 4 (low)
-    // "Brightness: 60%" → preset 5 (medium)
-    // Higher values → preset 1 (full on)
-    if (a.startsWith('brightness')) {
-      final percentMatch = RegExp(r'(\d+)%?').firstMatch(a);
-      if (percentMatch != null) {
-        final percent = int.tryParse(percentMatch.group(1)!) ?? 50;
-        if (percent <= 25) return 3;      // Dim preset (20%)
-        if (percent <= 45) return 4;      // Low preset (40%)
-        if (percent <= 70) return 5;      // Medium preset (60%)
-        return 1;                          // Full on for high brightness
-      }
-      return 3; // Default to dim preset if no percentage found
-    }
-
-    // Pattern execution - maps to preset 10+ (user-configured)
-    if (a.startsWith('pattern') || a.contains('pattern')) return 10;
-    // Default: trigger preset 1 (on)
-    return 1;
-  }
+  int _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
 
   /// Extracts brightness percentage from an action label.
   /// Returns null if the label doesn't contain a brightness percentage.
@@ -1546,11 +1267,7 @@ class ScheduleSyncService {
   }
 }
 
-class _ParsedTime {
-  final int hour;
-  final int minute;
-  const _ParsedTime({required this.hour, required this.minute});
-}
+// _ParsedTime moved to cfg_payload_builder.dart (pure Dart, as ParsedTime).
 
 final scheduleSyncServiceProvider = Provider<ScheduleSyncService>((ref) => const ScheduleSyncService());
 

@@ -1461,14 +1461,30 @@ service cloud.firestore {
     // config/schedules_subcollection.enabled gates whether schedules persist
     // under /users/{uid}/schedules (default false → legacy array backend).
     //
-    // There is NO rule for config/sync_fanout (the Dart flag this one clones) —
-    // it is default-deny, so its reads only ever fall back to false. The
-    // existing config rules are all doc-specific, and the closest analog is
-    // config/calendar_leases (above): read open to any authenticated user so
-    // the StreamProvider picks up flips without a restart, bootstrap-only
-    // create with the safe default, console-only flips. Mirrored here so the
-    // flag is genuinely readable (rather than silently default-denied).
+    // The closest analog for these flag docs is config/calendar_leases (above):
+    // read open to any authenticated user so the StreamProvider picks up flips
+    // without a restart, bootstrap-only create with the safe default, and
+    // console-only flips. Mirrored here so the flag is genuinely readable
+    // (rather than silently default-denied).
     match /config/schedules_subcollection {
+      allow read: if request.auth != null;
+      // Bootstrap-only create with the safe default (enabled=false). Any
+      // subsequent flip is console-only.
+      allow create: if request.auth != null &&
+                       request.resource.data.enabled == false;
+      allow update, delete: if false;
+    }
+
+    // ── Neighborhood Sync Fanout Feature Flag (config/sync_fanout) ──
+    // Activation prep (P1-44). Read: any authed user, so the client
+    // StreamProvider (sync_fanout_feature_flag.dart) gets a clean `false` on
+    // every launch (no fleet-wide permission-denied). Create: bootstrap-only with
+    // the SAFE DEFAULT enabled=false, so bootstrapSyncFanoutFlagDoc() (or the
+    // console) can provision the doc. The enabled=true FLIP is console-only
+    // (update/delete denied). Mirrors config/schedules_subcollection above.
+    // Creating the doc does NOT activate fanout — enabled stays false until the
+    // deliberate console flip (see the activation runbook, docs/).
+    match /config/sync_fanout {
       allow read: if request.auth != null;
       // Bootstrap-only create with the safe default (enabled=false). Any
       // subsequent flip is console-only.
@@ -1758,9 +1774,18 @@ service cloud.firestore {
         // Any group member can read the member roster.
         allow read: if request.auth != null;
 
-        // A user may create/update their own member doc. The creator may
-        // also write any member doc (for reorder/host moderation).
-        allow create, update: if request.auth != null && (
+        // CREATE is SELF-ONLY (SYNC-1): a member doc may only be brought into
+        // existence by that user joining (request.auth.uid == memberUid). The
+        // creator may NOT create a doc for someone else — that was the
+        // self-fanout authorization hole: a creator could insert a
+        // non-consenting victim's member doc, and the admin-SDK crew fanout
+        // (applySyncPattern) would then write to that victim's command queue.
+        // Requiring self-create makes "members/{uid} exists" ⟺ "that user
+        // self-joined this crew".
+        allow create: if request.auth != null && request.auth.uid == memberUid;
+        // UPDATE stays self-or-creator so the creator can reorder / moderate
+        // EXISTING members (position, host moves) — but cannot FABRICATE one.
+        allow update: if request.auth != null && (
           request.auth.uid == memberUid ||
           get(/databases/$(database)/documents/neighborhoods/$(groupId)).data.creatorUid == request.auth.uid
         );

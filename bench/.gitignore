@@ -1,0 +1,3 @@
+# Transient per-run capture dumps (capture-before/restore-after brackets write
+# these). Not source — safe to delete anytime; never commit.
+snapshots/
