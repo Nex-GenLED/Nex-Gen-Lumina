@@ -515,6 +515,18 @@ export async function fanoutToCrew(
 }
 
 // ─── Slice 1 Commit 2: anti-strobe rate limit ────────────────────────────
+//
+// DELIBERATE ANTI-STROBE POLICY (not arbitrary defaults — do not weaken without
+// re-justifying). A crew fanout writes a command to EVERY member's controller;
+// unthrottled, rapid re-fanouts would strobe every crew member's lights (a
+// photosensitivity/comfort hazard, not just spam). Two independent gates:
+//   • per-INITIATOR cooldown 18s — one person can't machine-gun the crew;
+//     ~a real "change the scene" cadence, well above a strobe rate.
+//   • per-GROUP ceiling 5 per rolling 60s — even multiple initiators together
+//     can't drive the crew faster than ~1 change / 12s sustained.
+// Both are enforced transactionally in reserveFanoutSlot (concurrent-safe).
+// Locked by test/unit/fanoutRateLimit.test.js — changing these values will
+// fail that suite on purpose.
 
 /** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
 export const GROUP_CEILING_PER_MIN = 5;
@@ -599,7 +611,7 @@ export function evaluateRateLimit(
  * composite index. Admin-SDK only (new subcollection has no client rule →
  * default-deny for clients).
  */
-async function reserveFanoutSlot(
+export async function reserveFanoutSlot(
   db: admin.firestore.Firestore,
   groupId: string,
   initiatorUid: string,
