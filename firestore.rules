@@ -1476,17 +1476,21 @@ service cloud.firestore {
     }
 
     // ── Neighborhood Sync Fanout Feature Flag (config/sync_fanout) ──
-    // READ-ONLY on purpose (P1-44): the client StreamProvider
-    // (sync_fanout_feature_flag.dart) subscribes to this doc on EVERY launch.
-    // With NO rule it was default-denied → a permission-denied error thrown and
-    // logged fleet-wide on each launch (caught; defaults to false). This read
-    // rule makes it a clean `false` with zero error. Deliberately NO create/
-    // update/delete: the doc stays ABSENT and the fanout flag stays false —
-    // ACTIVATING fanout is a separate, deliberate step (see ledger P1-44:
-    // add a create allowance + bootstrap the doc + console flip).
+    // Activation prep (P1-44). Read: any authed user, so the client
+    // StreamProvider (sync_fanout_feature_flag.dart) gets a clean `false` on
+    // every launch (no fleet-wide permission-denied). Create: bootstrap-only with
+    // the SAFE DEFAULT enabled=false, so bootstrapSyncFanoutFlagDoc() (or the
+    // console) can provision the doc. The enabled=true FLIP is console-only
+    // (update/delete denied). Mirrors config/schedules_subcollection above.
+    // Creating the doc does NOT activate fanout — enabled stays false until the
+    // deliberate console flip (see the activation runbook, docs/).
     match /config/sync_fanout {
       allow read: if request.auth != null;
-      allow write: if false; // no create/update/delete — flag stays absent/false
+      // Bootstrap-only create with the safe default (enabled=false). Any
+      // subsequent flip is console-only.
+      allow create: if request.auth != null &&
+                       request.resource.data.enabled == false;
+      allow update, delete: if false;
     }
 
     // ── Migration tracking (Item #72 and future migrations) ──
