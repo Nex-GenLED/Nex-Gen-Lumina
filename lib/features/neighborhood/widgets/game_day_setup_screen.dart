@@ -904,7 +904,6 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
     return;
   }
 
-  final service = ref.read(neighborhoodServiceProvider);
   final members =
       ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
   if (members.isEmpty) return;
@@ -928,7 +927,16 @@ Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
   );
 
   try {
-    await service.broadcastSyncCommand(celebrationCommand);
+    // SYNC-3 fanout-bypass fix: route through broadcastSync (NOT
+    // broadcastSyncCommand directly) so this celebration fans out to closed-app
+    // crew members when the sync_fanout flag is ON — uniform with the other sync
+    // paths. Flag OFF ⇒ broadcastSync just calls broadcastSyncCommand,
+    // byte-identical to before. When fanout is enabled the server rate limiter
+    // throttles rapid score celebrations (anti-strobe). FanoutResult return
+    // ignored (fire-and-forget celebration).
+    await ref
+        .read(neighborhoodNotifierProvider.notifier)
+        .broadcastSync(celebrationCommand);
     debugPrint('[GameDay] Celebration broadcast sent for ${teamColors.teamName}');
   } catch (e) {
     debugPrint('[GameDay] Celebration broadcast failed: $e');
