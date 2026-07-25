@@ -1774,9 +1774,18 @@ service cloud.firestore {
         // Any group member can read the member roster.
         allow read: if request.auth != null;
 
-        // A user may create/update their own member doc. The creator may
-        // also write any member doc (for reorder/host moderation).
-        allow create, update: if request.auth != null && (
+        // CREATE is SELF-ONLY (SYNC-1): a member doc may only be brought into
+        // existence by that user joining (request.auth.uid == memberUid). The
+        // creator may NOT create a doc for someone else — that was the
+        // self-fanout authorization hole: a creator could insert a
+        // non-consenting victim's member doc, and the admin-SDK crew fanout
+        // (applySyncPattern) would then write to that victim's command queue.
+        // Requiring self-create makes "members/{uid} exists" ⟺ "that user
+        // self-joined this crew".
+        allow create: if request.auth != null && request.auth.uid == memberUid;
+        // UPDATE stays self-or-creator so the creator can reorder / moderate
+        // EXISTING members (position, host moves) — but cannot FABRICATE one.
+        allow update: if request.auth != null && (
           request.auth.uid == memberUid ||
           get(/databases/$(database)/documents/neighborhoods/$(groupId)).data.creatorUid == request.auth.uid
         );

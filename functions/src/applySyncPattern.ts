@@ -374,12 +374,39 @@ async function resolveMemberTargets(
 }
 
 /**
+ * SYNC-1 server-side mutual-membership verification. A fanout may only target a
+ * uid that is a VERIFIED member of the crew — present in the group's
+ * `memberUids[]` (which the self-join flow maintains for both the group doc and
+ * the member subcollection). A member SUBCOLLECTION doc that is NOT backed by
+ * memberUids membership is not a mutual/self-consented member (e.g. an orphaned
+ * or out-of-band doc) and must NOT receive a fanout write to its command queue.
+ * Pure + exported for unit verification (mirrors evaluateRateLimit).
+ */
+export function verifyFanoutTarget(
+  targetUid: string,
+  groupMemberUids: string[]
+): { ok: boolean; reason?: string } {
+  if (!targetUid || targetUid.length === 0) {
+    return { ok: false, reason: "empty_uid" };
+  }
+  if (!groupMemberUids.includes(targetUid)) {
+    return { ok: false, reason: "not_in_group_member_uids" };
+  }
+  return { ok: true };
+}
+
+/**
  * Fan an ad-hoc sync out to every consenting crew member's own command queue.
  * Membership is read LIVE here (never a cached/passed-in list) so a member who
  * just left is already gone. Per-member work is isolated with allSettled — one
  * member's read/write failure must not abort the crew.
+ *
+ * SYNC-1: each target is verified against the group's memberUids[] via
+ * [verifyFanoutTarget] BEFORE any write — a member-subcollection doc alone (e.g.
+ * a one-sided/out-of-band insert) is skipped, never fanned out to. Exported for
+ * unit verification.
  */
-async function fanoutToCrew(
+export async function fanoutToCrew(
   db: admin.firestore.Firestore,
   args: {
     groupId: string;
@@ -389,6 +416,20 @@ async function fanoutToCrew(
     source: string;
   }
 ): Promise<{ memberCount: number; commandCount: number; skipped: number }> {
+  // SYNC-1: the crew's verified roster. A member SUBCOLLECTION doc is only
+  // fanned out to if its uid is ALSO in the group's memberUids[] (mutual /
+  // self-consented membership). Read once; the members subcollection iteration
+  // is cross-checked against it below.
+  const groupSnap = await db
+    .collection("neighborhoods")
+    .doc(args.groupId)
+    .get();
+  const groupMemberUids: string[] = Array.isArray(groupSnap.data()?.memberUids)
+    ? (groupSnap.data()!.memberUids as unknown[]).filter(
+        (x): x is string => typeof x === "string"
+      )
+    : [];
+
   const membersSnap = await db
     .collection("neighborhoods")
     .doc(args.groupId)
@@ -405,8 +446,20 @@ async function fanoutToCrew(
       skipped++;
       return;
     }
-    memberCount++;
     const memberUid = memberDoc.id;
+    // SYNC-1: reject any target not mutually verified in memberUids[]. Closes
+    // the self-fanout hole — a one-sided/out-of-band member doc never receives a
+    // write to its command queue. Structured + logged.
+    const verdict = verifyFanoutTarget(memberUid, groupMemberUids);
+    if (!verdict.ok) {
+      skipped++;
+      console.warn(
+        `applySyncPattern FANOUT: skipped unverified target ${memberUid} ` +
+          `in ${args.groupId} — ${verdict.reason}`
+      );
+      return;
+    }
+    memberCount++;
     tasks.push(
       (async () => {
         const targets = await resolveMemberTargets(db, memberUid, data);
