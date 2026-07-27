@@ -458,6 +458,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     SEPARATE feature (re-enable the service + repoint it at `game_day_autopilot` instead of the prefs
     store + wire `controllerIps` + Play FGS declaration), NOT a revival of this toggle.
 
+- [ ] **P2-48 — `functions/lib/` is TRACKED despite `.gitignore` listing it (inert rule → chronic dirty tree)**
+  - Status: OPEN (tech debt — dedicated task, NOT bundled into a feature fix) · Evidence:
+    verified-by-repo-state (2026-07-27)
+  - `.gitignore:225` lists `functions/lib/`, but all **81 files** under it are committed and tracked
+    in HEAD (`applySyncPattern`, `staffAuth`, `createCustomerAccount`, …). **A `.gitignore` rule has
+    no effect on already-tracked files** — the entry was added after the files were committed, so git
+    keeps tracking them and the rule is inert. Confirmed: `git check-ignore -v` on
+    `functions/lib/applySyncPattern.{js,d.ts,js.map}` matches **no rule**, while
+    `git ls-tree --name-only HEAD functions/lib/` lists all 81.
+  - **Symptom:** chronic dirty-tree churn. Any `tsc`/`npm run build` rewrites the compiled output,
+    which git then reports as modified. Because the files are tracked, the modifications **follow
+    every branch switch** — observed 2026-07-27 carrying `applySyncPattern.*` from
+    `feat/dealer-team-empty-state` → `main` → `fix/neighborhood-join-membership` untouched. It also
+    means a routine `git add -A` can silently commit stale build output.
+  - **Doc drift:** the SYNC-1 commit (`76324ce`) states *"functions/lib/ is gitignored build output —
+    deploy/test:unit rebuild it; compiled output intentionally not committed."* That is **false** for
+    this repo as it stands — it IS committed. Fix the claim or fix the repo; right now they disagree.
+  - **FIX (separate dedicated task — do NOT fold into an unrelated branch):** decide which model is
+    intended, then make the repo match.
+    - (a) **Generated** — `git rm --cached -r functions/lib` + commit; the existing `.gitignore:225`
+      rule then takes effect and the churn stops permanently.
+    - (b) **Build-committed** — remove `functions/lib/` from `.gitignore` so the tracked state is
+      honest, and accept that compiled output is reviewed in diffs.
+  - **BLOCKER on (a) — must confirm BEFORE untracking:** that every deploy path rebuilds `lib/`
+    from source. Check `functions/package.json` (`predeploy`/`build` scripts), `firebase.json`
+    (`functions.predeploy` hooks), and any CI/Codemagic step that runs `firebase deploy --only
+    functions`. If any path ships `lib/` as-is from the checkout, untracking it **breaks deploys**.
+    Removing 81 files from the repo is not reversible-by-accident — verify first.
+
 ---
 
 ## Features promised (post-cleanup)
