@@ -260,6 +260,24 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     the "keep main green" outcome + gate.
   - Files: `test/…/cloud_ai_processor_normalize*`, `test/…/schedule_sync_time_parse*` (see P1-8).
 
+- [ ] **P1-47 — Single-channel "on" briefly lit ALL channels (RESOLVED/INTERMITTENT — WATCH)**
+  - Status: WATCH (self-corrected in-session; root cause NOT confirmed) · Evidence: reported
+    (observed in-app, not isolated — no readback captured)
+  - With only ch1 selected, an "on" lit **all** channels. Corrected by deselecting/reselecting
+    channels; subsequent single-channel commands targeted correctly. No code change made.
+  - Hypothesis (unconfirmed): stale selection-vs-command-target state — the channel selection the
+    UI showed was not the selection the command path read. NOT a confirmed regression of P1-43
+    (which is bench-proven for the fresh-selection cases); the failing shape here is the
+    additive/stale-selection case P1-43's bench matrix did not cover.
+  - **REPRO CAPTURE (do this BEFORE correcting, if it recurs):** exact screen, controller IP,
+    whether the selection was **fresh** (app-launch/first pick) or **additive** (toggled after a
+    prior selection), and a `curl /json/state` readback taken while the wrong channels are lit.
+    Without that, the selection→command path cannot be audited from a live repro.
+  - Suspect files (unaudited): `lib/features/dashboard/widgets/channel_selector_bar.dart`
+    (selection state), `lib/features/wled/wled_providers.dart` (`setChannelPower` /
+    `applyChannelFilter`), `lib/features/wled/channel_power_payload.dart`
+    (`buildChannelPowerPayload`).
+
 ---
 
 ## P2 — hardening & platform
