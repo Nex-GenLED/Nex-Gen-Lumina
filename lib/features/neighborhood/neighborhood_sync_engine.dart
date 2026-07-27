@@ -39,9 +39,21 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
 
   /// True once we've captured the pre-sync snapshot for this listening
   /// session. Reset on startListening / stopListening so each new
-  /// session snapshots the member's then-current state on its first
-  /// applied command.
+  /// session snapshots the member's then-current state at sync START.
   bool _hasCapturedThisSession = false;
+
+  /// The in-flight sync-start capture, if any.
+  ///
+  /// Capture now kicks off in [startListening] so EVERY member gets a restore
+  /// point — the old first-applied-command gate left members who never applied
+  /// (opted out, participation gate skipped every command) with no snapshot,
+  /// so their leave fell straight through to the blanket-off tier.
+  ///
+  /// [_executePattern] awaits this before applying. That await is load-bearing:
+  /// it preserves the original ordering guarantee that the snapshot reflects
+  /// PRE-sync state. Without it a fast command could apply before getState()
+  /// returned and we'd snapshot the sync look itself, then "restore" it.
+  Future<void>? _captureInFlight;
 
   /// True once at least one applyJson succeeded for this listening
   /// session. Gates the teardown on stopListening — if no apply ever
@@ -335,6 +347,10 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     _hasAppliedThisSession = false;
     debugPrint('Starting neighborhood sync listener...');
 
+    // Capture the restore point NOW, at sync start, for every member —
+    // independent of whether any command is ever applied.
+    _captureInFlight = _captureSnapshotAtSyncStart();
+
     _commandSubscription = _ref.listen<AsyncValue<SyncCommand?>>(
       latestSyncCommandProvider,
       handleCommandSnapshot,
@@ -436,6 +452,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
 
     _hasCapturedThisSession = false;
     _hasAppliedThisSession = false;
+    // Clear the in-flight handle alongside the gate, so a later apply on this
+    // engine re-captures rather than awaiting an already-settled future.
+    _captureInFlight = null;
     dispatchTeardown();
   }
 
@@ -504,6 +523,7 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     final shouldTeardown = _hasAppliedThisSession;
     _hasCapturedThisSession = false;
     _hasAppliedThisSession = false;
+    _captureInFlight = null;
 
     if (shouldTeardown) {
       unawaited(_executeTeardown());
@@ -700,9 +720,15 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       // below). Failures are swallowed by capturePreSyncScene — a
       // null snapshot just makes the teardown fall through to the off
       // tier, which is the correct conservative behavior.
-      if (!_hasCapturedThisSession) {
+      // Await the sync-start capture (started in startListening) so the
+      // snapshot is guaranteed to predate this apply. If startListening never
+      // ran — e.g. a command arrives on a path that bypassed it — fall back to
+      // capturing here, preserving the original first-command behavior.
+      if (_captureInFlight != null) {
+        await _captureInFlight;
+      } else if (!_hasCapturedThisSession) {
         _hasCapturedThisSession = true;
-        await _captureSnapshotForFirstCommand(command.groupId, wledRepo);
+        await _captureSnapshot(command.groupId, wledRepo);
       }
 
       // Build single-seg-no-id with fx. The applyJson chokepoint
@@ -777,16 +803,36 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     }
   }
 
-  /// First-command pre-sync scene capture. Awaited inline by
-  /// [_executePattern] so the snapshot reflects pre-apply state. The
-  /// helper itself swallows getState() errors and returns null on
-  /// failure — a null capture leaves [preSyncSceneProvider] untouched,
-  /// which makes the eventual teardown fall through to the off tier
-  /// (the conservative safe default).
-  Future<void> _captureSnapshotForFirstCommand(
-    String groupId,
-    WledRepository repo,
-  ) async {
+  /// Sync-START pre-sync scene capture. Kicked off by [startListening] and
+  /// awaited by [_executePattern] before its first apply.
+  ///
+  /// Resolves the group and repo itself (startListening takes no arguments).
+  /// A missing group or repo is a no-op, not an error — nothing to snapshot.
+  Future<void> _captureSnapshotAtSyncStart() async {
+    if (_hasCapturedThisSession) return;
+    _hasCapturedThisSession = true;
+
+    final groupId = _ref.read(activeNeighborhoodIdProvider);
+    if (groupId == null) {
+      debugPrint('Pre-sync capture: no active group at sync start — skipping');
+      return;
+    }
+    final repo = _ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      debugPrint('Pre-sync capture: no WLED repo at sync start — skipping');
+      return;
+    }
+    await _captureSnapshot(groupId, repo);
+  }
+
+  /// Snapshot the member's current state and store it BOTH in the in-memory
+  /// slot and on disk.
+  ///
+  /// Swallows getState() errors and returns without storing on failure — a
+  /// null capture leaves [preSyncSceneProvider] untouched, which makes the
+  /// eventual teardown fall through to the off tier (the conservative safe
+  /// default).
+  Future<void> _captureSnapshot(String groupId, WledRepository repo) async {
     final label = _ref.read(activePresetLabelProvider);
     final scene = await capturePreSyncScene(
       groupId: groupId,
@@ -798,8 +844,11 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       return;
     }
     _ref.read(preSyncSceneProvider.notifier).state = scene;
+    // Durable copy — this is what survives an app restart and keeps the
+    // teardown off the blanket-off tier.
+    await savePreSyncScene(scene);
     debugPrint(
-      'Pre-sync capture: snapshot stored for $groupId '
+      'Pre-sync capture: snapshot stored (mem+disk) for $groupId '
       '(label="${scene.activeLabel}", capturedAt=${scene.capturedAt.toIso8601String()})',
     );
   }
@@ -834,7 +883,20 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       activeSchedule: scheduler.activeSchedule,
       now: DateTime.now(),
     );
-    final preSyncScene = _ref.read(preSyncSceneProvider);
+    // In-memory slot first; fall back to the persisted copy when it's empty.
+    // That fallback is the fix for "leave sync shuts the system off": after an
+    // app restart the provider slot is null, and without this the resolver
+    // dropped straight to TurnOff() and killed the master.
+    var preSyncScene = _ref.read(preSyncSceneProvider);
+    if (preSyncScene == null) {
+      preSyncScene = await loadPersistedPreSyncScene();
+      if (preSyncScene != null) {
+        debugPrint(
+          'Teardown: recovered persisted pre-sync snapshot for '
+          '${preSyncScene.groupId} (captured ${preSyncScene.capturedAt.toIso8601String()})',
+        );
+      }
+    }
     final activeGroupId = _ref.read(activeNeighborhoodIdProvider);
 
     // Read the local participating-channels cache — the same source
@@ -872,6 +934,9 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
         },
         clearPreSyncScene: () {
           _ref.read(preSyncSceneProvider.notifier).state = null;
+          // Drop the durable copy too — otherwise a later, unrelated leave
+          // could restore this now-consumed scene.
+          unawaited(clearPersistedPreSyncScene());
         },
         restoreParticipation: () {
           // Sync's [_executePattern] writes the participation cache on

@@ -382,6 +382,101 @@ void main() {
               'stops (Bug 2 in the cache-refresh audit).');
     });
   });
+
+  group('sync-START capture (every member gets a restore point)', () {
+    test(
+        'startListening captures WITHOUT any command being applied — the '
+        'no-apply member used to leave with no snapshot and get blanket-off',
+        () async {
+      final repo = _CapturingRepo(
+        stateToReturn: {'on': false, 'bri': 128, 'seg': [
+          {'id': 0, 'on': true, 'fx': 12},
+        ]},
+      );
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0]),
+        deviceChannels: const [_ch0, _ch1],
+        activeGroupId: 'g1',
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      engine.startListening();
+      // Let the fire-and-forget sync-start capture settle. NO executePattern
+      // call here — that is the whole point of the test.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repo.getStateCallCount, 1,
+          reason: 'capture must run at sync START, not on first applied command');
+      final scene = container.read(preSyncSceneProvider);
+      expect(scene, isNotNull,
+          reason: 'a member who never applies a command still needs a restore '
+              'point — without one the teardown falls to TurnOff and kills '
+              'the master');
+      expect(scene!.groupId, 'g1');
+      // Captures the true pre-sync state verbatim, master-off included.
+      expect(scene.wledPayload['on'], isFalse);
+
+      // And it is mirrored to disk, so a restart can still recover it.
+      final persisted = await loadPersistedPreSyncScene();
+      expect(persisted, isNotNull);
+      expect(persisted!.groupId, 'g1');
+
+      engine.stopListening();
+    });
+
+    // ── REGRESSION LOCK, NOT A BUG FIX ──────────────────────────────────
+    // Green from the first run. The "sync commands carry on:false" report was
+    // a misattribution: the on:false docs in users/{uid}/commands are TEARDOWN
+    // restores (a verbatim getState() of a master-off device, which is
+    // legitimately {on:false, seg:[{on:true}]}), not broadcasts. Every
+    // broadcast builder already hardcodes root on:true. This locks that so a
+    // future edit can't quietly introduce the bug that was suspected here.
+    test('LOCK: a broadcast apply carries root on:true (already correct)',
+        () async {
+      final repo = _CapturingRepo(applyJsonReturns: true);
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0]),
+        deviceChannels: const [_ch0, _ch1],
+        activeGroupId: 'g1',
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      await engine.executePatternForTest(_baseCommand(id: 'lock1'));
+
+      expect(repo.applyCalls, isNotEmpty);
+      expect(repo.applyCalls.first['on'], isTrue,
+          reason: 'a sync broadcast must never darken the master; segments '
+              'being lit is not enough if root on is false');
+    });
+
+    test('sync-start capture does not double-capture on a later apply',
+        () async {
+      final repo = _CapturingRepo(stateToReturn: {'on': true, 'bri': 200});
+      final container = _makeContainer(
+        repo: repo,
+        currentMember: _baseMember(participatingChannelIndices: const [0]),
+        deviceChannels: const [_ch0, _ch1],
+        activeGroupId: 'g1',
+      );
+      addTearDown(container.dispose);
+      final engine = container.read(neighborhoodSyncEngineProvider);
+
+      engine.startListening();
+      await Future<void>.delayed(Duration.zero);
+      await engine.executePatternForTest(_baseCommand(id: 'cmd1'));
+
+      expect(repo.getStateCallCount, 1,
+          reason: 'the apply path must await the sync-start capture, not '
+              'run a second one');
+
+      engine.stopListening();
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

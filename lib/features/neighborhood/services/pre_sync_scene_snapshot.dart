@@ -15,15 +15,21 @@
 // Phase 2 wires the capture into the sync-start path and the consumption
 // into the stop-sync teardown.
 
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../wled/wled_repository.dart';
 
 /// One captured snapshot of a member's pre-sync WLED state.
 ///
-/// Held in memory only — never persisted. A new capture replaces the prior
-/// one. Phase 2's teardown reads this when there is no active schedule item
-/// and no autopilot item to restore.
+/// Held in the [preSyncSceneProvider] slot AND mirrored to SharedPreferences
+/// so it survives an app restart. Before persistence existed, killing the app
+/// mid-session dropped the snapshot, which made the teardown fall through to
+/// the [TurnOff] tier — that is what made "leave sync" shut the whole system
+/// off instead of restoring. A new capture replaces the prior one.
 class PreSyncScene {
   /// The group the snapshot was captured for. Phase 2 will check this
   /// against the active group at teardown time so a stale snapshot from
@@ -50,7 +56,83 @@ class PreSyncScene {
     required this.activeLabel,
     required this.capturedAt,
   });
+
+  /// snake_case per the repo's serialization convention. `capturedAt` is an
+  /// ISO-8601 string rather than a Timestamp — this lands in SharedPreferences
+  /// as JSON, not in Firestore.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'group_id': groupId,
+        'wled_payload': wledPayload,
+        'active_label': activeLabel,
+        'captured_at': capturedAt.toIso8601String(),
+      };
+
+  /// Returns null on ANY malformed field. A corrupt snapshot must read as
+  /// "no snapshot" so the teardown falls through the tiers normally, rather
+  /// than throwing on a path whose whole job is restoring the user's lights.
+  static PreSyncScene? fromJson(Map<String, dynamic> json) {
+    final groupId = json['group_id'];
+    final payload = json['wled_payload'];
+    final capturedAt = json['captured_at'];
+    if (groupId is! String || payload is! Map || capturedAt is! String) {
+      return null;
+    }
+    final parsedAt = DateTime.tryParse(capturedAt);
+    if (parsedAt == null) return null;
+    return PreSyncScene(
+      groupId: groupId,
+      wledPayload: Map<String, dynamic>.from(payload),
+      activeLabel: json['active_label'] as String?,
+      capturedAt: parsedAt,
+    );
+  }
 }
+
+/// SharedPreferences key for the persisted snapshot. Local device state only —
+/// deliberately NOT Firestore: this is "what were my lights doing before the
+/// sync", which is per-device and has no business in the cloud.
+const String kPreSyncScenePrefsKey = 'neighborhood_pre_sync_scene_v1';
+
+/// Mirror [scene] to disk (or clear it when null).
+///
+/// Best-effort: a persistence failure must never break sync-start, so errors
+/// are swallowed and logged. Worst case the snapshot stays in-memory-only and
+/// behaves exactly as it did before persistence existed.
+Future<void> savePreSyncScene(PreSyncScene? scene) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (scene == null) {
+      await prefs.remove(kPreSyncScenePrefsKey);
+      return;
+    }
+    await prefs.setString(kPreSyncScenePrefsKey, jsonEncode(scene.toJson()));
+  } catch (e) {
+    debugPrint('PreSyncScene: persist failed (non-fatal): $e');
+  }
+}
+
+/// Read the persisted snapshot, or null when absent/corrupt.
+///
+/// The freshness gate ([isPreSyncSceneFresh]) still applies to whatever this
+/// returns — surviving a restart does NOT exempt a snapshot from the 12h
+/// staleness rule or the group-id match.
+Future<PreSyncScene?> loadPersistedPreSyncScene() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kPreSyncScenePrefsKey);
+    if (raw == null || raw.isEmpty) return null;
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    return PreSyncScene.fromJson(Map<String, dynamic>.from(decoded));
+  } catch (e) {
+    debugPrint('PreSyncScene: load failed, treating as absent: $e');
+    return null;
+  }
+}
+
+/// Drop the persisted snapshot. Called after a teardown consumes it so a
+/// later, unrelated leave can't restore a stale scene.
+Future<void> clearPersistedPreSyncScene() => savePreSyncScene(null);
 
 /// Capture the member's current pre-sync state.
 ///
@@ -90,6 +172,11 @@ Future<PreSyncScene?> capturePreSyncScene({
 /// when there is no active sync (or to clear after a teardown that
 /// consumed the snapshot). Mutated by the sync-start hook in
 /// [NeighborhoodSyncEngine] and cleared by the teardown executor.
+///
+/// In-memory ONLY — this slot is empty after an app restart. The durable copy
+/// lives in SharedPreferences ([loadPersistedPreSyncScene]); the teardown falls
+/// back to it when this slot is null, which is what keeps a restart from
+/// turning into a blanket master-off on leave.
 final preSyncSceneProvider = StateProvider<PreSyncScene?>((ref) => null);
 
 /// Default maximum staleness for a pre-sync snapshot before the
