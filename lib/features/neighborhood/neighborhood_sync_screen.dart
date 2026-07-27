@@ -188,11 +188,66 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
     }
   }
 
-  void _showJoinGroupDialog() {
+  /// Runs a join and reflects the result in the UI.
+  ///
+  /// Mirrors [_showCreateGroupDialog]'s post-success sequence — set the active
+  /// group, refresh the list, open the controls sheet. Without that, a join
+  /// that fully SUCCEEDS in Firestore (memberUids + member doc both written)
+  /// leaves the UI sitting on the Sync screen as though nothing happened.
+  ///
+  /// Deliberately takes the SCREEN's `context`/`mounted`, never a popped
+  /// dialog's: looking up ScaffoldMessenger through a dead dialog context is
+  /// what previously ate both the success and the failure snackbar.
+  Future<bool> _performJoin(String inviteCode, {String? displayName}) async {
+    final group = await ref
+        .read(neighborhoodNotifierProvider.notifier)
+        .joinGroup(inviteCode, displayName: displayName);
+
+    if (!mounted) return group != null;
+
+    if (group == null) {
+      // The notifier swallows exceptions and returns null. Distinguish a real
+      // error (surface it, like _createGroup) from a genuine no-such-code.
+      final notifierState = ref.read(neighborhoodNotifierProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            notifierState.hasError
+                ? 'Could not join that crew: ${notifierState.error}'
+                : 'Hmm, that code didn\'t work. Double-check it and try again!',
+          ),
+          backgroundColor:
+              notifierState.hasError ? Colors.red : Colors.orange,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: notifierState.hasError ? 8 : 4),
+        ),
+      );
+      return false;
+    }
+
+    ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+    ref.invalidate(userNeighborhoodsProvider);
+    await ref.read(userNeighborhoodsProvider.future);
+    if (!mounted) return true;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Welcome to ${group.name}! Let\'s light it up!'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    _showGroupControlsSheet(ref.read(userNeighborhoodsProvider).valueOrNull ?? []);
+    return true;
+  }
+
+  Future<void> _showJoinGroupDialog() async {
     final controller = TextEditingController();
     final nameController = TextEditingController();
 
-    showDialog(
+    // The dialog only COLLECTS input and pops with it; the join itself runs
+    // below on the screen's context. Doing the await inside the builder is
+    // what bound the snackbar to a context that had already been popped.
+    final submitted = await showDialog<({String code, String? name})>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey.shade900,
@@ -288,32 +343,14 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
             ),
           ),
           ElevatedButton.icon(
-            onPressed: () async {
+            onPressed: () {
               if (controller.text.trim().length != 6) return;
-
-              Navigator.pop(context);
-              final group = await ref.read(neighborhoodNotifierProvider.notifier).joinGroup(
-                controller.text.trim().toUpperCase(),
-                displayName: nameController.text.trim().isNotEmpty
+              Navigator.pop(context, (
+                code: controller.text.trim().toUpperCase(),
+                name: nameController.text.trim().isNotEmpty
                     ? nameController.text.trim()
                     : null,
-              );
-
-              if (group == null && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Hmm, that code didn\'t work. Double-check it and try again!'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-              } else if (group != null && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Welcome to ${group.name}! Let\'s light it up!'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
+              ));
             },
             icon: const Icon(Icons.celebration, size: 18),
             label: const Text('Join In'),
@@ -325,6 +362,12 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
         ],
       ),
     );
+
+    controller.dispose();
+    nameController.dispose();
+
+    if (submitted == null || !mounted) return;
+    await _performJoin(submitted.code, displayName: submitted.name);
   }
 
   void _showFindNearbyDialog() {
@@ -982,26 +1025,43 @@ class _NeighborhoodGroupListViewState
             padding: const EdgeInsets.only(bottom: 10),
             child: InkWell(
               onTap: () async {
+                // Resolve the messenger BEFORE the await — after it, this
+                // closure's context may be stale, which is the same trap that
+                // silently ate the join dialog's snackbars.
+                final messenger = ScaffoldMessenger.of(context);
                 final group = await ref
                     .read(neighborhoodNotifierProvider.notifier)
                     .joinGroup(prev.inviteCode);
-                if (!context.mounted) return;
                 if (group != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+                  ref.invalidate(userNeighborhoodsProvider);
+                  messenger.showSnackBar(SnackBar(
                     content: Text('Welcome back to ${group.name}!'),
                     backgroundColor: Colors.green,
                     behavior: SnackBarBehavior.floating,
                   ));
+                } else if (ref.read(neighborhoodNotifierProvider).hasError) {
+                  // A real error is NOT proof the group is gone — surface it and
+                  // KEEP the saved entry. Deleting here used to discard the
+                  // user's rejoin shortcut on any transient failure.
+                  messenger.showSnackBar(SnackBar(
+                    content: Text(
+                      'Could not rejoin: ${ref.read(neighborhoodNotifierProvider).error}',
+                    ),
+                    backgroundColor: Colors.red,
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 8),
+                  ));
                 } else {
+                  // No error + null group == the invite code genuinely resolved
+                  // to nothing. Only then is dropping the saved entry correct.
                   await removePreviousGroup(prev.id);
                   ref.invalidate(previousGroupsProvider);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: const Text('This group no longer exists.'),
-                      backgroundColor: Colors.orange.shade700,
-                      behavior: SnackBarBehavior.floating,
-                    ));
-                  }
+                  messenger.showSnackBar(SnackBar(
+                    content: const Text('This group no longer exists.'),
+                    backgroundColor: Colors.orange.shade700,
+                    behavior: SnackBarBehavior.floating,
+                  ));
                 }
               },
               borderRadius: BorderRadius.circular(12),
@@ -2713,13 +2773,32 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
             ? nameController.text.trim()
             : null,
       );
+      if (!mounted) return;
 
-      if (result != null && mounted) {
+      if (result != null) {
+        ref.read(activeNeighborhoodIdProvider.notifier).state = result.id;
+        ref.invalidate(userNeighborhoodsProvider);
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Joined "${group.name}"!'),
             backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Previously there was NO else here — a failed join from this sheet
+        // did nothing at all: no snackbar, no nav, no log.
+        final notifierState = ref.read(neighborhoodNotifierProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              notifierState.hasError
+                  ? 'Could not join "${group.name}": ${notifierState.error}'
+                  : 'Could not join "${group.name}". Please try again.',
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
           ),
         );
       }
