@@ -176,6 +176,11 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
       state = const AsyncValue.data(null);
       return group;
     } catch (e, st) {
+      // Log like createGroup does — without this a failed join left NO trace
+      // anywhere: the error lived only in notifier state, which no join call
+      // site read, so the failure was invisible in both the UI and the console.
+      debugPrint('🏘️ [NeighborhoodNotifier] joinGroup FAILED: $e');
+      debugPrint('🏘️ [NeighborhoodNotifier] Stack: $st');
       state = AsyncValue.error(e, st);
       return null;
     }
