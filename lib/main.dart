@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -31,6 +32,22 @@ import 'package:timezone/data/latest.dart' as tz;
 /// - Firebase initialization
 /// - go_router navigation
 /// - Material 3 theming with light/dark modes
+/// Emits a startup breadcrumb that SURVIVES RELEASE BUILDS.
+///
+/// `debugPrint` is nulled out below in release, so a release startup is totally
+/// silent — which is why the 2.5.10+55 dead splash could not be diagnosed from
+/// an `adb logcat` capture at all: the process sat pre-`runApp()` forever
+/// having logged nothing. `print` is NOT nulled and reaches logcat as
+/// `I/flutter`, so these lines are readable in a release build with:
+///
+///     adb logcat -d | grep LUMINA_STARTUP
+///
+/// The last breadcrumb printed names the step that blocked launch.
+void _startupBreadcrumb(String message) {
+  // ignore: avoid_print
+  print('LUMINA_STARTUP: $message');
+}
+
 /// Re-entry guard: if the sink itself throws (e.g. Firestore unreachable),
 /// we must not recurse into ourselves and feedback-loop.
 bool _errorSinkActive = false;
@@ -105,10 +122,13 @@ Future<void> main() async {
     return true; // signal handled — don't escalate to the OS
   };
 
-  // Silence all debugPrint output in release builds
+  // Silence all debugPrint output in release builds.
+  // NOTE: this is why _startupBreadcrumb uses print() rather than debugPrint —
+  // the startup trace has to remain readable in a release logcat.
   if (kReleaseMode) {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
+  _startupBreadcrumb('main:enter');
   try {
     if (kIsWeb) {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -127,8 +147,36 @@ Future<void> main() async {
   // seeding against a hardcoded UID produced an orphan doc the signed-in
   // reviewer could never read.
 
-  // SECURITY: Initialize encryption service for sensitive data
-  await EncryptionService.initialize();
+  _startupBreadcrumb('firebase:ok');
+
+  // SECURITY: Initialize encryption service for sensitive data.
+  //
+  // GUARDED — encryption is NOT essential to launch, so it must never be able
+  // to block runApp(). Two independent failure modes have to be contained, and
+  // a try/catch only covers one of them:
+  //   * throw — e.g. a secure-storage PlatformException; caught below.
+  //   * HANG  — an await that never completes. try/catch does NOTHING for this;
+  //             only the timeout breaks it.
+  // 2.5.10+55 shipped a permanent dead splash on a device whose restored Tink
+  // keyset could not be decrypted (AEADBadTagException): the process sat
+  // pre-runApp() indefinitely, never drew a frame, and never even ANR'd.
+  // Degraded encryption is always preferable to an app that will not start.
+  _startupBreadcrumb('encryption:begin');
+  try {
+    await EncryptionService.initialize().timeout(const Duration(seconds: 10));
+    _startupBreadcrumb('encryption:ok');
+  } catch (e, st) {
+    EncryptionService.markDegraded(e);
+    _startupBreadcrumb('encryption:FAILED (continuing degraded) err=$e');
+    // Fire-and-forget: this sink writes to Firestore and must never be awaited
+    // here, or an unreachable Firestore would recreate the very hang we are
+    // fixing. It no-ops when no user is signed in (typical on a cold start).
+    unawaited(_reportUncaughtError(
+      error: e,
+      stack: st,
+      context: 'startup/EncryptionService.initialize',
+    ));
+  }
 
   // Initialize timezone database for autopilot scheduling
   tz.initializeTimeZones();
@@ -136,8 +184,20 @@ Future<void> main() async {
   // Wire navigator key for notification deep-link navigation
   NotificationsService.navigatorKey = AppRouter.rootNavigatorKey;
 
-  // Initialize local notifications (no prompts on web)
-  await NotificationsService.init();
+  // Initialize local notifications (no prompts on web).
+  //
+  // GUARDED for the same reason as encryption above. NotificationsService.init()
+  // already swallows exceptions internally, but it awaits
+  // FirebaseMessaging.getInitialMessage(), which can stall indefinitely when
+  // Play Services is wedged — and a stall here is indistinguishable from the
+  // +55 dead splash. Notifications are not worth a launch blocker either.
+  _startupBreadcrumb('notifications:begin');
+  try {
+    await NotificationsService.init().timeout(const Duration(seconds: 10));
+    _startupBreadcrumb('notifications:ok');
+  } catch (e) {
+    _startupBreadcrumb('notifications:FAILED (continuing) err=$e');
+  }
 
   // Initialize FCM for Neighborhood Sync push notifications (no-op on web)
   if (!kIsWeb) {
@@ -159,6 +219,7 @@ Future<void> main() async {
     debugPrint('Background learning startup failed: $e');
   });
 
+  _startupBreadcrumb('runApp');
   runApp(const ProviderScope(child: MyApp()));
 }
 

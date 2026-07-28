@@ -59,10 +59,28 @@
          declaration matches reality. -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"
         tools:node="remove" />
+    <!-- Auto Backup DISABLED. Backup used to capture the app's SharedPreferences,
+         including FlutterSecureStorage.xml — the Tink keyset used by
+         flutter_secure_storage. That keyset is encrypted with a MasterKey that
+         lives in the Android Keystore, which is device-bound and is NEVER
+         backed up. Restoring the keyset onto a device without its matching key
+         yields AEADBadTagException ("Signature/MAC verification failed"), which
+         is what bricked 2.5.10+55 into a permanent dead splash on a restored
+         install. There is little to lose: Lumina's real state (profile,
+         controllers, properties, schedules) lives in Firebase and is restored
+         by signing in, not by device backup.
+
+         allowBackup="false" covers cloud backup on every API level. It does NOT
+         cover Android 12+ device-to-device transfer, so dataExtractionRules
+         closes that second path — see res/xml/data_extraction_rules.xml. -->
     <application
         android:label="Lumina"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:targetApi="s"
         android:usesCleartextTraffic="true">
         <activity
             android:name="com.nexgenled.lumina.MainActivity"

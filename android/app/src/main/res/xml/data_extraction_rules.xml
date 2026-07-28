@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31) backup / transfer rules.
+
+  android:allowBackup="false" in AndroidManifest.xml already disables cloud
+  backup on every API level, but on Android 12+ it does NOT disable
+  device-to-device transfer. A D2D transfer to a new phone would still copy
+  FlutterSecureStorage.xml (the Tink keyset) while leaving the device-bound
+  Keystore MasterKey behind — precisely the mismatch that produced the
+  AEADBadTagException dead splash in 2.5.10+55.
+
+  Both paths are therefore excluded explicitly. The <exclude> entries are the
+  load-bearing part; keep them even if backup is ever re-enabled.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Tink keyset for flutter_secure_storage. Encrypted with a Keystore
+             key that never leaves the device, so a restored copy is garbage. -->
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    </device-transfer>
+</data-extraction-rules>

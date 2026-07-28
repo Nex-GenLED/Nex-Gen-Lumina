@@ -14,11 +14,43 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// - Device-specific encryption keys
 /// - Secure storage for encryption keys
 /// - One-way hashing for WiFi SSID comparison
+///
+/// KEY LOSS / DEGRADED MODE — KNOWN GAP, follow-up required:
+/// The stored key can be lost (Keystore keyset reset via `resetOnError`, app
+/// data cleared, restore onto a new device). When that happens the fields
+/// written by [encryptUserData] — `address_encrypted`, `webhook_url_encrypted`,
+/// `home_ssid_encrypted` — can no longer be decrypted. [decryptString] returns
+/// the ciphertext unchanged in that case, so reads degrade to a garbage string
+/// rather than crashing, and nothing ever re-encrypts them under the new key.
+///
+/// Two consequences that are NOT yet handled:
+///  1. Stale ciphertext persists until the user next saves that field.
+///  2. While [isDegraded] is true, [encryptString] returns its input UNCHANGED,
+///     so a save would write PLAINTEXT into a `*_encrypted` field.
+/// A re-encrypt-on-read-migrate path plus a degraded-mode write refusal are the
+/// scoped follow-up; do not treat `*_encrypted` as a security guarantee until
+/// they land.
 class EncryptionService {
   static const String _keyStorageKey = 'lumina_encryption_key';
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
+      // SELF-HEAL. Android Auto Backup used to restore FlutterSecureStorage.xml
+      // (the Tink keyset) onto a device whose Keystore master key is different
+      // — the keyset is backed up, the device-bound key is not. Tink then fails
+      // with AEADBadTagException ("Signature/MAC verification failed").
+      //
+      // Without this flag the plugin catches that internally and silently falls
+      // back to PLAINTEXT SharedPreferences (FlutterSecureStorage.java:172-176),
+      // leaving the bad keyset in place to fail again on every single call.
+      // resetOnError wipes the unreadable keyset so a fresh key can be written
+      // to the real encrypted store.
+      //
+      // TRADE-OFF: this PERMANENTLY erases previously stored values. For Lumina
+      // that is exactly one key (_keyStorageKey), and losing it makes existing
+      // *_encrypted Firestore fields undecryptable — see the class doc and the
+      // re-encrypt follow-up noted there.
+      resetOnError: true,
     ),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock,
@@ -27,6 +59,25 @@ class EncryptionService {
 
   static encrypt.Encrypter? _encrypter;
   static encrypt.IV? _iv;
+
+  static bool _degraded = false;
+
+  /// True when [initialize] did not complete successfully — it threw, or it
+  /// timed out at the call site in `main()`.
+  ///
+  /// In this state [encryptString]/[decryptString] fall through to their
+  /// pass-through fallbacks, which means values are handled UNENCRYPTED. Read
+  /// this before treating any `*_encrypted` field as trustworthy.
+  static bool get isDegraded => _degraded;
+
+  /// Records that encryption is unavailable for this session.
+  ///
+  /// Called by `main()` when the guarded [initialize] fails or times out, so a
+  /// non-essential subsystem can never block app launch.
+  static void markDegraded(Object error) {
+    _degraded = true;
+    debugPrint('❌ Encryption degraded for this session: $error');
+  }
 
   /// Initialize the encryption service
   /// Must be called before using encryption functions
@@ -56,9 +107,11 @@ class EncryptionService {
 
       _encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc));
 
+      _degraded = false;
       debugPrint('✅ Encryption service initialized');
     } catch (e) {
       debugPrint('❌ Encryption service initialization failed: $e');
+      _degraded = true;
       rethrow;
     }
   }
