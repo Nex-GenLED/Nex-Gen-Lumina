@@ -88,9 +88,32 @@ void main() {
       expect(ins, isEmpty);
     });
 
-    test('sunrise/sunset still map to solar timer codes (24/25)', () {
-      expect(insFor(item(timeLabel: 'sunrise')).single['hour'], 24);
-      expect(insFor(item(timeLabel: 'sunset')).single['hour'], 25);
+    // WAS: 'sunrise/sunset still map to solar timer codes (24/25)', asserting
+    // hour==24 / hour==25. That encoding was WRONG and has been removed: in
+    // WLED, hour 24 means "fire HOURLY" (minute-only match) and hour 25 never
+    // matches the RTC. 0.15.1 keys solar BY SLOT POSITION — ins[8]=sunrise,
+    // ins[9]=sunset, hour:255 marker, min=offset — which syncAll assembles;
+    // buildCfgPayload deliberately emits NO general-slot entry for a solar
+    // boundary. Pinning the old codes here kept a discredited contract alive in
+    // the suite. See schedule_solar_encoding_test.dart for the real encoding.
+    test('solar labels produce NO general-slot timer (never hour 24/25)', () {
+      for (final label in ['sunrise', 'sunset']) {
+        final ins = insFor(item(timeLabel: label));
+        expect(ins, isEmpty,
+            reason: '"$label" must not occupy a general clock slot');
+      }
+    });
+
+    test('solar labels never emit the old hourly-fire code, flag on or off',
+        () {
+      for (final solar in [true, false]) {
+        final ins = ((svc.buildCfgPayload([item(timeLabel: 'sunrise')],
+                    solarEnabled: solar)['timers'] as Map)['ins'] as List)
+            .cast<Map<String, dynamic>>();
+        expect(ins.where((t) => t['hour'] == 24 || t['hour'] == 25), isEmpty,
+            reason: 'hour:24 fires HOURLY and hour:25 never fires — neither '
+                'may ever reach a controller (solarEnabled=$solar)');
+      }
     });
 
     test('valid ON with unparseable OFF — ON arms, malformed OFF dropped', () {

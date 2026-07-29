@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/premium_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/schedule/sunrise_off_service.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -82,6 +83,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const _VoiceAssistantsCard(),
           const SizedBox(height: 16),
           const _SportsAlertsCard(),
+          const SizedBox(height: 16),
+          const _SunriseOffCard(),
           const SizedBox(height: 16),
           const _SimpleModeToggleCard(),
           const SizedBox(height: 16),
@@ -1183,6 +1186,140 @@ class _GrowthListTile extends StatelessWidget {
               ),
               Icon(Icons.chevron_right, color: iconColor.withValues(alpha: 0.7), size: 22),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Opt-in daily sunrise-off. Arms a controller-resident WLED timer, so the OFF
+/// fires with the app closed — the toggle is not an app-side alarm.
+class _SunriseOffCard extends ConsumerStatefulWidget {
+  const _SunriseOffCard();
+
+  @override
+  ConsumerState<_SunriseOffCard> createState() => _SunriseOffCardState();
+}
+
+class _SunriseOffCardState extends ConsumerState<_SunriseOffCard> {
+  bool _busy = false;
+
+  Future<void> _toggle(bool value) async {
+    // Captured before the await so the SnackBar never reaches across an async
+    // gap for its context.
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    final result =
+        await ref.read(sunriseOffControllerProvider).setEnabled(value);
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    // Report what actually happened. The preference is saved either way; only
+    // the controller write can fail, and saying "on" when no timer was armed is
+    // exactly the silent-failure this feature exists to remove.
+    final String message;
+    switch (result) {
+      case SunriseOffWriteResult.confirmed:
+        message = value
+            ? 'Your lights will turn off at sunrise every day.'
+            : 'Daily sunrise-off turned off.';
+      case SunriseOffWriteResult.deferredOffLan:
+        message = 'Saved, but your controller can only be updated on your '
+            'home Wi-Fi. Open the app there to finish.';
+      case SunriseOffWriteResult.noController:
+        message = 'Saved, but no controller was reachable — reconnect and '
+            'this will finish applying.';
+      case SunriseOffWriteResult.failed:
+        message = "Saved, but the controller didn't confirm the change. "
+            'Try again on your home Wi-Fi.';
+    }
+    messenger.showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      content: Text(message),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = ref.watch(sunriseOffEnabledProvider);
+    final accentColor = enabled ? NexGenPalette.cyan : NexGenPalette.violet;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withValues(alpha: 0.3)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  NexGenPalette.gunmetal90.withValues(alpha: 0.85),
+                  NexGenPalette.matteBlack.withValues(alpha: 0.9),
+                ],
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [accentColor, accentColor.withValues(alpha: 0.6)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.wb_twilight,
+                      color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Turn lights off at sunrise daily',
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Your controller turns the lights off at sunrise every '
+                        'day, whatever is running — even with the app closed.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: NexGenPalette.textMedium,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_busy)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Switch(
+                    value: enabled,
+                    onChanged: _toggle,
+                    activeColor: NexGenPalette.cyan,
+                    activeTrackColor:
+                        NexGenPalette.cyan.withValues(alpha: 0.3),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

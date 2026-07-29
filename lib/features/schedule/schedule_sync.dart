@@ -19,6 +19,11 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show WledService
 // (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
     show calendarLeaseActiveTimersProvider;
+// Global sunrise-off: a reserved slot-8 timer owned by a user profile toggle.
+// syncAll MERGES it for the same reason it merges lease timers — otherwise the
+// solar assembly stub-clobbers it on the next foreground sync.
+import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
+    show globalSunriseOffTimerProvider;
 // Pure-Dart extractions (bench/ CLI imports these without dart:ui). Imported for
 // internal use AND re-exported so existing importers of schedule_sync.dart still
 // resolve timersInsLanded / isRealEnabledTimer.
@@ -306,6 +311,12 @@ class ScheduleSyncService {
     'dow': 0,
   };
 
+  /// A fresh copy of the disabled-timer stub. Public so the sunrise-off writer
+  /// (sunrise_off_service.dart) reclaims a vacated slot with the SAME stub the
+  /// schedule path uses, instead of hand-rolling a second "disabled" shape.
+  static Map<String, dynamic> disabledTimerStub() =>
+      Map<String, dynamic>.from(_disabledTimerStub);
+
   /// Pad/truncate [ins] to exactly [kMaxWledTimers] entries. Real timers keep
   /// their order and values (so sunset hour:25 / sunrise hour:24 entries are
   /// untouched); unused slots become disabled stubs so a sync that dropped a
@@ -395,17 +406,31 @@ class ScheduleSyncService {
   ///
   /// Flexible pairing: a dusk-to-dawn schedule (ON at sunset, OFF at sunrise)
   /// fills BOTH slots by itself; the two are independently assignable.
+  /// [sunriseTaken] is set when the global sunrise-off owns slot 8. Schedule
+  /// sunrise boundaries are then NOT assigned: an OFF boundary is redundant
+  /// (identical macro 2 — superseded silently, same effect), and an ON boundary
+  /// was already refused-and-warned in syncAll's arm guard, so it can't reach
+  /// here. Sunset is unaffected, so a dusk-to-dawn schedule keeps its ON.
   ({
     Map<String, dynamic>? sunrise,
     Map<String, dynamic>? sunset,
     List<String> rejected,
-  }) solarTimerSlots(List<ScheduleItem> schedules) {
+  }) solarTimerSlots(List<ScheduleItem> schedules,
+      {bool sunriseTaken = false}) {
     Map<String, dynamic>? sunrise;
     Map<String, dynamic>? sunset;
     final rejected = <String>[];
 
     void assign(bool isSunrise, Map<String, dynamic> entry, String who) {
       if (isSunrise) {
+        // The global sunrise-off holds slot 8. Superseding a schedule's sunrise
+        // OFF is a no-op in effect (both load macro 2 = master off), so this is
+        // logged, not surfaced as a user-facing rejection.
+        if (sunriseTaken) {
+          debugPrint('ScheduleSync: sunrise slot owned by the global '
+              'sunrise-off — superseded $who (same master-OFF effect)');
+          return;
+        }
         if (sunrise == null) {
           sunrise = entry;
         } else {
@@ -573,6 +598,21 @@ class ScheduleSyncService {
       }
     }
     final solarEnabled = solarFlagOn && solarCoordsUsable;
+
+    // ── Global sunrise-off (reserved slot 8) ─────────────────────────────
+    // Read like the lease timers below: if the user has opted in, this sync
+    // MUST re-write the entry into the sunrise slot, or assembleSolarAwareIns
+    // would stub-clobber a timer this sync doesn't own (the P0-3 clobber class,
+    // new victim). Defensive: any read failure → treat as not enabled rather
+    // than letting it break a schedule sync.
+    Map<String, dynamic>? globalSunriseOff;
+    try {
+      globalSunriseOff = ref.read(globalSunriseOffTimerProvider);
+    } catch (e) {
+      debugPrint('ScheduleSync: sunrise-off read failed — $e '
+          '(proceeding without it)');
+      globalSunriseOff = null;
+    }
 
     final enabled = schedules.where((s) => s.enabled).toList();
 
@@ -908,6 +948,31 @@ class ScheduleSyncService {
         continue;
       }
 
+      // ── Global sunrise-off owns the single sunrise slot ────────────────
+      // WLED has exactly ONE sunrise slot. A schedule that turns lights ON at
+      // sunrise genuinely cannot arm while the global sunrise-off holds it —
+      // and the two are semantically opposed (on and off at the same instant),
+      // so silently dropping either would be a lie. Refuse-and-warn, matching
+      // every other arm invariant. Checked BEFORE the generic solar gate so the
+      // user gets the specific, actionable reason ("turn that setting off")
+      // rather than the generic "sunrise/sunset isn't supported".
+      //
+      // A schedule whose sunrise boundary is an OFF is NOT refused here: it
+      // still arms its other boundaries (a dusk-to-dawn schedule keeps its
+      // sunset ON) and its redundant sunrise OFF is superseded by the identical
+      // global one — see solarTimerSlots's `sunriseTaken`.
+      if (globalSunriseOff != null &&
+          s.timeLabel.trim().toLowerCase() == 'sunrise') {
+        presetErrors.add(
+            '"${s.actionLabel}" turns lights ON at sunrise, which conflicts '
+            'with "Turn lights off at sunrise daily" — not armed. Turn that '
+            'setting off, or give this schedule a different time.');
+        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — sunrise '
+            'ON conflicts with the global sunrise-off (slot '
+            '$kWledSunriseSlot)');
+        continue;
+      }
+
       // ── Sunrise/sunset gate (refuse-and-warn unless solar is enabled) ──
       // When the solar_scheduling flag is ON *and* the controller has usable
       // coordinates, correctly-encoded solar (hour:255 at slot 8/9) is armed
@@ -1006,8 +1071,19 @@ class ScheduleSyncService {
     // ins = the MERGED array actually written (schedules + leases).
     final List<Map<String, dynamic>> scheduleIns;
     final List<Map<String, dynamic>> ins;
-    if (solarEnabled) {
-      final solar = solarTimerSlots(armedSchedules);
+    // The 10-slot solar assembly is required whenever ANY dedicated slot has an
+    // owner — solar schedules OR the global sunrise-off. Using it purely
+    // because the sunrise-off is on is what makes slot 8 authoritative on every
+    // sync, so the timer is re-asserted rather than left to luck.
+    if (solarEnabled || globalSunriseOff != null) {
+      final solar = solarEnabled
+          ? solarTimerSlots(armedSchedules,
+              sunriseTaken: globalSunriseOff != null)
+          : (
+              sunrise: null,
+              sunset: null,
+              rejected: const <String>[],
+            );
       // Only one sunrise slot (8) and one sunset slot (9) exist — reject-and-
       // warn any additional solar boundary (cross-schedule constraint).
       for (final who in solar.rejected) {
@@ -1016,12 +1092,18 @@ class ScheduleSyncService {
             'controller — "$who" was not armed.');
         debugPrint('ScheduleSync: solar slot already taken — dropped $who');
       }
+      // Slot 8: the global sunrise-off outranks a schedule's solar sunrise.
+      final sunriseSlot = globalSunriseOff ?? solar.sunrise;
+      // scheduleIns deliberately EXCLUDES the sunrise-off (it passes
+      // solar.sunrise, not sunriseSlot) so a preserved global timer can never
+      // mask a "schedules produced nothing" bug in the empty-armed guard below
+      // — the same reason lease timers are excluded from it.
       scheduleIns = assembleSolarAwareIns(builtIns,
           sunrise: solar.sunrise, sunset: solar.sunset);
       // Lease timers are CLOCK timers → merge into the general pool BEFORE solar
       // assembly (solar entries own the dedicated slots 8/9).
       ins = assembleSolarAwareIns([...builtIns, ...leaseTimers],
-          sunrise: solar.sunrise, sunset: solar.sunset);
+          sunrise: sunriseSlot, sunset: solar.sunset);
     } else {
       scheduleIns = builtIns;
       ins = padTimersToMax([...builtIns, ...leaseTimers]);
