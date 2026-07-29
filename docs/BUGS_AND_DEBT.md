@@ -487,6 +487,30 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     functions`. If any path ships `lib/` as-is from the checkout, untracking it **breaks deploys**.
     Removing 81 files from the repo is not reversible-by-accident — verify first.
 
+- [ ] **P2-49 — Sunrise-off toggle arms only the ACTIVE controller (no fan-out to a user's others)**
+  - Status: OPEN (known limitation — ledger only, NOT a regression) · Evidence: verified-by-code
+    (2026-07-29, `f8ce483` on `feat/sunrise-off-toggle`)
+  - The global "Turn lights off at sunrise daily" toggle arms/disarms via
+    `SunriseOffService._write`, which resolves a single repo from `wledRepositoryProvider` and writes
+    the reserved sunrise slot to **that controller only**. This is the **same scope as
+    `ScheduleSyncService.syncAll`** (which also reads one `wledRepositoryProvider`), so it is
+    consistent with existing per-controller behavior — **not a regression**, and not a defect
+    introduced by the sunrise-off feature.
+  - **Fine for residential**, the shipping case: a single controller, or a linked set fronted by one
+    active repo.
+  - **KNOWN LIMITATION for multi-controller / commercial multi-zone properties:** toggling on arms
+    only the active controller. **The user's other controllers stay ON at sunrise**, with no UI
+    signal that the toggle only covered one of them — the settings switch reads as account-wide.
+  - **FIX (only if commercial multi-zone adoption happens — do NOT pre-build):** extend arm/disarm to
+    fan out across all of the user's controllers, then aggregate the per-controller results so a
+    partial success is reported as partial (the existing `SunriseOffWriteResult` is single-valued and
+    would otherwise report the first/last controller's outcome as if it were the whole account).
+    Natural source for the controller set is `activeAreaControllerIpsProvider`
+    (`lib/features/site/site_providers.dart`).
+  - **Coordinate with schedule sync.** `syncAll` has the identical single-repo scope, so a fan-out
+    that covers only the sunrise-off would leave the two paths inconsistent (sunrise-off on every
+    controller, schedules on one). Either fan out both or neither — this is one decision, not two.
+
 ---
 
 ## Features promised (post-cleanup)
