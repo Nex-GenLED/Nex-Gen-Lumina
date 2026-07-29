@@ -1230,6 +1230,9 @@ class _SunriseOffCardState extends ConsumerState<_SunriseOffCard> {
       case SunriseOffWriteResult.noController:
         message = 'Saved, but no controller was reachable — reconnect and '
             'this will finish applying.';
+      case SunriseOffWriteResult.presetSaveFailed:
+        message = "Saved, but the controller wouldn't store the off command, "
+            'so nothing was scheduled. Try again on your home Wi-Fi.';
       case SunriseOffWriteResult.failed:
         message = "Saved, but the controller didn't confirm the change. "
             'Try again on your home Wi-Fi.';

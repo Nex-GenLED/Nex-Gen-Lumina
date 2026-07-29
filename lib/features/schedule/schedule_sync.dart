@@ -311,6 +311,37 @@ class ScheduleSyncService {
     'dow': 0,
   };
 
+  /// WLED preset holding the master-OFF state. Every OFF boundary — clock,
+  /// solar, and the global sunrise-off — fires `macro: kNglOffPresetId`.
+  static const int kNglOffPresetId = 2;
+  static const String kNglOffPresetName = 'NGL Off';
+
+  /// THE definition of the OFF preset. Single source of truth: schedule sync
+  /// seeds it here, and the sunrise-off writer (sunrise_off_service.dart)
+  /// re-uses this exact builder before arming its timer, so the two can never
+  /// drift into saving different "off" states under the same preset id.
+  ///
+  /// `ib: true` persists root `on:false` into the stored preset, so LOADING it
+  /// kills master power regardless of what pattern is running. The per-segment
+  /// off list covers the full strip because a preset load only touches segments
+  /// present in the preset (bench-proven: a seg[0]-only OFF left seg1 lit).
+  static Map<String, dynamic> buildNglOffPresetState(
+          Map<String, dynamic>? liveState) =>
+      <String, dynamic>{
+        'on': false,
+        'ib': true,
+        'seg': _fullStripOffSegments(liveState),
+      };
+
+  /// Whether a stored preset def already IS a usable NGL Off. Requires the def
+  /// to actually assert root `on:false` — a legacy segments-only preset 2 is
+  /// NOT satisfying and gets re-saved. Shared so the sunrise-off writer applies
+  /// the same bar before deciding to skip its psave.
+  static bool isNglOffPresetSatisfied(Map<String, dynamic> def) =>
+      _presetNamed(def, kNglOffPresetName) &&
+      def['on'] == false &&
+      _presetIsOff(def);
+
   /// A fresh copy of the disabled-timer stub. Public so the sunrise-off writer
   /// (sunrise_off_service.dart) reclaims a vacated slot with the SAME stub the
   /// schedule path uses, instead of hand-rolling a second "disabled" shape.
@@ -727,15 +758,10 @@ class ScheduleSyncService {
     // 1/3/4/5 skip on name only and share this landmine; re-saving them is
     // tracked separately as post-main queue item #3.)
     await psaveIfChanged(
-      id: 2,
-      state: {
-        'on': false,
-        'ib': true,
-        'seg': _fullStripOffSegments(capturedLiveState),
-      },
-      name: 'NGL Off',
-      isSatisfied: (d) =>
-          _presetNamed(d, 'NGL Off') && d['on'] == false && _presetIsOff(d),
+      id: kNglOffPresetId,
+      state: buildNglOffPresetState(capturedLiveState),
+      name: kNglOffPresetName,
+      isSatisfied: isNglOffPresetSatisfied,
     );
     await psaveIfChanged(
       id: 3,

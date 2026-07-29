@@ -100,6 +100,12 @@ enum SunriseOffWriteResult {
   /// Written and readback-verified on the controller.
   confirmed,
 
+  /// The OFF preset (macro 2) could not be saved, so the timer was NOT written.
+  /// Arming anyway would leave a timer pointing at a preset that doesn't exist:
+  /// WLED fires the macro, nothing loads, the lights stay on — and the timer
+  /// readback would still match, reporting a green that isn't real.
+  presetSaveFailed,
+
   /// Controller unreachable — nothing was written.
   noController,
 
@@ -124,13 +130,15 @@ class SunriseOffService {
 
   /// Arm the daily sunrise-off timer (toggle ON).
   Future<SunriseOffWriteResult> arm(Ref ref) =>
-      _write(ref, buildSunriseOffTimerEntry());
+      _write(ref, buildSunriseOffTimerEntry(), ensureOffPreset: true);
 
   /// Disarm it (toggle OFF) by writing a disabled stub into the reserved slot,
   /// so the controller stops firing it. Same slot-reclaim mechanism the
-  /// schedule path uses for vacated slots.
+  /// schedule path uses for vacated slots. No preset is needed to clear a slot,
+  /// so the OFF-preset guarantee is skipped here.
   Future<SunriseOffWriteResult> disarm(Ref ref) =>
-      _write(ref, ScheduleSyncService.disabledTimerStub());
+      _write(ref, ScheduleSyncService.disabledTimerStub(),
+          ensureOffPreset: false);
 
   /// Test seam over the hardened cfg write+verify, mirroring the lease writer's
   /// `cfgPushFn`. Production delegates to the shared [pushCfgWithVerify].
@@ -143,16 +151,32 @@ class SunriseOffService {
       pushCfgWithVerify(repo: repo, payload: payload, ins: ins);
 
   Future<SunriseOffWriteResult> _write(
-      Ref ref, Map<String, dynamic> slot8Entry) async {
+      Ref ref, Map<String, dynamic> slot8Entry,
+      {required bool ensureOffPreset}) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
       debugPrint('SunriseOff: no controller — not armed');
       return SunriseOffWriteResult.noController;
     }
     // Cfg writes are LAN-only. Say so plainly instead of claiming a save.
+    //
+    // Checked BEFORE the preset save (which DOES work off-LAN via /json/state)
+    // so a controller we can't arm never gets an orphaned preset written to it.
+    // Ordering lifted verbatim from the P0-3 lease writer
+    // (calendar_entry_lease_manager.dart) — same hazard, same sequence.
     if (!repoCanWriteCfg(repo)) {
       debugPrint('SunriseOff: off-LAN — cannot write /json/cfg; deferred');
       return SunriseOffWriteResult.deferredOffLan;
+    }
+
+    // The timer fires `macro: 2`. If that preset isn't on the controller, WLED
+    // loads nothing and the lights stay on — a silent no-op that still reads
+    // back as a perfectly armed timer. Guarantee it exists BEFORE arming, and
+    // abort rather than write a timer pointing at nothing.
+    if (ensureOffPreset && !await _ensureOffPresetSaved(repo)) {
+      debugPrint('SunriseOff: NGL Off preset (${ScheduleSyncService
+          .kNglOffPresetId}) could not be saved — ABORTING the timer write');
+      return SunriseOffWriteResult.presetSaveFailed;
     }
 
     final ins = await _readModifyWrite(repo, slot8Entry);
@@ -176,11 +200,96 @@ class SunriseOffService {
     }
   }
 
-  /// Build the full 10-slot array: the controller's existing timers with ONLY
-  /// the reserved sunrise slot replaced. When the current table can't be read
-  /// (relay, fetch error) we fall back to stubs for the general slots rather
-  /// than inventing timers — the next schedule sync re-asserts slots 0-7 from
-  /// Firestore, which is the authoritative source for those.
+  /// Guarantee the controller holds a usable NGL Off preset (macro 2).
+  ///
+  /// The definition comes from [ScheduleSyncService.buildNglOffPresetState] —
+  /// the SAME builder schedule sync seeds with — so the two paths can never
+  /// save divergent "off" states under preset 2.
+  ///
+  /// Skips the psave when a satisfying preset is already stored. That matters:
+  /// `savePreset` posts `{...state, psave: id}` to /json/state, so it APPLIES
+  /// the state as well as storing it — a needless save would blink the strip
+  /// off. When the preset is missing, unsatisfying, or unreadable we save
+  /// anyway: an unnecessary save is recoverable, a missing OFF preset is the
+  /// silent failure this whole guard exists to prevent.
+  Future<bool> _ensureOffPresetSaved(WledRepository repo) async {
+    if (repo is WledService) {
+      try {
+        final presets = await repo.fetchPresets();
+        final def = presets[ScheduleSyncService.kNglOffPresetId];
+        if (def != null && ScheduleSyncService.isNglOffPresetSatisfied(def)) {
+          return true; // already correct — don't disturb the lights
+        }
+      } catch (e) {
+        debugPrint('SunriseOff: preset readback failed — $e (saving anyway)');
+      }
+    }
+
+    // Live state drives the per-segment off list — WLED stores off-segs only
+    // for segments that exist at save time, so this must track the real layout.
+    Map<String, dynamic>? live;
+    try {
+      live = await repo.getState();
+    } catch (e) {
+      debugPrint('SunriseOff: getState failed — $e (falling back to 1 seg)');
+    }
+
+    final ok = await repo.savePreset(
+      presetId: ScheduleSyncService.kNglOffPresetId,
+      state: ScheduleSyncService.buildNglOffPresetState(live),
+      presetName: ScheduleSyncService.kNglOffPresetName,
+    );
+    debugPrint('SunriseOff: NGL Off preset save → $ok');
+    return ok;
+  }
+
+  /// Classify a `timers.ins` response WITHOUT assuming array index == firmware
+  /// slot index.
+  ///
+  /// WLED COMPACTS `ins` when serializing: it omits any timer that is entirely
+  /// empty (`macro == 0 && hour == 0 && min == 0`). Verified on 192.168.1.150
+  /// (0.15.1 / vid 2507300, 2026-07-29): a controller with 8 empty general
+  /// slots and 2 solar slots returns just TWO entries — so `ins[0]` there is
+  /// firmware slot 8, not slot 0. Indexing the response positionally copies the
+  /// solar entries into general slots and loses the sunrise slot entirely.
+  ///
+  /// The reliable discriminator is the solar marker: a clock timer's `hour` is
+  /// 0-23, and only the sunrise/sunset slots serialize `hour: 255`. So the
+  /// FIRST 255-entry is sunrise (slot 8), the SECOND is sunset (slot 9), and
+  /// everything else is a general timer in slot order. This holds whether the
+  /// firmware returns a compacted array or a full positional 10 — in the full
+  /// case the general entries already occupy 0-7 and the two 255s trail them.
+  @visibleForTesting
+  static ({
+    List<Map<String, dynamic>> general,
+    Map<String, dynamic>? sunrise,
+    Map<String, dynamic>? sunset,
+  }) partitionTimerIns(List<Map<String, dynamic>>? ins) {
+    final general = <Map<String, dynamic>>[];
+    final solar = <Map<String, dynamic>>[];
+    for (final t in ins ?? const <Map<String, dynamic>>[]) {
+      final hour = (t['hour'] as num?)?.toInt();
+      if (hour == ScheduleSyncService.kWledSolarHourMarker) {
+        solar.add(t);
+      } else if (general.length < ScheduleSyncService.kMaxWledTimers) {
+        general.add(t);
+      }
+    }
+    return (
+      general: general,
+      sunrise: solar.isNotEmpty ? solar[0] : null,
+      sunset: solar.length > 1 ? solar[1] : null,
+    );
+  }
+
+  /// Build the full 10-slot array to push: the controller's existing timers
+  /// with ONLY the reserved sunrise slot replaced.
+  ///
+  /// Always emits exactly [ScheduleSyncService.kWledTotalTimerSlots] entries in
+  /// firmware-slot order, so the write is positionally unambiguous no matter
+  /// what shape the read came back in. When the table can't be read (relay,
+  /// fetch error) the general slots become stubs rather than invented timers —
+  /// the next schedule sync re-asserts 0-7 from Firestore, which owns them.
   Future<List<Map<String, dynamic>>> _readModifyWrite(
       WledRepository repo, Map<String, dynamic> slot8Entry) async {
     List<Map<String, dynamic>>? existing;
@@ -196,16 +305,19 @@ class SunriseOffService {
           'stubs for slots 0-7 (next schedule sync re-asserts them)');
     }
 
+    final parts = partitionTimerIns(existing);
     final out = <Map<String, dynamic>>[];
-    for (var i = 0; i < ScheduleSyncService.kWledTotalTimerSlots; i++) {
-      if (i == ScheduleSyncService.kWledSunriseSlot) {
-        out.add(Map<String, dynamic>.from(slot8Entry));
-      } else if (existing != null && i < existing.length) {
-        out.add(Map<String, dynamic>.from(existing[i]));
-      } else {
-        out.add(ScheduleSyncService.disabledTimerStub());
-      }
+    // Slots 0-7: preserved general timers, padded with stubs.
+    for (var i = 0; i < ScheduleSyncService.kMaxWledTimers; i++) {
+      out.add(i < parts.general.length
+          ? Map<String, dynamic>.from(parts.general[i])
+          : ScheduleSyncService.disabledTimerStub());
     }
+    // Slot 8: ours. Slot 9: the controller's existing sunset, preserved.
+    out.add(Map<String, dynamic>.from(slot8Entry));
+    out.add(parts.sunset != null
+        ? Map<String, dynamic>.from(parts.sunset!)
+        : ScheduleSyncService.disabledTimerStub());
     return out;
   }
 }
