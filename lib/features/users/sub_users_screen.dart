@@ -130,7 +130,7 @@ class _SubUsersScreenState extends ConsumerState<SubUsersScreen> {
             )
           : null,
       body: ListView(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarPlusFabHeight(context)),
         children: [
           // Sub-user count
           subUsersAsync.when(

@@ -450,7 +450,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
           final model = profile.valueOrNull;
           _hydrate(model, user.displayName);
           return ListView(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
+            // navBarPlusFabHeight (not navBarTotalHeight): this Scaffold has an
+            // "Update Profile" FAB lifted above the dock, so content padded only
+            // to the dock height ends up UNDER the FAB. The last row here is the
+            // "Enable Autopilot" switch, which was unreachable as a result.
+            padding:
+                EdgeInsets.fromLTRB(16, 16, 16, navBarPlusFabHeight(context)),
             children: [
               // House Photo Section for AR Preview
               _HousePhotoCard(),

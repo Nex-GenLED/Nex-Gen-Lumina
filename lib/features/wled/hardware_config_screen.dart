@@ -460,7 +460,7 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
           : AbsorbPointer(
               absorbing: _saving,
               child: ListView(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, navBarPlusFabHeight(context)),
                 children: [
                   Text('Channel Configuration', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 6),
