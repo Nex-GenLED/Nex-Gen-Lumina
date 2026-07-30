@@ -39,6 +39,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
@@ -65,6 +66,11 @@ const int kWledNoActivePreset = -1;
 
 /// WLED `cfg.def.ps` when no boot preset is configured.
 const int kWledNoBootPreset = 0;
+
+/// Settle between consecutive `psave` flash writes during the ON-preset heal.
+/// Mirrors the schedule-sync post-psave settle: back-to-back saves can return
+/// 2xx without persisting (bench-observed 2026-07-30, vid 2507300).
+const Duration kPresetHealSettle = Duration(milliseconds: 900);
 
 int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 
@@ -284,6 +290,10 @@ class ControllerHealReport {
   /// The AudioReactive usermod was found ON and disabled. Never triggers a
   /// reboot — the controller suspends the FFT task on its next loop().
   bool audioReactiveHealed = false;
+
+  /// System ON preset slots (1/3/4/5) repaired to assert ROOT master power.
+  /// Empty on a healthy controller — the heal is readback-gated.
+  final List<int> onPresetsHealed = [];
   bool rebooted = false;
 
   /// The ntp-host heal was written but the reboot was DEFERRED to the next
@@ -296,7 +306,8 @@ class ControllerHealReport {
       tzHealed ||
       coordsHealed ||
       gammaHealed ||
-      audioReactiveHealed;
+      audioReactiveHealed ||
+      onPresetsHealed.isNotEmpty;
 
   @override
   String toString() {
@@ -306,6 +317,7 @@ class ControllerHealReport {
       if (coordsHealed) 'coords',
       if (gammaHealed) 'gamma',
       if (audioReactiveHealed) 'audioreactive',
+      if (onPresetsHealed.isNotEmpty) 'on-presets${onPresetsHealed.join('/')}',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
     ];
@@ -441,6 +453,14 @@ class ControllerDefaultsHealer {
       await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
     }
 
+    // (e2) ON-preset master power — repair presets 1/3/4/5 that store segments
+    // only (no root `on`), so a fired ON-timer powers the strip instead of
+    // loading a design into a dark master. See _healOnPresetMasterPower.
+    final presetSource = repo;
+    if (presetSource is WledService) {
+      await _healOnPresetMasterPower(presetSource, report);
+    }
+
     // (f) reboot ONLY when an NTP-retry field (host/en) changed — never for
     // tz/coords/gamma/audioreactive. WLED re-attempts NTP only on boot. Gate on
     // device state so we don't reboot an actively-running non-boot look: defer
@@ -468,6 +488,109 @@ class ControllerDefaultsHealer {
     }
 
     return report;
+  }
+
+  /// Repairs system ON presets (1/3/4/5) that do not assert ROOT master power.
+  ///
+  /// WHY THIS BELONGS HERE AND NOT ONLY IN SCHEDULE SYNC: the sync-side
+  /// predicate fix ([ScheduleSyncService.isNglOnPresetSatisfied]) only heals on
+  /// the next schedule sync. A customer who never edits a schedule would stay
+  /// broken indefinitely — their ON-timers keep firing DARK. Healing on CONNECT
+  /// repairs the installed fleet without requiring any user action.
+  ///
+  /// HEAL-ONLY-BROKEN, readback-gated — matching this class's stated policy and
+  /// the gamma heal's precedent: a healthy controller costs ONE GET
+  /// (/presets.json) and ZERO writes.
+  ///
+  /// NO PERSISTED "already healed" MARKER — deliberate. A marker would make
+  /// this run once per controller and then stop, but a preset can be clobbered
+  /// later by any psave path, and this codebase already has a documented
+  /// device-side revert phenomenon (gamma). A marker would suppress exactly the
+  /// re-heal such a revert needs, and would desync from device truth. The
+  /// readback IS the gate: it is cheaper than a marker, cannot go stale, and
+  /// re-heals automatically if a preset regresses. (The gamma heal in this same
+  /// class made the same choice for the same reason.)
+  ///
+  /// ABSENT presets are NOT created here: schedule sync owns creating them, and
+  /// inventing a preset from a healer would mask an un-synced controller.
+  ///
+  /// `ib` is never asserted — it is a psave REQUEST flag, never stored back.
+  Future<void> _healOnPresetMasterPower(
+    WledService svc,
+    ControllerHealReport report,
+  ) async {
+    // Two passes: heal, re-read, heal anything that did not land. A `psave` is
+    // a FLASH write; back-to-back saves on this firmware can return 2xx and
+    // still not persist — bench-observed 2026-07-30 (vid 2507300): preset 4
+    // reported ok=true and read back with no root `on`. Trusting the 2xx alone
+    // would report a heal that never happened.
+    for (var pass = 0; pass < 2; pass++) {
+      Map<int, Map<String, dynamic>> presets;
+      try {
+        presets = await svc.fetchPresets();
+      } catch (e) {
+        report.log.add('on-preset master-power: fetchPresets failed: $e');
+        return;
+      }
+      if (presets.isEmpty) return; // un-synced or unreadable — nothing to heal
+
+      final broken = <int>[];
+      for (final entry in ScheduleSyncService.kOnPresetSpecs.entries) {
+        final def = presets[entry.key];
+        if (def == null) continue; // sync creates it; not ours to invent
+        if (!ScheduleSyncService.isNglOnPresetSatisfied(def, entry.value.name)) {
+          broken.add(entry.key);
+        }
+      }
+      if (broken.isEmpty) {
+        // Pass 0 → already healthy (zero writes). Pass 1 → the heal verified.
+        return;
+      }
+      if (pass == 1) {
+        report.log.add('on-preset heal: retrying $broken (first pass did not '
+            'persist)');
+      }
+
+      for (final id in broken) {
+        final spec = ScheduleSyncService.kOnPresetSpecs[id]!;
+        try {
+          await svc.savePreset(
+            presetId: id,
+            state: ScheduleSyncService.onPresetHealState(spec.bri),
+            presetName: spec.name,
+          );
+          if (!report.onPresetsHealed.contains(id)) {
+            report.onPresetsHealed.add(id);
+          }
+        } catch (e) {
+          report.log.add('on-preset $id heal threw: $e');
+        }
+        // Settle between flash writes so the next psave is not issued while
+        // the controller is still committing the previous one.
+        await Future<void>.delayed(kPresetHealSettle);
+      }
+    }
+
+    // Final readback — report only what ACTUALLY landed, so a heal that
+    // silently failed is not reported as success.
+    try {
+      final after = await svc.fetchPresets();
+      report.onPresetsHealed.removeWhere((id) {
+        final def = after[id];
+        final spec = ScheduleSyncService.kOnPresetSpecs[id];
+        if (def == null || spec == null) return true;
+        final landed =
+            ScheduleSyncService.isNglOnPresetSatisfied(def, spec.name);
+        if (!landed) {
+          report.log.add('on-preset $id heal did NOT persist after 2 passes '
+              '— next connect retries');
+        }
+        return !landed;
+      });
+    } catch (_) {
+      // Verification unavailable — leave the optimistic list; next connect
+      // re-evaluates from device truth anyway.
+    }
   }
 
   /// Disables the AudioReactive usermod when it is found ON, then readback-

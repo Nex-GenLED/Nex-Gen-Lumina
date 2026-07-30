@@ -337,6 +337,54 @@ class ScheduleSyncService {
   /// to actually assert root `on:false` — a legacy segments-only preset 2 is
   /// NOT satisfying and gets re-saved. Shared so the sunrise-off writer applies
   /// the same bar before deciding to skip its psave.
+  /// The system ON presets: slot → (name, brightness). Exposed so the
+  /// on-connect defaults healer can repair them without re-deriving the
+  /// definitions.
+  ///
+  /// ⚠️ These MUST stay in step with the four `psaveIfChanged` calls in
+  /// [syncAll] (search 'NGL On'). Those literals are deliberately left inline
+  /// here — rewriting the shipping sync path to consume this map is a
+  /// refactor, and this change is scoped to the master-power defect. The drift
+  /// risk is recorded in docs/BUGS_AND_DEBT.md.
+  static const Map<int, ({String name, int bri})> kOnPresetSpecs = {
+    1: (name: 'NGL On', bri: 200),
+    3: (name: 'NGL Dim', bri: 51),
+    4: (name: 'NGL Low', bri: 102),
+    5: (name: 'NGL Medium', bri: 153),
+  };
+
+  /// The exact state a system ON preset must be psaved with. `ib: true` is what
+  /// makes WLED persist the ROOT `on`/`bri` into the stored preset instead of
+  /// segments only — without it the preset loads DARK from a master-off strip.
+  static Map<String, dynamic> onPresetHealState(int bri) =>
+      {'on': true, 'bri': bri, 'ib': true};
+
+  /// An ON system preset (1/3/4/5) is satisfied only when it carries the right
+  /// name AND asserts ROOT master power (`on: true`).
+  ///
+  /// WHY THE NAME ALONE WAS NOT ENOUGH (the defect this closes): the previous
+  /// predicate was `_presetNamed(d, 'NGL On')`, so any preset merely CALLED
+  /// "NGL On" satisfied it and [psaveIfChanged] skipped the write forever. On
+  /// every controller commissioned before 9158c00 that preset already existed
+  /// without root `on`, so the ib:true fix was inert on the entire installed
+  /// fleet: the timer fires, loads macro:1, and the strip stays DARK.
+  /// Bench-proven 2026-07-30 (vid 2507300): presets 1/3/4/5 read `on: ABSENT`,
+  /// and `{"ps":1}` from a master-off strip left `on:false`.
+  ///
+  /// WHY `bri` IS DELIBERATELY NOT ASSERTED: a `psave` APPLIES its inline state
+  /// live on this firmware, so every needless re-save is a visible disruption.
+  /// Brightness drift (a user nudging the slider, a rounding difference) is
+  /// cosmetic and must not trigger a re-save on every sync. Root `on` is the
+  /// only field whose absence breaks scheduled firing, so it is the only field
+  /// added. This mirrors [isNglOffPresetSatisfied], which likewise asserts the
+  /// master-state field and not `bri`.
+  ///
+  /// `ib` is NOT asserted anywhere: it is a psave REQUEST flag, never stored —
+  /// WLED does not write it back, so `ib` is absent on healthy presets too.
+  static bool isNglOnPresetSatisfied(
+          Map<String, dynamic> def, String expectedName) =>
+      _presetNamed(def, expectedName) && def['on'] == true;
+
   static bool isNglOffPresetSatisfied(Map<String, dynamic> def) =>
       _presetNamed(def, kNglOffPresetName) &&
       def['on'] == false &&
@@ -729,7 +777,7 @@ class ScheduleSyncService {
       id: 1,
       state: {'on': true, 'bri': 200, 'ib': true},
       name: 'NGL On',
-      isSatisfied: (d) => _presetNamed(d, 'NGL On'),
+      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL On'),
     );
     // Preset 2 = Off. OFF timers fire `macro: 2`. `ib` is required on BOTH
     // directions — ib persists WHATEVER master state is saved: ON presets
@@ -755,8 +803,10 @@ class ScheduleSyncService {
     // isSatisfied requires the stored def to actually assert root on:false, not
     // merely be seg-off — this self-heals legacy segments-only preset 2 (no root
     // master state), forcing the ib re-save on the first Sync. (The ON presets
-    // 1/3/4/5 skip on name only and share this landmine; re-saving them is
-    // tracked separately as post-main queue item #3.)
+    // 1/3/4/5 previously skipped on NAME ONLY and shared this landmine — that
+    // was post-main queue item #3 and is now CLOSED: they use
+    // isNglOnPresetSatisfied, which asserts root on:true the same way this one
+    // asserts root on:false.)
     await psaveIfChanged(
       id: kNglOffPresetId,
       state: buildNglOffPresetState(capturedLiveState),
@@ -767,19 +817,19 @@ class ScheduleSyncService {
       id: 3,
       state: {'on': true, 'bri': 51, 'ib': true},
       name: 'NGL Dim',
-      isSatisfied: (d) => _presetNamed(d, 'NGL Dim'),
+      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Dim'),
     );
     await psaveIfChanged(
       id: 4,
       state: {'on': true, 'bri': 102, 'ib': true},
       name: 'NGL Low',
-      isSatisfied: (d) => _presetNamed(d, 'NGL Low'),
+      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Low'),
     );
     await psaveIfChanged(
       id: 5,
       state: {'on': true, 'bri': 153, 'ib': true},
       name: 'NGL Medium',
-      isSatisfied: (d) => _presetNamed(d, 'NGL Medium'),
+      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Medium'),
     );
 
     int nextPresetId = _firstSchedulePresetId;

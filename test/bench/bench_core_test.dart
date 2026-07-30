@@ -70,29 +70,58 @@ void main() {
 
   group('checkEnTruthTable (curl-proven polarity)', () {
     test('int→1, bool→0 = PASS', () {
-      final r = checkEnTruthTable(storedForIntWrite: 1, storedForBoolWrite: 0);
+      final r = checkEnTruthTable(
+          intWriteLanded: true, storedForIntWrite: 1, storedForBoolWrite: 0);
       expect(r.pass, isTrue);
       expect(r.render(), startsWith('VERIFIED-BY-BENCH'));
     });
 
     test('int stored as 0 (regression) = FAIL', () {
       expect(
-          checkEnTruthTable(storedForIntWrite: 0, storedForBoolWrite: 0).pass,
+          checkEnTruthTable(
+                  intWriteLanded: true,
+                  storedForIntWrite: 0,
+                  storedForBoolWrite: 0)
+              .pass,
           isFalse);
     });
 
     test('bool stored as 1 (firmware changed) = FAIL', () {
-      final r = checkEnTruthTable(storedForIntWrite: 1, storedForBoolWrite: 1);
+      final r = checkEnTruthTable(
+          intWriteLanded: true, storedForIntWrite: 1, storedForBoolWrite: 1);
       expect(r.pass, isFalse);
       expect(r.render(), startsWith('FAIL'));
     });
 
-    test('bool true normalizes like int 1', () {
-      // If the controller echoed the bool back as `true` for the int write, that
-      // still counts as enabled=1.
-      expect(
-          checkEnTruthTable(storedForIntWrite: true, storedForBoolWrite: 0).pass,
-          isTrue);
+    test('bool compacted out (absent) = PASS — expected on this firmware', () {
+      final r = checkEnTruthTable(
+          intWriteLanded: true, storedForIntWrite: 1, storedForBoolWrite: null);
+      expect(r.pass, isTrue);
+      expect(r.evidence, contains('ABSENT'));
+    });
+
+    // AUDIT 2026-07-30 — REPLACES 'bool true normalizes like int 1'. That test
+    // asserted the defect: it required the check to treat a bool `true`
+    // readback as int 1, erasing the very type distinction the truth table
+    // exists to detect. Type-strictness is the point.
+    test('int write echoed back as bool true = FAIL (not type-strict)', () {
+      final r = checkEnTruthTable(
+          intWriteLanded: true, storedForIntWrite: true, storedForBoolWrite: 0);
+      expect(r.pass, isFalse,
+          reason: 'a bool readback for an int write is a DIFFERENT firmware '
+              'behaviour and must not silently pass');
+    });
+
+    // AUDIT 2026-07-30 — the null-passes-the-bool-half hole.
+    test('int control never landed = FAIL as INCONCLUSIVE', () {
+      final r = checkEnTruthTable(
+          intWriteLanded: false,
+          storedForIntWrite: null,
+          storedForBoolWrite: null);
+      expect(r.pass, isFalse,
+          reason: 'without a landed int control, a dead controller would have '
+              'passed the bool half');
+      expect(r.evidence, contains('INCONCLUSIVE'));
     });
   });
 
@@ -108,26 +137,79 @@ void main() {
       expect(p.keys.toSet(), {1, 2});
     });
 
-    test('ON presets read on, OFF preset 2 reads off → all pass', () {
+    // AUDIT 2026-07-30 — the fixtures below now carry ROOT `on`, because that
+    // is what asserts master power. The OLD version of this test used
+    // segment-only presets with NO root `on` and asserted they all PASS — i.e.
+    // it encoded the exact broken shape found on the bench rig, which is why
+    // the defect survived: the regression guard asserted the bug.
+    test('ON presets assert root on, OFF preset 2 asserts root off → all pass',
+        () {
       final presets = {
-        1: {'seg': [{'id': 0, 'on': true}]},
-        2: {'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': false}]},
-        3: {'seg': [{'id': 0, 'on': true}]},
-        4: {'seg': [{'id': 0, 'on': true}]},
-        5: {'seg': [{'id': 0, 'on': true}]},
+        1: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        2: {'on': false, 'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': false}]},
+        3: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        4: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        5: {'on': true, 'seg': [{'id': 0, 'on': true}]},
       };
       final results = checkPresetInvariants(presets);
       expect(results.every((r) => r.pass), isTrue,
           reason: results.where((r) => !r.pass).map((r) => r.name).join(', '));
     });
 
+    // THE REGRESSION GUARD THAT WAS MISSING. This is the live bench-rig shape:
+    // segments on, no root `on`. It must FAIL.
+    test('ON preset with segs on but NO root on → FAIL (the 9158c00 shape)', () {
+      final presets = {
+        1: {'n': 'NGL On', 'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]},
+        2: {'on': false, 'seg': [{'id': 0, 'on': false}]},
+      };
+      final on1 = checkPresetInvariants(presets)
+          .firstWhere((r) => r.name.contains('ON-preset 1'));
+      expect(on1.pass, isFalse,
+          reason: 'segment-level on does NOT assert master power — this preset '
+              'loads into a dark strip');
+      expect(on1.evidence, contains('DARK'));
+    });
+
     test('stale OFF preset 2 left with a lit seg → FAIL (the +50 bug shape)', () {
       final presets = {
-        2: {'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]}, // seg1 lit
+        2: {'on': false, 'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]},
       };
       final off = checkPresetInvariants(presets)
           .firstWhere((r) => r.name.contains('OFF-preset 2'));
       expect(off.pass, isFalse);
+    });
+
+    test('OFF preset 2 with no seg lit but root on:true → FAIL', () {
+      final presets = {
+        2: {'on': true, 'seg': [{'id': 0, 'on': false}]},
+      };
+      final off = checkPresetInvariants(presets)
+          .firstWhere((r) => r.name.contains('OFF-preset 2'));
+      expect(off.pass, isFalse,
+          reason: 'all-segments-off does not imply master off');
+    });
+
+    test('partially-synced controller: missing ON preset emits a FAIL, not silence',
+        () {
+      final presets = {
+        1: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        2: {'on': false, 'seg': [{'id': 0, 'on': false}]},
+        // 3, 4, 5 absent
+      };
+      final results = checkPresetInvariants(presets);
+      for (final id in [3, 4, 5]) {
+        final r = results.firstWhere((x) => x.name.contains('ON-preset $id'));
+        expect(r.pass, isFalse, reason: 'absent preset $id must not be silent');
+      }
+    });
+
+    test('un-synced controller (no system presets) emits ONE explicit check', () {
+      final results = checkPresetInvariants({251: {'on': true}});
+      final synced =
+          results.where((r) => r.name.contains('controller synced')).toList();
+      expect(synced, hasLength(1));
+      expect(synced.single.pass, isTrue);
     });
 
     test('preset id over 250 ceiling → FAIL', () {
@@ -141,10 +223,112 @@ void main() {
       expect(ceiling.evidence, contains('251'));
     });
 
-    test('presetIsOn: per-segment on semantics', () {
-      expect(presetIsOn({'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]}), isTrue);
-      expect(presetIsOn({'seg': [{'id': 0, 'on': false}]}), isFalse);
-      expect(presetIsOn({'on': true}), isTrue); // fallback
+    // AUDIT 2026-07-30 — REPLACES 'presetIsOn: per-segment on semantics'.
+    // presetIsOn is gone: it claimed to test master power and tested segments,
+    // which is the defect. The two concepts are now separate functions and the
+    // distinction between them is what this test pins.
+    test('presetAssertsMasterPower is ROOT-only and ignores segments', () {
+      // The live bench-rig shape: segments on, no root on → NOT master power.
+      expect(
+          presetAssertsMasterPower(
+              {'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]}),
+          isFalse);
+      expect(presetAssertsMasterPower({'on': true}), isTrue);
+      expect(presetAssertsMasterPower({'on': false, 'seg': [{'on': true}]}),
+          isFalse);
+      expect(presetAssertsMasterPower(const {}), isFalse);
+    });
+
+    test('presetAnySegmentOn is segment-only and never consulted for power', () {
+      expect(
+          presetAnySegmentOn(
+              {'seg': [{'id': 0, 'on': false}, {'id': 1, 'on': true}]}),
+          isTrue);
+      expect(presetAnySegmentOn({'seg': [{'id': 0, 'on': false}]}), isFalse);
+      // No seg list → false (it is NOT a root-on fallback; that was the bug).
+      expect(presetAnySegmentOn({'on': true}), isFalse);
+    });
+
+    test('ib is never a signal — a healthy preset has no ib key', () {
+      // WLED never writes `ib` back; it is a psave REQUEST flag. A preset that
+      // asserts master power has root on:true and no ib, and must pass.
+      final presets = {
+        1: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        2: {'on': false, 'seg': [{'id': 0, 'on': false}]},
+        3: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        4: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+        5: {'on': true, 'seg': [{'id': 0, 'on': true}]},
+      };
+      expect(presets.values.any((p) => p.containsKey('ib')), isFalse);
+      expect(checkPresetInvariants(presets).every((r) => r.pass), isTrue);
+    });
+  });
+
+  group('fire-test split (ps discriminator)', () {
+    test('timer never fired → A fails, B explicitly NOT EVALUATED', () {
+      final r = checkFireTestSplit(
+          expectedMacro: 1, psBefore: -1, psAfter: -1, onAfter: false);
+      expect(r[0].pass, isFalse);
+      expect(r[0].evidence, contains('FIRMWARE'));
+      expect(r[1].pass, isFalse);
+      expect(r[1].evidence, contains('NOT EVALUATED'));
+    });
+
+    test('timer fired but preset dark → A passes, B fails as APP side', () {
+      final r = checkFireTestSplit(
+          expectedMacro: 1, psBefore: -1, psAfter: 1, onAfter: false);
+      expect(r[0].pass, isTrue);
+      expect(r[1].pass, isFalse);
+      expect(r[1].evidence, contains('APP side'));
+    });
+
+    test('timer fired and strip lit → both pass', () {
+      final r = checkFireTestSplit(
+          expectedMacro: 1, psBefore: -1, psAfter: 1, onAfter: true);
+      expect(r.every((c) => c.pass), isTrue);
+    });
+  });
+
+  group('slot bands + lease integrity', () {
+    test('stray slot in the 6-9 gap → FAIL', () {
+      final r = checkPresetSlotBands({7: {'on': true}});
+      expect(r.pass, isFalse);
+      expect(r.evidence, contains('7'));
+    });
+
+    test('reserved bands are clean', () {
+      final r = checkPresetSlotBands({
+        1: {'on': true}, 12: {'on': true}, 27: {'on': true}, 104: {'on': true},
+      });
+      expect(r.pass, isTrue);
+    });
+
+    test('lease slot mutated during a run → FAIL (was hardcoded true)', () {
+      final r = checkLeaseSlotsIntact(
+        before: {26: {'n': 'Lease A', 'on': true}},
+        after: {26: {'n': 'Lease B', 'on': true}},
+      );
+      expect(r.pass, isFalse);
+      expect(r.evidence, contains('MUTATED'));
+    });
+
+    test('lease slot disappearing → FAIL', () {
+      final r = checkLeaseSlotsIntact(
+          before: {41: {'n': 'Lease X'}}, after: const {});
+      expect(r.pass, isFalse);
+      expect(r.evidence, contains('DISAPPEARED'));
+    });
+  });
+
+  group('controller clock parsing', () {
+    test('parses WLED non-padded info.time', () {
+      final t = parseControllerTime('2026-7-30, 14:29:23');
+      expect(t, DateTime(2026, 7, 30, 14, 29, 23));
+    });
+
+    test('null / malformed → null (caller falls back to host with a warning)', () {
+      expect(parseControllerTime(null), isNull);
+      expect(parseControllerTime('not a time'), isNull);
     });
   });
 

@@ -85,10 +85,16 @@ class WledClient {
   /// (which reads back and returns true iff the write landed). Never re-POSTs.
   /// Returns (confirmed, stallSeconds). A mid-stall controller is WAITED on,
   /// never spurious-failed.
+  /// [maxConfirmAttempts] bounds how many times we re-read a LIVE controller
+  /// that keeps reporting the write did not land. Stall polls (controller not
+  /// answering) do NOT count against it, so genuine multi-minute flash stalls
+  /// are still waited out — but a responsive controller that simply did not
+  /// persist the write fails in ~1 minute instead of pinning the suite for 5.
   Future<({bool confirmed, int stallSeconds})> patientVerify({
     required Future<bool> Function() confirm,
     Duration interval = const Duration(seconds: 20),
     Duration maxWait = const Duration(minutes: 5),
+    int maxConfirmAttempts = 4,
     void Function(int elapsedSec)? onPoll,
   }) async {
     final started = DateTime.now();
@@ -97,16 +103,27 @@ class WledClient {
     if (await ping(timeout: const Duration(seconds: 3))) {
       if (await confirm()) return (confirmed: true, stallSeconds: 0);
     }
+    // AUDIT FIX (2026-07-30): this loop used to `return` on the FIRST live
+    // confirm attempt, so despite maxWait=5min it made exactly TWO attempts
+    // ~20s apart. Every "verified=false (20s)" in the historical logs is that
+    // bug, not a controller that was given five minutes and failed. A cfg
+    // flash-commit can land AFTER the first post-stall look, so keep retrying
+    // the confirm until it succeeds or maxWait genuinely elapses.
     var waited = Duration.zero;
-    while (waited < maxWait) {
+    var liveConfirmAttempts = 1; // the fast-path confirm above
+    while (waited < maxWait && liveConfirmAttempts < maxConfirmAttempts) {
       await Future<void>.delayed(interval);
       waited += interval;
       final sec = DateTime.now().difference(started).inSeconds;
       onPoll?.call(sec);
-      if (!await ping()) continue; // still stalled — keep waiting
-      final ok = await confirm();
-      return (confirmed: ok, stallSeconds: sec);
+      if (!await ping()) continue; // still stalled — does NOT burn an attempt
+      liveConfirmAttempts++;
+      if (await confirm()) return (confirmed: true, stallSeconds: sec);
+      // Live but not yet confirmed — the write may still be committing.
     }
-    return (confirmed: false, stallSeconds: maxWait.inSeconds);
+    return (
+      confirmed: false,
+      stallSeconds: DateTime.now().difference(started).inSeconds
+    );
   }
 }
