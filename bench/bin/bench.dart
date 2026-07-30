@@ -198,8 +198,16 @@ Future<void> cmdCfgTruth() async {
 
     final storedInt = await writeAndReadEn(1); // int
     final storedBool = await writeAndReadEn(true); // bool
+    // AUDIT FIX: `intWriteLanded` is now a required precondition. Previously a
+    // null (never-landed) BOOL readback normalized to 0 and PASSED the bool
+    // half — so a dead controller, a dropped POST or a network error all
+    // reported "correctly disabled". The int write is the control that proves
+    // the write path works at all; without it the result is inconclusive.
     _record(checkEnTruthTable(
-        storedForIntWrite: storedInt, storedForBoolWrite: storedBool));
+      intWriteLanded: storedInt != null,
+      storedForIntWrite: storedInt,
+      storedForBoolWrite: storedBool,
+    ));
   } finally {
     await _restoreTimers(captured, label: 'cfg-truth restore');
   }
@@ -243,8 +251,8 @@ Future<void> cmdSyncSim() async {
   }
 }
 
-Future<void> cmdPresetVerify() async {
-  _log('▶ preset-verify (on-device invariants, read-only)');
+Future<void> cmdPresetVerify({bool functional = true}) async {
+  _log('▶ preset-verify (on-device invariants)');
   final body = await client.getPresets();
   if (body == null) {
     _record(const CheckResult('presets readable', false, '/presets.json unreadable'));
@@ -254,15 +262,73 @@ Future<void> cmdPresetVerify() async {
   for (final r in checkPresetInvariants(presets)) {
     _record(r);
   }
-  // Lease slots must exist untouched OR be absent — either way we only REPORT.
-  final leasePresent = kLeaseSlots.where(presets.containsKey).toList()..sort();
-  _record(CheckResult('lease slots (26/28/41) not clobbered by app slots', true,
-      'present lease slots: $leasePresent (harness never writes these)'));
+  // AUDIT FIX: was a HARDCODED `true` — a check that could never fail. Now
+  // compares lease slots against a re-read after the static checks, so any
+  // mutation during this run is caught. (The harness never writes them; this
+  // asserts that rather than asserting it in a comment.)
+  final after = parsePresets(await client.getPresets() ?? const {});
+  _record(checkLeaseSlotsIntact(before: presets, after: after));
+
   final scheduleSlots = presets.keys
       .where((id) => id >= kSchedulePresetMin && id <= kSchedulePresetMax)
       .toList()
     ..sort();
   _log('  app-managed schedule slots present (10-25): $scheduleSlots');
+
+  if (functional) await _functionalPresetGuard(presets);
+}
+
+/// FUNCTIONAL master-power guard (VERIFICATION_REPORT.md §5 Guard 2).
+///
+/// Static key inspection still encodes an assumption about what WLED does with
+/// `ib`. This asserts the only property that actually matters, end to end:
+///
+///     master OFF → load preset N → state.on MUST be true
+///
+/// It cannot be faked by a firmware change in mechanism, and it is the exact
+/// manual test that exposed the defect the static check had been passing on.
+/// MUTATING: toggles master power, so it captures and restores.
+Future<void> _functionalPresetGuard(Map<int, Map<String, dynamic>> presets) async {
+  final onPresets = [1, 3, 4, 5].where(presets.containsKey).toList();
+  if (onPresets.isEmpty) {
+    _record(const CheckResult('functional preset guard', true,
+        'no ON presets on device — nothing to exercise'));
+    return;
+  }
+  _log('  functional guard: master-off → load preset → assert lights on');
+  final pre = await client.getState();
+  final preOn = pre?['on'] == true;
+  final prePs = pre?['ps'];
+  try {
+    for (final id in onPresets) {
+      await client.postState({'on': false});
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final dark = await client.getState();
+      if (dark?['on'] == true) {
+        _record(CheckResult('functional: preset $id lights a dark strip', false,
+            'precondition failed — could not force master off'));
+        continue;
+      }
+      await client.postState({'ps': id});
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      final after = await client.getState();
+      final poweredOn = after?['on'] == true;
+      _record(CheckResult(
+        'functional: preset $id lights a dark strip',
+        poweredOn,
+        'master off → ps:$id → state.on=${after?['on']} ps=${after?['ps']} '
+            '(want on=true)'
+            '${poweredOn ? '' : ' — preset $id does NOT assert master power; a '
+                'timer firing macro:$id fires DARK'}',
+      ));
+    }
+  } finally {
+    await client.postState({'on': preOn});
+    if (prePs is num && prePs.toInt() > 0) {
+      await client.postState({'ps': prePs.toInt()});
+    }
+    _log('  functional guard restored master on=$preOn ps=$prePs');
+  }
 }
 
 Future<void> cmdFireTest() async {
@@ -272,10 +338,29 @@ Future<void> cmdFireTest() async {
     // Compute "today" dow per the CONTROLLER clock where possible; WLED 0.15.1
     // does not expose wall time over JSON, so we use local time and the app's
     // Mon=bit0 convention. Target 2 minutes ahead (rounded to the minute).
-    final now = DateTime.now();
-    // 3-min lead (not 2): the arm+verify and any RTC skew between this machine
-    // and the controller eat into the margin; a short lead flakes if the target
-    // minute passes during arming. Deadline is target-minute + 90s.
+    // AUDIT FIX: the old code used the HOST clock with a comment claiming
+    // "WLED 0.15.1 does not expose wall time over JSON". It DOES — /json →
+    // info.time. Host/controller clock or timezone skew silently armed the
+    // timer for the wrong minute, failing the test for a reason unrelated to
+    // the app. Prefer controller time; fall back to host with a loud warning.
+    final info = await client.getInfo();
+    final ctrlNow = parseControllerTime(info?['time']);
+    final hostNow = DateTime.now();
+    if (ctrlNow == null) {
+      _log('    ⚠ controller time unavailable (info.time=${info?['time']}) — '
+          'falling back to HOST clock; a clock skew will flake this test');
+    } else {
+      final skew = ctrlNow.difference(hostNow).inSeconds.abs();
+      _log('    controller time=$ctrlNow host=$hostNow skew=${skew}s');
+      if (skew > 60) {
+        _record(CheckResult('fire-test precondition: clock skew < 60s', false,
+            'controller/host skew ${skew}s — arming would target the wrong '
+            'minute. Fix NTP before trusting a fire result.'));
+      }
+    }
+    final now = ctrlNow ?? hostNow;
+    // 3-min lead (not 2): the arm+verify eats into the margin; a short lead
+    // flakes if the target minute passes during arming.
     final target = now.add(const Duration(minutes: 3));
     final dowBit = dowBitForMondayZeroIndex(now.weekday - 1); // Mon=1→bit0
     // CLEAN single-scratch array (NOT captured+scratch): re-posting the live
@@ -295,12 +380,37 @@ Future<void> cmdFireTest() async {
       final cfgBack = await client.getCfg();
       return cfgBack != null && timersInsLanded([scratch], timerInsFrom(cfgBack));
     }, onPoll: (s) => _log('    …arming scratch timer (${s}s)'));
+    _record(CheckResult('fire-test: scratch timer armed', armed.confirmed,
+        armed.confirmed
+            ? 'scratch landed on /json/cfg readback (${armed.stallSeconds}s)'
+            : 'scratch did not land on /json/cfg readback'));
     if (!armed.confirmed) {
-      _record(const CheckResult('fire-test: scratch timer armed', false,
-          'scratch did not land on /json/cfg readback'));
+      // AUDIT FIX: the old code recorded the failure and then CONTINUED —
+      // waiting 90s to emit a "strip powered on" check that was meaningless
+      // because nothing was ever armed. Bail instead of manufacturing a
+      // second, uninterpretable failure.
+      _log('  arming failed — skipping the fire window (nothing to wait for)');
+      return;
+    }
+    // Park `ps` on a DIFFERENT preset before arming so the discriminator is
+    // non-degenerate. Bench-observed on this firmware: a plain /json/state
+    // write does NOT clear `ps`, so without this the value left behind by the
+    // functional preset guard (ps=1) collides with the scratch macro (also 1)
+    // and "ps changed to 1" cannot distinguish a fire from a leftover.
+    // Preset 2 is the OFF preset, so loading it also enforces the required
+    // start-dark precondition.
+    final parked = await client.postState({'ps': kNglOffPresetIdForBench});
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // Capture ps BEFORE the fire window: it is the discriminator between
+    // "never fired" and "fired but dark" (VERIFICATION_REPORT.md §6).
+    // NOTE: nothing may write /json/state during the window — see above.
+    final psBefore = (await client.getState())?['ps'];
+    if (!parked || psBefore == 1) {
+      _log('    ⚠ could not park ps away from the scratch macro '
+          '(ps=$psBefore) — fire-test A will report INCONCLUSIVE');
     }
     _log('  scratch timer armed for ${target.hour}:${target.minute.toString().padLeft(2, '0')} '
-        '(dow bit $dowBit); master off; waiting for fire…');
+        '(dow bit $dowBit); master off; ps=$psBefore; waiting for fire…');
 
     // Wait until ~65s past the target minute.
     final fireDeadline = DateTime(target.year, target.month, target.day, target.hour, target.minute)
@@ -309,10 +419,20 @@ Future<void> cmdFireTest() async {
       await Future<void>.delayed(const Duration(seconds: 10));
       _log('    …waiting (${DateTime.now().difference(now).inSeconds}s elapsed)');
     }
+    // AUDIT FIX — the single conflated assertion is split in two. The old check
+    // (`state.on == true`) failed IDENTICALLY when the timer never fired
+    // (firmware) and when it fired into a preset that does not assert master
+    // power (app). Both were true on the bench rig at once, which is why the
+    // failure stayed ambiguous for weeks.
     final state = await client.getState();
-    final poweredOn = state != null && state['on'] == true;
-    _record(CheckResult('fire-test: strip powered on at the minute', poweredOn,
-        'post-fire /json/state on=${state?['on']} (want true)'));
+    for (final r in checkFireTestSplit(
+      expectedMacro: 1,
+      psBefore: psBefore,
+      psAfter: state?['ps'],
+      onAfter: state?['on'],
+    )) {
+      _record(r);
+    }
   } finally {
     await client.postState({'on': false});
     await _restoreTimers(captured, label: 'fire-test restore');
@@ -380,9 +500,12 @@ Future<void> cmdChannelPower() async {
         (p4['seg'] as List).single['on'] == true;
     final s4 = await applyAndRead(p4);
     final lit4 = litFromState(s4);
+    // AUDIT FIX: `lit` means "segment flagged on", NOT "physically lit". Without
+    // asserting master power too, this passed when the master was off and both
+    // segments merely carried on:true — i.e. a dark strip reported as correct.
     _record(CheckResult('P1-43 case 4: chan $b on while master on = seg-only, $a undisturbed',
-        emitted4ok && lit4.contains(a) && lit4.contains(b),
-        'emitted noMasterKey=${!p4.containsKey('on')}; state lit=$lit4'));
+        emitted4ok && s4?['on'] == true && lit4.contains(a) && lit4.contains(b),
+        'emitted noMasterKey=${!p4.containsKey('on')}; master on=${s4?['on']} (want true); state lit=$lit4'));
 
     // CASE 1: channel A off while B still lit → seg off, NO master key.
     final p1 = buildChannelPowerPayload(
@@ -392,9 +515,11 @@ Future<void> cmdChannelPower() async {
         (p1['seg'] as List).single['on'] == false;
     final s1 = await applyAndRead(p1);
     final lit1 = litFromState(s1);
+    // Same audit fix as case 4 — master must remain ON for "only $a dies" to
+    // mean anything physically.
     _record(CheckResult('P1-43 case 1: chan $a off (others lit) = seg-off no master, only $a dies',
-        emitted1ok && !lit1.contains(a) && lit1.contains(b),
-        'emitted noMasterKey=${!p1.containsKey('on')}; state lit=$lit1'));
+        emitted1ok && s1?['on'] == true && !lit1.contains(a) && lit1.contains(b),
+        'emitted noMasterKey=${!p1.containsKey('on')}; master on=${s1?['on']} (want true); state lit=$lit1'));
 
     // CASE 2: channel B off (last lit) → master follows off.
     final p2 = buildChannelPowerPayload(
@@ -429,8 +554,14 @@ Future<void> cmdRestore() async {
   await _restoreTimers(ins, label: 'restore timers from ${snaps.last.path.split('/').last}');
   final state = snap['state'];
   if (state is Map && state['on'] is bool) {
-    await client.postState({'on': state['on']});
-    _record(CheckResult('restore master power', true, 'on=${state['on']}'));
+    // AUDIT FIX: was a HARDCODED `true` — it posted and asserted nothing, so a
+    // failed restore reported green. Now reads back and compares.
+    final want = state['on'] as bool;
+    await client.postState({'on': want});
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    final got = (await client.getState())?['on'];
+    _record(CheckResult('restore master power', got == want,
+        'wanted on=$want, readback on=$got'));
   }
 }
 

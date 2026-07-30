@@ -129,8 +129,9 @@ void main() {
 
   test('Option A: pattern preset ALWAYS re-saved (even when it matches); '
       'system presets skip; save is non-disruptive', () async {
-    // Controller already holds every preset the sync would write, named
-    // correctly, preset 2 genuinely off, and slot 10 matching the design.
+    // Controller already holds every preset the sync would write in its
+    // HEALTHY shape: named correctly AND asserting root master state (ON
+    // presets on:true, preset 2 on:false), with slot 10 matching the design.
     final repo = _FakeService(
       state: {
         'on': true,
@@ -147,6 +148,9 @@ void main() {
       presets: {
         1: {
           'n': 'NGL On',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
@@ -162,18 +166,27 @@ void main() {
         },
         3: {
           'n': 'NGL Dim',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
         },
         4: {
           'n': 'NGL Low',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
         },
         5: {
           'n': 'NGL Medium',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
@@ -198,10 +211,12 @@ void main() {
 
     expect(result.success, isTrue);
     // Option A: the schedule's pattern preset is ALWAYS re-saved (no fx+color
-    // skip), so a stale on:false / wrong-field preset can never survive. System
-    // presets 1-5 still skip by name.
+    // skip), so a stale on:false / wrong-field preset can never survive.
+    // System presets 1-5 skip because they satisfy name AND root master state
+    // — NOT by name alone. The name-only predicate was the defect that made
+    // 9158c00 inert on every pre-existing controller.
     expect(repo.savedPresetIds, [10],
-        reason: 'pattern preset always re-psaved; system presets match → skip');
+        reason: 'pattern preset always re-psaved; healthy system presets skip');
     // on:true is forced into the saved pattern preset so it can never be dark,
     // and ib:true makes WLED persist that master state (bench-proven: without
     // ib the preset is segments-only and fires DARK from a master-off state).
@@ -214,6 +229,95 @@ void main() {
     expect(repo.callLog.last, 'applyJson',
         reason: 'live-state restore is the last live-output touch (after psave)');
     expect(repo.applyConfigCalls, 1, reason: 'timers are still pushed');
+  });
+
+  // ── REGRESSION GUARD (P3-57) ────────────────────────────────────────────
+  //
+  // THE test that must fail if anyone reinstates a name-only skip predicate.
+  //
+  // Fixtures presets 1/3/4/5 in the shape found on every controller
+  // commissioned before 9158c00 and bench-confirmed on vid 2507300 on
+  // 2026-07-30: right NAME, segments on, but NO root `on`. WLED writes root
+  // `on`/`bri` into a preset only when the psave carried `ib: true`, so these
+  // store segments only — a timer firing macro:1 loads the design and leaves
+  // the MASTER off, i.e. the strip stays DARK.
+  //
+  // The old predicate (`_presetNamed`) was satisfied by the name alone, so the
+  // sync skipped these forever and the ib fix was inert on the entire
+  // installed fleet. They MUST be re-saved.
+  test('ON presets named correctly but WITHOUT root on are re-saved '
+      '(P3-57 regression guard: name-only skip must never come back)',
+      () async {
+    final repo = _FakeService(
+      state: {'on': true, 'bri': 128, 'seg': []},
+      presets: {
+        // BROKEN shape — deliberately no root `on`. Do NOT "fix" these
+        // fixtures: they are the defect this test exists to catch.
+        1: {
+          'n': 'NGL On',
+          'seg': [
+            {'on': true}
+          ]
+        },
+        2: {
+          'n': 'NGL Off',
+          'on': false, // healthy — isolates the ON presets
+          'seg': [
+            {'on': false}
+          ]
+        },
+        3: {
+          'n': 'NGL Dim',
+          'seg': [
+            {'on': true}
+          ]
+        },
+        4: {
+          'n': 'NGL Low',
+          'seg': [
+            {'on': true}
+          ]
+        },
+        5: {
+          'n': 'NGL Medium',
+          'seg': [
+            {'on': true}
+          ]
+        },
+      },
+    );
+    final h = _harness(repo);
+    final ref = h.container.read(_refProvider);
+
+    // Payload-less schedule so no slot 10+ write muddies the assertion.
+    final result = await svc.syncAll(ref, [
+      const ScheduleItem(
+        id: 'guard1',
+        timeLabel: '7:00 PM',
+        offTimeLabel: '11:00 PM',
+        repeatDays: ['Mon'],
+        actionLabel: 'Turn On',
+        enabled: true,
+      ),
+    ]);
+
+    expect(result.success, isTrue);
+    expect(repo.savedPresetIds, [1, 3, 4, 5],
+        reason: 'every ON preset lacking root on MUST be re-saved; the healthy '
+            'OFF preset 2 must NOT be touched');
+
+    for (final id in [1, 3, 4, 5]) {
+      expect(repo.savedStates[id]?['on'], true,
+          reason: 'preset $id must be re-saved asserting root master power');
+      expect(repo.savedStates[id]?['ib'], true,
+          reason: 'ib is what makes WLED persist root on/bri — without it the '
+              'rewrite would store segments only and stay dark');
+    }
+    // Brightness must survive the repair, per ScheduleSyncService.kOnPresetSpecs.
+    expect(repo.savedStates[1]?['bri'], 200);
+    expect(repo.savedStates[3]?['bri'], 51);
+    expect(repo.savedStates[4]?['bri'], 102);
+    expect(repo.savedStates[5]?['bri'], 153);
   });
 
   test('corrupted/absent presets → writes happen AND live state is restored',
@@ -251,13 +355,18 @@ void main() {
 
   test('preset 2 named NGL Off but left ON is repaired (off-timer safety)',
       () async {
-    // Field corruption: slot 2 has the right name but an ON segment, so an
-    // OFF timer firing macro:2 would turn lights ON. Sync must rewrite it.
+    // Field corruption: slot 2 has the right name but an ON segment and no
+    // root on:false, so an OFF timer firing macro:2 would turn lights ON. Sync
+    // must rewrite it. Presets 1/3/4/5 are HEALTHY here so the assertion
+    // isolates the preset-2 repair.
     final repo = _FakeService(
       state: {'on': true, 'bri': 128, 'seg': []},
       presets: {
         1: {
           'n': 'NGL On',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
@@ -270,18 +379,27 @@ void main() {
         },
         3: {
           'n': 'NGL Dim',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
         },
         4: {
           'n': 'NGL Low',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]
         },
         5: {
           'n': 'NGL Medium',
+          // HEALED shape: root `on: true` is what asserts MASTER power.
+          // Segment-level `on` does NOT — see the broken-shape test below.
+          'on': true,
           'seg': [
             {'on': true}
           ]

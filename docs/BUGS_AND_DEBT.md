@@ -513,6 +513,118 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ---
 
+## P3 — debt (no launch relevance)
+
+> Added 2026-07-30 from the pre-submission audit (`audit/LAUNCH_PLAN.md`, consolidating
+> `audit/FEATURE_STATUS_MATRIX.md` + `audit/RELEASE_READINESS.md`). None of these block
+> submission; none are customer-visible.
+
+- [ ] **P3-50 — `buildTimerEntry` still carries the known-wrong solar 24/25 encoding (dead, but loaded)**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30, `393af46`)
+  - `lib/features/schedule/cfg_payload_builder.dart:100-108` emits `hour: 24` (sunrise) /
+    `hour: 25` (sunset) — the encoding proven wrong for WLED (24 = hourly, 25 = invalid).
+  - **Currently unreachable**: `buildCfgPayload` skips every solar label before it can be
+    called with one (`:155-165`), and the real solar path is
+    `ScheduleSyncService.buildSolarTimerEntry` (`hour: 255` marker, `schedule_sync.dart:414-428`).
+    So this is dead code, not a live defect.
+  - **Why it is still worth closing:** it is a correct-*looking* helper in a shared builder. The
+    next author who needs a solar timer will reasonably call it and silently reintroduce the bug.
+  - Fix: delete the solar branch, or `assert(false)` it. ~0.5h.
+
+- [ ] **P3-51 — 108 silent empty catch blocks in `lib/`**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30) — `grep -rn "catch (_) {}" lib/`
+  - Most are defensible best-effort paths. But the class hid a real data-loss bug: the pixel-walk
+    save swallows its exception at `map_roofline_step.dart:417` and the caller discards the
+    `false` return (`:426-428`), so a failed Firestore write advances the wizard silently.
+    That specific instance is tracked separately as a P1 in the launch plan (T-5).
+  - Not worth a blanket sweep. Worth a rule: **catches on WRITE paths must surface or log.**
+  - Fix: lint rule + targeted audit of write paths. ~4h.
+
+- [ ] **P3-52 — `CLAUDE.md` carries three claims that contradict the code**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30)
+  - `kSimulationMode` documented as hardcoded `true`; it is `false` (`app_providers.dart:17`).
+  - HTTP timeouts documented as an outstanding 5s KNOWN ISSUE requiring a 15s fix; that work shipped.
+  - "No automated tests currently exist" — there are ~170 files under `test/` plus emulator
+    suites in `functions/test/`.
+  - Also stale in project memory: the schedules array→subcollection migration is recorded as
+    "PLAN ONLY"; it is fully implemented (client lazy migrator + server backfill + bidirectional
+    dual-write). All four misled the pre-submission audit and will mislead the next session.
+  - Fix: correct the four claims. ~0.5h.
+
+- [ ] **P3-53 — `functions/lib` (compiled output) is committed to VCS**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30) — 78 tracked files, no `functions/.gitignore`
+  - Structural cause of the deploy-parity drift tracked in the launch plan (T-4): `src` and `lib`
+    diverge silently, and a bare `firebase deploy --only functions` from repo root ships whichever
+    `lib` is on disk without building. `npm run deploy` chains the build; the bare form does not.
+  - Fix: gitignore `functions/lib`, rely on the predeploy build hook. ~1h. Removes the failure
+    mode entirely rather than re-fixing the artifact each time.
+
+- [ ] **P3-54 — `minifyEnabled = false` in the release buildType → 65 MB AAB**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30) — `android/app/build.gradle:60-61`
+  - Both minification and resource shrinking are disabled for **release**. Well under Play's
+    limit and harmless; enabling R8 would cut download size materially.
+  - Needs a keep-rules pass against the reflection-using plugins (Firebase, flutter_blue_plus,
+    speech_to_text) — which is why it is debt and not a quick win. ~2h + regression testing.
+
+- [ ] **P3-55 — Orphaned-route safety rests on the ABSENCE of deep-link config — needs a regression guard**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30, Window B `audit/COMPLIANCE_AND_SECURITY.md`
+    §2.6(b) Q2d; corrects an earlier Window A claim)
+  - Seven routes are registered in `app_router.dart` with **zero** navigation from anywhere in
+    `lib/` (`/commercial/onboarding`, `/settings/current-colors`, `/dealer/payouts`,
+    `/autopilot/first-week`, `/media`, `/system-deactivated`, `/installer/zone-setup`). Several
+    host stub controls that report false success (`CommercialScheduleScreen.dart:1819,1850,2064`).
+  - **They are currently unreachable — but only by accident of configuration, not by design:**
+    - `deep_link_service.dart:59-90` is a closed allow-list (`power`, `brightness`, `scene`, …);
+      an unmatched first path segment returns `null` and never reaches GoRouter.
+    - `flutter_deeplinking_enabled` is **absent** from `AndroidManifest.xml` and
+      `FlutterDeepLinkingEnabled` is **absent** from `Info.plist`, so Flutter's automatic
+      URI→route mechanism is off.
+    - `autoVerify="true"` at `AndroidManifest.xml:107` is inert — it applies to `http`/`https`
+      App Links only, not to the custom `lumina` scheme.
+  - **The hazard:** compliance row 1.1 PASSes *because of these absences*. Adding
+    `flutter_deeplinking_enabled` in any future release — a one-line, innocuous-looking change
+    someone will eventually make for App Links or marketing attribution — **re-opens the entire
+    orphaned-route class at once**, making every stub screen externally addressable.
+  - Guard (pick one, cheapest first): a widget/unit test asserting neither flag is present in the
+    built manifest/plist; **or** land the route-guard class fix (deny-by-default for unknown
+    prefixes, `route_guards.dart:54,294-296`, ~4h) so reachability stops depending on the absence
+    of a config key. The class fix is the durable answer — the test only detects the regression.
+  - Related: the `/commercial` deletion (~1h) removes the worst instance regardless.
+
+- [ ] **P3-56 — ON-preset definitions exist in TWO places (drift risk from the master-power fix)**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30, master-power fix)
+  - `ScheduleSyncService.kOnPresetSpecs` (slot → name+bri) was added so the on-connect defaults
+    healer can repair presets 1/3/4/5 without re-deriving them. The four `psaveIfChanged` calls
+    in `syncAll` still carry their literals inline (`{'on': true, 'bri': 200, 'ib': true}` etc.).
+  - **Left deliberately.** Rewriting the shipping sync path to consume the map is a refactor, and
+    that fix was scoped to the master-power defect on a release candidate. Zero behavioural risk
+    was the priority.
+  - **The risk:** change a brightness in one place and the healer and the sync will write
+    different definitions, so every connect and every sync will fight each other — each seeing
+    the other's value as "unsatisfied" and re-saving. A psave APPLIES live, so that presents as
+    the strip flashing on every connect.
+  - Fix: have the four calls consume `kOnPresetSpecs` + `onPresetHealState`. ~0.5h. Add a unit
+    test asserting the sync's emitted state equals `onPresetHealState(spec.bri)` for each slot.
+
+- [ ] **P3-57 — `schedule_sync_idempotent_test.dart` fixtures encode the pre-fix preset shape**
+  - Status: OPEN · Evidence: verified-by-test (2026-07-30) — 2 failures after the master-power fix
+  - Presets 1/3/4/5 are fixtured as `{'n': 'NGL On', 'seg': [{'on': true}]}` — name + segment-on,
+    **no root `on`** — which is exactly the broken on-device shape. Preset 2's fixture carries
+    `'on': false` with the comment *"Already healed…so the OFF-preset self-heal skips it"*, so the
+    author had the right model for 2 and not for 1/3/4/5.
+  - Two tests now fail **because the fix works**:
+    - *"Option A: pattern preset ALWAYS re-saved…; system presets skip"* — `Expected: [10]`,
+      `Actual: [1, 3, 4, 5, 10]`
+    - *"preset 2 named NGL Off but left ON is repaired"* — `Expected: [2]`, `Actual: [1,2,3,4,5]`
+  - **NOT rewritten** — reported rather than silently changed, since a fixture that encodes broken
+    behaviour is exactly what made the original defect survive review. Deciding what these tests
+    *should* assert is a judgement call, not a mechanical edit.
+  - Fix: add root `'on': true` to the 1/3/4/5 fixtures (making them healthy, so the skip
+    expectation becomes correct) **and** add a sibling test with the no-root-`on` shape asserting
+    that those slots ARE re-saved. ~1h.
+
+---
+
 ## Features promised (post-cleanup)
 
 - [ ] **F-18 — One-shot date-specific schedules**
